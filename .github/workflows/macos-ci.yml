@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Show toolchain versions
         run: |
@@ -46,7 +46,7 @@ jobs:
           plutil -lint dist/Nugumi.app/Contents/Info.plist
 
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Nugumi-${{ github.sha }}.dmg
           path: dist/Nugumi.dmg

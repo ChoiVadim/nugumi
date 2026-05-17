@@ -1704,6 +1704,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         globalHotKeys.forEach { $0.unregister() }
         accessibilityTrustTimer?.invalidate()
         accessibilityTrustTimer = nil
+        screenRecordingTrustTimer?.invalidate()
+        screenRecordingTrustTimer = nil
     }
 
     private func setupStatusItem() {

@@ -178,9 +178,16 @@ echo "Built $APP_DIR"
 
 # --- Styled DMG packaging ---
 
-# Detach any leftover Nugumi mounts so we land at /Volumes/Nugumi exactly.
-for stale in $(/sbin/mount | /usr/bin/awk -F' on ' '/Nugumi/ {sub(/ \(.*$/, "", $2); print $2}'); do
-    /usr/bin/hdiutil detach "$stale" -force >/dev/null 2>&1 || true
+# Detach only leftover Nugumi DMG mounts so we land at /Volumes/Nugumi exactly.
+# Preserve spaces in mount paths and avoid detaching unrelated volumes whose
+# path merely contains the word "Nugumi".
+/sbin/mount | /usr/bin/awk -F' on ' '{sub(/ \(.*$/, "", $2); print $2}' |
+while IFS= read -r stale; do
+    case "$stale" in
+        /Volumes/Nugumi|/Volumes/Nugumi\ [0-9]*)
+            /usr/bin/hdiutil detach "$stale" -force >/dev/null 2>&1 || true
+            ;;
+    esac
 done
 
 rm -rf "$DMG_STAGE" "$DMG_PATH" "$DMG_RW_PATH"
