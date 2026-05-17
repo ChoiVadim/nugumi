@@ -7024,11 +7024,14 @@ final class PetController: NSObject, NSTextFieldDelegate {
             promptBubbleView.bubbleFrame = currentAnswerLayout.bubbleFrame
             promptBubbleView.targetMarkerPoint = nil
             answerScrollView.frame = currentAnswerLayout.viewportFrame
+            // The bubble is drawn with a ~15px pixel border (5*unit) on the
+            // sides and ~9px (3*unit) at the bottom. Inset past that so the
+            // button sits on the cream fill, not clipped behind the border.
             let bubble = currentAnswerLayout.bubbleFrame
-            let buttonSize: CGFloat = 18
+            let buttonSize: CGFloat = 16
             continueButton.frame = NSRect(
-                x: bubble.maxX - buttonSize - 6,
-                y: bubble.minY + 6,
+                x: bubble.maxX - buttonSize - 18,
+                y: bubble.minY + 14,
                 width: buttonSize,
                 height: buttonSize
             )
