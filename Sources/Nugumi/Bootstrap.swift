@@ -1870,7 +1870,7 @@ private final class FeatureTourVideoView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 20
+        layer?.cornerRadius = 24
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.white.withAlphaComponent(0.11).cgColor
         layer?.backgroundColor = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.05, alpha: 0.92).cgColor
@@ -1879,7 +1879,7 @@ private final class FeatureTourVideoView: NSView {
         playerView.controlsStyle = .none
         playerView.videoGravity = .resizeAspect
         playerView.wantsLayer = true
-        playerView.layer?.cornerRadius = 16
+        playerView.layer?.cornerRadius = 20
         playerView.layer?.masksToBounds = true
         playerView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.32).cgColor
         playerView.translatesAutoresizingMaskIntoConstraints = false
@@ -1951,6 +1951,9 @@ private final class FeatureTourVideoView: NSView {
 
 @MainActor
 private final class PermissionPreviewView: NSView {
+    private static let screenRecordingPromptImage = loadOnboardingImage(named: "screen-recording-prompt")
+    private static let screenRecordingSettingsImage = loadOnboardingImage(named: "screen-recording-settings")
+
     private var activePermission: PermissionsWindowController.PermissionKind = .accessibility
     private var accessibilityTrusted = false
     private var screenRecordingTrusted = false
@@ -1958,7 +1961,7 @@ private final class PermissionPreviewView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 20
+        layer?.cornerRadius = 24
         layer?.masksToBounds = true
     }
 
@@ -1977,8 +1980,22 @@ private final class PermissionPreviewView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         drawPanelBackground()
-        drawSettingsPreview()
-        drawSystemPrompt()
+        if activePermission == .screenRecording, drawScreenRecordingAssetPreview() {
+            return
+        }
+        drawSystemPromptScreenshot()
+        drawSystemSettingsScreenshot()
+    }
+
+    private static func loadOnboardingImage(named name: String) -> NSImage? {
+        guard let url = Bundle.module.url(
+            forResource: name,
+            withExtension: "png",
+            subdirectory: "Onboarding"
+        ) else {
+            return nil
+        }
+        return NSImage(contentsOf: url)
     }
 
     private func drawPanelBackground() {
@@ -1991,168 +2008,251 @@ private final class PermissionPreviewView: NSView {
         path.stroke()
     }
 
-    private func drawSystemPrompt() {
-        let promptRect = NSRect(
-            x: 24,
-            y: bounds.maxY - 182,
-            width: bounds.width - 48,
-            height: 128
-        )
-        fillRounded(promptRect, radius: 18, fill: NSColor(calibratedWhite: 0.96, alpha: 1), stroke: nil)
-
-        drawLockBadge(in: NSRect(x: promptRect.minX + 28, y: promptRect.midY - 28, width: 54, height: 54))
-
-        let title: String
-        let message: String
-        switch activePermission {
-        case .accessibility:
-            title = "\"Nugumi\" would like to control this computer"
-            message = "Grant access in Privacy & Security settings so shortcuts work in other apps."
-        case .screenRecording:
-            title = "\"Nugumi\" would like to record this computer's screen"
-            message = "Grant access in Privacy & Security settings for screen-area OCR."
+    private func drawScreenRecordingAssetPreview() -> Bool {
+        guard let promptImage = Self.screenRecordingPromptImage,
+              let settingsImage = Self.screenRecordingSettingsImage else {
+            return false
         }
+
+        let horizontalInset: CGFloat = 24
+        let promptWidth = bounds.width - horizontalInset * 2
+        let promptHeight = promptWidth / aspectRatio(of: promptImage)
+        let promptRect = NSRect(
+            x: horizontalInset,
+            y: bounds.maxY - 56 - promptHeight,
+            width: promptWidth,
+            height: promptHeight
+        )
+
+        let settingsWidth = promptWidth
+        let settingsHeight = settingsWidth / aspectRatio(of: settingsImage)
+        let settingsRect = NSRect(
+            x: horizontalInset,
+            y: promptRect.minY - 68 - settingsHeight,
+            width: settingsWidth,
+            height: settingsHeight
+        )
+
+        drawImage(promptImage, in: promptRect, cornerRadius: 22)
+        drawImage(settingsImage, in: settingsRect, cornerRadius: 18)
+        return true
+    }
+
+    private func aspectRatio(of image: NSImage) -> CGFloat {
+        if let representation = image.representations.first,
+           representation.pixelsWide > 0,
+           representation.pixelsHigh > 0 {
+            return CGFloat(representation.pixelsWide) / CGFloat(representation.pixelsHigh)
+        }
+        guard image.size.height > 0 else { return 1 }
+        return image.size.width / image.size.height
+    }
+
+    private func drawImage(_ image: NSImage, in rect: NSRect, cornerRadius: CGFloat) {
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current?.imageInterpolation = .high
+
+        let clipPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+        clipPath.addClip()
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawSystemPromptScreenshot() {
+        let promptRect = NSRect(
+            x: 26,
+            y: bounds.maxY - 186,
+            width: bounds.width - 52,
+            height: 144
+        )
+        fillRounded(
+            promptRect,
+            radius: 18,
+            fill: NSColor(calibratedWhite: 0.17, alpha: 1),
+            stroke: NSColor.white.withAlphaComponent(0.16)
+        )
+
+        let titleBar = NSRect(x: promptRect.minX, y: promptRect.maxY - 28, width: promptRect.width, height: 28)
+        NSColor(calibratedWhite: 0.12, alpha: 0.85).setFill()
+        titleBar.fill()
+        drawText(
+            activePermission == .screenRecording ? "Screen Recording" : "Accessibility",
+            in: NSRect(x: promptRect.minX + 18, y: promptRect.maxY - 23, width: 180, height: 18),
+            font: NSFont.systemFont(ofSize: 11.5, weight: .bold),
+            color: NSColor.white.withAlphaComponent(0.42)
+        )
+
+        drawLockBadge(in: NSRect(x: promptRect.minX + 28, y: promptRect.minY + 42, width: 68, height: 68))
+
+        let title = activePermission == .accessibility
+            ? "\"Nugumi\" would like to control this computer"
+            : "\"Nugumi\" would like to record this computer's\nscreen and audio."
+        let message = activePermission == .accessibility
+            ? "Grant access to this application in Privacy & Security\nsettings, located in System Settings."
+            : "Grant access to this application in Privacy & Security\nsettings, located in System Settings."
 
         drawText(
             title,
-            in: NSRect(x: promptRect.minX + 104, y: promptRect.maxY - 54, width: promptRect.width - 132, height: 38),
-            font: NSFont.systemFont(ofSize: 14, weight: .bold),
-            color: NSColor(calibratedWhite: 0.12, alpha: 1)
+            in: NSRect(x: promptRect.minX + 126, y: promptRect.maxY - 76, width: promptRect.width - 170, height: 48),
+            font: NSFont.systemFont(ofSize: 14.5, weight: .bold),
+            color: NSColor.white.withAlphaComponent(0.93)
         )
         drawText(
             message,
-            in: NSRect(x: promptRect.minX + 104, y: promptRect.maxY - 88, width: promptRect.width - 146, height: 34),
-            font: NSFont.systemFont(ofSize: 11, weight: .regular),
-            color: NSColor(calibratedWhite: 0.30, alpha: 1)
+            in: NSRect(x: promptRect.minX + 126, y: promptRect.maxY - 119, width: promptRect.width - 170, height: 42),
+            font: NSFont.systemFont(ofSize: 13, weight: .regular),
+            color: NSColor.white.withAlphaComponent(0.86)
         )
 
-        let settingsButton = NSRect(x: promptRect.maxX - 198, y: promptRect.minY + 18, width: 122, height: 28)
-        let denyButton = NSRect(x: promptRect.maxX - 66, y: promptRect.minY + 18, width: 44, height: 28)
-        fillRounded(settingsButton, radius: 8, fill: NSColor(calibratedWhite: 0.86, alpha: 1), stroke: nil)
-        fillRounded(denyButton, radius: 8, fill: NSColor.systemBlue, stroke: nil)
+        let settingsButton = NSRect(x: promptRect.maxX - 240, y: promptRect.minY + 20, width: 156, height: 30)
+        let denyButton = NSRect(x: promptRect.maxX - 72, y: promptRect.minY + 20, width: 52, height: 30)
+        fillRounded(settingsButton, radius: 8, fill: NSColor(calibratedWhite: 0.28, alpha: 1), stroke: nil)
+        fillRounded(denyButton, radius: 8, fill: NSColor(calibratedWhite: 0.28, alpha: 1), stroke: nil)
         drawText(
-            "Open Settings",
-            in: settingsButton.insetBy(dx: 8, dy: 5),
-            font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-            color: NSColor(calibratedWhite: 0.20, alpha: 1),
+            "Open System Settings",
+            in: settingsButton.insetBy(dx: 8, dy: 6),
+            font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            color: NSColor.white.withAlphaComponent(0.90),
             alignment: .center
         )
         drawText(
             "Deny",
-            in: denyButton.insetBy(dx: 6, dy: 5),
-            font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-            color: .white,
+            in: denyButton.insetBy(dx: 6, dy: 6),
+            font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            color: NSColor.white.withAlphaComponent(0.88),
             alignment: .center
         )
     }
 
-    private func drawSettingsPreview() {
+    private func drawSystemSettingsScreenshot() {
         let panelRect = NSRect(
-            x: 24,
-            y: 42,
-            width: bounds.width - 48,
-            height: bounds.height - 244
+            x: 46,
+            y: 50,
+            width: bounds.width - 92,
+            height: bounds.height - 270
         )
-        fillRounded(panelRect, radius: 22, fill: NSColor(calibratedWhite: 0.96, alpha: 0.98), stroke: NSColor.white.withAlphaComponent(0.32))
+        fillRounded(panelRect, radius: 16, fill: NSColor(calibratedWhite: 0.16, alpha: 1), stroke: NSColor.white.withAlphaComponent(0.15))
 
-        let sidebar = NSRect(x: panelRect.minX, y: panelRect.minY, width: 66, height: panelRect.height)
-        let sidebarPath = NSBezierPath(roundedRect: sidebar, xRadius: 22, yRadius: 22)
-        NSColor(calibratedWhite: 0.88, alpha: 1).setFill()
-        sidebarPath.fill()
+        let separator = NSBezierPath()
+        for rowIndex in 1...3 {
+            let y = panelRect.maxY - CGFloat(rowIndex) * 54
+            separator.move(to: NSPoint(x: panelRect.minX + 36, y: y))
+            separator.line(to: NSPoint(x: panelRect.maxX - 24, y: y))
+        }
+        NSColor.white.withAlphaComponent(0.075).setStroke()
+        separator.lineWidth = 1
+        separator.stroke()
 
-        let contentX = panelRect.minX + 86
-        let title = activePermission == .accessibility ? "Accessibility" : "Screen & System Audio Recording"
-        drawText(
-            title,
-            in: NSRect(x: contentX, y: panelRect.maxY - 50, width: panelRect.width - 112, height: 24),
-            font: NSFont.systemFont(ofSize: 15, weight: .bold),
-            color: NSColor(calibratedWhite: 0.16, alpha: 1)
+        let rowHeight: CGFloat = 54
+        let firstRowY = panelRect.maxY - rowHeight
+        drawDarkSettingsRow(
+            name: activePermission == .screenRecording ? "Loom" : "Slack",
+            rect: NSRect(x: panelRect.minX + 10, y: firstRowY, width: panelRect.width - 20, height: rowHeight),
+            iconFill: NSColor.systemBlue,
+            enabled: true,
+            highlighted: false
         )
-        drawText(
-            activePermission == .accessibility
-                ? "Allow the applications below to control your computer."
-                : "Allow the applications below to record screen content and audio.",
-            in: NSRect(x: contentX, y: panelRect.maxY - 76, width: panelRect.width - 112, height: 22),
-            font: NSFont.systemFont(ofSize: 10.5, weight: .regular),
-            color: NSColor(calibratedWhite: 0.48, alpha: 1)
-        )
-
-        let listRect = NSRect(x: contentX, y: panelRect.minY + 28, width: panelRect.width - 116, height: panelRect.height - 116)
-        fillRounded(listRect, radius: 14, fill: NSColor.white.withAlphaComponent(0.74), stroke: NSColor.black.withAlphaComponent(0.035))
-
-        drawSettingsRow(
+        let nugumiTrusted = activePermission == .accessibility ? accessibilityTrusted : screenRecordingTrusted
+        let nugumiRow = NSRect(x: panelRect.minX + 10, y: firstRowY - rowHeight, width: panelRect.width - 20, height: rowHeight)
+        drawDarkSettingsRow(
             name: "Nugumi",
-            rect: NSRect(x: listRect.minX + 12, y: listRect.maxY - 56, width: listRect.width - 24, height: 40),
-            highlighted: true,
-            enabled: activePermission == .accessibility ? accessibilityTrusted : screenRecordingTrusted
+            rect: nugumiRow,
+            iconFill: NSColor(calibratedRed: 0.03, green: 0.12, blue: 0.13, alpha: 1),
+            enabled: nugumiTrusted,
+            highlighted: true
         )
-        drawSettingsRow(
-            name: "Messages",
-            rect: NSRect(x: listRect.minX + 12, y: listRect.maxY - 100, width: listRect.width - 24, height: 40),
-            highlighted: false,
-            enabled: true
+        drawDarkSettingsRow(
+            name: activePermission == .screenRecording ? "Raycast" : "Notes",
+            rect: NSRect(x: panelRect.minX + 10, y: firstRowY - rowHeight * 2, width: panelRect.width - 20, height: rowHeight),
+            iconFill: activePermission == .screenRecording ? NSColor.systemRed : NSColor(calibratedWhite: 0.34, alpha: 1),
+            enabled: true,
+            highlighted: false
         )
-        drawSettingsRow(
-            name: "Notes",
-            rect: NSRect(x: listRect.minX + 12, y: listRect.maxY - 144, width: listRect.width - 24, height: 40),
-            highlighted: false,
-            enabled: false
+
+        let toggleCenter = NSPoint(x: nugumiRow.maxX - 38, y: nugumiRow.midY)
+        drawArrow(
+            from: NSPoint(x: toggleCenter.x - 116, y: toggleCenter.y - 1),
+            to: NSPoint(x: toggleCenter.x - 28, y: toggleCenter.y),
+            color: NSColor.systemRed
         )
     }
 
-    private func drawSettingsRow(name: String, rect: NSRect, highlighted: Bool, enabled: Bool) {
+    private func drawDarkSettingsRow(
+        name: String,
+        rect: NSRect,
+        iconFill: NSColor,
+        enabled: Bool,
+        highlighted: Bool
+    ) {
+        let iconRect = NSRect(x: rect.minX + 16, y: rect.midY - 13, width: 26, height: 26)
+        fillRounded(iconRect, radius: 6, fill: iconFill, stroke: NSColor.white.withAlphaComponent(0.18))
         if highlighted {
-            fillRounded(rect, radius: 10, fill: NSColor.systemBlue.withAlphaComponent(0.08), stroke: nil)
+            drawText("⌘", in: iconRect.insetBy(dx: 5, dy: 4), font: NSFont.systemFont(ofSize: 13, weight: .bold), color: .white, alignment: .center)
         }
-
-        let iconRect = NSRect(x: rect.minX + 8, y: rect.midY - 10, width: 20, height: 20)
-        fillRounded(iconRect, radius: 6, fill: highlighted ? NSColor.nugumiAccent : NSColor(calibratedWhite: 0.78, alpha: 1), stroke: nil)
 
         drawText(
             name,
-            in: NSRect(x: iconRect.maxX + 10, y: rect.midY - 9, width: 140, height: 20),
-            font: NSFont.systemFont(ofSize: 12.5, weight: highlighted ? .semibold : .regular),
-            color: NSColor(calibratedWhite: highlighted ? 0.12 : 0.42, alpha: 1)
+            in: NSRect(x: iconRect.maxX + 18, y: rect.midY - 11, width: 180, height: 24),
+            font: NSFont.systemFont(ofSize: 13.5, weight: .semibold),
+            color: NSColor.white.withAlphaComponent(highlighted ? 0.92 : 0.84)
         )
 
-        let toggleRect = NSRect(x: rect.maxX - 52, y: rect.midY - 10, width: 42, height: 22)
+        let toggleRect = NSRect(x: rect.maxX - 58, y: rect.midY - 11, width: 44, height: 24)
         fillRounded(
             toggleRect,
-            radius: 11,
-            fill: enabled ? NSColor.systemBlue : NSColor(calibratedWhite: 0.82, alpha: 1),
+            radius: 12,
+            fill: enabled ? NSColor.systemBlue : NSColor(calibratedWhite: 0.31, alpha: 1),
             stroke: nil
         )
-        let knobX = enabled ? toggleRect.maxX - 20 : toggleRect.minX + 2
+        let knobX = enabled ? toggleRect.maxX - 22 : toggleRect.minX + 2
         fillRounded(
-            NSRect(x: knobX, y: toggleRect.minY + 2, width: 18, height: 18),
-            radius: 9,
-            fill: .white,
-            stroke: NSColor.black.withAlphaComponent(0.05)
+            NSRect(x: knobX, y: toggleRect.minY + 2, width: 20, height: 20),
+            radius: 10,
+            fill: NSColor(calibratedWhite: 0.92, alpha: 1),
+            stroke: NSColor.black.withAlphaComponent(0.12)
         )
     }
 
+    private func drawArrow(from start: NSPoint, to end: NSPoint, color: NSColor) {
+        let path = NSBezierPath()
+        path.move(to: start)
+        path.line(to: end)
+        color.setStroke()
+        path.lineWidth = 2
+        path.stroke()
+
+        let head = NSBezierPath()
+        head.move(to: end)
+        head.line(to: NSPoint(x: end.x - 12, y: end.y + 6))
+        head.line(to: NSPoint(x: end.x - 12, y: end.y - 6))
+        head.close()
+        color.setFill()
+        head.fill()
+    }
+
     private func drawLockBadge(in rect: NSRect) {
-        let body = NSRect(x: rect.minX + 8, y: rect.minY + 5, width: rect.width - 16, height: rect.height - 22)
+        let body = NSRect(x: rect.minX + 10, y: rect.minY + 6, width: rect.width - 20, height: rect.height - 28)
         let bodyPath = NSBezierPath(roundedRect: body, xRadius: 6, yRadius: 6)
         NSColor(calibratedRed: 0.95, green: 0.59, blue: 0.15, alpha: 1).setFill()
         bodyPath.fill()
 
         let shackle = NSBezierPath()
         shackle.appendArc(
-            withCenter: NSPoint(x: rect.midX, y: rect.minY + 30),
-            radius: 15,
+            withCenter: NSPoint(x: rect.midX, y: rect.minY + 39),
+            radius: 17,
             startAngle: 0,
             endAngle: 180,
             clockwise: false
         )
-        shackle.lineWidth = 5
+        shackle.lineWidth = 6
         NSColor(calibratedWhite: 0.78, alpha: 1).setStroke()
         shackle.stroke()
 
-        let badgeRect = NSRect(x: rect.maxX - 17, y: rect.minY + 5, width: 24, height: 24)
+        let badgeRect = NSRect(x: rect.maxX - 23, y: rect.minY + 6, width: 30, height: 30)
         fillRounded(
             badgeRect,
-            radius: 12,
+            radius: 15,
             fill: activePermission == .accessibility ? NSColor.systemBlue : NSColor.systemRed,
             stroke: NSColor.white.withAlphaComponent(0.85)
         )

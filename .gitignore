@@ -4,3 +4,10 @@ dist/
 *.xcuserdata/
 DerivedData/
 .envrc.local
+
+# Signing secrets — must never be committed
+sparkle_private_key.txt
+*.p12
+*.pem
+*.gpg
+*.key
