@@ -84,6 +84,10 @@ Nugumi updates itself. When a new version ships, click **Check for Updates...** 
 - macOS 14 (Sonoma) or later — Apple Silicon and Intel both supported.
 - [Ollama](https://ollama.com) installed. Nugumi walks you through it on first launch.
 
+## License
+
+Nugumi is available under the [PolyForm Noncommercial License 1.0.0](LICENSE): you can use, copy, and modify it for non-commercial purposes, but commercial resale or commercial use is not allowed without separate permission.
+
 <br>
 
 <div align="center">
