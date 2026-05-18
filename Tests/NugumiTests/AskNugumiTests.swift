@@ -435,6 +435,8 @@ final class AskNugumiTests: XCTestCase {
     func testAnswerTextHasSymmetricInnerPadding() {
         let layout = AskNugumiAnswerBubbleMetrics.layout(forContentHeight: 80)
 
+        // Metrics stay symmetric; the scroller lane is applied at runtime on
+        // the text container only when a scrollbar is present.
         XCTAssertEqual(layout.viewportFrame.minX - layout.bubbleFrame.minX, 30, accuracy: 0.001)
         XCTAssertEqual(layout.bubbleFrame.maxX - layout.viewportFrame.maxX, 30, accuracy: 0.001)
     }

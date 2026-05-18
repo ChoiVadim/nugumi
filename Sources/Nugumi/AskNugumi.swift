@@ -415,7 +415,11 @@ enum AskNugumiAnswerBubbleMetrics {
     private static let bubbleY: CGFloat = 34
     private static let bubbleWidth: CGFloat = 294
     private static let textX: CGFloat = 30
-    private static let textY: CGFloat = 56
+    // textY clears the bottom-right continue button (~bubble.minY+9+8+16).
+    // The scroller lane is applied at the text-container level only while a
+    // scrollbar is present (see configureAnswerTextView), so the bubble keeps
+    // full-width symmetric text the rest of the time.
+    private static let textY: CGFloat = 70
     private static let textWidth: CGFloat = 234
     private static let minimumViewportHeight: CGFloat = 54
     private static let topTextInset: CGFloat = 26

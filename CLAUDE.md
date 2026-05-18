@@ -6,6 +6,7 @@ This file is loaded as project context by Claude Code. It contains operational i
 
 - macOS menu bar app, Swift Package Manager, deployment target macOS 14.
 - Bundle ID: `com.nugumi.app`. GitHub repo: `ChoiVadim/nugumi` (`origin`).
+- GitHub CLI account for this repo: use `ChoiVadim`. If multiple accounts are configured locally, prefer `gh-vadim ...` or run `gh-use-vadim` before release/repo operations.
 - Single source file: `Sources/Nugumi/App.swift` (everything except onboarding state lives here). `Sources/Nugumi/Bootstrap.swift` covers Ollama setup wizard.
 - Distribution: ad-hoc signed `.app` + universal DMG packaged via `Scripts/build-app-bundle.sh`. In-app updates via Sparkle 2.9.1.
 - Renamed from "Yaku" to "Nugumi" at v0.6.0. Existing v0.5.0 (Yaku) installs will not auto-migrate via Sparkle — they must download the new bundle manually from GitHub Releases. The Sparkle EdDSA key is unchanged across the rename.

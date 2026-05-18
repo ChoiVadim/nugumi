@@ -35,6 +35,7 @@ private enum MenuItemTag: Int {
     case resetSettings = 123
     case invisibilityMode = 124
     case contactSupport = 125
+    case permissionsOnboarding = 126
 }
 
 enum InvisibilityState {
@@ -1791,6 +1792,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             keyEquivalent: shortcut(for: .toggleInvisibility).menuKeyEquivalent,
             keyEquivalentModifierMask: shortcut(for: .toggleInvisibility).keyEquivalentModifierMask
         ))
+        menu.addItem(makeMenuItem(
+            title: "How to use Nugumi...",
+            tag: .permissionsOnboarding,
+            symbolName: "questionmark.circle",
+            action: #selector(openPermissionsOnboardingWindow),
+            keyEquivalent: ""
+        ))
 
         menu.addItem(makeSectionHeader("Shortcuts"))
         menu.addItem(makeMenuItem(
@@ -3002,6 +3010,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     timer.invalidate()
                     self.accessibilityTrustTimer = nil
                     self.updateMenuState()
+                    self.presentPermissionsWindowIfNeeded()
                 }
             }
         }
@@ -3031,6 +3040,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 if CGPreflightScreenCaptureAccess() {
                     timer.invalidate()
                     self.screenRecordingTrustTimer = nil
+                    self.updateMenuState()
+                    self.presentPermissionsWindowIfNeeded()
                 }
             }
         }
@@ -3038,12 +3049,19 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     private func presentPermissionsWindowIfNeeded() {
+        presentPermissionsWindow(force: false)
+    }
+
+    private func presentPermissionsWindow(force: Bool) {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
-        guard !(axTrusted && scrTrusted) else { return }
-        if permissionsWindowController != nil { return }
+        guard force || !(axTrusted && scrTrusted) || !PermissionsWindowController.hasCompletedFeatureTour else { return }
+        if let permissionsWindowController {
+            permissionsWindowController.presentAndActivate()
+            return
+        }
 
-        let controller = PermissionsWindowController { [weak self] in
+        let controller = PermissionsWindowController(allowsCompletedReview: force) { [weak self] in
             self?.permissionsWindowController = nil
         }
         permissionsWindowController = controller
@@ -3285,6 +3303,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
+    @objc private func openPermissionsOnboardingWindow() {
+        presentPermissionsWindow(force: true)
+    }
+
+    @MainActor
     @objc private func openSnippetsWindow() {
         if let snippetsWindowController {
             snippetsWindowController.presentAndFocus()
@@ -3313,22 +3336,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @objc private func contactSupport() {
         let metadata = supportMetadata()
-        let alert = NSAlert()
-        alert.messageText = "Open Gmail to contact Vadim?"
-        alert.informativeText = """
-        Nugumi will open Gmail in your browser with a draft to tsoivadim97@gmail.com.
-        The draft includes the diagnostic info below, and you can edit or delete anything before sending.
-
-        \(metadata)
-        """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Open Gmail")
-        alert.addButton(withTitle: "Cancel")
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-
         let subject = "Nugumi bug or request"
         let body = """
         Hey Vadim,
@@ -6771,8 +6778,14 @@ final class PetController: NSObject, NSTextFieldDelegate {
         ))
         answerTextView.font = NugumiFont.pixelPrompt(size: Self.answerFontSize)
         answerTextView.textColor = NSColor(srgbRed: 0.26, green: 0.30, blue: 0.30, alpha: 1.0)
+        // Only carve out a lane for the overlay scroller when it's actually
+        // shown. The text view stays full-width (so the clip view fills the
+        // bubble); the container wraps ~14px short so glyphs never sit under
+        // the scrollbar, with no wasted space when there's no scroll.
+        let scrollerGutter: CGFloat = layout.needsScroll ? 14 : 0
+        answerTextView.textContainer?.widthTracksTextView = false
         answerTextView.textContainer?.containerSize = NSSize(
-            width: layout.viewportFrame.width,
+            width: layout.viewportFrame.width - scrollerGutter,
             height: .greatestFiniteMagnitude
         )
         answerTextView.frame = NSRect(
@@ -7024,14 +7037,17 @@ final class PetController: NSObject, NSTextFieldDelegate {
             promptBubbleView.bubbleFrame = currentAnswerLayout.bubbleFrame
             promptBubbleView.targetMarkerPoint = nil
             answerScrollView.frame = currentAnswerLayout.viewportFrame
-            // The bubble is drawn with a ~15px pixel border (5*unit) on the
-            // sides and ~9px (3*unit) at the bottom. Inset past that so the
-            // button sits on the cream fill, not clipped behind the border.
+            // The visible bubble border sits 15px in from the sides (5*unit)
+            // and 9px up from the bottom (3*unit). Add the SAME gap past each
+            // so the button is equidistant from the right and bottom edges.
             let bubble = currentAnswerLayout.bubbleFrame
             let buttonSize: CGFloat = 16
+            let sideBorder: CGFloat = 15
+            let bottomBorder: CGFloat = 9
+            let gap: CGFloat = 8
             continueButton.frame = NSRect(
-                x: bubble.maxX - buttonSize - 18,
-                y: bubble.minY + 14,
+                x: bubble.maxX - sideBorder - gap - buttonSize,
+                y: bubble.minY + bottomBorder + gap,
                 width: buttonSize,
                 height: buttonSize
             )

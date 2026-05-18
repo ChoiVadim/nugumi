@@ -1,4 +1,5 @@
 import AppKit
+import AVKit
 import Foundation
 
 extension NSColor {
@@ -1038,29 +1039,119 @@ extension OnboardingWindowController: NSWindowDelegate {
 
 @MainActor
 final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
+    fileprivate enum PermissionKind {
+        case accessibility
+        case screenRecording
+    }
+
+    private enum Page {
+        case permissions
+        case feature(Int)
+    }
+
+    fileprivate struct FeatureTourStep {
+        let eyebrow: String
+        let title: String
+        let body: String
+        let actionTitle: String
+        let actionDetail: String
+        let shortcutLabel: String
+        let shortcutDetail: String
+        let symbolName: String
+        let videoURL: URL
+
+        static var all: [FeatureTourStep] {
+            let translateShortcut = GlobalShortcutStore.shortcut(for: .translateOrReply).displayString
+            let rewriteShortcut = GlobalShortcutStore.shortcut(for: .translateSelection).displayString
+
+            return [
+                FeatureTourStep(
+                    eyebrow: "Understand",
+                    title: "Read any language without leaving work",
+                    body: "Use Nugumi where the text already is: Slack, Gmail, Notion, PDFs, websites, or any Mac app with selectable text.",
+                    actionTitle: "Select text, then left-click",
+                    actionDetail: "Highlight the text and left-click the Nugumi button that appears near the selection.",
+                    shortcutLabel: "Left click",
+                    shortcutDetail: "\(translateShortcut) also translates selected text.",
+                    symbolName: "text.viewfinder",
+                    videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4")!
+                ),
+                FeatureTourStep(
+                    eyebrow: "Sound native",
+                    title: "Write naturally. Send like a native",
+                    body: "Draft in the language that feels natural, then let Nugumi polish it into your target language with better grammar, tone, and phrasing.",
+                    actionTitle: "Select your draft, then right-click",
+                    actionDetail: "Highlight your draft and right-click the Nugumi button to rewrite it into the target language.",
+                    shortcutLabel: "Right click",
+                    shortcutDetail: "\(rewriteShortcut) also rewrites selected text.",
+                    symbolName: "text.insert",
+                    videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")!
+                ),
+                FeatureTourStep(
+                    eyebrow: "Reply",
+                    title: "Reply across languages",
+                    body: "When you need an answer instead of a translation, Nugumi can draft a reply from the incoming message.",
+                    actionTitle: "Draft a reply",
+                    actionDetail: "Select an incoming message. Press Tab on the Nugumi button to switch to reply, then click.",
+                    shortcutLabel: "Tab",
+                    shortcutDetail: "Or set Menu -> Main mode: reply, then use \(translateShortcut).",
+                    symbolName: "bubble.left.and.text.bubble.right",
+                    videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")!
+                ),
+                FeatureTourStep(
+                    eyebrow: "Ask Nugumi",
+                    title: "Ask what to click",
+                    body: "Nugumi can look at the current screen when you ask, explain what is happening, and point you to the next button or field.",
+                    actionTitle: "Open the prompt near your cursor",
+                    actionDetail: "Press Control twice, type your question, then press Return.",
+                    shortcutLabel: "Control x2",
+                    shortcutDetail: "Use it on websites, forms, dialogs, and apps.",
+                    symbolName: "cursorarrow.click.2",
+                    videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")!
+                )
+            ]
+        }
+    }
+
+    static let featureTourCompletedKey = "permissionsOnboarding.featureTourCompleted"
+
+    static var hasCompletedFeatureTour: Bool {
+        UserDefaults.standard.bool(forKey: featureTourCompletedKey)
+    }
+
     private let onClose: () -> Void
-    private var accessibilityRow: StepRow!
-    private var screenRecordingRow: StepRow!
+    private let allowsCompletedReview: Bool
+    private var page: Page = .permissions
+    private var accessibilityCard: PermissionCardView!
+    private var screenRecordingCard: PermissionCardView!
+    private var featureInstructionView: FeatureInstructionView!
+    private var stageLabel: NSTextField!
+    private var titleLabel: NSTextField!
+    private var subtitleLabel: NSTextField!
+    private var privacyNote: NSTextField!
+    private var primaryButton: NSButton!
+    private var skipButton: NSButton!
+    private var previewView: PermissionPreviewView!
+    private var featureVideoView: FeatureTourVideoView!
     private var pollTimer: Timer?
 
-    private static let accessibilityCopy = "Translate the text you select in any app."
-    private static let screenRecordingCopy = "Translate text in screen areas you capture."
-
-    init(onClose: @escaping () -> Void) {
+    init(allowsCompletedReview: Bool = false, onClose: @escaping () -> Void) {
+        self.allowsCompletedReview = allowsCompletedReview
         self.onClose = onClose
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 340),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Welcome to Nugumi"
+        window.title = "Set up Nugumi"
+        window.appearance = NSAppearance(named: .darkAqua)
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
         window.level = .floating
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.isMovableByWindowBackground = false
+        window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -1068,6 +1159,7 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
 
         super.init(window: window)
         window.delegate = self
+        page = initialPage()
         buildUI()
         refreshState()
         startPolling()
@@ -1098,47 +1190,100 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
         rootView.addSubview(glass)
         let contentView = glass.contentView
 
-        let title = NSTextField(labelWithString: "Welcome to Nugumi")
-        title.font = NSFont.systemFont(ofSize: 18, weight: .semibold)
-        title.translatesAutoresizingMaskIntoConstraints = false
+        let backdrop = PermissionBackdropView()
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
 
-        let subtitle = NSTextField(wrappingLabelWithString:
-            "Two quick permissions to start translating selected text and screen areas. Nugumi only sees what you actively highlight or capture — nothing else, nothing in the background.")
-        subtitle.font = NSFont.systemFont(ofSize: 12)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
+        let stageLabel = NSTextField(labelWithString: "Step 1 of 2")
+        stageLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        stageLabel.textColor = NSColor(calibratedRed: 0.67, green: 0.93, blue: 0.88, alpha: 1)
+        stageLabel.translatesAutoresizingMaskIntoConstraints = false
+        self.stageLabel = stageLabel
 
-        let accessibilityRow = StepRow(
-            title: "Accessibility",
-            primaryActionTitle: "Open settings"
-        ) { [weak self] in
-            self?.openAccessibilitySettings()
-        }
-        self.accessibilityRow = accessibilityRow
+        let titleLabel = NSTextField(wrappingLabelWithString: "Give Nugumi the access it needs")
+        titleLabel.font = NSFont.systemFont(ofSize: 31, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.preferredMaxLayoutWidth = 300
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        self.titleLabel = titleLabel
 
-        let screenRecordingRow = StepRow(
-            title: "Screen recording",
-            primaryActionTitle: "Open settings"
-        ) { [weak self] in
-            self?.openScreenRecordingSettings()
-        }
-        self.screenRecordingRow = screenRecordingRow
+        let subtitleLabel = NSTextField(wrappingLabelWithString:
+            "Selected-text translation needs Accessibility. Screen-area OCR needs Screen Recording. Nugumi only reads what you explicitly select or capture.")
+        subtitleLabel.font = NSFont.systemFont(ofSize: 13)
+        subtitleLabel.textColor = NSColor.white.withAlphaComponent(0.68)
+        subtitleLabel.maximumNumberOfLines = 4
+        subtitleLabel.preferredMaxLayoutWidth = 310
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        self.subtitleLabel = subtitleLabel
 
-        let footerNote = NSTextField(wrappingLabelWithString:
-            "Skip for now — you can grant these later from the Nugumi menu.")
-        footerNote.font = NSFont.systemFont(ofSize: 11)
-        footerNote.textColor = .tertiaryLabelColor
-        footerNote.translatesAutoresizingMaskIntoConstraints = false
+        let accessibilityCard = PermissionCardView(
+            symbolName: "keyboard.badge.eye",
+            fallbackSymbolName: "keyboard",
+            title: "Translate selected text anywhere",
+            detail: "Lets Nugumi read your current selection and run your shortcuts in other apps."
+        )
+        self.accessibilityCard = accessibilityCard
 
-        contentView.addSubview(title)
-        contentView.addSubview(subtitle)
-        contentView.addSubview(accessibilityRow)
-        contentView.addSubview(screenRecordingRow)
-        contentView.addSubview(footerNote)
+        let screenRecordingCard = PermissionCardView(
+            symbolName: "rectangle.dashed.badge.record",
+            fallbackSymbolName: "rectangle.dashed",
+            title: "Translate text from the screen",
+            detail: "Only used when you capture a screen area for OCR or ask about what you see."
+        )
+        self.screenRecordingCard = screenRecordingCard
 
-        let leading: CGFloat = 24
-        let trailing: CGFloat = -24
-        let rowSpacing: CGFloat = 20
+        let featureInstructionView = FeatureInstructionView()
+        featureInstructionView.translatesAutoresizingMaskIntoConstraints = false
+        self.featureInstructionView = featureInstructionView
+
+        let privacyNote = NSTextField(wrappingLabelWithString:
+            "No continuous recording. No background reading. You can revoke either permission in System Settings.")
+        privacyNote.font = NSFont.systemFont(ofSize: 11)
+        privacyNote.textColor = NSColor.white.withAlphaComponent(0.45)
+        privacyNote.preferredMaxLayoutWidth = 310
+        privacyNote.translatesAutoresizingMaskIntoConstraints = false
+        self.privacyNote = privacyNote
+
+        let primaryButton = NSButton(title: "", target: self, action: #selector(primaryTapped))
+        primaryButton.bezelStyle = .rounded
+        primaryButton.controlSize = .large
+        primaryButton.bezelColor = .nugumiAccent
+        primaryButton.translatesAutoresizingMaskIntoConstraints = false
+        self.primaryButton = primaryButton
+
+        let skipButton = NSButton(title: "Set up later", target: self, action: #selector(skipTapped))
+        skipButton.bezelStyle = .regularSquare
+        skipButton.isBordered = false
+        skipButton.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        skipButton.contentTintColor = NSColor.white.withAlphaComponent(0.56)
+        skipButton.translatesAutoresizingMaskIntoConstraints = false
+        self.skipButton = skipButton
+
+        let previewView = PermissionPreviewView()
+        previewView.translatesAutoresizingMaskIntoConstraints = false
+        self.previewView = previewView
+
+        let featureVideoView = FeatureTourVideoView()
+        featureVideoView.translatesAutoresizingMaskIntoConstraints = false
+        self.featureVideoView = featureVideoView
+
+        contentView.addSubview(backdrop)
+        contentView.addSubview(stageLabel)
+        contentView.addSubview(titleLabel)
+        contentView.addSubview(subtitleLabel)
+        contentView.addSubview(accessibilityCard)
+        contentView.addSubview(screenRecordingCard)
+        contentView.addSubview(featureInstructionView)
+        contentView.addSubview(privacyNote)
+        contentView.addSubview(primaryButton)
+        contentView.addSubview(skipButton)
+        contentView.addSubview(previewView)
+        contentView.addSubview(featureVideoView)
+
+        let leading: CGFloat = 36
+        let rightColumnLeading: CGFloat = 388
+        let top: CGFloat = 62
 
         NSLayoutConstraint.activate([
             glass.topAnchor.constraint(equalTo: rootView.topAnchor),
@@ -1146,27 +1291,74 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
             glass.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
             glass.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
 
-            title.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 62),
-            title.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: leading),
-            title.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: trailing),
+            backdrop.topAnchor.constraint(equalTo: contentView.topAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.trailingAnchor.constraint(equalTo: title.trailingAnchor),
+            stageLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: top),
+            stageLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: leading),
+            stageLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.leadingAnchor, constant: rightColumnLeading - 24),
 
-            accessibilityRow.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 22),
-            accessibilityRow.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: leading),
-            accessibilityRow.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: trailing),
+            titleLabel.topAnchor.constraint(equalTo: stageLabel.bottomAnchor, constant: 14),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: leading),
+            titleLabel.widthAnchor.constraint(equalToConstant: 312),
 
-            screenRecordingRow.topAnchor.constraint(equalTo: accessibilityRow.bottomAnchor, constant: rowSpacing),
-            screenRecordingRow.leadingAnchor.constraint(equalTo: accessibilityRow.leadingAnchor),
-            screenRecordingRow.trailingAnchor.constraint(equalTo: accessibilityRow.trailingAnchor),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
+            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            subtitleLabel.widthAnchor.constraint(equalToConstant: 312),
 
-            footerNote.topAnchor.constraint(greaterThanOrEqualTo: screenRecordingRow.bottomAnchor, constant: 18),
-            footerNote.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: leading),
-            footerNote.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: trailing),
-            footerNote.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
+            accessibilityCard.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 28),
+            accessibilityCard.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            accessibilityCard.widthAnchor.constraint(equalToConstant: 312),
+            accessibilityCard.heightAnchor.constraint(equalToConstant: 104),
+
+            screenRecordingCard.topAnchor.constraint(equalTo: accessibilityCard.bottomAnchor, constant: 12),
+            screenRecordingCard.leadingAnchor.constraint(equalTo: accessibilityCard.leadingAnchor),
+            screenRecordingCard.widthAnchor.constraint(equalTo: accessibilityCard.widthAnchor),
+            screenRecordingCard.heightAnchor.constraint(equalTo: accessibilityCard.heightAnchor),
+
+            featureInstructionView.topAnchor.constraint(equalTo: accessibilityCard.topAnchor),
+            featureInstructionView.leadingAnchor.constraint(equalTo: accessibilityCard.leadingAnchor),
+            featureInstructionView.widthAnchor.constraint(equalTo: accessibilityCard.widthAnchor),
+            featureInstructionView.bottomAnchor.constraint(equalTo: screenRecordingCard.bottomAnchor),
+
+            privacyNote.topAnchor.constraint(equalTo: screenRecordingCard.bottomAnchor, constant: 18),
+            privacyNote.leadingAnchor.constraint(equalTo: accessibilityCard.leadingAnchor),
+            privacyNote.widthAnchor.constraint(equalTo: accessibilityCard.widthAnchor),
+
+            primaryButton.topAnchor.constraint(greaterThanOrEqualTo: privacyNote.bottomAnchor, constant: 18),
+            primaryButton.leadingAnchor.constraint(equalTo: accessibilityCard.leadingAnchor),
+            primaryButton.widthAnchor.constraint(equalTo: accessibilityCard.widthAnchor),
+            primaryButton.heightAnchor.constraint(equalToConstant: 44),
+            primaryButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -56),
+
+            skipButton.topAnchor.constraint(equalTo: primaryButton.bottomAnchor, constant: 10),
+            skipButton.centerXAnchor.constraint(equalTo: primaryButton.centerXAnchor),
+
+            previewView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 48),
+            previewView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: rightColumnLeading),
+            previewView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -28),
+            previewView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -36),
+
+            featureVideoView.topAnchor.constraint(equalTo: previewView.topAnchor),
+            featureVideoView.leadingAnchor.constraint(equalTo: previewView.leadingAnchor),
+            featureVideoView.trailingAnchor.constraint(equalTo: previewView.trailingAnchor),
+            featureVideoView.bottomAnchor.constraint(equalTo: previewView.bottomAnchor)
         ])
+    }
+
+    private func initialPage() -> Page {
+        if AXIsProcessTrusted(),
+           CGPreflightScreenCaptureAccess(),
+           shouldShowFeatureTour {
+            return .feature(0)
+        }
+        return .permissions
+    }
+
+    private var shouldShowFeatureTour: Bool {
+        allowsCompletedReview || !Self.hasCompletedFeatureTour
     }
 
     private func startPolling() {
@@ -1179,24 +1371,157 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func refreshState() {
+        switch page {
+        case .permissions:
+            refreshPermissionState()
+        case .feature(let index):
+            renderFeature(index)
+        }
+    }
+
+    private func refreshPermissionState() {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
+        let activePermission = nextPermission(accessibilityTrusted: axTrusted, screenRecordingTrusted: scrTrusted)
 
-        if axTrusted {
-            accessibilityRow.applyOk(message: "Granted.")
+        titleLabel.stringValue = "Give Nugumi the access it needs"
+        subtitleLabel.stringValue = "Selected-text translation needs Accessibility. Screen-area OCR needs Screen Recording. Nugumi only reads what you explicitly select or capture."
+        privacyNote.stringValue = "No continuous recording. No background reading. You can revoke either permission in System Settings."
+        skipButton.title = "Set up later"
+        accessibilityCard.isHidden = false
+        screenRecordingCard.isHidden = false
+        featureInstructionView.isHidden = true
+        previewView.isHidden = false
+        featureVideoView.isHidden = true
+        featureVideoView.stop()
+
+        if activePermission == nil {
+            stageLabel.stringValue = "Ready"
         } else {
-            accessibilityRow.apply(.needsAction(Self.accessibilityCopy))
+            stageLabel.stringValue = activePermission == .screenRecording ? "Step 2 of 2" : "Step 1 of 2"
         }
 
-        if scrTrusted {
-            screenRecordingRow.applyOk(message: "Granted — relaunch Nugumi to activate.")
-        } else {
-            screenRecordingRow.apply(.needsAction(Self.screenRecordingCopy))
+        accessibilityCard.apply(
+            axTrusted ? .granted : (activePermission == .accessibility ? .active : .waiting)
+        )
+        screenRecordingCard.apply(
+            scrTrusted ? .granted : (activePermission == .screenRecording ? .active : .waiting)
+        )
+        previewView.configure(
+            activePermission: activePermission ?? .screenRecording,
+            accessibilityTrusted: axTrusted,
+            screenRecordingTrusted: scrTrusted
+        )
+
+        switch activePermission {
+        case .accessibility:
+            setPrimaryButtonTitle("Open Accessibility Settings")
+            primaryButton.isEnabled = true
+        case .screenRecording:
+            setPrimaryButtonTitle(scrTrusted ? "Open Screen Settings" : "Allow Screen Capture")
+            primaryButton.isEnabled = true
+        case nil:
+            setPrimaryButtonTitle("Continue")
+            primaryButton.isEnabled = true
         }
 
         if axTrusted && scrTrusted {
+            if shouldShowFeatureTour {
+                showFeature(at: 0)
+                return
+            }
             close()
         }
+    }
+
+    private func showFeature(at index: Int) {
+        let clampedIndex = max(0, min(index, Self.FeatureTourStep.all.count - 1))
+        page = .feature(clampedIndex)
+        renderFeature(clampedIndex)
+    }
+
+    private func renderFeature(_ index: Int) {
+        let steps = Self.FeatureTourStep.all
+        guard steps.indices.contains(index) else { return }
+        let step = steps[index]
+
+        stageLabel.stringValue = "Feature \(index + 1) of \(steps.count)"
+        titleLabel.stringValue = step.title
+        subtitleLabel.stringValue = step.body
+        accessibilityCard.isHidden = true
+        screenRecordingCard.isHidden = true
+        featureInstructionView.isHidden = false
+        featureInstructionView.configure(step)
+        privacyNote.stringValue = "You can reopen this tour anytime from the Nugumi menu."
+        previewView.isHidden = true
+        featureVideoView.isHidden = false
+        featureVideoView.configure(step)
+        setPrimaryButtonTitle(index == steps.count - 1 ? "Done" : "Next")
+        primaryButton.isEnabled = true
+        skipButton.title = "Skip tour"
+    }
+
+    private func nextPermission(accessibilityTrusted: Bool, screenRecordingTrusted: Bool) -> PermissionKind? {
+        if !accessibilityTrusted { return .accessibility }
+        if !screenRecordingTrusted { return .screenRecording }
+        return nil
+    }
+
+    private func setPrimaryButtonTitle(_ title: String) {
+        primaryButton.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .foregroundColor: NSColor.white,
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold)
+            ]
+        )
+    }
+
+    @objc private func primaryTapped() {
+        if case .feature(let index) = page {
+            advanceFeature(from: index)
+            return
+        }
+
+        if allowsCompletedReview,
+           AXIsProcessTrusted(),
+           CGPreflightScreenCaptureAccess() {
+            showFeature(at: 0)
+            return
+        }
+
+        switch nextPermission(
+            accessibilityTrusted: AXIsProcessTrusted(),
+            screenRecordingTrusted: CGPreflightScreenCaptureAccess()
+        ) {
+        case .accessibility:
+            openAccessibilitySettings()
+        case .screenRecording:
+            openScreenRecordingSettings()
+        case nil:
+            close()
+        }
+    }
+
+    @objc private func skipTapped() {
+        if case .feature = page {
+            markFeatureTourComplete()
+        }
+        close()
+    }
+
+    private func advanceFeature(from index: Int) {
+        let nextIndex = index + 1
+        if nextIndex < Self.FeatureTourStep.all.count {
+            showFeature(at: nextIndex)
+            return
+        }
+        markFeatureTourComplete()
+        close()
+    }
+
+    private func markFeatureTourComplete() {
+        UserDefaults.standard.set(true, forKey: Self.featureTourCompletedKey)
     }
 
     private func openAccessibilitySettings() {
@@ -1225,16 +1550,643 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
     private func closeBeforeOpeningSystemPermissionUI() {
         pollTimer?.invalidate()
         pollTimer = nil
+        featureVideoView?.stop()
         window?.orderOut(nil)
         close()
     }
 
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
+            if case .feature = self.page {
+                self.markFeatureTourComplete()
+            }
             self.pollTimer?.invalidate()
             self.pollTimer = nil
+            self.featureVideoView?.stop()
             self.onClose()
         }
+    }
+}
+
+@MainActor
+private final class PermissionBackdropView: NSView {
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(calibratedRed: 0.025, green: 0.035, blue: 0.04, alpha: 0.96).setFill()
+        bounds.fill()
+
+        let divider = NSBezierPath()
+        divider.move(to: NSPoint(x: 360, y: 0))
+        divider.line(to: NSPoint(x: 360, y: bounds.height))
+        NSColor.white.withAlphaComponent(0.08).setStroke()
+        divider.lineWidth = 1
+        divider.stroke()
+
+        let gridPath = NSBezierPath()
+        let spacing: CGFloat = 34
+        var x = CGFloat(360)
+        while x < bounds.maxX {
+            gridPath.move(to: NSPoint(x: x, y: 0))
+            gridPath.line(to: NSPoint(x: x, y: bounds.maxY))
+            x += spacing
+        }
+        var y = CGFloat(18)
+        while y < bounds.maxY {
+            gridPath.move(to: NSPoint(x: 360, y: y))
+            gridPath.line(to: NSPoint(x: bounds.maxX, y: y))
+            y += spacing
+        }
+        NSColor.white.withAlphaComponent(0.035).setStroke()
+        gridPath.lineWidth = 1
+        gridPath.stroke()
+    }
+}
+
+@MainActor
+private final class PermissionCardView: NSView {
+    enum State {
+        case active
+        case waiting
+        case granted
+    }
+
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(wrappingLabelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+
+    init(symbolName: String, fallbackSymbolName: String, title: String, detail: String) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.borderWidth = 1
+        layer?.masksToBounds = true
+
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)
+            ?? NSImage(systemSymbolName: fallbackSymbolName, accessibilityDescription: title)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.stringValue = title
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        detailLabel.stringValue = detail
+        detailLabel.font = NSFont.systemFont(ofSize: 11)
+        detailLabel.textColor = NSColor.white.withAlphaComponent(0.56)
+        detailLabel.preferredMaxLayoutWidth = 218
+        detailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        statusLabel.alignment = .right
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.wantsLayer = true
+        statusLabel.layer?.cornerRadius = 8
+        statusLabel.layer?.masksToBounds = true
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+        addSubview(detailLabel)
+        addSubview(statusLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 17),
+            iconView.widthAnchor.constraint(equalToConstant: 26),
+            iconView.heightAnchor.constraint(equalToConstant: 26),
+
+            statusLabel.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 54),
+            statusLabel.heightAnchor.constraint(equalToConstant: 20),
+
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -10),
+
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16)
+        ])
+
+        apply(.waiting)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func apply(_ state: State) {
+        switch state {
+        case .active:
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.105).cgColor
+            layer?.borderColor = NSColor.nugumiAccent.withAlphaComponent(0.92).cgColor
+            iconView.contentTintColor = .white
+            titleLabel.textColor = .white
+            detailLabel.textColor = NSColor.white.withAlphaComponent(0.68)
+            statusLabel.stringValue = "Next"
+            statusLabel.textColor = NSColor(calibratedRed: 0.67, green: 0.93, blue: 0.88, alpha: 1)
+            statusLabel.layer?.backgroundColor = NSColor.clear.cgColor
+        case .waiting:
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.045).cgColor
+            layer?.borderColor = NSColor.white.withAlphaComponent(0.095).cgColor
+            iconView.contentTintColor = NSColor.white.withAlphaComponent(0.44)
+            titleLabel.textColor = NSColor.white.withAlphaComponent(0.76)
+            detailLabel.textColor = NSColor.white.withAlphaComponent(0.43)
+            statusLabel.stringValue = "Later"
+            statusLabel.textColor = NSColor.white.withAlphaComponent(0.48)
+            statusLabel.layer?.backgroundColor = NSColor.clear.cgColor
+        case .granted:
+            layer?.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.34, blue: 0.25, alpha: 0.34).cgColor
+            layer?.borderColor = NSColor.systemGreen.withAlphaComponent(0.42).cgColor
+            iconView.contentTintColor = .systemGreen
+            titleLabel.textColor = NSColor.white.withAlphaComponent(0.92)
+            detailLabel.textColor = NSColor.white.withAlphaComponent(0.55)
+            statusLabel.stringValue = "Done"
+            statusLabel.textColor = .systemGreen
+            statusLabel.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+}
+
+@MainActor
+private final class FeatureInstructionView: NSView {
+    private let iconView = NSImageView()
+    private let eyebrowLabel = NSTextField(labelWithString: "")
+    private let actionTitleLabel = NSTextField(wrappingLabelWithString: "")
+    private let actionDetailLabel = NSTextField(wrappingLabelWithString: "")
+    private let shortcutChip = CenteredPillLabel()
+    private let shortcutDetailLabel = NSTextField(wrappingLabelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 14
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.11).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        layer?.masksToBounds = true
+
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .medium)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.contentTintColor = NSColor(calibratedRed: 0.67, green: 0.93, blue: 0.88, alpha: 1)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        eyebrowLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        eyebrowLabel.textColor = NSColor(calibratedRed: 0.67, green: 0.93, blue: 0.88, alpha: 1)
+        eyebrowLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        actionTitleLabel.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
+        actionTitleLabel.textColor = .white
+        actionTitleLabel.maximumNumberOfLines = 2
+        actionTitleLabel.lineBreakMode = .byWordWrapping
+        actionTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        actionDetailLabel.font = NSFont.systemFont(ofSize: 12)
+        actionDetailLabel.textColor = NSColor.white.withAlphaComponent(0.62)
+        actionDetailLabel.maximumNumberOfLines = 3
+        actionDetailLabel.preferredMaxLayoutWidth = 246
+        actionDetailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        shortcutChip.translatesAutoresizingMaskIntoConstraints = false
+
+        shortcutDetailLabel.font = NSFont.systemFont(ofSize: 11)
+        shortcutDetailLabel.textColor = NSColor.white.withAlphaComponent(0.48)
+        shortcutDetailLabel.maximumNumberOfLines = 2
+        shortcutDetailLabel.preferredMaxLayoutWidth = 190
+        shortcutDetailLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(eyebrowLabel)
+        addSubview(actionTitleLabel)
+        addSubview(actionDetailLabel)
+        addSubview(shortcutChip)
+        addSubview(shortcutDetailLabel)
+
+        NSLayoutConstraint.activate([
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 20),
+            iconView.widthAnchor.constraint(equalToConstant: 30),
+            iconView.heightAnchor.constraint(equalToConstant: 30),
+
+            eyebrowLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
+            eyebrowLabel.topAnchor.constraint(equalTo: topAnchor, constant: 20),
+            eyebrowLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -18),
+
+            actionTitleLabel.leadingAnchor.constraint(equalTo: eyebrowLabel.leadingAnchor),
+            actionTitleLabel.topAnchor.constraint(equalTo: eyebrowLabel.bottomAnchor, constant: 8),
+            actionTitleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -18),
+
+            actionDetailLabel.leadingAnchor.constraint(equalTo: actionTitleLabel.leadingAnchor),
+            actionDetailLabel.topAnchor.constraint(equalTo: actionTitleLabel.bottomAnchor, constant: 10),
+            actionDetailLabel.trailingAnchor.constraint(equalTo: actionTitleLabel.trailingAnchor),
+
+            shortcutChip.leadingAnchor.constraint(equalTo: actionTitleLabel.leadingAnchor),
+            shortcutChip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -22),
+            shortcutChip.heightAnchor.constraint(equalToConstant: 28),
+            shortcutChip.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
+            shortcutChip.widthAnchor.constraint(lessThanOrEqualToConstant: 150),
+
+            shortcutDetailLabel.leadingAnchor.constraint(equalTo: shortcutChip.trailingAnchor, constant: 12),
+            shortcutDetailLabel.centerYAnchor.constraint(equalTo: shortcutChip.centerYAnchor),
+            shortcutDetailLabel.trailingAnchor.constraint(equalTo: actionTitleLabel.trailingAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func configure(_ step: PermissionsWindowController.FeatureTourStep) {
+        iconView.image = NSImage(systemSymbolName: step.symbolName, accessibilityDescription: step.eyebrow)
+            ?? NSImage(systemSymbolName: "sparkle.magnifyingglass", accessibilityDescription: step.eyebrow)
+        eyebrowLabel.stringValue = step.eyebrow.uppercased()
+        actionTitleLabel.stringValue = step.actionTitle
+        actionDetailLabel.stringValue = step.actionDetail
+        shortcutChip.text = step.shortcutLabel
+        shortcutDetailLabel.stringValue = step.shortcutDetail
+    }
+}
+
+@MainActor
+private final class CenteredPillLabel: NSView {
+    var text = "" {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    private let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+
+    override var intrinsicContentSize: NSSize {
+        let size = (text as NSString).size(withAttributes: [.font: font])
+        return NSSize(width: max(72, ceil(size.width) + 32), height: 28)
+    }
+
+    override var isOpaque: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let pillRect = bounds.insetBy(dx: 0, dy: 0)
+        let path = NSBezierPath(roundedRect: pillRect, xRadius: pillRect.height / 2, yRadius: pillRect.height / 2)
+        NSColor.nugumiAccent.withAlphaComponent(0.72).setFill()
+        path.fill()
+
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white
+        ]
+        let string = text as NSString
+        let textSize = string.size(withAttributes: attributes)
+        let textRect = NSRect(
+            x: bounds.midX - textSize.width / 2,
+            y: bounds.midY - textSize.height / 2,
+            width: textSize.width,
+            height: textSize.height
+        )
+        string.draw(in: textRect, withAttributes: attributes)
+    }
+}
+
+@MainActor
+private final class FeatureTourVideoView: NSView {
+    private let playerView = AVPlayerView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let captionLabel = NSTextField(wrappingLabelWithString: "")
+    private var player: AVQueuePlayer?
+    private var looper: AVPlayerLooper?
+    private var currentURL: URL?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 20
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.11).cgColor
+        layer?.backgroundColor = NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.05, alpha: 0.92).cgColor
+        layer?.masksToBounds = true
+
+        playerView.controlsStyle = .none
+        playerView.videoGravity = .resizeAspect
+        playerView.wantsLayer = true
+        playerView.layer?.cornerRadius = 16
+        playerView.layer?.masksToBounds = true
+        playerView.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.32).cgColor
+        playerView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .white
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        captionLabel.font = NSFont.systemFont(ofSize: 11)
+        captionLabel.textColor = NSColor.white.withAlphaComponent(0.50)
+        captionLabel.maximumNumberOfLines = 2
+        captionLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(playerView)
+        addSubview(titleLabel)
+        addSubview(captionLabel)
+
+        NSLayoutConstraint.activate([
+            playerView.topAnchor.constraint(equalTo: topAnchor, constant: 34),
+            playerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 26),
+            playerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -26),
+            playerView.heightAnchor.constraint(equalTo: playerView.widthAnchor, multiplier: 0.64),
+            playerView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -16),
+
+            titleLabel.leadingAnchor.constraint(equalTo: playerView.leadingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: playerView.bottomAnchor, constant: 18),
+            titleLabel.trailingAnchor.constraint(equalTo: playerView.trailingAnchor),
+
+            captionLabel.leadingAnchor.constraint(equalTo: playerView.leadingAnchor),
+            captionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
+            captionLabel.trailingAnchor.constraint(equalTo: playerView.trailingAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func configure(_ step: PermissionsWindowController.FeatureTourStep) {
+        titleLabel.stringValue = step.eyebrow
+        captionLabel.stringValue = "Watch the gesture, then try the shortcut on the left."
+
+        guard currentURL != step.videoURL else {
+            player?.play()
+            return
+        }
+
+        currentURL = step.videoURL
+        let item = AVPlayerItem(url: step.videoURL)
+        let queuePlayer = AVQueuePlayer()
+        queuePlayer.isMuted = true
+        looper = AVPlayerLooper(player: queuePlayer, templateItem: item)
+        playerView.player = queuePlayer
+        player = queuePlayer
+        queuePlayer.play()
+    }
+
+    func stop() {
+        player?.pause()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            stop()
+        } else {
+            player?.play()
+        }
+    }
+}
+
+@MainActor
+private final class PermissionPreviewView: NSView {
+    private var activePermission: PermissionsWindowController.PermissionKind = .accessibility
+    private var accessibilityTrusted = false
+    private var screenRecordingTrusted = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 20
+        layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func configure(
+        activePermission: PermissionsWindowController.PermissionKind,
+        accessibilityTrusted: Bool,
+        screenRecordingTrusted: Bool
+    ) {
+        self.activePermission = activePermission
+        self.accessibilityTrusted = accessibilityTrusted
+        self.screenRecordingTrusted = screenRecordingTrusted
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawPanelBackground()
+        drawSettingsPreview()
+        drawSystemPrompt()
+    }
+
+    private func drawPanelBackground() {
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 20, yRadius: 20)
+        NSColor(calibratedRed: 0.03, green: 0.045, blue: 0.05, alpha: 0.9).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.11).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    private func drawSystemPrompt() {
+        let promptRect = NSRect(
+            x: 24,
+            y: bounds.maxY - 182,
+            width: bounds.width - 48,
+            height: 128
+        )
+        fillRounded(promptRect, radius: 18, fill: NSColor(calibratedWhite: 0.96, alpha: 1), stroke: nil)
+
+        drawLockBadge(in: NSRect(x: promptRect.minX + 28, y: promptRect.midY - 28, width: 54, height: 54))
+
+        let title: String
+        let message: String
+        switch activePermission {
+        case .accessibility:
+            title = "\"Nugumi\" would like to control this computer"
+            message = "Grant access in Privacy & Security settings so shortcuts work in other apps."
+        case .screenRecording:
+            title = "\"Nugumi\" would like to record this computer's screen"
+            message = "Grant access in Privacy & Security settings for screen-area OCR."
+        }
+
+        drawText(
+            title,
+            in: NSRect(x: promptRect.minX + 104, y: promptRect.maxY - 54, width: promptRect.width - 132, height: 38),
+            font: NSFont.systemFont(ofSize: 14, weight: .bold),
+            color: NSColor(calibratedWhite: 0.12, alpha: 1)
+        )
+        drawText(
+            message,
+            in: NSRect(x: promptRect.minX + 104, y: promptRect.maxY - 88, width: promptRect.width - 146, height: 34),
+            font: NSFont.systemFont(ofSize: 11, weight: .regular),
+            color: NSColor(calibratedWhite: 0.30, alpha: 1)
+        )
+
+        let settingsButton = NSRect(x: promptRect.maxX - 198, y: promptRect.minY + 18, width: 122, height: 28)
+        let denyButton = NSRect(x: promptRect.maxX - 66, y: promptRect.minY + 18, width: 44, height: 28)
+        fillRounded(settingsButton, radius: 8, fill: NSColor(calibratedWhite: 0.86, alpha: 1), stroke: nil)
+        fillRounded(denyButton, radius: 8, fill: NSColor.systemBlue, stroke: nil)
+        drawText(
+            "Open Settings",
+            in: settingsButton.insetBy(dx: 8, dy: 5),
+            font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            color: NSColor(calibratedWhite: 0.20, alpha: 1),
+            alignment: .center
+        )
+        drawText(
+            "Deny",
+            in: denyButton.insetBy(dx: 6, dy: 5),
+            font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            color: .white,
+            alignment: .center
+        )
+    }
+
+    private func drawSettingsPreview() {
+        let panelRect = NSRect(
+            x: 24,
+            y: 42,
+            width: bounds.width - 48,
+            height: bounds.height - 244
+        )
+        fillRounded(panelRect, radius: 22, fill: NSColor(calibratedWhite: 0.96, alpha: 0.98), stroke: NSColor.white.withAlphaComponent(0.32))
+
+        let sidebar = NSRect(x: panelRect.minX, y: panelRect.minY, width: 66, height: panelRect.height)
+        let sidebarPath = NSBezierPath(roundedRect: sidebar, xRadius: 22, yRadius: 22)
+        NSColor(calibratedWhite: 0.88, alpha: 1).setFill()
+        sidebarPath.fill()
+
+        let contentX = panelRect.minX + 86
+        let title = activePermission == .accessibility ? "Accessibility" : "Screen & System Audio Recording"
+        drawText(
+            title,
+            in: NSRect(x: contentX, y: panelRect.maxY - 50, width: panelRect.width - 112, height: 24),
+            font: NSFont.systemFont(ofSize: 15, weight: .bold),
+            color: NSColor(calibratedWhite: 0.16, alpha: 1)
+        )
+        drawText(
+            activePermission == .accessibility
+                ? "Allow the applications below to control your computer."
+                : "Allow the applications below to record screen content and audio.",
+            in: NSRect(x: contentX, y: panelRect.maxY - 76, width: panelRect.width - 112, height: 22),
+            font: NSFont.systemFont(ofSize: 10.5, weight: .regular),
+            color: NSColor(calibratedWhite: 0.48, alpha: 1)
+        )
+
+        let listRect = NSRect(x: contentX, y: panelRect.minY + 28, width: panelRect.width - 116, height: panelRect.height - 116)
+        fillRounded(listRect, radius: 14, fill: NSColor.white.withAlphaComponent(0.74), stroke: NSColor.black.withAlphaComponent(0.035))
+
+        drawSettingsRow(
+            name: "Nugumi",
+            rect: NSRect(x: listRect.minX + 12, y: listRect.maxY - 56, width: listRect.width - 24, height: 40),
+            highlighted: true,
+            enabled: activePermission == .accessibility ? accessibilityTrusted : screenRecordingTrusted
+        )
+        drawSettingsRow(
+            name: "Messages",
+            rect: NSRect(x: listRect.minX + 12, y: listRect.maxY - 100, width: listRect.width - 24, height: 40),
+            highlighted: false,
+            enabled: true
+        )
+        drawSettingsRow(
+            name: "Notes",
+            rect: NSRect(x: listRect.minX + 12, y: listRect.maxY - 144, width: listRect.width - 24, height: 40),
+            highlighted: false,
+            enabled: false
+        )
+    }
+
+    private func drawSettingsRow(name: String, rect: NSRect, highlighted: Bool, enabled: Bool) {
+        if highlighted {
+            fillRounded(rect, radius: 10, fill: NSColor.systemBlue.withAlphaComponent(0.08), stroke: nil)
+        }
+
+        let iconRect = NSRect(x: rect.minX + 8, y: rect.midY - 10, width: 20, height: 20)
+        fillRounded(iconRect, radius: 6, fill: highlighted ? NSColor.nugumiAccent : NSColor(calibratedWhite: 0.78, alpha: 1), stroke: nil)
+
+        drawText(
+            name,
+            in: NSRect(x: iconRect.maxX + 10, y: rect.midY - 9, width: 140, height: 20),
+            font: NSFont.systemFont(ofSize: 12.5, weight: highlighted ? .semibold : .regular),
+            color: NSColor(calibratedWhite: highlighted ? 0.12 : 0.42, alpha: 1)
+        )
+
+        let toggleRect = NSRect(x: rect.maxX - 52, y: rect.midY - 10, width: 42, height: 22)
+        fillRounded(
+            toggleRect,
+            radius: 11,
+            fill: enabled ? NSColor.systemBlue : NSColor(calibratedWhite: 0.82, alpha: 1),
+            stroke: nil
+        )
+        let knobX = enabled ? toggleRect.maxX - 20 : toggleRect.minX + 2
+        fillRounded(
+            NSRect(x: knobX, y: toggleRect.minY + 2, width: 18, height: 18),
+            radius: 9,
+            fill: .white,
+            stroke: NSColor.black.withAlphaComponent(0.05)
+        )
+    }
+
+    private func drawLockBadge(in rect: NSRect) {
+        let body = NSRect(x: rect.minX + 8, y: rect.minY + 5, width: rect.width - 16, height: rect.height - 22)
+        let bodyPath = NSBezierPath(roundedRect: body, xRadius: 6, yRadius: 6)
+        NSColor(calibratedRed: 0.95, green: 0.59, blue: 0.15, alpha: 1).setFill()
+        bodyPath.fill()
+
+        let shackle = NSBezierPath()
+        shackle.appendArc(
+            withCenter: NSPoint(x: rect.midX, y: rect.minY + 30),
+            radius: 15,
+            startAngle: 0,
+            endAngle: 180,
+            clockwise: false
+        )
+        shackle.lineWidth = 5
+        NSColor(calibratedWhite: 0.78, alpha: 1).setStroke()
+        shackle.stroke()
+
+        let badgeRect = NSRect(x: rect.maxX - 17, y: rect.minY + 5, width: 24, height: 24)
+        fillRounded(
+            badgeRect,
+            radius: 12,
+            fill: activePermission == .accessibility ? NSColor.systemBlue : NSColor.systemRed,
+            stroke: NSColor.white.withAlphaComponent(0.85)
+        )
+    }
+
+    private func fillRounded(_ rect: NSRect, radius: CGFloat, fill: NSColor, stroke: NSColor?) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        fill.setFill()
+        path.fill()
+        if let stroke {
+            stroke.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+
+    private func drawText(
+        _ text: String,
+        in rect: NSRect,
+        font: NSFont,
+        color: NSColor,
+        alignment: NSTextAlignment = .left
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
+        paragraph.lineBreakMode = .byWordWrapping
+        (text as NSString).draw(
+            in: rect,
+            withAttributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraph
+            ]
+        )
     }
 }
 
