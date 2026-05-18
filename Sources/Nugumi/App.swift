@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 import CoreText
+import Darwin
 import Foundation
 import Sparkle
 import UserNotifications
@@ -33,6 +34,7 @@ private enum MenuItemTag: Int {
     case translateOrReplySelection = 122
     case resetSettings = 123
     case invisibilityMode = 124
+    case contactSupport = 125
 }
 
 enum InvisibilityState {
@@ -1876,6 +1878,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(makeMenuItem(
+            title: "DM us for bug or request...",
+            tag: .contactSupport,
+            symbolName: "envelope",
+            action: #selector(contactSupport),
+            keyEquivalent: ""
+        ))
+        menu.addItem(makeMenuItem(
             title: "Reset settings...",
             tag: .resetSettings,
             symbolName: "arrow.counterclockwise",
@@ -3298,6 +3307,97 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @objc private func translateOrReplySelectionFromMenu() {
         startSelectionTranslateOrReply()
+    }
+
+    @objc private func contactSupport() {
+        let metadata = supportMetadata()
+        let alert = NSAlert()
+        alert.messageText = "Open Gmail to contact Vadim?"
+        alert.informativeText = """
+        Nugumi will open Gmail in your browser with a draft to tsoivadim97@gmail.com.
+        The draft includes the diagnostic info below, and you can edit or delete anything before sending.
+
+        \(metadata)
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open Gmail")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        let subject = "Nugumi bug or request"
+        let body = """
+        Hey Vadim,
+
+        <tell me about your bug or request>
+
+        --
+
+        \(metadata)
+        """
+
+        var components = URLComponents(string: "https://mail.google.com/mail/")!
+        components.queryItems = [
+            URLQueryItem(name: "view", value: "cm"),
+            URLQueryItem(name: "fs", value: "1"),
+            URLQueryItem(name: "to", value: "tsoivadim97@gmail.com"),
+            URLQueryItem(name: "su", value: subject),
+            URLQueryItem(name: "body", value: body)
+        ]
+
+        if let url = components.url, NSWorkspace.shared.open(url) {
+            return
+        }
+
+        let errorAlert = NSAlert()
+        errorAlert.messageText = "Could not open Gmail"
+        errorAlert.informativeText = "Please email Vadim directly at tsoivadim97@gmail.com."
+        errorAlert.alertStyle = .warning
+        errorAlert.runModal()
+    }
+
+    private func supportMetadata() -> String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info["CFBundleVersion"] as? String ?? "unknown"
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        let architecture = nativeArchitecture
+        let screenCount = NSScreen.screens.count
+
+        return """
+        App: Nugumi \(version)
+        Build: \(build)
+        macOS: \(osVersion)
+        Mac: \(hardwareModel()) (\(architecture))
+        Number of screens: \(screenCount)
+        Triggered from: menu bar
+        """
+    }
+
+    private var nativeArchitecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #elseif arch(x86_64)
+        return "x86_64"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    private func hardwareModel() -> String {
+        var size = 0
+        guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 0 else {
+            return "unknown Mac"
+        }
+
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("hw.model", &buffer, &size, nil, 0) == 0 else {
+            return "unknown Mac"
+        }
+
+        return String(cString: buffer)
     }
 
     @MainActor
