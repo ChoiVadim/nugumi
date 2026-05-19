@@ -3336,6 +3336,17 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @objc private func contactSupport() {
         let metadata = supportMetadata()
+        let confirmation = NSAlert()
+        confirmation.messageText = "Open a support email draft?"
+        confirmation.informativeText = "Nugumi will open Gmail with editable diagnostics in the draft body. Review, edit, or delete anything before sending.\n\n\(metadata)"
+        confirmation.alertStyle = .informational
+        confirmation.addButton(withTitle: "Open Draft")
+        confirmation.addButton(withTitle: "Cancel")
+
+        guard confirmation.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
         let subject = "Nugumi bug or request"
         let body = """
         Hey Vadim,
