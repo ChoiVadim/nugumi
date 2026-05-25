@@ -245,8 +245,11 @@ final class OllamaBootstrap {
 
     private func refreshCloudKeys() {
         var keys: [CloudProvider: BootstrapStepStatus] = [:]
-        for provider in CloudProvider.allCases {
-            keys[provider] = KeychainStore.apiKey(for: provider) != nil ? .ok : .needsAction("Paste your \(provider.displayName) API key.")
+        for provider in CloudProvider.cloudOnboardingCases {
+            let needsAction = provider.usesOAuth
+                ? "Sign in to \(provider.displayName) to use it."
+                : "Paste your \(provider.displayName) API key."
+            keys[provider] = provider.hasCredentials ? .ok : .needsAction(needsAction)
         }
         update(\.cloudKeys, keys)
     }
@@ -435,12 +438,56 @@ private struct PullProgress: Decodable {
 
 @MainActor
 final class OnboardingWindowController: NSWindowController {
-    private enum Method: Int { case cloud = 0, ollama = 1 }
+    private enum Method: Int, CaseIterable {
+        case subscription = 0, apiKey = 1, ollama = 2
+
+        var providers: [CloudProvider] {
+            switch self {
+            case .subscription: [.openAICodex]
+            case .apiKey: CloudProvider.allCases.filter { !$0.usesOAuth }
+            case .ollama: []
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .subscription: "Subscription"
+            case .apiKey: "API key"
+            case .ollama: "Ollama"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .subscription: "person.crop.circle.badge.checkmark"
+            case .apiKey: "key.fill"
+            case .ollama: "desktopcomputer"
+            }
+        }
+
+        var explainer: String {
+            switch self {
+            case .subscription:
+                return "Use your existing ChatGPT Plus or Pro account. Nugumi signs in via OpenAI's device-code flow — your subscription quota covers translation, no API key needed."
+            case .apiKey:
+                return "Paste an API key from one provider. Nothing to install — the fastest way to start. Nugumi sends the text you select to that provider to translate it."
+            case .ollama:
+                return ""
+            }
+        }
+    }
 
     private let bootstrap: OllamaBootstrap
     private let onClose: () -> Void
     private let onCloudPick: (CloudProvider) -> Void
     private let onCloudTest: (CloudProvider) async -> CloudTestResult
+    private let onOllamaReady: (String) -> Void
+    // Set of Ollama model IDs already .ok when the onboarding window opened.
+    // We only fire onOllamaReady for models that transition to .ok WHILE the
+    // user is in this onboarding session — otherwise re-opening Setup with a
+    // previously-downloaded model would clobber the user's manual choices.
+    private var initiallyReadyOllamaIDs: Set<String> = []
+    private var didFireOllamaReady = false
 
     private let methodSelector = NSSegmentedControl()
     private let providerSelector = NSSegmentedControl()
@@ -453,12 +500,20 @@ final class OnboardingWindowController: NSWindowController {
     private var signInRow: StepRow!
     private var modelRows: [String: StepRow] = [:]
 
-    private var selectedProvider: CloudProvider = .openAI
-    private var currentMethod: Method = .cloud
+    private var selectedProvider: CloudProvider = .openAICodex
+    private var currentMethod: Method = .subscription
     private var testingProviders: Set<CloudProvider> = []
 
+    // Constraints for the Cloud panel — toggled when switching between the
+    // Subscription and API-key methods so the panel layout collapses cleanly
+    // when the provider selector is hidden.
+    private weak var providerCaptionLabel: NSTextField?
+    private weak var explainerLabel: NSTextField?
+    private var rowTopAfterSelector: NSLayoutConstraint?
+    private var rowTopAfterExplainer: NSLayoutConstraint?
+
     private let windowWidth: CGFloat = 460
-    private let methodKey = "onboardingMethodTab"
+    private let methodKey = "onboardingMethodTabV2"
     private let providerKey = "onboardingCloudProvider"
 
     private let contentWidth: CGFloat = 412 // windowWidth (460) minus 24pt margins
@@ -470,24 +525,39 @@ final class OnboardingWindowController: NSWindowController {
         bootstrap: OllamaBootstrap,
         onClose: @escaping () -> Void,
         onCloudPick: @escaping (CloudProvider) -> Void = { _ in },
-        onCloudTest: @escaping (CloudProvider) async -> CloudTestResult = { _ in .failure("Test not wired.") }
+        onCloudTest: @escaping (CloudProvider) async -> CloudTestResult = { _ in .failure("Test not wired.") },
+        onOllamaReady: @escaping (String) -> Void = { _ in }
     ) {
         self.bootstrap = bootstrap
         self.onClose = onClose
         self.onCloudPick = onCloudPick
         self.onCloudTest = onCloudTest
+        self.onOllamaReady = onOllamaReady
+        for model in bootstrap.models {
+            if case .ok = bootstrap.state.modelReady(for: model.id) {
+                initiallyReadyOllamaIDs.insert(model.id)
+            }
+        }
 
         // Resolve the initial tab/provider before the window is sized so it
         // opens at the right height for the method the user lands on.
-        let savedKeyProvider = CloudProvider.allCases.first { KeychainStore.apiKey(for: $0) != nil }
+        let savedKeyProvider = CloudProvider.cloudOnboardingCases.first { $0.hasCredentials }
         let storedProvider = UserDefaults.standard.string(forKey: "onboardingCloudProvider")
             .flatMap { CloudProvider(rawValue: $0) }
-        let resolvedProvider = savedKeyProvider ?? storedProvider ?? .openAI
+        let resolvedProvider = savedKeyProvider ?? storedProvider ?? .openAICodex
 
-        let storedMethod = (UserDefaults.standard.object(forKey: "onboardingMethodTab") as? Int)
+        let storedMethod = (UserDefaults.standard.object(forKey: "onboardingMethodTabV2") as? Int)
             .flatMap { Method(rawValue: $0) }
-        // A saved cloud key is the strongest signal the user is a cloud user.
-        let resolvedMethod: Method = savedKeyProvider != nil ? .cloud : (storedMethod ?? .cloud)
+        // Pick the method matching whichever credentials the user has saved —
+        // a Codex token implies Subscription, an API key implies API key,
+        // otherwise honor the last-used tab (default: Subscription, the
+        // friction-free option for ChatGPT account holders).
+        let resolvedMethod: Method = {
+            if let saved = savedKeyProvider {
+                return saved.usesOAuth ? .subscription : .apiKey
+            }
+            return storedMethod ?? .subscription
+        }()
 
         // Placeholder height; applyMethod() resizes to fit the active panel
         // before the window is shown.
@@ -560,15 +630,14 @@ final class OnboardingWindowController: NSWindowController {
         subtitle.translatesAutoresizingMaskIntoConstraints = false
         subtitleLabel = subtitle
 
-        // Top method toggle: Cloud (paste a key) vs Ollama (install locally).
-        methodSelector.segmentCount = 2
-        methodSelector.setLabel("Cloud", forSegment: 0)
-        methodSelector.setLabel("Ollama", forSegment: 1)
-        if let img = NSImage(systemSymbolName: "cloud.fill", accessibilityDescription: nil) {
-            methodSelector.setImage(img, forSegment: 0)
-        }
-        if let img = NSImage(systemSymbolName: "desktopcomputer", accessibilityDescription: nil) {
-            methodSelector.setImage(img, forSegment: 1)
+        // Top method toggle: Subscription (ChatGPT OAuth) / API key (Bring your
+        // own OpenAI/Anthropic/Gemini key) / Ollama (run locally).
+        methodSelector.segmentCount = Method.allCases.count
+        for method in Method.allCases {
+            methodSelector.setLabel(method.label, forSegment: method.rawValue)
+            if let img = NSImage(systemSymbolName: method.symbolName, accessibilityDescription: nil) {
+                methodSelector.setImage(img, forSegment: method.rawValue)
+            }
         }
         methodSelector.segmentStyle = .texturedRounded
         methodSelector.selectedSegmentBezelColor = .nugumiAccent
@@ -643,37 +712,32 @@ final class OnboardingWindowController: NSWindowController {
     private func buildCloudContainer() {
         cloudContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        let explainer = NSTextField(wrappingLabelWithString:
-            "Paste an API key from one provider. Nothing to install — the fastest way to start. Nugumi sends the text you select to that provider to translate it.")
+        let explainer = NSTextField(wrappingLabelWithString: currentMethod.explainer)
         explainer.font = NSFont.systemFont(ofSize: 12)
         explainer.textColor = .secondaryLabelColor
         explainer.preferredMaxLayoutWidth = contentWidth
         explainer.translatesAutoresizingMaskIntoConstraints = false
+        self.explainerLabel = explainer
 
         let providerCaption = Self.makeSectionHeader("Provider")
+        self.providerCaptionLabel = providerCaption
 
-        providerSelector.segmentCount = CloudProvider.allCases.count
-        for (index, provider) in CloudProvider.allCases.enumerated() {
-            providerSelector.setLabel(provider.displayName, forSegment: index)
-        }
+        configureProviderSelector(for: currentMethod)
         providerSelector.segmentStyle = .rounded
         providerSelector.selectedSegmentBezelColor = .nugumiAccent
         providerSelector.trackingMode = .selectOne
         providerSelector.target = self
         providerSelector.action = #selector(providerChanged(_:))
         providerSelector.translatesAutoresizingMaskIntoConstraints = false
-        if let index = CloudProvider.allCases.firstIndex(of: selectedProvider) {
-            providerSelector.setSelected(true, forSegment: index)
-        }
 
         let row = StepRow(
-            title: "\(selectedProvider.displayName) API key",
-            primaryActionTitle: "Paste key"
+            title: Self.cloudRowTitle(for: selectedProvider),
+            primaryActionTitle: selectedProvider.usesOAuth ? "Sign in" : "Paste key"
         ) { [weak self] in
             guard let self else { return }
             self.promptCloudKey(for: self.selectedProvider)
         }
-        row.keepsSecondaryVisible = true
+        row.keepsSecondaryVisible = !selectedProvider.usesOAuth
         row.secondaryActionTitle = "Get a key →"
         cloudRow = row
 
@@ -690,6 +754,9 @@ final class OnboardingWindowController: NSWindowController {
         cloudContainer.addSubview(row)
         cloudContainer.addSubview(hint)
 
+        rowTopAfterSelector = row.topAnchor.constraint(equalTo: providerSelector.bottomAnchor, constant: 16)
+        rowTopAfterExplainer = row.topAnchor.constraint(equalTo: explainer.bottomAnchor, constant: 18)
+
         NSLayoutConstraint.activate([
             explainer.topAnchor.constraint(equalTo: cloudContainer.topAnchor),
             explainer.leadingAnchor.constraint(equalTo: cloudContainer.leadingAnchor),
@@ -704,7 +771,6 @@ final class OnboardingWindowController: NSWindowController {
             providerSelector.trailingAnchor.constraint(equalTo: cloudContainer.trailingAnchor),
             providerSelector.heightAnchor.constraint(equalToConstant: 28),
 
-            row.topAnchor.constraint(equalTo: providerSelector.bottomAnchor, constant: 16),
             row.leadingAnchor.constraint(equalTo: cloudContainer.leadingAnchor),
             row.trailingAnchor.constraint(equalTo: cloudContainer.trailingAnchor),
 
@@ -713,6 +779,32 @@ final class OnboardingWindowController: NSWindowController {
             hint.trailingAnchor.constraint(equalTo: cloudContainer.trailingAnchor),
             hint.bottomAnchor.constraint(equalTo: cloudContainer.bottomAnchor)
         ])
+        // One of the two row-top constraints is active at a time, chosen by
+        // applyMethod() depending on whether the provider selector is shown.
+        applyCloudLayout(for: currentMethod)
+    }
+
+    private func configureProviderSelector(for method: Method) {
+        let providers = method.providers
+        providerSelector.segmentCount = providers.count
+        for (index, provider) in providers.enumerated() {
+            providerSelector.setLabel(provider.displayName, forSegment: index)
+        }
+        if let index = providers.firstIndex(of: selectedProvider) {
+            providerSelector.setSelected(true, forSegment: index)
+        } else if let first = providers.first {
+            selectedProvider = first
+            providerSelector.setSelected(true, forSegment: 0)
+        }
+    }
+
+    private func applyCloudLayout(for method: Method) {
+        let showsProviderSelector = method.providers.count > 1
+        providerCaptionLabel?.isHidden = !showsProviderSelector
+        providerSelector.isHidden = !showsProviderSelector
+        rowTopAfterSelector?.isActive = showsProviderSelector
+        rowTopAfterExplainer?.isActive = !showsProviderSelector
+        explainerLabel?.stringValue = method.explainer
     }
 
     private func buildOllamaContainer() {
@@ -847,9 +939,25 @@ final class OnboardingWindowController: NSWindowController {
         UserDefaults.standard.set(method.rawValue, forKey: methodKey)
         methodSelector.setSelected(true, forSegment: method.rawValue)
 
-        let active: NSView = method == .cloud ? cloudContainer : ollamaContainer
-        cloudContainer.isHidden = method != .cloud
+        // Pick a provider that lives in this method's set. For Subscription
+        // that's always .openAICodex. For API key, prefer the user's last
+        // non-OAuth pick, falling back to the first available provider.
+        let providers = method.providers
+        if !providers.contains(selectedProvider), let first = providers.first {
+            selectedProvider = first
+            UserDefaults.standard.set(selectedProvider.rawValue, forKey: providerKey)
+        }
+        configureProviderSelector(for: method)
+        applyCloudLayout(for: method)
+
+        let isCloud = method == .subscription || method == .apiKey
+        let active: NSView = isCloud ? cloudContainer : ollamaContainer
+        cloudContainer.isHidden = !isCloud
         ollamaContainer.isHidden = method != .ollama
+
+        cloudRow?.setTitle(Self.cloudRowTitle(for: selectedProvider))
+        cloudRow?.keepsSecondaryVisible = !selectedProvider.usesOAuth
+        render(state: bootstrap.state)
 
         // Pin Done directly under the active panel so the window hugs that
         // panel's content. The hidden panel's height is irrelevant.
@@ -884,12 +992,20 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     @objc private func providerChanged(_ sender: NSSegmentedControl) {
+        let providers = currentMethod.providers
         let index = sender.selectedSegment
-        guard CloudProvider.allCases.indices.contains(index) else { return }
-        selectedProvider = CloudProvider.allCases[index]
+        guard providers.indices.contains(index) else { return }
+        selectedProvider = providers[index]
         UserDefaults.standard.set(selectedProvider.rawValue, forKey: providerKey)
-        cloudRow?.setTitle("\(selectedProvider.displayName) API key")
+        cloudRow?.setTitle(Self.cloudRowTitle(for: selectedProvider))
+        cloudRow?.keepsSecondaryVisible = !selectedProvider.usesOAuth
         render(state: bootstrap.state)
+    }
+
+    private static func cloudRowTitle(for provider: CloudProvider) -> String {
+        provider.usesOAuth
+            ? provider.displayName
+            : "\(provider.displayName) API key"
     }
 
     @objc private func doneTapped() {
@@ -910,6 +1026,22 @@ final class OnboardingWindowController: NSWindowController {
 
     private func promptCloudKey(for provider: CloudProvider, errorMessage: String? = nil) {
         NSApp.activate(ignoringOtherApps: true)
+        if provider == .openAICodex {
+            Task { @MainActor [weak self] in
+                let outcome = await CodexLoginAlert.present()
+                guard let self else { return }
+                switch outcome {
+                case .success:
+                    self.bootstrap.refresh()
+                    self.onCloudPick(provider)
+                case .cancelled:
+                    break
+                case .failed(let message):
+                    NSLog("Nugumi: Codex sign-in failed — \(message)")
+                }
+            }
+            return
+        }
         let baseMessage = "Your key is stored locally on this Mac. Nugumi sends your selected text to \(provider.displayName) for translation."
         let fullMessage = errorMessage.map { "⚠️ \($0)\n\n\(baseMessage)" } ?? baseMessage
         let controller = NugumiInputAlertController(
@@ -981,8 +1113,40 @@ final class OnboardingWindowController: NSWindowController {
         // Cloud: a single row that reflects whichever provider is selected.
         let provider = selectedProvider
         let status = state.cloudKey(for: provider)
-        if case .ok = status {
-            let isTesting = testingProviders.contains(provider)
+        let isTesting = testingProviders.contains(provider)
+        if provider.usesOAuth {
+            // OAuth flow (ChatGPT subscription): no API key, no "Get a key" link.
+            // Signed-in: show "Sign out" + "Test". Signed-out: show single
+            // "Sign in" button.
+            if case .ok = status {
+                cloudRow?.applyKeySaved(
+                    message: isTesting ? "Testing…" : "Signed in to ChatGPT. Click Sign out to switch accounts.",
+                    primaryTitle: "Sign out",
+                    secondaryTitle: "Test"
+                )
+                cloudRow?.primaryAction = { [weak self] in
+                    KeychainStore.setCodexCredentials(nil)
+                    self?.bootstrap.refresh()
+                }
+                cloudRow?.secondaryAction = { [weak self] in
+                    self?.runCloudTest(for: provider)
+                }
+                cloudRow?.setPrimaryEnabled(!isTesting)
+                cloudRow?.setSecondaryEnabled(!isTesting)
+            } else {
+                cloudRow?.setPrimaryTitle("Sign in")
+                // OAuth has no "Get a key" affordance — clearing the title
+                // also short-circuits the secondary-button-visible heuristic
+                // in StepRow.apply() (which otherwise picks up "sign in" in
+                // the needs-action message and re-shows the secondary).
+                cloudRow?.secondaryActionTitle = nil
+                cloudRow?.secondaryAction = nil
+                cloudRow?.primaryAction = { [weak self] in
+                    self?.promptCloudKey(for: provider)
+                }
+                cloudRow?.apply(status)
+            }
+        } else if case .ok = status {
             cloudRow?.applyKeySaved(
                 message: isTesting ? "Testing…" : "Key saved. Click Change to replace it.",
                 primaryTitle: "Change",
@@ -1024,6 +1188,17 @@ final class OnboardingWindowController: NSWindowController {
                     : "Lives on your Mac. Private, works without internet.")
             } else {
                 modelRows[model.id]?.apply(status)
+            }
+        }
+        // Auto-apply preferred Ollama model when a NEW download finishes
+        // while the user is on the Ollama onboarding tab. Once-per-session.
+        if !didFireOllamaReady, currentMethod == .ollama {
+            for model in bootstrap.models {
+                guard !initiallyReadyOllamaIDs.contains(model.id),
+                      case .ok = state.modelReady(for: model.id) else { continue }
+                didFireOllamaReady = true
+                onOllamaReady(model.id)
+                break
             }
         }
     }
@@ -2299,6 +2474,14 @@ private final class StepRow: NSView {
     private let primaryButton = NSButton(title: "", target: nil, action: nil)
     private let secondaryButton = NSButton(title: "", target: nil, action: nil)
 
+    // Trailing constraints swapped when secondary visibility changes — so the
+    // status/title text doesn't run under the secondary button when it's shown,
+    // and uses the full width up to the primary button when it isn't.
+    private var titleTrailingToSecondary: NSLayoutConstraint!
+    private var titleTrailingToPrimary: NSLayoutConstraint!
+    private var statusTrailingToSecondary: NSLayoutConstraint!
+    private var statusTrailingToPrimary: NSLayoutConstraint!
+
     var primaryAction: (() -> Void)?
     var secondaryAction: (() -> Void)?
     var secondaryActionTitle: String? {
@@ -2352,6 +2535,11 @@ private final class StepRow: NSView {
         addSubview(primaryButton)
         addSubview(secondaryButton)
 
+        titleTrailingToSecondary = titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: secondaryButton.leadingAnchor, constant: -10)
+        titleTrailingToPrimary = titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: primaryButton.leadingAnchor, constant: -10)
+        statusTrailingToSecondary = statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: secondaryButton.leadingAnchor, constant: -10)
+        statusTrailingToPrimary = statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: primaryButton.leadingAnchor, constant: -10)
+
         NSLayoutConstraint.activate([
             statusIndicator.leadingAnchor.constraint(equalTo: leadingAnchor),
             statusIndicator.topAnchor.constraint(equalTo: titleLabel.topAnchor, constant: 1),
@@ -2365,11 +2553,9 @@ private final class StepRow: NSView {
 
             titleLabel.leadingAnchor.constraint(equalTo: statusIndicator.trailingAnchor, constant: 10),
             titleLabel.topAnchor.constraint(equalTo: topAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: primaryButton.leadingAnchor, constant: -10),
 
             statusLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             statusLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: primaryButton.leadingAnchor, constant: -10),
 
             primaryButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             primaryButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -2379,6 +2565,18 @@ private final class StepRow: NSView {
 
             heightAnchor.constraint(equalToConstant: 44)
         ])
+        updateTextTrailingForSecondaryVisibility()
+    }
+
+    /// Switches the title/status trailing constraint between primary and
+    /// secondary leading based on whether the secondary button is showing —
+    /// otherwise long status text runs under the secondary button.
+    private func updateTextTrailingForSecondaryVisibility() {
+        let secondaryShown = !secondaryButton.isHidden
+        titleTrailingToSecondary.isActive = secondaryShown
+        titleTrailingToPrimary.isActive = !secondaryShown
+        statusTrailingToSecondary.isActive = secondaryShown
+        statusTrailingToPrimary.isActive = !secondaryShown
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -2406,6 +2604,7 @@ private final class StepRow: NSView {
         statusLabel.textColor = .secondaryLabelColor
         primaryButton.isEnabled = false
         secondaryButton.isHidden = true
+        updateTextTrailingForSecondaryVisibility()
     }
 
     func applyKeySaved(message: String, primaryTitle: String, secondaryTitle: String? = nil) {
@@ -2425,6 +2624,7 @@ private final class StepRow: NSView {
         } else {
             secondaryButton.isHidden = true
         }
+        updateTextTrailingForSecondaryVisibility()
     }
 
     func setPrimaryEnabled(_ enabled: Bool) {
@@ -2478,6 +2678,7 @@ private final class StepRow: NSView {
             primaryButton.isEnabled = true
             secondaryButton.isHidden = secondaryActionTitle == nil && !keepsSecondaryVisible
         }
+        updateTextTrailingForSecondaryVisibility()
     }
 
     @objc private func primaryTapped() {

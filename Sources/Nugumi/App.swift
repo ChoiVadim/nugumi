@@ -70,10 +70,27 @@ enum BackendKind: Equatable {
 
 struct LLMModel: Equatable {
     let id: String
+    let apiModelID: String
     let shortName: String
     let displayName: String
     let backend: BackendKind
     let supportsImages: Bool
+
+    init(
+        id: String,
+        apiModelID: String? = nil,
+        shortName: String,
+        displayName: String,
+        backend: BackendKind,
+        supportsImages: Bool
+    ) {
+        self.id = id
+        self.apiModelID = apiModelID ?? id
+        self.shortName = shortName
+        self.displayName = displayName
+        self.backend = backend
+        self.supportsImages = supportsImages
+    }
 
     var isCloud: Bool {
         if case .ollama(let requiresAccount) = backend { return requiresAccount }
@@ -111,16 +128,52 @@ struct LLMModel: Equatable {
     static let ollamaModels = all.filter(\.isOllama)
     static let apiKeyModels = all.filter { $0.cloudProvider != nil }
     static let apiKeyMenuTitle = "API key models"
+    static let chatGPTSubscriptionMenuTitle = "ChatGPT subscription"
+
+    /// Models served by the Codex (ChatGPT subscription) backend. The slugs
+    /// come from CodexModelCache (live discovery → UserDefaults → fallback),
+    /// so this list reflects whatever the user's account currently sees.
+    static var codexModels: [LLMModel] {
+        CodexModelCache.slugs.map { makeCodexModel(slug: $0) }
+    }
+
+    private static func makeCodexModel(slug: String) -> LLMModel {
+        let pretty = slug
+            .replacingOccurrences(of: "gpt-", with: "GPT-")
+            .replacingOccurrences(of: "-mini", with: " mini")
+            .replacingOccurrences(of: "-codex", with: " codex")
+            .replacingOccurrences(of: "-spark", with: " spark")
+            .replacingOccurrences(of: "-max", with: " max")
+        return LLMModel(
+            id: "codex/\(slug)",
+            apiModelID: slug,
+            shortName: pretty,
+            displayName: "\(pretty) (ChatGPT)",
+            backend: .cloud(.openAICodex),
+            // Vision support varies by model — backend rejects images for
+            // text-only slugs. Optimistic default avoids hiding usable models.
+            supportsImages: true
+        )
+    }
 
     static let defaultModel = all[0]
 
     static func option(id: String) -> LLMModel {
-        all.first { $0.id == id } ?? defaultModel
+        if id.hasPrefix("codex/") {
+            let slug = String(id.dropFirst("codex/".count))
+            return codexModels.first { $0.id == id } ?? makeCodexModel(slug: slug)
+        }
+        return all.first { $0.id == id } ?? defaultModel
     }
 
     static var modeMenuEntries: [LLMModelMenuEntry] {
-        ollamaModels.map(LLMModelMenuEntry.model)
-            + [.apiKeyModels(title: apiKeyMenuTitle, models: apiKeyModels)]
+        var entries: [LLMModelMenuEntry] = ollamaModels.map(LLMModelMenuEntry.model)
+        entries.append(.apiKeyModels(title: apiKeyMenuTitle, models: apiKeyModels))
+        let codex = codexModels
+        if !codex.isEmpty {
+            entries.append(.apiKeyModels(title: chatGPTSubscriptionMenuTitle, models: codex))
+        }
+        return entries
     }
 }
 
@@ -910,10 +963,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let model = LLMModel.option(id: modelID)
         switch model.backend {
         case .ollama:
-            return OllamaClient(baseURL: ollamaBaseURL, model: model.id)
+            return OllamaClient(baseURL: ollamaBaseURL, model: model.apiModelID)
         case .cloud(let provider):
-            let key = KeychainStore.apiKey(for: provider) ?? ""
-            return OpenAIChatClient(provider: provider, apiKey: key, model: model.id)
+            switch provider {
+            case .openAICodex:
+                return OpenAICodexClient(apiModelID: model.apiModelID)
+            case .openAI, .anthropic, .gemini:
+                let key = KeychainStore.apiKey(for: provider) ?? ""
+                return OpenAIChatClient(provider: provider, apiKey: key, model: model.apiModelID)
+            }
         }
     }
 
@@ -1630,9 +1688,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         case .ollama:
             return translationErrorIfBootstrapNeedsSetup(for: model.id)
         case .cloud(let provider):
-            let apiKey = KeychainStore.apiKey(for: provider)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return apiKey?.isEmpty == false ? nil : .invalidAPIKey(provider)
+            // Use the unified hasCredentials helper — for .openAICodex it
+            // checks OAuth tokens via KeychainStore.codexCredentials(),
+            // for API-key providers it checks the saved key. The previous
+            // `apiKey(for:)` check was always nil for Codex even when the
+            // user was signed in, killing requests pre-flight.
+            return provider.hasCredentials ? nil : .invalidAPIKey(provider)
         }
     }
 
@@ -1749,12 +1810,24 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             },
             onCloudPick: { [weak self] provider in
                 guard let self else { return }
-                if let firstModel = LLMModel.all.first(where: { $0.cloudProvider == provider }) {
-                    self.applyModelSelection(firstModel.id, for: .textActions)
-                }
+                // Auto-assign sensible defaults for this provider so the user
+                // doesn't have to hunt through model menus after onboarding:
+                // a fast/cheap model for everyday text, the flagship for Ask
+                // Nugumi (which is multimodal and benefits from the smarter
+                // model when the screenshot needs understanding).
+                self.applyModelSelection(provider.preferredTextModelID, for: .textActions)
+                self.applyModelSelection(provider.preferredAskModelID, for: .askNugumi)
             },
             onCloudTest: { [weak self] provider in
                 await self?.runCloudTest(for: provider) ?? .failure("Internal error.")
+            },
+            onOllamaReady: { [weak self] modelID in
+                guard let self else { return }
+                // First-session Ollama setup just completed: lock in this
+                // model as the everyday-text default. Ask Nugumi stays on
+                // whatever it was — Ollama models don't support vision, so
+                // we don't auto-rewire that scope.
+                self.applyModelSelection(modelID, for: .textActions)
             }
         )
         onboardingWindowController = controller
@@ -1813,7 +1886,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         menu.addItem(usageSummaryItem)
 
         menu.addItem(makeMenuItem(
-            title: "Translator setup needed",
+            title: "Model setup needed",
             tag: .bootstrapNotice,
             symbolName: "bolt.badge.clock",
             isEnabled: false
@@ -2198,36 +2271,25 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             item.submenu = makeScopedModelSelectionMenu(for: scope)
             menu.addItem(item)
         }
-        menu.addItem(.separator())
-        menu.addItem(makeConfigureAPIKeysMenuItem())
         return menu
     }
 
     private func makeScopedModelSelectionMenu(for scope: ModelUseScope) -> NSMenu {
-        switch scope {
-        case .textActions:
-            return makeTextModelSelectionMenu(for: scope)
-        case .askNugumi:
-            return makeAPIKeyModelMenu(
-                models: scope.availableModels(from: LLMModel.apiKeyModels),
-                scope: scope
-            )
-        }
-    }
-
-    private func makeTextModelSelectionMenu(for scope: ModelUseScope) -> NSMenu {
         let menu = NSMenu()
         for entry in LLMModel.modeMenuEntries {
             switch entry {
             case .model(let option):
+                // For askNugumi, hide single non-vision entries (Ollama)
+                // rather than showing them disabled — keeps the menu tight.
+                let filtered = scope.availableModels(from: [option])
+                guard !filtered.isEmpty else { continue }
                 menu.addItem(makeModelMenuItem(option, scope: scope))
             case .apiKeyModels(let title, let models):
+                let filtered = scope.availableModels(from: models)
+                guard !filtered.isEmpty else { continue }
                 menu.addItem(.separator())
                 let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-                item.submenu = makeAPIKeyModelMenu(
-                    models: scope.availableModels(from: models),
-                    scope: scope
-                )
+                item.submenu = makeAPIKeyModelMenu(models: filtered, scope: scope)
                 menu.addItem(item)
             }
         }
@@ -2249,16 +2311,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         return menu
     }
 
-    private func makeConfigureAPIKeysMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(
-            title: "Configure API keys…",
-            action: #selector(openOnboardingChooser),
-            keyEquivalent: ""
-        )
-        item.target = self
-        return item
-    }
-
     private func makeModelMenuItem(_ option: LLMModel, scope: ModelUseScope) -> NSMenuItem {
         let item = NSMenuItem(
             title: option.displayName,
@@ -2268,11 +2320,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         item.target = self
         item.representedObject = ModelMenuSelection(scope: scope, modelID: option.id)
         return item
-    }
-
-    @MainActor
-    @objc private func openOnboardingChooser() {
-        presentOnboardingWindow()
     }
 
     private func makeWritingStyleMenu() -> NSMenu {
@@ -3019,9 +3066,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return true
         case .invalidAPIKey(let provider):
             controller?.close()
-            KeychainStore.setAPIKey(nil, for: provider)
+            if provider == .openAICodex {
+                KeychainStore.setCodexCredentials(nil)
+            } else {
+                KeychainStore.setAPIKey(nil, for: provider)
+            }
             bootstrap.refresh()
-            presentAPIKeySheet(for: provider) { _ in }
+            presentCredentialPrompt(for: provider) { _ in }
             return true
         case .ollama, .emptyResponse, .modelDownloading, .rateLimited, .cloudError:
             return false
@@ -3998,8 +4049,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        if let provider = option.cloudProvider, KeychainStore.apiKey(for: provider) == nil {
-            presentAPIKeySheet(for: provider) { [weak self] saved in
+        if let provider = option.cloudProvider, !provider.hasCredentials {
+            presentCredentialPrompt(for: provider) { [weak self] saved in
                 guard let self, saved else { return }
                 self.applyModelSelection(option.id, for: selection.scope)
             }
@@ -4010,14 +4061,50 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
+    private func presentCredentialPrompt(for provider: CloudProvider, onSave: @escaping (Bool) -> Void) {
+        if provider == .openAICodex {
+            Task { @MainActor in
+                let outcome = await CodexLoginAlert.present()
+                switch outcome {
+                case .success:
+                    self.bootstrap.refresh()
+                    onSave(true)
+                case .cancelled:
+                    onSave(false)
+                case .failed(let message):
+                    self.presentSelectionTranslationError(message, title: "ChatGPT sign-in failed")
+                    onSave(false)
+                }
+            }
+        } else {
+            presentAPIKeySheet(for: provider, onSave: onSave)
+        }
+    }
+
+    @MainActor
     private func runCloudTest(for provider: CloudProvider) async -> CloudTestResult {
-        guard let model = LLMModel.all.first(where: { $0.cloudProvider == provider }) else {
-            return .failure("No model registered for \(provider.displayName).")
+        let model: LLMModel
+        let client: any LLMBackend
+        switch provider {
+        case .openAICodex:
+            guard let m = LLMModel.codexModels.first else {
+                return .failure("No Codex models known yet — sign in first.")
+            }
+            guard provider.hasCredentials else {
+                return .failure("Not signed in to ChatGPT.")
+            }
+            model = m
+            client = OpenAICodexClient(apiModelID: m.apiModelID)
+        case .openAI, .anthropic, .gemini:
+            guard let m = LLMModel.all.first(where: { $0.cloudProvider == provider }) else {
+                return .failure("No model registered for \(provider.displayName).")
+            }
+            guard let apiKey = KeychainStore.apiKey(for: provider), !apiKey.isEmpty else {
+                return .failure("No API key saved.")
+            }
+            model = m
+            client = OpenAIChatClient(provider: provider, apiKey: apiKey, model: m.apiModelID)
         }
-        guard let apiKey = KeychainStore.apiKey(for: provider), !apiKey.isEmpty else {
-            return .failure("No API key saved.")
-        }
-        let client = OpenAIChatClient(provider: provider, apiKey: apiKey, model: model.id)
         do {
             let translated = try await client.translate(
                 "Hello, this is a test sentence.",
@@ -10698,14 +10785,25 @@ enum AppCategoryClassifier {
 
 enum CloudProvider: String, Codable, CaseIterable {
     case openAI
+    case openAICodex
     case anthropic
     case gemini
 
+    /// `.openAICodex` uses OAuth (ChatGPT subscription) instead of an API key
+    /// — branches that present the API-key sheet must consult this flag.
+    var usesOAuth: Bool {
+        switch self {
+        case .openAICodex: true
+        case .openAI, .anthropic, .gemini: false
+        }
+    }
+
     var baseURL: URL {
         switch self {
-        case .openAI:    URL(string: "https://api.openai.com/v1/chat/completions")!
-        case .anthropic: URL(string: "https://api.anthropic.com/v1/chat/completions")!
-        case .gemini:    URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")!
+        case .openAI:      URL(string: "https://api.openai.com/v1/chat/completions")!
+        case .openAICodex: URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+        case .anthropic:   URL(string: "https://api.anthropic.com/v1/chat/completions")!
+        case .gemini:      URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")!
         }
     }
 
@@ -10713,25 +10811,28 @@ enum CloudProvider: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .openAI:    "OpenAI"
-        case .anthropic: "Anthropic"
-        case .gemini:    "Google Gemini"
+        case .openAI:      "OpenAI"
+        case .openAICodex: "ChatGPT subscription"
+        case .anthropic:   "Anthropic"
+        case .gemini:      "Google Gemini"
         }
     }
 
     var apiKeyHelpURL: URL {
         switch self {
-        case .openAI:    URL(string: "https://platform.openai.com/api-keys")!
-        case .anthropic: URL(string: "https://console.anthropic.com/settings/keys")!
-        case .gemini:    URL(string: "https://aistudio.google.com/app/apikey")!
+        case .openAI:      URL(string: "https://platform.openai.com/api-keys")!
+        case .openAICodex: URL(string: "https://chatgpt.com/")!
+        case .anthropic:   URL(string: "https://console.anthropic.com/settings/keys")!
+        case .gemini:      URL(string: "https://aistudio.google.com/app/apikey")!
         }
     }
 
     var modelsURL: URL {
         switch self {
-        case .openAI:    URL(string: "https://api.openai.com/v1/models")!
-        case .anthropic: URL(string: "https://api.anthropic.com/v1/models")!
-        case .gemini:    URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/models")!
+        case .openAI:      URL(string: "https://api.openai.com/v1/models")!
+        case .openAICodex: URL(string: "https://chatgpt.com/backend-api/codex/models?client_version=1.0.0")!
+        case .anthropic:   URL(string: "https://api.anthropic.com/v1/models")!
+        case .gemini:      URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/models")!
         }
     }
 }
@@ -10747,7 +10848,7 @@ enum APIKeyValidator {
         var request = URLRequest(url: provider.modelsURL)
         request.httpMethod = "GET"
         switch provider {
-        case .openAI, .gemini:
+        case .openAI, .gemini, .openAICodex:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         case .anthropic:
             // Native Anthropic /v1/models requires x-api-key + anthropic-version,
@@ -11302,7 +11403,7 @@ struct CloudThinkingOptions: Encodable, Equatable {
 
     init(provider: CloudProvider, model: String, thinkingLevel: ThinkingLevel) {
         switch provider {
-        case .openAI, .gemini:
+        case .openAI, .gemini, .openAICodex:
             reasoningEffort = thinkingLevel.cloudReasoningEffort
             thinking = nil
             outputConfig = nil
@@ -11502,6 +11603,1128 @@ enum TranslationError: LocalizedError {
         case .cloudError(let provider, let detail):
             "\(provider.displayName): \(detail)"
         }
+    }
+}
+
+// MARK: - OpenAI Codex (ChatGPT subscription) OAuth
+//
+// Lets ChatGPT Plus/Pro subscribers use Nugumi without an OpenAI API key.
+// The flow mirrors what the official Codex CLI does (and what Hermes Agent
+// replicates): OAuth device-code login against auth.openai.com, then inference
+// against chatgpt.com/backend-api/codex/responses (the Responses API, not the
+// public /v1/chat/completions surface).
+//
+// IMPORTANT: this endpoint is unofficial. The same client_id and Cloudflare
+// allow-listed `originator` header are shared with Codex CLI; OpenAI could
+// tighten the allow-list at any time and break this backend.
+
+struct CodexCredentials: Codable, Equatable {
+    let accessToken: String
+    let refreshToken: String
+    let expiresAt: Date
+    let accountId: String?
+    let planType: String?
+
+    func isExpiring(within seconds: TimeInterval) -> Bool {
+        expiresAt.timeIntervalSinceNow < seconds
+    }
+}
+
+enum CodexJWT {
+    struct Claims {
+        let expiresAt: Date?
+        let accountId: String?
+        let planType: String?
+    }
+
+    static func decode(_ jwt: String) -> Claims {
+        let empty = Claims(expiresAt: nil, accountId: nil, planType: nil)
+        let parts = jwt.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count >= 2,
+              let payload = base64URLDecode(String(parts[1])),
+              let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any]
+        else { return empty }
+
+        let exp: Date? = {
+            if let v = json["exp"] as? Double { return Date(timeIntervalSince1970: v) }
+            if let v = json["exp"] as? Int { return Date(timeIntervalSince1970: TimeInterval(v)) }
+            return nil
+        }()
+        let auth = json["https://api.openai.com/auth"] as? [String: Any]
+        return Claims(
+            expiresAt: exp,
+            accountId: auth?["chatgpt_account_id"] as? String,
+            planType: auth?["chatgpt_plan_type"] as? String
+        )
+    }
+
+    static func base64URLDecode(_ s: String) -> Data? {
+        var b64 = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        let pad = (4 - b64.count % 4) % 4
+        if pad > 0 { b64.append(String(repeating: "=", count: pad)) }
+        return Data(base64Encoded: b64)
+    }
+}
+
+extension KeychainStore {
+    private static var codexCache: CodexCredentials?
+    private static var codexCacheLoaded = false
+    private static let codexFileName = "openai.codex.tokens.json"
+
+    private static var codexFileURL: URL {
+        storageDirectory.appending(path: codexFileName, directoryHint: .notDirectory)
+    }
+
+    static func codexCredentials() -> CodexCredentials? {
+        if codexCacheLoaded { return codexCache }
+        codexCacheLoaded = true
+        guard let data = try? Data(contentsOf: codexFileURL) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        codexCache = try? decoder.decode(CodexCredentials.self, from: data)
+        return codexCache
+    }
+
+    static func setCodexCredentials(_ creds: CodexCredentials?) {
+        guard let creds else {
+            try? FileManager.default.removeItem(at: codexFileURL)
+            codexCache = nil
+            codexCacheLoaded = true
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        if let data = try? encoder.encode(creds) {
+            try? data.write(to: codexFileURL, options: [.atomic])
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: codexFileURL.path
+            )
+        }
+        codexCache = creds
+        codexCacheLoaded = true
+    }
+}
+
+extension CloudProvider {
+    /// True if the user has saved credentials for this provider (API key OR OAuth tokens).
+    var hasCredentials: Bool {
+        switch self {
+        case .openAICodex:
+            return KeychainStore.codexCredentials() != nil
+        case .openAI, .anthropic, .gemini:
+            let key = KeychainStore.apiKey(for: self)
+            return !(key?.isEmpty ?? true)
+        }
+    }
+
+    /// Order in which providers appear in the onboarding wizard's Cloud tab.
+    /// ChatGPT subscription (OAuth) first — it's the most-friction-free
+    /// option for users who already have a ChatGPT account — followed by
+    /// the API-key providers in their declaration order.
+    static var cloudOnboardingCases: [CloudProvider] {
+        [.openAICodex] + allCases.filter { !$0.usesOAuth }
+    }
+
+    /// Default model ID to assign to the everyday-text scope when the user
+    /// signs in / saves a key for this provider during onboarding. Picks a
+    /// fast/cheap option from the provider's lineup.
+    var preferredTextModelID: String {
+        switch self {
+        case .openAICodex: "codex/gpt-5.4-mini"
+        case .openAI:      "gpt-5.4-mini"
+        case .anthropic:   "claude-haiku-4-5-20251001"
+        case .gemini:      "gemini-2.5-flash-lite"
+        }
+    }
+
+    /// Default model ID for Ask Nugumi (the multimodal scope) when this
+    /// provider's credentials get set during onboarding. Picks the flagship
+    /// vision model from the provider's lineup.
+    var preferredAskModelID: String {
+        switch self {
+        case .openAICodex: "codex/gpt-5.5"
+        case .openAI:      "gpt-5.5"
+        case .anthropic:   "claude-sonnet-4-6"
+        case .gemini:      "gemini-2.5-pro"
+        }
+    }
+}
+
+// MARK: Codex diagnostics log
+
+/// File-based debug log for the Codex auth flow. NSLog/os_log can get
+/// silenced when the app is launched via `open` (stderr → /dev/null) and the
+/// system log filter is unfriendly, so for the duration of debugging the
+/// OAuth dance we mirror everything to ~/Library/Logs/Nugumi/codex.log
+/// where the user can always `tail -f` it.
+enum CodexDebugLog {
+    private static let lock = NSLock()
+    private static let formatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let fileURL: URL = {
+        let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
+            .first!
+            .appending(path: "Logs/Nugumi", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        return logs.appending(path: "codex.log", directoryHint: .notDirectory)
+    }()
+
+    static func append(_ message: String) {
+        let stamped = "\(formatter.string(from: Date())) \(message)\n"
+        lock.lock()
+        defer { lock.unlock() }
+        if let data = stamped.data(using: .utf8) {
+            if let handle = try? FileHandle(forWritingTo: fileURL) {
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: data)
+                try? handle.close()
+            } else {
+                try? data.write(to: fileURL)
+            }
+        }
+        NSLog("[Nugumi/Codex] %@", message)
+    }
+}
+
+// MARK: Codex OAuth client (device-code login + refresh)
+
+/// Endpoints + flow shape mirror Hermes Agent's hermes_cli/auth.py:
+/// `app_EMoamEEZ73f0CkXaXp7hrann` is the public Codex CLI client_id;
+/// device-code returns {user_code, device_auth_id} then poll
+/// /api/accounts/deviceauth/token until 200 returns {authorization_code,
+/// code_verifier}, then exchange those at /oauth/token.
+actor CodexOAuthClient {
+    static let shared = CodexOAuthClient()
+
+    private let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+    private let issuer = "https://auth.openai.com"
+    private let session: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 30
+        return URLSession(configuration: cfg)
+    }()
+
+    struct DeviceCodeStart {
+        let userCode: String       // e.g. "LI50-8AOZ1"
+        let deviceAuthID: String
+        let verificationURL: URL   // https://auth.openai.com/codex/device
+        let pollInterval: TimeInterval
+    }
+
+    enum CodexAuthError: LocalizedError {
+        case network(String)
+        case server(Int, String)
+        case malformedResponse(String)
+        case timeout
+
+        var errorDescription: String? {
+            switch self {
+            case .network(let d): "Network error: \(d)"
+            case .server(let code, let d): "Server returned HTTP \(code): \(d.prefix(200))"
+            case .malformedResponse(let d): "Unexpected response: \(d)"
+            case .timeout: "Login timed out after 15 minutes."
+            }
+        }
+    }
+
+    func startDeviceCode() async throws -> DeviceCodeStart {
+        CodexDebugLog.append("startDeviceCode: requesting device code from \(issuer)")
+        var req = URLRequest(url: URL(string: "\(issuer)/api/accounts/deviceauth/usercode")!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["client_id": clientID])
+
+        let (data, resp) = try await dataTask(req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw CodexAuthError.malformedResponse("not an HTTP response")
+        }
+        let bodyPreview = String(data: data, encoding: .utf8)?.prefix(500) ?? ""
+        CodexDebugLog.append("startDeviceCode: status=\(http.statusCode) body=\(bodyPreview)")
+        guard http.statusCode == 200 else {
+            throw CodexAuthError.server(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let userCode = json["user_code"] as? String,
+              let deviceAuthID = json["device_auth_id"] as? String
+        else { throw CodexAuthError.malformedResponse("missing user_code / device_auth_id") }
+
+        let interval: TimeInterval = {
+            if let i = json["interval"] as? Double { return i }
+            if let i = json["interval"] as? Int { return Double(i) }
+            if let s = json["interval"] as? String, let v = Double(s) { return v }
+            return 5
+        }()
+        CodexDebugLog.append("startDeviceCode: got userCode=\(userCode) interval=\(interval) keys=\(Array(json.keys))")
+        return DeviceCodeStart(
+            userCode: userCode,
+            deviceAuthID: deviceAuthID,
+            verificationURL: URL(string: "\(issuer)/codex/device")!,
+            pollInterval: max(3, interval)
+        )
+    }
+
+    func pollForTokens(
+        deviceAuthID: String,
+        userCode: String,
+        interval: TimeInterval
+    ) async throws -> CodexCredentials {
+        let deadline = Date().addingTimeInterval(15 * 60)
+        let pollURL = URL(string: "\(issuer)/api/accounts/deviceauth/token")!
+        CodexDebugLog.append("pollForTokens: start — interval=\(interval)s deviceAuthID=\(deviceAuthID) userCode=\(userCode)")
+        var lastStatusLogged = -1
+        var iteration = 0
+        while Date() < deadline {
+            iteration += 1
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            try Task.checkCancellation()
+
+            var req = URLRequest(url: pollURL)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: [
+                "device_auth_id": deviceAuthID,
+                "user_code": userCode
+            ])
+
+            let (data, resp): (Data, URLResponse)
+            do {
+                (data, resp) = try await dataTask(req)
+            } catch {
+                CodexDebugLog.append("poll #\(iteration): network error \(error)")
+                continue
+            }
+            guard let http = resp as? HTTPURLResponse else {
+                CodexDebugLog.append("poll #\(iteration): non-HTTP response")
+                continue
+            }
+            let bodyPreview = String(data: data, encoding: .utf8)?.prefix(500) ?? ""
+            if http.statusCode != lastStatusLogged {
+                CodexDebugLog.append("poll #\(iteration) status=\(http.statusCode) body=\(bodyPreview)")
+                lastStatusLogged = http.statusCode
+            }
+            switch http.statusCode {
+            case 200:
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    CodexDebugLog.append("poll 200 but body not JSON: \(bodyPreview)")
+                    throw CodexAuthError.malformedResponse("poll 200 body not JSON")
+                }
+                if let _ = json["access_token"] as? String {
+                    CodexDebugLog.append("poll 200: direct access_token, skipping exchange")
+                    return try parseTokenResponseJSON(json, fallbackRefreshToken: "")
+                }
+                if let authCode = json["authorization_code"] as? String,
+                   let verifier = json["code_verifier"] as? String {
+                    CodexDebugLog.append("poll 200: got authorization_code, exchanging…")
+                    return try await exchangeAuthorizationCode(authCode, verifier: verifier)
+                }
+                CodexDebugLog.append("poll 200 unknown shape — keys=\(Array(json.keys))")
+                throw CodexAuthError.malformedResponse("poll 200 unknown shape: \(Array(json.keys))")
+            case 403, 404:
+                continue // user hasn't completed sign-in yet
+            case 400, 408, 425, 429:
+                continue // "authorization_pending", "slow_down", or rate limit
+            default:
+                CodexDebugLog.append("poll #\(iteration) unexpected status \(http.statusCode) body=\(bodyPreview)")
+                throw CodexAuthError.server(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+            }
+        }
+        throw CodexAuthError.timeout
+    }
+
+    private func parseTokenResponseJSON(_ json: [String: Any], fallbackRefreshToken: String) throws -> CodexCredentials {
+        guard let access = json["access_token"] as? String else {
+            throw CodexAuthError.malformedResponse("missing access_token")
+        }
+        let refresh = (json["refresh_token"] as? String) ?? fallbackRefreshToken
+        let claims = CodexJWT.decode(access)
+        let fallbackExpiresIn: TimeInterval = {
+            if let v = json["expires_in"] as? Double { return v }
+            if let v = json["expires_in"] as? Int { return Double(v) }
+            return 3600
+        }()
+        let expiry = claims.expiresAt ?? Date().addingTimeInterval(fallbackExpiresIn)
+        return CodexCredentials(
+            accessToken: access,
+            refreshToken: refresh,
+            expiresAt: expiry,
+            accountId: claims.accountId,
+            planType: claims.planType
+        )
+    }
+
+    private func exchangeAuthorizationCode(_ code: String, verifier: String) async throws -> CodexCredentials {
+        try await postTokenRequest(form: [
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": "\(issuer)/deviceauth/callback",
+            "client_id": clientID,
+            "code_verifier": verifier
+        ])
+    }
+
+    func refresh(_ refreshToken: String) async throws -> CodexCredentials {
+        try await postTokenRequest(form: [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientID
+        ])
+    }
+
+    private func postTokenRequest(form: [String: String]) async throws -> CodexCredentials {
+        let grantType = form["grant_type"] ?? "?"
+        CodexDebugLog.append("postTokenRequest: building \(grantType) request to /oauth/token")
+        var req = URLRequest(url: URL(string: "\(issuer)/oauth/token")!)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = Self.urlencode(form).data(using: .utf8)
+        CodexDebugLog.append("postTokenRequest: sending \(grantType), body \(req.httpBody?.count ?? 0) bytes")
+
+        let (data, resp): (Data, URLResponse)
+        do {
+            (data, resp) = try await dataTask(req)
+        } catch {
+            CodexDebugLog.append("postTokenRequest: dataTask threw — \(error)")
+            throw error
+        }
+        guard let http = resp as? HTTPURLResponse else {
+            CodexDebugLog.append("postTokenRequest: not an HTTPURLResponse")
+            throw CodexAuthError.malformedResponse("not an HTTP response")
+        }
+        let bodyPreview = String(data: data, encoding: .utf8)?.prefix(500) ?? ""
+        CodexDebugLog.append("postTokenRequest: \(grantType) status=\(http.statusCode) body=\(bodyPreview)")
+        guard http.statusCode == 200 else {
+            throw CodexAuthError.server(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = json["access_token"] as? String
+        else { throw CodexAuthError.malformedResponse("missing access_token") }
+
+        let refresh = (json["refresh_token"] as? String) ?? form["refresh_token"] ?? ""
+        let claims = CodexJWT.decode(access)
+        let fallbackExpiresIn: TimeInterval = {
+            if let v = json["expires_in"] as? Double { return v }
+            if let v = json["expires_in"] as? Int { return Double(v) }
+            return 3600
+        }()
+        let expiry = claims.expiresAt ?? Date().addingTimeInterval(fallbackExpiresIn)
+        CodexDebugLog.append("postTokenRequest: \(grantType) success — accountId=\(claims.accountId ?? "nil") plan=\(claims.planType ?? "nil")")
+        return CodexCredentials(
+            accessToken: access,
+            refreshToken: refresh,
+            expiresAt: expiry,
+            accountId: claims.accountId,
+            planType: claims.planType
+        )
+    }
+
+    private func dataTask(_ req: URLRequest) async throws -> (Data, URLResponse) {
+        let url = req.url?.absoluteString ?? "?"
+        CodexDebugLog.append("dataTask: starting \(req.httpMethod ?? "?") \(url)")
+        do {
+            let result = try await session.data(for: req)
+            CodexDebugLog.append("dataTask: completed \(url)")
+            return result
+        } catch let err as URLError {
+            CodexDebugLog.append("dataTask: URLError on \(url) — \(err.code.rawValue) \(err.localizedDescription)")
+            throw CodexAuthError.network(err.localizedDescription)
+        } catch {
+            CodexDebugLog.append("dataTask: unexpected error on \(url) — \(error)")
+            throw error
+        }
+    }
+
+    private static func urlencode(_ form: [String: String]) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?")
+        return form.map { k, v in
+            let ek = k.addingPercentEncoding(withAllowedCharacters: allowed) ?? k
+            let ev = v.addingPercentEncoding(withAllowedCharacters: allowed) ?? v
+            return "\(ek)=\(ev)"
+        }.joined(separator: "&")
+    }
+}
+
+// MARK: Token broker — refresh-on-demand for inference paths
+
+/// Resolves a fresh access token + JWT-derived account ID for the Codex
+/// backend. Persists refreshed tokens back to Keychain. Serialized on the
+/// shared CodexOAuthClient actor so concurrent translate/ask calls don't
+/// stampede the token endpoint.
+enum CodexCredentialBroker {
+    /// Returns an access token guaranteed not to expire within ~2 minutes,
+    /// refreshing transparently if needed. Throws if the user is not logged in.
+    static func resolveAccessToken() async throws -> (token: String, accountId: String?) {
+        guard let creds = KeychainStore.codexCredentials() else {
+            throw TranslationError.invalidAPIKey(.openAICodex)
+        }
+        if !creds.isExpiring(within: 120) {
+            return (creds.accessToken, creds.accountId)
+        }
+        do {
+            let refreshed = try await CodexOAuthClient.shared.refresh(creds.refreshToken)
+            await MainActor.run { KeychainStore.setCodexCredentials(refreshed) }
+            return (refreshed.accessToken, refreshed.accountId)
+        } catch let err as CodexOAuthClient.CodexAuthError {
+            if case .server(let status, _) = err, status == 400 || status == 401 || status == 403 {
+                // Refresh token revoked or rotated by another client — force re-login.
+                await MainActor.run { KeychainStore.setCodexCredentials(nil) }
+                throw TranslationError.invalidAPIKey(.openAICodex)
+            }
+            throw TranslationError.cloudError(.openAICodex, err.errorDescription ?? "auth error")
+        }
+    }
+
+    static func forceRefresh() async throws -> (token: String, accountId: String?) {
+        guard let creds = KeychainStore.codexCredentials() else {
+            throw TranslationError.invalidAPIKey(.openAICodex)
+        }
+        let refreshed = try await CodexOAuthClient.shared.refresh(creds.refreshToken)
+        await MainActor.run { KeychainStore.setCodexCredentials(refreshed) }
+        return (refreshed.accessToken, refreshed.accountId)
+    }
+}
+
+// MARK: Discovered Codex models (live API + cached fallback)
+
+/// Thread-safe cache of Codex model slugs discovered from
+/// chatgpt.com/backend-api/codex/models. Falls back to the Hermes-curated
+/// list when discovery hasn't run yet. Lives outside any actor so
+/// `LLMModel.codexModels` can be read from any thread that builds the
+/// menu / dispatches a backend.
+enum CodexModelCache {
+    /// Hermes' curated fallback (hermes_cli/codex_models.py DEFAULT_CODEX_MODELS).
+    /// Used until live discovery succeeds.
+    static let fallbackSlugs: [String] = [
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-spark",
+        "gpt-5.2-codex",
+        "gpt-5.1-codex-max",
+        "gpt-5.1-codex-mini"
+    ]
+
+    private static let cacheKey = "codex.discoveredModels.v1"
+    private static let lock = NSLock()
+    private static var memo: [String]?
+
+    static var slugs: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        if let memo { return memo }
+        let stored = UserDefaults.standard.stringArray(forKey: cacheKey) ?? []
+        let resolved = stored.isEmpty ? fallbackSlugs : stored
+        memo = resolved
+        return resolved
+    }
+
+    static func update(_ slugs: [String]) {
+        lock.lock()
+        memo = slugs
+        lock.unlock()
+        UserDefaults.standard.set(slugs, forKey: cacheKey)
+        NotificationCenter.default.post(name: .codexModelsUpdated, object: nil)
+    }
+
+    static func clear() {
+        lock.lock()
+        memo = nil
+        lock.unlock()
+        UserDefaults.standard.removeObject(forKey: cacheKey)
+        NotificationCenter.default.post(name: .codexModelsUpdated, object: nil)
+    }
+}
+
+enum CodexModelDiscovery {
+    /// Live fetch + cache. Best-effort: failure leaves the cache untouched.
+    static func refreshFromAPI() async {
+        let token: String
+        do {
+            token = try await CodexCredentialBroker.resolveAccessToken().token
+        } catch {
+            return
+        }
+        var req = URLRequest(url: CloudProvider.openAICodex.modelsURL)
+        req.httpMethod = "GET"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        for (k, v) in OpenAICodexClient.cloudflareHeaders(accessToken: token) {
+            req.setValue(v, forHTTPHeaderField: k)
+        }
+        req.timeoutInterval = 15
+
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = json["models"] as? [[String: Any]]
+        else { return }
+
+        struct Entry { let slug: String; let priority: Int }
+        var parsed: [Entry] = []
+        for item in entries {
+            guard let slug = (item["slug"] as? String)?.trimmingCharacters(in: .whitespaces),
+                  !slug.isEmpty
+            else { continue }
+            if let v = item["visibility"] as? String,
+               ["hide", "hidden"].contains(v.lowercased()) { continue }
+            let priority: Int = {
+                if let n = item["priority"] as? Int { return n }
+                if let n = item["priority"] as? Double { return Int(n) }
+                return 10_000
+            }()
+            parsed.append(Entry(slug: slug, priority: priority))
+        }
+        guard !parsed.isEmpty else { return }
+        parsed.sort { $0.priority == $1.priority ? $0.slug < $1.slug : $0.priority < $1.priority }
+        CodexModelCache.update(parsed.map(\.slug))
+    }
+}
+
+extension Notification.Name {
+    static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
+}
+
+// MARK: OpenAICodexClient — Responses API + Cloudflare allow-list headers
+
+/// Talks to chatgpt.com/backend-api/codex/responses on behalf of a
+/// ChatGPT Plus/Pro subscriber. Sits behind Cloudflare which 403s any
+/// request that doesn't advertise an allow-listed `originator` — we pin
+/// `codex_cli_rs` (the value the Rust Codex CLI uses), the matching
+/// User-Agent shape, and a `ChatGPT-Account-ID` extracted from the JWT.
+/// All three are required; dropping any one trips the WAF.
+struct OpenAICodexClient: LLMBackend {
+    let apiModelID: String
+    private static let maxImageBytes = 5 * 1024 * 1024
+
+    /// Pulls a user-facing error message out of an OpenAI error JSON body.
+    /// Accepts both `{"error": {"message": "…"}}` and `{"error": "…"}` shapes.
+    private func extractOpenAIErrorMessage(from data: Data) -> String? {
+        guard !data.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        if let err = obj["error"] as? [String: Any] {
+            if let m = err["message"] as? String, !m.isEmpty { return m }
+        } else if let s = obj["error"] as? String, !s.isEmpty {
+            return s
+        }
+        return nil
+    }
+
+    /// Headers that mimic the Rust Codex CLI so Cloudflare doesn't block us.
+    /// Extracted as a static helper so model discovery can reuse them.
+    static func cloudflareHeaders(accessToken: String) -> [String: String] {
+        var headers: [String: String] = [
+            "User-Agent": "codex_cli_rs/0.0.0 (Nugumi)",
+            "originator": "codex_cli_rs"
+        ]
+        let claims = CodexJWT.decode(accessToken)
+        if let acct = claims.accountId, !acct.isEmpty {
+            headers["ChatGPT-Account-ID"] = acct
+        }
+        return headers
+    }
+
+    func translate(
+        _ text: String,
+        images: [ImageInput],
+        to targetLanguage: TranslationLanguage,
+        mode: TranslationMode,
+        appCategory: AppCategory,
+        composition: CompositionSettings?,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        let sourceText: String
+        switch mode {
+        case .selection, .smartReply:
+            sourceText = TextNormalizer.cleanedSelection(text)
+        case .draftMessage:
+            sourceText = TextNormalizer.cleanedDraftMessage(text)
+        }
+        guard !sourceText.isEmpty || !images.isEmpty else {
+            throw TranslationError.emptyResponse
+        }
+        for image in images where image.data.count > Self.maxImageBytes {
+            throw TranslationError.cloudError(.openAICodex, "Image too large (limit 5 MB)")
+        }
+
+        let systemPrompt = mode.systemPrompt(
+            targetLanguage: targetLanguage,
+            appCategory: appCategory,
+            composition: composition
+        )
+        let userContent: [CodexInputContent] = {
+            var parts: [CodexInputContent] = [.text(sourceText, role: "user")]
+            parts.append(contentsOf: images.map { .image($0.openAIDataURI) })
+            return parts
+        }()
+        let body = CodexResponsesRequest(
+            model: apiModelID,
+            instructions: systemPrompt,
+            input: [CodexInputItem(role: "user", content: userContent)],
+            stream: true,
+            store: false
+        )
+
+        var streamed = ""
+        try await runStreaming(body: body) { delta in
+            streamed += delta
+            let partial = TextNormalizer.cleanedTranslation(streamed)
+            if !partial.isEmpty { onPartial(partial) }
+        }
+        let final = TextNormalizer.cleanedTranslation(streamed)
+        guard !final.isEmpty else { throw TranslationError.emptyResponse }
+        return final
+    }
+
+    func ask(
+        history: [AskNugumiTurn],
+        question: String,
+        image: ImageInput?,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> AskNugumiResponse {
+        if let image, image.data.count > Self.maxImageBytes {
+            throw TranslationError.cloudError(.openAICodex, "Image too large (limit 5 MB)")
+        }
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty else {
+            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+        }
+        let currentPrompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
+
+        var items: [CodexInputItem] = []
+        for turn in history {
+            items.append(CodexInputItem(role: "user", content: [.text(turn.question, role: "user")]))
+            items.append(CodexInputItem(role: "assistant", content: [.text(turn.answer, role: "assistant")]))
+        }
+        var currentContent: [CodexInputContent] = [.text(currentPrompt, role: "user")]
+        if let image { currentContent.append(.image(image.openAIDataURI)) }
+        items.append(CodexInputItem(role: "user", content: currentContent))
+
+        let body = CodexResponsesRequest(
+            model: apiModelID,
+            instructions: AskNugumiPromptBuilder.systemPrompt,
+            input: items,
+            stream: true,
+            store: false
+        )
+
+        var answer = ""
+        try await runStreaming(body: body) { delta in
+            answer += delta
+            onPartial(answer)
+        }
+        let parsed = AskNugumiResponse.parse(answer)
+        guard !parsed.message.isEmpty else { throw TranslationError.emptyResponse }
+        return parsed
+    }
+
+    // MARK: Streaming transport (Responses API SSE)
+
+    private func runStreaming(
+        body: CodexResponsesRequest,
+        onDelta: @escaping (String) -> Void
+    ) async throws {
+        let encoded = try JSONEncoder().encode(body)
+        do {
+            try await performStreamingRequest(encodedBody: encoded, allowRefresh: true, onDelta: onDelta)
+        } catch TranslationError.invalidAPIKey(.openAICodex) {
+            // One transparent retry after a forced refresh — covers tokens
+            // revoked between our last JWT-exp check and the actual request.
+            try await performStreamingRequest(encodedBody: encoded, allowRefresh: false, onDelta: onDelta)
+        }
+    }
+
+    private func performStreamingRequest(
+        encodedBody: Data,
+        allowRefresh: Bool,
+        onDelta: @escaping (String) -> Void
+    ) async throws {
+        let (token, accountId) = try await CodexCredentialBroker.resolveAccessToken()
+        CodexDebugLog.append("inference: POST /responses (model=\(apiModelID), account=\(accountId ?? "nil"), bodyBytes=\(encodedBody.count))")
+
+        var request = URLRequest(url: CloudProvider.openAICodex.baseURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(UUID().uuidString, forHTTPHeaderField: "session_id")
+        for (k, v) in Self.cloudflareHeaders(accessToken: token) {
+            request.setValue(v, forHTTPHeaderField: k)
+        }
+        request.timeoutInterval = 120
+        request.httpBody = encodedBody
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await URLSession.shared.bytes(for: request)
+        } catch let urlError as URLError where urlError.code == .cannotConnectToHost
+            || urlError.code == .cannotFindHost
+            || urlError.code == .networkConnectionLost
+            || urlError.code == .notConnectedToInternet
+            || urlError.code == .timedOut {
+            CodexDebugLog.append("inference: URLError \(urlError.code.rawValue) — \(urlError.localizedDescription)")
+            throw TranslationError.cloudError(.openAICodex, urlError.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            CodexDebugLog.append("inference: non-HTTP response")
+            throw TranslationError.cloudError(.openAICodex, "invalid response")
+        }
+        CodexDebugLog.append("inference: status=\(http.statusCode)")
+        switch http.statusCode {
+        case 200..<300:
+            break
+        case 401, 403:
+            // Drain the body so we can show OpenAI's actual error message —
+            // 401/403 from the Codex endpoint for free accounts surfaces as
+            // a JSON body with a useful explanation we should pass through
+            // rather than swallowing as "rejected the API key."
+            var bodyData = Data()
+            for try await chunk in bytes { bodyData.append(chunk) }
+            let bodyPreview = String(data: bodyData, encoding: .utf8)?.prefix(800) ?? ""
+            CodexDebugLog.append("inference: \(http.statusCode) body=\(bodyPreview)")
+            if http.statusCode == 401, allowRefresh {
+                _ = try? await CodexCredentialBroker.forceRefresh()
+                throw TranslationError.invalidAPIKey(.openAICodex)
+            }
+            // Try to extract a human-readable message from OpenAI's error JSON.
+            let detail = extractOpenAIErrorMessage(from: bodyData) ?? "HTTP \(http.statusCode)"
+            throw TranslationError.cloudError(.openAICodex, detail)
+        case 429:
+            throw TranslationError.rateLimited(.openAICodex)
+        default:
+            var bodyData = Data()
+            for try await chunk in bytes { bodyData.append(chunk) }
+            let bodyPreview = String(data: bodyData, encoding: .utf8)?.prefix(800) ?? ""
+            CodexDebugLog.append("inference: \(http.statusCode) body=\(bodyPreview)")
+            let detail = extractOpenAIErrorMessage(from: bodyData) ?? "HTTP \(http.statusCode)"
+            throw TranslationError.cloudError(.openAICodex, detail)
+        }
+
+        let decoder = JSONDecoder()
+        for try await rawLine in bytes.lines {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix(":") || line.hasPrefix("event:") { continue }
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { break }
+            guard let data = payload.data(using: .utf8) else { continue }
+            if let chunk = try? decoder.decode(CodexResponsesStreamEvent.self, from: data) {
+                if chunk.type == "response.output_text.delta", let delta = chunk.delta, !delta.isEmpty {
+                    onDelta(delta)
+                } else if chunk.type == "response.completed" {
+                    break
+                } else if chunk.type == "response.error" || chunk.type == "error" {
+                    let msg = chunk.message ?? chunk.error?.message ?? "stream error"
+                    throw TranslationError.cloudError(.openAICodex, msg)
+                }
+            }
+        }
+    }
+}
+
+// MARK: Codex Responses API wire types
+
+private struct CodexResponsesRequest: Encodable {
+    let model: String
+    let instructions: String?
+    let input: [CodexInputItem]
+    let stream: Bool
+    let store: Bool
+}
+
+private struct CodexInputItem: Encodable {
+    let role: String
+    let content: [CodexInputContent]
+}
+
+private enum CodexInputContent: Encodable {
+    case text(String, role: String)
+    case image(String) // data: URI
+
+    private enum CodingKeys: String, CodingKey {
+        case type, text, image_url
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .text(let s, let role):
+            try c.encode(role == "assistant" ? "output_text" : "input_text", forKey: .type)
+            try c.encode(s, forKey: .text)
+        case .image(let url):
+            try c.encode("input_image", forKey: .type)
+            try c.encode(url, forKey: .image_url)
+        }
+    }
+}
+
+private struct CodexResponsesStreamEvent: Decodable {
+    let type: String
+    let delta: String?
+    let message: String?
+    let error: CodexResponsesStreamError?
+}
+
+private struct CodexResponsesStreamError: Decodable {
+    let message: String?
+}
+
+// MARK: Codex login UI (device-code alert)
+
+/// Modal NSAlert that drives the device-code dance:
+///   1. Calls /api/accounts/deviceauth/usercode to get a code + interval.
+///   2. Shows the code + URL with copy/open buttons.
+///   3. Polls /api/accounts/deviceauth/token until the user finishes sign-in
+///      in their browser (or until 15-minute timeout / Cancel).
+///   4. On success, persists CodexCredentials to Keychain and dismisses
+///      the alert programmatically via NSApp.stopModal.
+@MainActor
+final class CodexLoginAlert: NSObject {
+    enum Outcome {
+        case success(CodexCredentials)
+        case cancelled
+        case failed(String)
+    }
+
+    nonisolated private static let successCode = NSApplication.ModalResponse(1729)
+    nonisolated private static let failedCode = NSApplication.ModalResponse(1730)
+
+    /// Programmatically dismiss the active modal session from any thread.
+    /// `NSApp.stopModal` alone often isn't enough to exit `NSAlert.runModal`
+    /// — the alert's nested RunLoop needs an event to wake it up, otherwise
+    /// it sits idle even after stopModal flips the internal flag. Posting a
+    /// synthetic .applicationDefined event guarantees the run loop spins
+    /// once more and notices the stop.
+    /// Strong reference to the active alert so the background task can ask
+    /// the main thread to close its window directly — `NSApp.stopModal`
+    /// alone has proven unreliable on the NSAlert nested run loop in macOS
+    /// 14+.
+    nonisolated(unsafe) private static weak var activeAlert: NSAlert?
+
+    nonisolated static func endModalOnMain(code: NSApplication.ModalResponse) {
+        CodexDebugLog.append("endModalOnMain: scheduling stopModal=\(code.rawValue) on main thread")
+        // CRITICAL: NSAlert.runModal spins the main run loop in
+        // NSModalPanelRunLoopMode, which is NOT what DispatchQueue.main
+        // services (that uses kCFRunLoopDefaultMode). If we DispatchQueue.main.async
+        // a stopModal call, the block sits queued until the modal returns by
+        // user action — exactly what was breaking auto-dismiss. CFRunLoop's
+        // performBlock with an explicit mode array schedules the block to run
+        // in *whichever* of those modes the loop is currently in, including
+        // the modal panel mode, and is thread-safe to call from any thread.
+        let block: () -> Void = {
+            CodexDebugLog.append("endModalOnMain: main-thread block running")
+            NSApp.stopModal(withCode: code)
+            if let win = activeAlert?.window {
+                CodexDebugLog.append("endModalOnMain: closing alert window")
+                win.orderOut(nil)
+            }
+            if let wakeEvent = NSEvent.otherEvent(
+                with: .applicationDefined,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                subtype: 0,
+                data1: 0,
+                data2: 0
+            ) {
+                NSApp.postEvent(wakeEvent, atStart: true)
+            }
+            CodexDebugLog.append("endModalOnMain: done")
+        }
+        let modes: CFArray = [
+            CFRunLoopMode.commonModes.rawValue,
+            CFRunLoopMode.defaultMode.rawValue,
+            "NSModalPanelRunLoopMode" as CFString,
+            "NSEventTrackingRunLoopMode" as CFString
+        ] as CFArray
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), modes, block)
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
+
+    private var failureMessage: String?
+    private var pollTask: Task<Void, Never>?
+    private var verificationURL: URL!
+    private var userCode: String!
+
+    static func present() async -> Outcome {
+        let controller = CodexLoginAlert()
+        return await controller.run()
+    }
+
+    private func run() async -> Outcome {
+        let start: CodexOAuthClient.DeviceCodeStart
+        do {
+            start = try await CodexOAuthClient.shared.startDeviceCode()
+        } catch {
+            return .failed("Couldn't start sign-in: \(error.localizedDescription)")
+        }
+
+        verificationURL = start.verificationURL
+        userCode = start.userCode
+
+        NSApp.activate(ignoringOtherApps: true)
+        NSWorkspace.shared.open(start.verificationURL)
+
+        let alert = NSAlert()
+        alert.messageText = "Sign in with ChatGPT"
+        alert.informativeText = "Finish sign-in in your browser. Nugumi will pick up the credentials automatically — no need to paste anything back."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Cancel")
+        alert.accessoryView = makeAccessoryView(start: start)
+        Self.activeAlert = alert
+
+        CodexDebugLog.append("CodexLoginAlert: launching detached poll task")
+        // Use Task.detached so the polling body runs on the cooperative thread
+        // pool, NOT on the @MainActor executor — otherwise alert.runModal()
+        // (which spins a nested RunLoop on the main thread) starves the
+        // Task and the polling never fires.
+        let deviceAuthID = start.deviceAuthID
+        let userCode = start.userCode
+        let pollInterval = start.pollInterval
+        pollTask = Task.detached { [weak self] in
+            do {
+                let creds = try await CodexOAuthClient.shared.pollForTokens(
+                    deviceAuthID: deviceAuthID,
+                    userCode: userCode,
+                    interval: pollInterval
+                )
+                // Persist creds *before* the main-thread hop so we don't
+                // lose them if the modal dismiss-handoff has timing issues.
+                KeychainStore.setCodexCredentials(creds)
+                CodexDebugLog.append("CodexLoginAlert: tokens persisted, dispatching stopModal")
+                Self.endModalOnMain(code: Self.successCode)
+            } catch is CancellationError {
+                CodexDebugLog.append("CodexLoginAlert: poll cancelled")
+                return
+            } catch {
+                CodexDebugLog.append("CodexLoginAlert: poll failed — \(error)")
+                let message = error.localizedDescription
+                DispatchQueue.main.async { [weak self] in
+                    self?.failureMessage = message
+                    Self.endModalOnMain(code: Self.failedCode)
+                }
+            }
+        }
+
+        let response = alert.runModal()
+        pollTask?.cancel()
+
+        if response == Self.successCode, let creds = KeychainStore.codexCredentials() {
+            // Fire-and-forget model discovery so the menu reflects this
+            // account's catalog (Plus vs Pro see different lineups).
+            Task.detached { await CodexModelDiscovery.refreshFromAPI() }
+            return .success(creds)
+        }
+        if response == Self.failedCode {
+            return .failed(failureMessage ?? "Sign-in failed.")
+        }
+        return .cancelled
+    }
+
+    private func makeAccessoryView(start: CodexOAuthClient.DeviceCodeStart) -> NSView {
+        let width: CGFloat = 360
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 132))
+
+        let step1 = NSTextField(labelWithString: "1. Open this URL in your browser:")
+        step1.font = .systemFont(ofSize: 12, weight: .medium)
+        step1.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(step1)
+
+        let urlField = NSTextField(labelWithString: start.verificationURL.absoluteString)
+        urlField.font = .systemFont(ofSize: 12)
+        urlField.textColor = .linkColor
+        urlField.isSelectable = true
+        urlField.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(urlField)
+
+        let step2 = NSTextField(labelWithString: "2. Enter this code:")
+        step2.font = .systemFont(ofSize: 12, weight: .medium)
+        step2.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(step2)
+
+        let codeLabel = NSTextField(labelWithString: start.userCode)
+        codeLabel.font = .monospacedSystemFont(ofSize: 20, weight: .bold)
+        codeLabel.textColor = .controlAccentColor
+        codeLabel.isSelectable = true
+        codeLabel.alignment = .center
+        codeLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(codeLabel)
+
+        let openBtn = NSButton(title: "Open URL", target: self, action: #selector(openURL))
+        openBtn.bezelStyle = .rounded
+        openBtn.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(openBtn)
+
+        let copyBtn = NSButton(title: "Copy code", target: self, action: #selector(copyCode))
+        copyBtn.bezelStyle = .rounded
+        copyBtn.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(copyBtn)
+
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(spinner)
+
+        let waitingLabel = NSTextField(labelWithString: "Waiting for sign-in…")
+        waitingLabel.font = .systemFont(ofSize: 11)
+        waitingLabel.textColor = .secondaryLabelColor
+        waitingLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(waitingLabel)
+
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: width),
+
+            step1.topAnchor.constraint(equalTo: container.topAnchor),
+            step1.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+
+            urlField.topAnchor.constraint(equalTo: step1.bottomAnchor, constant: 2),
+            urlField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            urlField.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            step2.topAnchor.constraint(equalTo: urlField.bottomAnchor, constant: 10),
+            step2.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+
+            codeLabel.topAnchor.constraint(equalTo: step2.bottomAnchor, constant: 2),
+            codeLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            codeLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            openBtn.topAnchor.constraint(equalTo: codeLabel.bottomAnchor, constant: 10),
+            openBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+
+            copyBtn.topAnchor.constraint(equalTo: openBtn.topAnchor),
+            copyBtn.leadingAnchor.constraint(equalTo: openBtn.trailingAnchor, constant: 8),
+
+            spinner.centerYAnchor.constraint(equalTo: openBtn.centerYAnchor),
+            spinner.trailingAnchor.constraint(equalTo: waitingLabel.leadingAnchor, constant: -4),
+
+            waitingLabel.centerYAnchor.constraint(equalTo: openBtn.centerYAnchor),
+            waitingLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+
+            container.bottomAnchor.constraint(equalTo: openBtn.bottomAnchor, constant: 4)
+        ])
+        return container
+    }
+
+    @objc private func openURL() {
+        NSWorkspace.shared.open(verificationURL)
+    }
+
+    @objc private func copyCode() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(userCode, forType: .string)
     }
 }
 
