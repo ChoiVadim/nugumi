@@ -889,6 +889,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var mouseMonitor: Any?
     private var lastLeftMouseDownLocation: NSPoint?
+    /// Per-bundle count of consecutive selection-gesture attempts that returned
+    /// no readable text. Apps like KakaoTalk expose neither AX text attributes
+    /// nor a working Cmd+C path, so the floating bar silently never appears —
+    /// this counter lets us surface a one-time hint pointing users at
+    /// Screenshot Translation instead.
+    private var unreadableSelectionFailureCounts: [String: Int] = [:]
+    private static let unreadableSelectionFailureThreshold = 3
+    private static let unreadableSelectionHintShownDefaultsKey = "unreadableSelectionHintShownBundles"
     private let selectionReader = SelectionReader()
     private let ollamaBaseURL = URL(string: "http://127.0.0.1:11434")!
     private var currentBackend: any LLMBackend {
@@ -912,6 +920,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var translateButtonController: FloatingTranslateButtonController?
     private var floatingLoadingBar: FloatingTranslateButtonController?
     private var floatingTargetButton: FloatingTranslateButtonController?
+    /// Round loading bubble shown in place of the Ask Nugumi pill while a
+    /// question is in flight. Unlike the pill, it has no outside-click
+    /// monitors, so clicking elsewhere can't dismiss the in-flight request.
+    private var askFloatingLoadingBar: FloatingTranslateButtonController?
     private var petController: PetController?
     private var translationPanelController: TranslationPanelController?
     private var askPromptController: AskPromptController?
@@ -1280,6 +1292,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             petController?.setPromptLoading()
         }
 
+        // Hide the wide "Ask Nugumi" pill and surface the round loading bar
+        // instead. The pill's outside-click monitors close the panel on any
+        // background click, which currently kills in-flight requests; the
+        // small loading bar has `ignoresMouseEvents = true` and no global
+        // click monitors, so the user can click anywhere without losing
+        // the answer. If the request fails, `AskPromptController.showError`
+        // calls `panel.makeKeyAndOrderFront` and the pill reappears with
+        // the error text.
+        if selectionDisplayMode != .pet, let prompt = askPromptController {
+            let pillCenter = prompt.panelCenter
+            prompt.hidePanel()
+            showAskFloatingLoadingBar(at: pillCenter)
+        }
+
         let cursorLocation = NSEvent.mouseLocation
         let backend = askBackend
         askNugumiTask = Task { [weak self] in
@@ -1350,6 +1376,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         guard askNugumiRequestID == requestID else { return }
         clearAskNugumiRequestIfCurrent(requestID)
         recordAskTurn(question: prompt, answer: response.message)
+        hideAskFloatingLoadingBar()
         askPromptController?.close()
         askPromptController = nil
 
@@ -1415,6 +1442,39 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         button.pointAt(point, visibleFrame: capture.visibleFrame)
     }
 
+    /// Brings up the round loading bubble centered on the pill's old
+    /// position so the user sees that the question is in flight after the
+    /// pill is hidden. The button is wired to no-op handlers — it exists
+    /// purely as a visual indicator.
+    @MainActor
+    private func showAskFloatingLoadingBar(at pillCenter: NSPoint) {
+        // The bar's init places the button at
+        // `screenPoint + (5 + buttonSize/2, -buttonSize/2 - 5)` from its
+        // anchor; reverse the math so its center lands on the pill's center.
+        let offsetX = 5 + AskNugumiFloatingTargetPresentationPolicy.buttonSize / 2
+        let offsetY = AskNugumiFloatingTargetPresentationPolicy.buttonSize / 2 + 5
+        let anchor = NSPoint(x: pillCenter.x - offsetX, y: pillCenter.y + offsetY)
+
+        let bar = FloatingTranslateButtonController(
+            screenPoint: anchor,
+            selectedText: "",
+            initialMode: .selection,
+            onTranslate: { _ in },
+            onRewrite: { _ in },
+            onSmartReply: { _ in }
+        )
+        bar.show()
+        bar.setLoading()
+        askFloatingLoadingBar?.close()
+        askFloatingLoadingBar = bar
+    }
+
+    @MainActor
+    private func hideAskFloatingLoadingBar() {
+        askFloatingLoadingBar?.close()
+        askFloatingLoadingBar = nil
+    }
+
     @MainActor
     private func presentPetAskNugumiResult(
         _ response: AskNugumiResponse,
@@ -1446,6 +1506,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func presentAskNugumiFailure(_ error: Error, requestID: UUID) {
         guard askNugumiRequestID == requestID else { return }
         clearAskNugumiRequestIfCurrent(requestID)
+        hideAskFloatingLoadingBar()
 
         if let screenshotError = error as? ScreenshotTranslationError,
            case .screenRecordingPermissionDenied = screenshotError {
@@ -1463,6 +1524,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             petController?.clearPrompt()
             return
         }
+        // `showError` on the hidden pill calls `makeKeyAndOrderFront`, so
+        // the pill reappears at its original spot carrying the error text.
         askPromptController?.showError(error.localizedDescription)
         petController?.showPromptError(error.localizedDescription)
     }
@@ -1477,6 +1540,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController?.clearPrompt()
         floatingTargetButton?.close()
         floatingTargetButton = nil
+        hideAskFloatingLoadingBar()
     }
 
     /// Opens the pet prompt input wired to Ask Nugumi. Reused for the initial
@@ -1523,6 +1587,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController?.clearPrompt()
         floatingTargetButton?.close()
         floatingTargetButton = nil
+        hideAskFloatingLoadingBar()
     }
 
     @MainActor
@@ -2355,22 +2420,50 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Capture the frontmost app at gesture time, not at completion time —
+        // the user may have switched apps during the 80ms+AX-read window, and
+        // we want to attribute the unreadable-selection signal to the app
+        // where the drag actually happened.
+        let isGesture = isLikelySelectionGesture(event)
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let frontmostBundleID = frontmostApp?.bundleIdentifier
+        let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             guard let self else { return }
             let preferClipboard = self.shouldAttemptClipboardSelectionFallback(for: event)
 
+            // Clipboard fallback after a failed AX read covers apps that
+            // expose a text-area-ish AX role (so `preferClipboard` is false)
+            // but don't actually publish `kAXSelectedTextAttribute` —
+            // KakaoTalk chat bubbles being the canonical example. Only allow
+            // it when the user clearly meant to select something; otherwise
+            // a stray click would synthesize Cmd+C for nothing.
             self.selectionReader.readSelectedTextContext(
                 preferClipboard: preferClipboard,
-                allowClipboardFallback: false
+                allowClipboardFallback: isGesture
             ) { [weak self] selection in
                 guard let self else { return }
 
                 guard let selection, !selection.text.isEmpty else {
+                    if isGesture {
+                        self.noteUnreadableSelection(
+                            bundleID: frontmostBundleID,
+                            appName: frontmostAppName
+                        )
+                    }
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
                     self.petController?.clearReady()
                     self.cancelPrefetch()
                     return
+                }
+
+                // The app exposed *some* selection text — even if we end up
+                // discarding it as not meaningful below, that's a "user
+                // selected garbage" case, not an "app blocks access" case.
+                if isGesture {
+                    self.clearUnreadableSelectionCounter(bundleID: frontmostBundleID)
                 }
 
                 let cleanedSelection = TextNormalizer.cleanedSelection(selection.text)
@@ -2447,26 +2540,79 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     private func shouldAttemptClipboardSelectionFallback(for event: NSEvent) -> Bool {
-        guard event.type == .leftMouseUp else {
-            return false
-        }
-
-        let isSelectionGesture: Bool
-        if event.clickCount >= 2 {
-            isSelectionGesture = true
-        } else if let downLocation = lastLeftMouseDownLocation {
-            let upLocation = NSEvent.mouseLocation
-            let distance = hypot(upLocation.x - downLocation.x, upLocation.y - downLocation.y)
-            isSelectionGesture = distance >= 15
-        } else {
-            isSelectionGesture = false
-        }
-
-        guard isSelectionGesture else {
+        guard isLikelySelectionGesture(event) else {
             return false
         }
 
         return !selectionReader.isLikelyEditableElementAtMouseLocation()
+    }
+
+    private func isLikelySelectionGesture(_ event: NSEvent) -> Bool {
+        guard event.type == .leftMouseUp else {
+            return false
+        }
+
+        if event.clickCount >= 2 {
+            return true
+        }
+
+        guard let downLocation = lastLeftMouseDownLocation else {
+            return false
+        }
+
+        let upLocation = NSEvent.mouseLocation
+        let distance = hypot(upLocation.x - downLocation.x, upLocation.y - downLocation.y)
+        return distance >= 15
+    }
+
+    private func clearUnreadableSelectionCounter(bundleID: String?) {
+        guard let bundleID else { return }
+        unreadableSelectionFailureCounts[bundleID] = 0
+    }
+
+    private func noteUnreadableSelection(bundleID: String?, appName: String) {
+        guard selectionDisplayMode != .off else { return }
+        guard let bundleID, bundleID != Bundle.main.bundleIdentifier else { return }
+        // UNUserNotificationCenter.current() aborts in non-bundle contexts
+        // (`swift run`). Skipping here also avoids polluting the persistent
+        // "already shown" set with bundles seen only during dev, which would
+        // suppress the hint forever in the user-facing .app build.
+        guard isRunningFromAppBundle else { return }
+
+        let next = (unreadableSelectionFailureCounts[bundleID] ?? 0) + 1
+        unreadableSelectionFailureCounts[bundleID] = next
+
+        guard next >= Self.unreadableSelectionFailureThreshold else { return }
+
+        let defaults = UserDefaults.standard
+        let key = Self.unreadableSelectionHintShownDefaultsKey
+        var shown = Set(defaults.stringArray(forKey: key) ?? [])
+        guard !shown.contains(bundleID) else { return }
+        shown.insert(bundleID)
+        defaults.set(Array(shown).sorted(), forKey: key)
+
+        Self.deliverUnreadableSelectionHint(appName: appName)
+    }
+
+    nonisolated private static func deliverUnreadableSelectionHint(appName: String) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                break
+            default:
+                return
+            }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Nugumi can't read text in \(appName)"
+            content.body = "This app doesn't expose its selection to other apps. Try Screenshot Translation instead."
+            let request = UNNotificationRequest(
+                identifier: "nugumi.selection.unreadable.\(Date().timeIntervalSince1970)",
+                content: content,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        }
     }
 
     @MainActor
@@ -8216,6 +8362,13 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
 
     var isVisible: Bool { panel.isVisible }
 
+    /// Center of the pill's window in screen coordinates. Used by the
+    /// caller to position the substitute floating loading bar at the same
+    /// spot when the pill is hidden during an in-flight question.
+    var panelCenter: NSPoint {
+        NSPoint(x: panel.frame.midX, y: panel.frame.midY)
+    }
+
     init(
         near screenPoint: NSPoint,
         onSubmit: @escaping (String) -> Void,
@@ -8268,6 +8421,14 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         promptInput.reset()
         renderPromptText()
         setPlaceholder("Looking...")
+    }
+
+    /// Visually removes the pill while keeping the controller (and its
+    /// outside-click monitors) alive. `closeIfClickIsOutside` bails on
+    /// `panel.isVisible`, so clicks become no-ops until `showError` brings
+    /// the panel back via `makeKeyAndOrderFront`.
+    func hidePanel() {
+        panel.orderOut(nil)
     }
 
     func showError(_ message: String) {
