@@ -1214,9 +1214,16 @@ extension OnboardingWindowController: NSWindowDelegate {
 
 @MainActor
 final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
-    fileprivate enum PermissionKind {
+    enum PermissionKind {
         case accessibility
         case screenRecording
+
+        var analyticsValue: String {
+            switch self {
+            case .accessibility: return "accessibility"
+            case .screenRecording: return "screen_recording"
+            }
+        }
     }
 
     private enum Page {

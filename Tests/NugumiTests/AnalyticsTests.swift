@@ -22,6 +22,10 @@ final class AnalyticsTests: XCTestCase {
             properties: [
                 "mode": "selection",
                 "target_language": "ko",
+                "permission": "accessibility",
+                "accessibility_status": "granted",
+                "screen_recording_status": "missing",
+                "source_event": "translate_completed",
                 "source_text": "private selected text",
                 "result_text": "private model output",
                 "api_key": "secret",
@@ -39,6 +43,10 @@ final class AnalyticsTests: XCTestCase {
         XCTAssertEqual(event.distinctID, "device-123")
         XCTAssertEqual(event.properties["mode"], "selection")
         XCTAssertEqual(event.properties["target_language"], "ko")
+        XCTAssertEqual(event.properties["permission"], "accessibility")
+        XCTAssertEqual(event.properties["accessibility_status"], "granted")
+        XCTAssertEqual(event.properties["screen_recording_status"], "missing")
+        XCTAssertEqual(event.properties["source_event"], "translate_completed")
         XCTAssertEqual(event.properties["app_version"], "1.2.3")
         XCTAssertEqual(event.properties["build"], "45")
         XCTAssertEqual(event.properties["os"], "macOS 15.0")
@@ -47,6 +55,19 @@ final class AnalyticsTests: XCTestCase {
         XCTAssertNil(event.properties["result_text"])
         XCTAssertNil(event.properties["api_key"])
         XCTAssertNil(event.properties["screenshot"])
+    }
+
+    func testFunnelEventNamesCoverInstallOnboardingPermissionsFirstActionAndErrors() {
+        let names = Set(AnalyticsEventName.allCases.map(\.rawValue))
+
+        XCTAssertTrue(names.contains("app_installed"))
+        XCTAssertTrue(names.contains("app_launched"))
+        XCTAssertTrue(names.contains("onboarding_started"))
+        XCTAssertTrue(names.contains("permissions_prompted"))
+        XCTAssertTrue(names.contains("permission_granted"))
+        XCTAssertTrue(names.contains("permissions_completed"))
+        XCTAssertTrue(names.contains("first_useful_action_completed"))
+        XCTAssertTrue(names.contains("error_occurred"))
     }
 
     func testPostHogBatchRequestShape() throws {

@@ -1222,7 +1222,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         setupDoubleControlDetector()
         setupBootstrap()
         _ = updaterController
-        analyticsClient.track(.appLaunched)
+        analyticsClient.trackInstallIfNeeded()
+        analyticsClient.track(.appLaunched, properties: permissionStatusProperties(
+            accessibilityTrusted: AXIsProcessTrusted(),
+            screenRecordingTrusted: CGPreflightScreenCaptureAccess()
+        ))
     }
 
     private func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
@@ -1438,6 +1442,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         analyticsClient.track(.askScreenCompleted, properties: [
             "model_id": askNugumiModelID
         ])
+        analyticsClient.trackFirstUsefulActionIfNeeded(
+            sourceEvent: .askScreenCompleted,
+            properties: ["model_id": askNugumiModelID]
+        )
         recordAskTurn(question: prompt, answer: response.message)
         hideAskFloatingLoadingBar()
         askPromptController?.close()
@@ -3255,6 +3263,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 if self.accessibilityIsTrusted() {
                     timer.invalidate()
                     self.accessibilityTrustTimer = nil
+                    self.trackPermissionGranted(.accessibility)
                     self.updateMenuState()
                     self.presentPermissionsWindowIfNeeded()
                 }
@@ -3286,6 +3295,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 if CGPreflightScreenCaptureAccess() {
                     timer.invalidate()
                     self.screenRecordingTrustTimer = nil
+                    self.trackPermissionGranted(.screenRecording)
                     self.updateMenuState()
                     self.presentPermissionsWindowIfNeeded()
                 }
@@ -3308,6 +3318,18 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         let hadCompletedFeatureTour = PermissionsWindowController.hasCompletedFeatureTour
+        if !hadCompletedFeatureTour {
+            analyticsClient.track(.onboardingStarted, properties: permissionStatusProperties(
+                accessibilityTrusted: axTrusted,
+                screenRecordingTrusted: scrTrusted
+            ))
+        }
+        if !(axTrusted && scrTrusted) {
+            analyticsClient.track(.permissionsPrompted, properties: permissionStatusProperties(
+                accessibilityTrusted: axTrusted,
+                screenRecordingTrusted: scrTrusted
+            ))
+        }
         let controller = PermissionsWindowController(allowsCompletedReview: force) { [weak self] in
             guard let self else { return }
             if !hadCompletedFeatureTour && PermissionsWindowController.hasCompletedFeatureTour {
@@ -3317,6 +3339,27 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
         permissionsWindowController = controller
         controller.presentAndActivate()
+    }
+
+    private func trackPermissionGranted(_ permission: PermissionsWindowController.PermissionKind) {
+        let axTrusted = AXIsProcessTrusted()
+        let scrTrusted = CGPreflightScreenCaptureAccess()
+        var properties = permissionStatusProperties(
+            accessibilityTrusted: axTrusted,
+            screenRecordingTrusted: scrTrusted
+        )
+        properties["permission"] = permission.analyticsValue
+        analyticsClient.track(.permissionGranted, properties: properties)
+        if axTrusted && scrTrusted {
+            analyticsClient.track(.permissionsCompleted, properties: properties)
+        }
+    }
+
+    private func permissionStatusProperties(accessibilityTrusted: Bool, screenRecordingTrusted: Bool) -> [String: String] {
+        [
+            "accessibility_status": accessibilityTrusted ? "granted" : "missing",
+            "screen_recording_status": screenRecordingTrusted ? "granted" : "missing"
+        ]
     }
 
     private func updateMenuState() {
