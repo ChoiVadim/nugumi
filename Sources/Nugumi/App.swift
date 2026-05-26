@@ -12589,23 +12589,28 @@ final class CodexLoginAlert: NSObject {
         // the modal panel mode, and is thread-safe to call from any thread.
         let block: () -> Void = {
             CodexDebugLog.append("endModalOnMain: main-thread block running")
-            NSApp.stopModal(withCode: code)
-            if let win = activeAlert?.window {
-                CodexDebugLog.append("endModalOnMain: closing alert window")
-                win.orderOut(nil)
-            }
-            if let wakeEvent = NSEvent.otherEvent(
-                with: .applicationDefined,
-                location: .zero,
-                modifierFlags: [],
-                timestamp: 0,
-                windowNumber: 0,
-                context: nil,
-                subtype: 0,
-                data1: 0,
-                data2: 0
-            ) {
-                NSApp.postEvent(wakeEvent, atStart: true)
+            // CFRunLoopPerformBlock(CFRunLoopGetMain(), ...) guarantees this
+            // block executes on the main thread, so the MainActor isolation
+            // assertion below will always hold.
+            MainActor.assumeIsolated {
+                NSApp.stopModal(withCode: code)
+                if let win = activeAlert?.window {
+                    CodexDebugLog.append("endModalOnMain: closing alert window")
+                    win.orderOut(nil)
+                }
+                if let wakeEvent = NSEvent.otherEvent(
+                    with: .applicationDefined,
+                    location: .zero,
+                    modifierFlags: [],
+                    timestamp: 0,
+                    windowNumber: 0,
+                    context: nil,
+                    subtype: 0,
+                    data1: 0,
+                    data2: 0
+                ) {
+                    NSApp.postEvent(wakeEvent, atStart: true)
+                }
             }
             CodexDebugLog.append("endModalOnMain: done")
         }
