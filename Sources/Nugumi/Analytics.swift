@@ -31,12 +31,18 @@ struct AnalyticsEnvironment: Equatable {
 }
 
 enum AnalyticsEventName: String, CaseIterable, Equatable {
+    case appInstalled = "app_installed"
     case appLaunched = "app_launched"
+    case onboardingStarted = "onboarding_started"
     case translateCompleted = "translate_completed"
     case rewriteCompleted = "rewrite_completed"
     case smartReplyCompleted = "smart_reply_completed"
     case askScreenCompleted = "ask_screen_completed"
     case onboardingCompleted = "onboarding_completed"
+    case permissionsPrompted = "permissions_prompted"
+    case permissionGranted = "permission_granted"
+    case permissionsCompleted = "permissions_completed"
+    case firstUsefulActionCompleted = "first_useful_action_completed"
     case modelChanged = "model_changed"
     case errorOccurred = "error_occurred"
 }
@@ -78,6 +84,10 @@ enum PrivacySafeAnalytics {
         "model_id",
         "model_scope",
         "provider",
+        "permission",
+        "accessibility_status",
+        "screen_recording_status",
+        "source_event",
         "error_type",
         "error_context"
     ]
@@ -129,7 +139,10 @@ enum PrivacySafeAnalytics {
 final class AnalyticsClient {
     private static let endpointDefaultsKey = "analytics.posthog.endpoint"
     private static let apiKeyDefaultsKey = "analytics.posthog.apiKey"
+    private static let appInstalledTrackedKey = "analytics.appInstalledTracked.v1"
+    private static let firstUsefulActionTrackedKey = "analytics.firstUsefulActionTracked.v1"
 
+    private let defaults: UserDefaults
     private let session: URLSession
     private let environment: AnalyticsEnvironment
     private let endpoint: URL?
@@ -141,11 +154,26 @@ final class AnalyticsClient {
         session: URLSession = .shared,
         environment: AnalyticsEnvironment = .current
     ) {
+        self.defaults = defaults
         self.session = session
         self.environment = environment
         self.endpoint = Self.configuredEndpoint(defaults: defaults)
         self.apiKey = Self.configuredAPIKey(defaults: defaults)
         self.distinctID = PrivacySafeAnalytics.anonymousDeviceID(defaults: defaults)
+    }
+
+    func trackInstallIfNeeded() {
+        guard !defaults.bool(forKey: Self.appInstalledTrackedKey) else { return }
+        defaults.set(true, forKey: Self.appInstalledTrackedKey)
+        track(.appInstalled)
+    }
+
+    func trackFirstUsefulActionIfNeeded(sourceEvent: AnalyticsEventName, properties: [String: String] = [:]) {
+        guard !defaults.bool(forKey: Self.firstUsefulActionTrackedKey) else { return }
+        defaults.set(true, forKey: Self.firstUsefulActionTrackedKey)
+        var enrichedProperties = properties
+        enrichedProperties["source_event"] = sourceEvent.rawValue
+        track(.firstUsefulActionCompleted, properties: enrichedProperties)
     }
 
     func track(_ event: AnalyticsEventName, properties: [String: String] = [:]) {
@@ -198,27 +226,24 @@ final class AnalyticsClient {
 
 extension AnalyticsClient {
     func trackCompletedUsage(kind: UsageStatsEventKind, targetLanguageID: String, modelID: String) {
+        let event: AnalyticsEventName
         switch kind {
         case .selection, .screenArea:
-            track(.translateCompleted, properties: [
-                "mode": kind.rawValue,
-                "target_language": targetLanguageID,
-                "model_id": modelID
-            ])
+            event = .translateCompleted
         case .draftMessage:
-            track(.rewriteCompleted, properties: [
-                "mode": kind.rawValue,
-                "target_language": targetLanguageID,
-                "model_id": modelID
-            ])
+            event = .rewriteCompleted
         case .smartReply:
-            track(.smartReplyCompleted, properties: [
-                "mode": kind.rawValue,
-                "target_language": targetLanguageID,
-                "model_id": modelID
-            ])
+            event = .smartReplyCompleted
         case .replacement:
-            break
+            return
         }
+
+        let properties = [
+            "mode": kind.rawValue,
+            "target_language": targetLanguageID,
+            "model_id": modelID
+        ]
+        track(event, properties: properties)
+        trackFirstUsefulActionIfNeeded(sourceEvent: event, properties: properties)
     }
 }
