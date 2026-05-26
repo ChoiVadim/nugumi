@@ -941,6 +941,7 @@ private final class TranslationCache {
 final class NugumiApp: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var mouseMonitor: Any?
+    private var keyboardMonitor: Any?
     private var lastLeftMouseDownLocation: NSPoint?
     /// Per-bundle count of consecutive selection-gesture attempts that returned
     /// no readable text. Apps like KakaoTalk expose neither AX text attributes
@@ -1217,6 +1218,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             self?.presentPermissionsWindowIfNeeded()
         }
         startMouseMonitor()
+        startKeyboardMonitor()
         applySelectionDisplayMode()
         setupGlobalHotKeys()
         setupDoubleControlDetector()
@@ -1859,6 +1861,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         if let mouseMonitor {
             NSEvent.removeMonitor(mouseMonitor)
         }
+        if let keyboardMonitor {
+            NSEvent.removeMonitor(keyboardMonitor)
+        }
         petController?.close()
         doubleControlDetector?.stop()
         globalHotKeys.forEach { $0.unregister() }
@@ -2450,6 +2455,89 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
             self.handleMouseUp(event)
         }
+    }
+
+    private func startKeyboardMonitor() {
+        // Global, listen-only — Cmd+A still propagates to the focused app so
+        // its native select-all fires. We just want to know when it happened
+        // so we can read the resulting selection and show the translate UI.
+        keyboardMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self else { return }
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard modifiers == .command, event.keyCode == UInt16(kVK_ANSI_A) else {
+                return
+            }
+            self.handleSelectAll()
+        }
+    }
+
+    private func handleSelectAll() {
+        guard selectionDisplayMode != .off else { return }
+        guard accessibilityIsTrusted() else { return }
+
+        // Cmd+A inside Nugumi's own panels means "select the prompt input",
+        // not "translate everything" — drop those events.
+        let frontmostApp = NSWorkspace.shared.frontmostApplication
+        let frontmostBundleID = frontmostApp?.bundleIdentifier
+        if frontmostBundleID == Bundle.main.bundleIdentifier {
+            return
+        }
+        let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
+
+        // The target app updates its AX selection state after macOS dispatches
+        // the Cmd+A keystroke. Mirror the mouse-up gating delay.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            let preferClipboard = !self.selectionReader.isLikelyEditableElementAtMouseLocation()
+            self.selectionReader.readSelectedTextContext(
+                preferClipboard: preferClipboard,
+                allowClipboardFallback: true
+            ) { [weak self] selection in
+                guard let self else { return }
+
+                guard let selection, !selection.text.isEmpty else {
+                    self.noteUnreadableSelection(
+                        bundleID: frontmostBundleID,
+                        appName: frontmostAppName
+                    )
+                    self.translateButtonController?.close()
+                    self.translateButtonController = nil
+                    self.petController?.clearReady()
+                    self.cancelPrefetch()
+                    return
+                }
+
+                self.clearUnreadableSelectionCounter(bundleID: frontmostBundleID)
+
+                let cleanedSelection = TextNormalizer.cleanedSelection(selection.text)
+                guard !cleanedSelection.isEmpty,
+                      TextNormalizer.looksMeaningful(cleanedSelection)
+                else {
+                    self.translateButtonController?.close()
+                    self.translateButtonController = nil
+                    self.petController?.clearReady()
+                    self.cancelPrefetch()
+                    return
+                }
+
+                let anchor = self.selectAllAnchorPoint(from: selection.selectionRect)
+                self.showTranslateButton(
+                    for: cleanedSelection,
+                    near: anchor,
+                    selectionRect: selection.selectionRect,
+                    panelSide: .right
+                )
+            }
+        }
+    }
+
+    private func selectAllAnchorPoint(from rect: NSRect?) -> NSPoint {
+        // Cmd+A has no mouse-based anchor. Prefer the bottom-right corner of
+        // the reported selection rect; fall back to current pointer position.
+        if let rect, rect.width > 0, rect.height > 0 {
+            return NSPoint(x: rect.maxX, y: rect.minY)
+        }
+        return NSEvent.mouseLocation
     }
 
     @MainActor
