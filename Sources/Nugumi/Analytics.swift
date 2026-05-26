@@ -1,0 +1,224 @@
+import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
+struct AnalyticsEnvironment: Equatable {
+    let appVersion: String
+    let build: String
+    let osVersion: String
+    let architecture: String
+
+    static var current: AnalyticsEnvironment {
+        let info = Bundle.main.infoDictionary ?? [:]
+        return AnalyticsEnvironment(
+            appVersion: info["CFBundleShortVersionString"] as? String ?? "unknown",
+            build: info["CFBundleVersion"] as? String ?? "unknown",
+            osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            architecture: AnalyticsEnvironment.nativeArchitecture
+        )
+    }
+
+    private static var nativeArchitecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #elseif arch(x86_64)
+        return "x86_64"
+        #else
+        return "unknown"
+        #endif
+    }
+}
+
+enum AnalyticsEventName: String, CaseIterable, Equatable {
+    case appLaunched = "app_launched"
+    case translateCompleted = "translate_completed"
+    case rewriteCompleted = "rewrite_completed"
+    case smartReplyCompleted = "smart_reply_completed"
+    case askScreenCompleted = "ask_screen_completed"
+    case onboardingCompleted = "onboarding_completed"
+    case modelChanged = "model_changed"
+    case errorOccurred = "error_occurred"
+}
+
+struct AnalyticsEventPayload: Codable, Equatable {
+    let event: String
+    let distinctID: String
+    let timestamp: String
+    let properties: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case event
+        case distinctID = "distinct_id"
+        case timestamp
+        case properties
+    }
+}
+
+struct PostHogBatchRequest: Codable, Equatable {
+    let apiKey: String
+    let batch: [AnalyticsEventPayload]
+
+    enum CodingKeys: String, CodingKey {
+        case apiKey = "api_key"
+        case batch
+    }
+}
+
+enum PrivacySafeAnalytics {
+    private static let anonymousDeviceIDKey = "analytics.anonymousDeviceID.v1"
+    private static let allowedPropertyKeys: Set<String> = [
+        "app_version",
+        "build",
+        "os",
+        "architecture",
+        "distinct_id",
+        "mode",
+        "target_language",
+        "model_id",
+        "model_scope",
+        "provider",
+        "error_type",
+        "error_context"
+    ]
+
+    static func anonymousDeviceID(defaults: UserDefaults = .standard) -> String {
+        if let existing = defaults.string(forKey: anonymousDeviceIDKey),
+           UUID(uuidString: existing) != nil {
+            return existing
+        }
+
+        let newID = UUID().uuidString
+        defaults.set(newID, forKey: anonymousDeviceIDKey)
+        return newID
+    }
+
+    static func makePayload(
+        event: AnalyticsEventName,
+        distinctID: String,
+        date: Date = Date(),
+        properties: [String: String] = [:],
+        environment: AnalyticsEnvironment = .current
+    ) -> AnalyticsEventPayload {
+        var safeProperties = sanitize(properties)
+        safeProperties["distinct_id"] = distinctID
+        safeProperties["app_version"] = environment.appVersion
+        safeProperties["build"] = environment.build
+        safeProperties["os"] = environment.osVersion
+        safeProperties["architecture"] = environment.architecture
+
+        return AnalyticsEventPayload(
+            event: event.rawValue,
+            distinctID: distinctID,
+            timestamp: ISO8601DateFormatter().string(from: date),
+            properties: safeProperties
+        )
+    }
+
+    private static func sanitize(_ properties: [String: String]) -> [String: String] {
+        properties.reduce(into: [:]) { result, pair in
+            guard allowedPropertyKeys.contains(pair.key) else { return }
+            let trimmed = pair.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            result[pair.key] = String(trimmed.prefix(96))
+        }
+    }
+}
+
+@MainActor
+final class AnalyticsClient {
+    private static let endpointDefaultsKey = "analytics.posthog.endpoint"
+    private static let apiKeyDefaultsKey = "analytics.posthog.apiKey"
+
+    private let session: URLSession
+    private let environment: AnalyticsEnvironment
+    private let endpoint: URL?
+    private let apiKey: String?
+    private let distinctID: String
+
+    init(
+        defaults: UserDefaults = .standard,
+        session: URLSession = .shared,
+        environment: AnalyticsEnvironment = .current
+    ) {
+        self.session = session
+        self.environment = environment
+        self.endpoint = Self.configuredEndpoint(defaults: defaults)
+        self.apiKey = Self.configuredAPIKey(defaults: defaults)
+        self.distinctID = PrivacySafeAnalytics.anonymousDeviceID(defaults: defaults)
+    }
+
+    func track(_ event: AnalyticsEventName, properties: [String: String] = [:]) {
+        guard let endpoint, let apiKey, !apiKey.isEmpty else {
+            return
+        }
+
+        let payload = PrivacySafeAnalytics.makePayload(
+            event: event,
+            distinctID: distinctID,
+            properties: properties,
+            environment: environment
+        )
+        let batch = PostHogBatchRequest(apiKey: apiKey, batch: [payload])
+
+        Task.detached { [session] in
+            do {
+                var request = URLRequest(url: endpoint)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONEncoder().encode(batch)
+                _ = try await session.data(for: request)
+            } catch {
+                // Analytics must never affect product UX. Drop failed events.
+            }
+        }
+    }
+
+    private static func configuredEndpoint(defaults: UserDefaults) -> URL? {
+        if let raw = defaults.string(forKey: endpointDefaultsKey), let url = URL(string: raw) {
+            return url
+        }
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "NugumiPostHogEndpoint") as? String,
+           let url = URL(string: raw) {
+            return url
+        }
+        return URL(string: "https://app.posthog.com/batch/")
+    }
+
+    private static func configuredAPIKey(defaults: UserDefaults) -> String? {
+        if let raw = defaults.string(forKey: apiKeyDefaultsKey), !raw.isEmpty {
+            return raw
+        }
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "NugumiPostHogAPIKey") as? String, !raw.isEmpty {
+            return raw
+        }
+        return nil
+    }
+}
+
+extension AnalyticsClient {
+    func trackCompletedUsage(kind: UsageStatsEventKind, targetLanguageID: String, modelID: String) {
+        switch kind {
+        case .selection, .screenArea:
+            track(.translateCompleted, properties: [
+                "mode": kind.rawValue,
+                "target_language": targetLanguageID,
+                "model_id": modelID
+            ])
+        case .draftMessage:
+            track(.rewriteCompleted, properties: [
+                "mode": kind.rawValue,
+                "target_language": targetLanguageID,
+                "model_id": modelID
+            ])
+        case .smartReply:
+            track(.smartReplyCompleted, properties: [
+                "mode": kind.rawValue,
+                "target_language": targetLanguageID,
+                "model_id": modelID
+            ])
+        case .replacement:
+            break
+        }
+    }
+}
