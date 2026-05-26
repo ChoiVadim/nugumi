@@ -1001,6 +1001,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var lastReplacementSourcePID: pid_t?
     private var translationCache = TranslationCache()
     private let usageStatsStore = UsageStatsStore()
+    private let analyticsClient = AnalyticsClient()
     private var shouldReopenStatusMenuAfterClose = false
     private let snippetsStore = SnippetsStore()
     private lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
@@ -1221,6 +1222,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         setupDoubleControlDetector()
         setupBootstrap()
         _ = updaterController
+        analyticsClient.track(.appLaunched)
     }
 
     private func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
@@ -1433,6 +1435,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     ) {
         guard askNugumiRequestID == requestID else { return }
         clearAskNugumiRequestIfCurrent(requestID)
+        analyticsClient.track(.askScreenCompleted, properties: [
+            "model_id": askNugumiModelID
+        ])
         recordAskTurn(question: prompt, answer: response.message)
         hideAskFloatingLoadingBar()
         askPromptController?.close()
@@ -1568,6 +1573,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         if let screenshotError = error as? ScreenshotTranslationError,
            case .screenRecordingPermissionDenied = screenshotError {
+            analyticsClient.track(.errorOccurred, properties: [
+                "error_type": "screen_recording_permission_denied",
+                "error_context": "ask_screen"
+            ])
             askPromptController?.close()
             askPromptController = nil
             petController?.clearPrompt()
@@ -1582,6 +1591,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             petController?.clearPrompt()
             return
         }
+        analyticsClient.track(.errorOccurred, properties: [
+            "error_type": Self.analyticsErrorType(error),
+            "error_context": "ask_screen"
+        ])
         // `showError` on the hidden pill calls `makeKeyAndOrderFront`, so
         // the pill reappears at its original spot carrying the error text.
         askPromptController?.showError(error.localizedDescription)
@@ -2985,6 +2998,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 kind: usageKind,
                 targetLanguage: language
             )
+            analyticsClient.trackCompletedUsage(
+                kind: usageKind,
+                targetLanguageID: language.id,
+                modelID: textModelID
+            )
             controller.showTranslation(cachedTranslation, requestID: requestID)
             return
         }
@@ -3003,6 +3021,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     resultText: finalTranslation,
                     kind: usageKind,
                     targetLanguage: language
+                )
+                self?.analyticsClient.trackCompletedUsage(
+                    kind: usageKind,
+                    targetLanguageID: language.id,
+                    modelID: self?.textModelID ?? "unknown"
                 )
             } onFailure: { [weak self, weak controller] error in
                 guard let self, let controller else { return }
@@ -3041,6 +3064,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         kind: usageKind,
                         targetLanguage: language
                     )
+                    self.analyticsClient.trackCompletedUsage(
+                        kind: usageKind,
+                        targetLanguageID: language.id,
+                        modelID: self.textModelID
+                    )
                     controller.showTranslation(translated, requestID: requestID)
                 }
             } catch {
@@ -3048,6 +3076,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     if self.handleTranslationFailure(error, controller: controller) {
                         return
                     }
+                    self.analyticsClient.track(.errorOccurred, properties: [
+                        "error_type": Self.analyticsErrorType(error),
+                        "error_context": "translation"
+                    ])
                     controller.showError(Self.translationPanelErrorMessage(for: error), requestID: requestID)
                 }
             }
@@ -3077,6 +3109,23 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         case .ollama, .emptyResponse, .modelDownloading, .rateLimited, .cloudError:
             return false
         }
+    }
+
+    private static func analyticsErrorType(_ error: Error) -> String {
+        if let translationError = error as? TranslationError {
+            switch translationError {
+            case .ollama: return "ollama"
+            case .emptyResponse: return "empty_response"
+            case .modelDownloading: return "model_downloading"
+            case .serverUnavailable: return "server_unavailable"
+            case .modelMissing: return "model_missing"
+            case .signInRequired: return "sign_in_required"
+            case .invalidAPIKey: return "invalid_api_key"
+            case .rateLimited: return "rate_limited"
+            case .cloudError: return "cloud_error"
+            }
+        }
+        return String(describing: type(of: error))
     }
 
     private static func translationPanelErrorMessage(for error: Error) -> String {
@@ -3258,8 +3307,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        let hadCompletedFeatureTour = PermissionsWindowController.hasCompletedFeatureTour
         let controller = PermissionsWindowController(allowsCompletedReview: force) { [weak self] in
-            self?.permissionsWindowController = nil
+            guard let self else { return }
+            if !hadCompletedFeatureTour && PermissionsWindowController.hasCompletedFeatureTour {
+                self.analyticsClient.track(.onboardingCompleted)
+            }
+            self.permissionsWindowController = nil
         }
         permissionsWindowController = controller
         controller.presentAndActivate()
@@ -3755,6 +3809,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         kind: .draftMessage,
                         targetLanguage: language
                     )
+                    self.analyticsClient.trackCompletedUsage(
+                        kind: .draftMessage,
+                        targetLanguageID: language.id,
+                        modelID: self.textModelID
+                    )
                     self.hideInstantTranslationLoading(loadingBar)
                     self.replaceCurrentSelection(with: translated)
                 }
@@ -3764,6 +3823,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     self.hideInstantTranslationLoading(loadingBar)
                     let routedToOnboarding = self.handleTranslationFailure(error)
                     if !routedToOnboarding {
+                        self.analyticsClient.track(.errorOccurred, properties: [
+                            "error_type": Self.analyticsErrorType(error),
+                            "error_context": "instant_rewrite"
+                        ])
                         self.presentSelectionTranslationError(
                             error.localizedDescription,
                             title: "Translation failed"
@@ -4128,6 +4191,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @MainActor
     private func applyModelSelection(_ modelID: String, for scope: ModelUseScope) {
         setModelID(modelID, for: scope)
+        analyticsClient.track(.modelChanged, properties: [
+            "model_id": modelID,
+            "model_scope": scope.rawValue
+        ])
         cancelPrefetch()
         translationCache = TranslationCache()
         onModelSelectionChanged(for: scope)

@@ -24,6 +24,10 @@
 	<string>Nugumi uses Accessibility to read the currently selected text and translate it.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Nugumi captures the selected screen area so it can recognize visible text and translate it.</string>
+	<key>NugumiPostHogAPIKey</key>
+	<string>phc_sFcbh5NcPxOFnpEOoQhxTRQ6dFo667xQX8c10P9cUZ9</string>
+	<key>NugumiPostHogEndpoint</key>
+	<string>https://app.posthog.com/batch/</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
