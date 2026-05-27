@@ -383,7 +383,7 @@ enum AskNugumiPromptInputMetrics {
     private static let textY: CGFloat = 52
     private static let textWidth: CGFloat = 116
     private static let minimumTextHeight: CGFloat = 22
-    private static let topTextInset: CGFloat = 24
+    private static let topTextInset: CGFloat = 30
     private static let bubbleBottomInset: CGFloat = 38
 
     static func layout(forContentHeight contentHeight: CGFloat) -> AskNugumiPromptInputLayout {
@@ -509,8 +509,8 @@ enum AskNugumiPetDismissalPolicy {
 }
 
 enum PetSelectionStatusPolicy {
-    static func shouldPreserveCurrentStatus(isThinking: Bool) -> Bool {
-        isThinking
+    static func shouldPreserveCurrentStatus(isThinking: Bool, isPromptVisible: Bool) -> Bool {
+        isThinking || isPromptVisible
     }
 }
 

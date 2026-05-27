@@ -1245,6 +1245,7 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
         static var all: [FeatureTourStep] {
             let translateShortcut = GlobalShortcutStore.shortcut(for: .translateOrReply).displayString
             let rewriteShortcut = GlobalShortcutStore.shortcut(for: .translateSelection).displayString
+            let askShortcut = GlobalShortcutStore.shortcut(for: .askNugumi)
 
             return [
                 FeatureTourStep(
@@ -1285,13 +1286,49 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
                     title: "Ask what to click",
                     body: "Nugumi can look at the current screen when you ask, explain what is happening, and point you to the next button or field.",
                     actionTitle: "Open the prompt near your cursor",
-                    actionDetail: "Press Control twice, type your question, then press Return.",
-                    shortcutLabel: "Control x2",
+                    actionDetail: askActionDetail(for: askShortcut),
+                    shortcutLabel: askShortcutLabel(for: askShortcut),
                     shortcutDetail: "Use it on websites, forms, dialogs, and apps.",
                     symbolName: "cursorarrow.click.2",
                     videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")!
                 )
             ]
+        }
+
+        private static func askShortcutLabel(for shortcut: GlobalShortcut) -> String {
+            switch shortcut.kind {
+            case .doubleTap:
+                let glyph = shortcut.displayString
+                // displayString for doubleTap repeats the modifier glyph twice
+                // (e.g. "⌃⌃"). Convert into a friendlier "Control x2" form.
+                let single = String(glyph.prefix(glyph.count / 2))
+                let name = modifierName(forGlyph: single)
+                return "\(name) x2"
+            case .combo:
+                return shortcut.displayString
+            }
+        }
+
+        private static func askActionDetail(for shortcut: GlobalShortcut) -> String {
+            switch shortcut.kind {
+            case .doubleTap:
+                let glyph = shortcut.displayString
+                let single = String(glyph.prefix(glyph.count / 2))
+                let name = modifierName(forGlyph: single)
+                return "Press \(name) twice, type your question, then press Return."
+            case .combo:
+                return "Press \(shortcut.displayString), type your question, then press Return."
+            }
+        }
+
+        private static func modifierName(forGlyph glyph: String) -> String {
+            switch glyph {
+            case "⌃": return "Control"
+            case "⌥": return "Option"
+            case "⇧": return "Shift"
+            case "⌘": return "Command"
+            default: return glyph
+            }
         }
     }
 

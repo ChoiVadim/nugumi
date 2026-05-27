@@ -742,153 +742,6 @@ struct CompositionSettings: Equatable {
     let snippets: [Snippet]
 }
 
-@MainActor
-private final class TranslationPrefetch {
-    private enum State {
-        case pending
-        case running
-        case completed(String)
-        case failed(Error)
-        case cancelled
-    }
-
-    let text: String
-    let images: [ImageInput]
-    let targetLanguage: TranslationLanguage
-    let thinkingLevel: ThinkingLevel
-    let appCategory: AppCategory
-    private let backend: any LLMBackend
-    private var task: Task<Void, Never>?
-    private var state: State = .pending
-    private var partialTranslation = ""
-    private var subscribers: [(String) -> Void] = []
-    private var completionSubscribers: [(String) -> Void] = []
-    private var failureSubscribers: [(Error) -> Void] = []
-    private let onComplete: (String, TranslationLanguage, ThinkingLevel, String) -> Void
-
-    init(
-        text: String,
-        images: [ImageInput] = [],
-        targetLanguage: TranslationLanguage,
-        thinkingLevel: ThinkingLevel,
-        appCategory: AppCategory,
-        backend: any LLMBackend,
-        onComplete: @escaping (String, TranslationLanguage, ThinkingLevel, String) -> Void
-    ) {
-        self.text = text
-        self.images = images
-        self.targetLanguage = targetLanguage
-        self.thinkingLevel = thinkingLevel
-        self.appCategory = appCategory
-        self.backend = backend
-        self.onComplete = onComplete
-    }
-
-    func startAfterDelay(milliseconds: UInt64) {
-        guard task == nil else { return }
-
-        task = Task { [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
-                try Task.checkCancellation()
-                await self?.start()
-            } catch {
-                self?.markCancelled()
-            }
-        }
-    }
-
-    func subscribe(
-        onPartial: @escaping (String) -> Void,
-        onCompletion: @escaping (String) -> Void,
-        onFailure: @escaping (Error) -> Void
-    ) {
-        if !partialTranslation.isEmpty {
-            onPartial(partialTranslation)
-        }
-
-        switch state {
-        case .completed(let translation):
-            onPartial(translation)
-            onCompletion(translation)
-        case .failed(let error):
-            onFailure(error)
-        default:
-            subscribers.append(onPartial)
-            completionSubscribers.append(onCompletion)
-            failureSubscribers.append(onFailure)
-        }
-    }
-
-    func ensureStartedNow() {
-        switch state {
-        case .pending:
-            task?.cancel()
-            task = Task { [weak self] in
-                await self?.start()
-            }
-        default:
-            break
-        }
-    }
-
-    func cancel() {
-        task?.cancel()
-        state = .cancelled
-        subscribers.removeAll()
-        completionSubscribers.removeAll()
-        failureSubscribers.removeAll()
-    }
-
-    private func start() async {
-        guard case .pending = state else { return }
-        state = .running
-
-        do {
-            let finalTranslation = try await backend.translate(
-                text,
-                images: images,
-                to: targetLanguage,
-                mode: .selection,
-                appCategory: appCategory,
-                composition: nil,
-                thinkingLevel: thinkingLevel
-            ) { [weak self] partial in
-                Task { @MainActor in
-                    self?.publishPartial(partial)
-                }
-            }
-            state = .completed(finalTranslation)
-            onComplete(text, targetLanguage, thinkingLevel, finalTranslation)
-            publishPartial(finalTranslation)
-            completionSubscribers.forEach { $0(finalTranslation) }
-            subscribers.removeAll()
-            completionSubscribers.removeAll()
-            failureSubscribers.removeAll()
-        } catch is CancellationError {
-            markCancelled()
-        } catch {
-            state = .failed(error)
-            failureSubscribers.forEach { $0(error) }
-            subscribers.removeAll()
-            completionSubscribers.removeAll()
-            failureSubscribers.removeAll()
-        }
-    }
-
-    private func publishPartial(_ partial: String) {
-        partialTranslation = partial
-        subscribers.forEach { $0(partial) }
-    }
-
-    private func markCancelled() {
-        state = .cancelled
-        subscribers.removeAll()
-        completionSubscribers.removeAll()
-        failureSubscribers.removeAll()
-    }
-}
-
 private final class TranslationCache {
     private let maxEntries: Int
     private var entries: [String: String] = [:]
@@ -989,7 +842,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var askNugumiTask: Task<Void, Never>?
     private var askNugumiRequestID: UUID?
     private var askHistory: [AskNugumiTurn] = []
-    private var translationPrefetch: TranslationPrefetch?
     private var isScreenshotTranslationRunning = false
     private var isAskNugumiRunning = false
     private var screenshotDragStartLocation: NSPoint?
@@ -997,7 +849,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var screenshotPanelSide: TranslationPanelController.Side?
     private var screenshotDragTracker: ScreenshotDragTracker?
     private var globalHotKeys: [GlobalHotKey] = []
-    private var doubleControlDetector: DoubleControlPressDetector?
+    private var modifierDetectors: [DoubleModifierPressDetector] = []
     private var shortcutRecorderWindowController: ShortcutRecorderWindowController?
     private var lastReplacementSourcePID: pid_t?
     private var translationCache = TranslationCache()
@@ -1192,9 +1044,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private let prefetchDelayMilliseconds: UInt64 = 220
-    private let prefetchMaxCharacterCount = 1_200
-
     static func main() {
         let app = NSApplication.shared
         let delegate = NugumiApp()
@@ -1221,7 +1070,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         startKeyboardMonitor()
         applySelectionDisplayMode()
         setupGlobalHotKeys()
-        setupDoubleControlDetector()
         setupBootstrap()
         _ = updaterController
         analyticsClient.trackInstallIfNeeded()
@@ -1237,60 +1085,43 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     private func setupGlobalHotKeys() {
         globalHotKeys.forEach { $0.unregister() }
+        globalHotKeys.removeAll()
+        modifierDetectors.forEach { $0.stop() }
+        modifierDetectors.removeAll()
 
-        let screenshotHotKey = GlobalHotKey(
-            definition: GlobalHotKeyDefinition(
-                action: .screenshotArea,
-                shortcut: shortcut(for: .screenshotArea)
-            )
-        ) { [weak self] in
-            self?.startScreenshotTranslation()
-        }
-        let translateSelectionHotKey = GlobalHotKey(
-            definition: GlobalHotKeyDefinition(
-                action: .translateSelection,
-                shortcut: shortcut(for: .translateSelection)
-            )
-        ) { [weak self] in
-            self?.startSelectedTextTranslationForReplacement()
-        }
-        let translateOrReplyHotKey = GlobalHotKey(
-            definition: GlobalHotKeyDefinition(
-                action: .translateOrReply,
-                shortcut: shortcut(for: .translateOrReply)
-            )
-        ) { [weak self] in
-            self?.startSelectionTranslateOrReply()
-        }
-        let toggleInvisibilityHotKey = GlobalHotKey(
-            definition: GlobalHotKeyDefinition(
-                action: .toggleInvisibility,
-                shortcut: shortcut(for: .toggleInvisibility)
-            )
-        ) { [weak self] in
-            self?.toggleInvisibilityMode()
-        }
-        globalHotKeys = [
-            screenshotHotKey,
-            translateSelectionHotKey,
-            translateOrReplyHotKey,
-            toggleInvisibilityHotKey
+        let bindings: [(GlobalShortcutAction, @MainActor () -> Void)] = [
+            (.screenshotArea, { [weak self] in self?.startScreenshotTranslation() }),
+            (.translateSelection, { [weak self] in self?.startSelectedTextTranslationForReplacement() }),
+            (.translateOrReply, { [weak self] in self?.startSelectionTranslateOrReply() }),
+            (.toggleInvisibility, { [weak self] in self?.toggleInvisibilityMode() }),
+            (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() })
         ]
-        globalHotKeys.forEach { $0.register() }
-    }
 
-    private func setupDoubleControlDetector() {
-        let detector = DoubleControlPressDetector { [weak self] in
-            self?.startAskNugumiPrompt()
+        for (action, handler) in bindings {
+            let shortcut = shortcut(for: action)
+            switch shortcut.kind {
+            case .combo:
+                let hotKey = GlobalHotKey(
+                    definition: GlobalHotKeyDefinition(action: action, shortcut: shortcut),
+                    onPressed: handler
+                )
+                globalHotKeys.append(hotKey)
+                hotKey.register()
+            case .doubleTap:
+                let detector = DoubleModifierPressDetector(
+                    modifier: shortcut.modifiers,
+                    onDetected: handler
+                )
+                modifierDetectors.append(detector)
+                detector.start()
+            }
         }
-        doubleControlDetector = detector
-        detector.start()
     }
 
     @MainActor
     private func startAskNugumiPrompt() {
-        // Double-Control toggles: if any Ask Nugumi UI (prompt, loading,
-        // answer, or an in-flight request) is already up, dismiss it instead
+        // Toggle: if any Ask Nugumi UI (prompt, loading, answer, or an
+        // in-flight request) is already up, the shortcut dismisses it instead
         // of opening another one.
         let askUIOpen = isAskNugumiRunning
             || askPromptController?.isVisible == true
@@ -1306,7 +1137,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         floatingTargetButton = nil
         translationPanelController?.close()
         translationPanelController = nil
-        cancelPrefetch()
 
         if selectionDisplayMode == .pet {
             presentPetAskPrompt()
@@ -1625,7 +1455,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     /// Opens the pet prompt input wired to Ask Nugumi. Reused for the initial
-    /// double-Control prompt and for the answer bubble's "continue" button —
+    /// shortcut-triggered prompt and for the answer bubble's "continue" button —
     /// `askHistory` persists across the session so follow-ups keep context.
     @MainActor
     private func presentPetAskPrompt() {
@@ -1657,7 +1487,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     /// Tears down every Ask Nugumi surface (pet prompt/answer, standalone
-    /// prompt window, in-flight request). Used by the double-Control toggle.
+    /// prompt window, in-flight request). Used by the Ask Nugumi shortcut toggle.
     @MainActor
     private func dismissAskNugumi() {
         if isAskNugumiRunning {
@@ -1865,7 +1695,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(keyboardMonitor)
         }
         petController?.close()
-        doubleControlDetector?.stop()
+        modifierDetectors.forEach { $0.stop() }
+        modifierDetectors.removeAll()
         globalHotKeys.forEach { $0.unregister() }
         accessibilityTrustTimer?.invalidate()
         accessibilityTrustTimer = nil
@@ -2503,7 +2334,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
                     self.petController?.clearReady()
-                    self.cancelPrefetch()
                     return
                 }
 
@@ -2516,7 +2346,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
                     self.petController?.clearReady()
-                    self.cancelPrefetch()
                     return
                 }
 
@@ -2551,7 +2380,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             petController = nil
             translateButtonController?.close()
             translateButtonController = nil
-            cancelPrefetch()
         case .pet:
             translateButtonController?.close()
             translateButtonController = nil
@@ -2566,6 +2394,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     private func handleMouseUp(_ event: NSEvent) {
         guard accessibilityIsTrusted() else {
+            return
+        }
+
+        // The shortcut recorder is up. Any synthesized ⌘+C we'd post during
+        // the clipboard fallback below would land in Nugumi (now frontmost)
+        // and the recorder field would capture it as the user's shortcut —
+        // see KeyboardShortcutPoster.postCommandShortcut. Hard-skip while the
+        // recorder is open.
+        if shortcutRecorderWindowController != nil {
             return
         }
 
@@ -2587,6 +2424,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             guard let self else { return }
+            // The async window is long enough for the user to have brought
+            // Nugumi to the front (e.g. opened the menu to set a shortcut).
+            // Re-check before posting any synthetic keystrokes.
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier {
+                return
+            }
+            if self.shortcutRecorderWindowController != nil {
+                return
+            }
             let preferClipboard = self.shouldAttemptClipboardSelectionFallback(for: event)
 
             // Clipboard fallback after a failed AX read covers apps that
@@ -2611,7 +2457,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
                     self.petController?.clearReady()
-                    self.cancelPrefetch()
                     return
                 }
 
@@ -2629,7 +2474,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
                     self.petController?.clearReady()
-                    self.cancelPrefetch()
                     return
                 }
 
@@ -2783,22 +2627,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController?.clearReady()
 
         guard selectionDisplayMode != .off else {
-            cancelPrefetch()
             return
         }
 
         let primaryMode = floatingDefaultMode.translationMode
-        if primaryMode == .selection {
-            let language = targetLanguage
-            let currentThinkingLevel = textThinkingLevel
-            if translationCache.translation(for: selectedText, targetLanguage: language, thinkingLevel: currentThinkingLevel) == nil {
-                startPrefetchIfEligible(for: selectedText)
-            } else {
-                cancelPrefetch()
-            }
-        } else {
-            cancelPrefetch()
-        }
 
         if selectionDisplayMode == .pet {
             if petController == nil {
@@ -2885,7 +2717,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         panelSide: TranslationPanelController.Side = .right,
         keepPetReadyUntilPanelCloses: Bool = false
     ) {
-        cancelPrefetch()
         lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
         let cleanedDraft = TextNormalizer.cleanedDraftMessage(text)
@@ -2930,7 +2761,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         panelSide: TranslationPanelController.Side = .right,
         keepPetReadyUntilPanelCloses: Bool = false
     ) {
-        cancelPrefetch()
         translate(
             text,
             near: screenPoint,
@@ -3103,37 +2933,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        if useCache,
-           let translationPrefetch,
-           translationPrefetch.text == text,
-           translationPrefetch.targetLanguage == language,
-           translationPrefetch.thinkingLevel == thinkingLevel,
-           translationPrefetch.appCategory == appCategory {
-            translationPrefetch.subscribe { partialTranslation in
-                controller.showTranslation(partialTranslation, requestID: requestID)
-            } onCompletion: { [weak self] finalTranslation in
-                self?.usageStatsStore.recordUse(
-                    sourceText: text,
-                    resultText: finalTranslation,
-                    kind: usageKind,
-                    targetLanguage: language
-                )
-                self?.analyticsClient.trackCompletedUsage(
-                    kind: usageKind,
-                    targetLanguageID: language.id,
-                    modelID: self?.textModelID ?? "unknown"
-                )
-            } onFailure: { [weak self, weak controller] error in
-                guard let self, let controller else { return }
-                if self.handleTranslationFailure(error, controller: controller) {
-                    return
-                }
-                controller.showError(Self.translationPanelErrorMessage(for: error), requestID: requestID)
-            }
-            translationPrefetch.ensureStartedNow()
-            return
-        }
-
         let backend = currentBackend
         Task {
             do {
@@ -3288,41 +3087,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func startPrefetchIfEligible(for text: String) {
-        cancelPrefetch()
-
-        guard text.count <= prefetchMaxCharacterCount else {
-            return
-        }
-
-        // Don't burn API calls while the translator isn't ready — the request
-        // would only surface a 404/connection error inside the prefetch.
-        guard bootstrap.isReady(for: textModelID) else {
-            return
-        }
-
-        let language = targetLanguage
-        let currentThinkingLevel = textThinkingLevel
-        let (_, appCategory) = AppCategoryClassifier.detectFrontmost()
-        let prefetch = TranslationPrefetch(
-            text: text,
-            targetLanguage: language,
-            thinkingLevel: currentThinkingLevel,
-            appCategory: appCategory,
-            backend: currentBackend
-        ) { [weak self] sourceText, targetLanguage, thinkingLevel, translation in
-            self?.translationCache.store(translation, for: sourceText, targetLanguage: targetLanguage, thinkingLevel: thinkingLevel)
-        }
-        translationPrefetch = prefetch
-        prefetch.startAfterDelay(milliseconds: prefetchDelayMilliseconds)
-    }
-
-    @MainActor
-    private func cancelPrefetch() {
-        translationPrefetch?.cancel()
-        translationPrefetch = nil
-    }
-
     private func requestAccessibilityPermissionIfNeeded() {
         // prompt:false silently registers Nugumi in System Settings → Privacy &
         // Security → Accessibility (so the TCC entry exists and the user can find
@@ -3802,7 +3566,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         translateButtonController?.close()
         translateButtonController = nil
         petController?.clearReady()
-        cancelPrefetch()
 
         let mode = floatingDefaultMode
 
@@ -3862,7 +3625,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        cancelPrefetch()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self else { return }
@@ -4063,7 +3825,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController?.clearReady()
         translationPanelController?.close()
         translationPanelController = nil
-        cancelPrefetch()
 
         Task { [weak self] in
             do {
@@ -4171,7 +3932,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         targetLanguage = TranslationLanguage.language(id: languageID)
-        cancelPrefetch()
         translationPanelController?.close()
         translationPanelController = nil
         updateMenuState()
@@ -4227,7 +3987,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         setThinkingLevel(selection.level, for: selection.scope)
         if selection.scope == .textActions {
-            cancelPrefetch()
         }
         updateMenuState()
     }
@@ -4326,7 +4085,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             "model_id": modelID,
             "model_scope": scope.rawValue
         ])
-        cancelPrefetch()
         translationCache = TranslationCache()
         onModelSelectionChanged(for: scope)
         updateMenuState()
@@ -4414,7 +4172,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
               let action = GlobalShortcutAction(rawValue: raw)
         else { return }
 
-        doubleControlDetector?.isEnabled = false
+        // Suspend every double-tap detector so the recorder owns flagsChanged
+        // events while the panel is up; otherwise the very modifier the user
+        // is trying to bind would also fire its currently-bound action.
+        modifierDetectors.forEach { $0.isEnabled = false }
         shortcutRecorderWindowController?.close()
         let controller = ShortcutRecorderWindowController(
             action: action,
@@ -4423,7 +4184,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 self?.setKeyboardShortcut(shortcut, for: action) ?? false
             },
             onClose: { [weak self] in
-                self?.doubleControlDetector?.isEnabled = true
+                self?.modifierDetectors.forEach { $0.isEnabled = true }
                 self?.shortcutRecorderWindowController = nil
             }
         )
@@ -4496,7 +4257,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         GlobalShortcutStore.resetToDefaults(defaults: defaults)
         shortcutRecorderWindowController?.close()
-        cancelPrefetch()
         translationCache = TranslationCache()
         translationPanelController?.close()
         translationPanelController = nil
@@ -6340,10 +6100,39 @@ private final class PetPromptBubbleView: NSView {
     }
     private var targetMarkerFrame = 0
 
+    /// When set, the bubble becomes a drag handle: clicks on the bubble
+    /// background (areas not covered by text or buttons) start a drag that
+    /// the closure handles. The closure receives the initial screen-space
+    /// mouse location captured at mouseDown so the drag anchor is precise.
+    /// Text selection and button clicks still work because their views sit
+    /// above this view in z-order and AppKit asks them first.
+    var onDragRequested: ((NSPoint) -> Void)?
+
     override var isOpaque: Bool { false }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
+        // Opt-in: stay click-through (current behavior) unless a drag handler
+        // is wired in. Lets targetMarkerView keep its non-interactive behavior.
+        guard onDragRequested != nil else { return nil }
+        return bounds.contains(point) ? self : nil
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if onDragRequested != nil {
+            addCursorRect(bounds, cursor: .openHand)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let onDragRequested else {
+            super.mouseDown(with: event)
+            return
+        }
+        let startLocation = NSEvent.mouseLocation
+        NSCursor.closedHand.push()
+        onDragRequested(startLocation)
+        NSCursor.pop()
     }
 
     func advanceTargetMarkerBlink() {
@@ -6565,10 +6354,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private let continueButton = NSButton()
     private var workspaceObserver: NSObjectProtocol?
     private var trackingTimer: Timer?
+    private var throwTimer: Timer?
+    private var throwVelocity: NSPoint = .zero
     private var tabInterceptor: TabKeyInterceptor?
-    private var promptKeyInterceptor: PromptKeyInterceptor?
-    private var promptGlobalOutsideClickMonitor: Any?
-    private var promptLocalOutsideClickMonitor: Any?
     private var selectedText: String?
     private var onTranslate: ((String) -> Void)?
     private var onRewrite: ((String) -> Void)?
@@ -6583,7 +6371,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var isPromptLoading = false
     private var isAnswerOpen = false
     private var promptBuffer = ""
-    private var promptHasFullSelection = false
     private var currentPromptInputLayout = AskNugumiPromptInputMetrics.layout(forContentHeight: 0)
     private var currentAnswerLayout = AskNugumiAnswerBubbleMetrics.layout(forContentHeight: 0)
     private var currentAnswerMarkerTarget: NSPoint?
@@ -6594,6 +6381,11 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var lastCursorLocation = NSEvent.mouseLocation
     private var lastCursorMovementDate = Date.distantPast
     private var cursorOffset = PetController.defaultCursorOffset
+    /// Exponentially-smoothed per-frame cursor velocity. The trailing side
+    /// commits off this smoothed vector instead of per-frame movement, so
+    /// sub-pixel tremor and tiny zig-zags can't flip the pet left/right every
+    /// tick. Reset implicitly via decay when the cursor stops.
+    private var smoothedCursorVelocity: NSPoint = .zero
     private var isReadyState: Bool {
         selectedText != nil || isReadyLockedUntilPanelCloses
     }
@@ -6647,7 +6439,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         let initialPromptInputLayout = AskNugumiPromptInputMetrics.layout(forContentHeight: 0)
         promptPanel = PetPanel(
             contentRect: NSRect(origin: origin, size: initialPromptInputLayout.panelSize),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -6727,6 +6519,10 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptBubbleView.alphaValue = 0
         promptBubbleView.isHidden = true
         promptContainerView.addSubview(promptBubbleView)
+
+        promptBubbleView.onDragRequested = { [weak self] startLocation in
+            self?.beginBubbleDrag(initialMouseLocation: startLocation)
+        }
 
         targetMarkerView.drawsBubble = false
         targetMarkerView.autoresizingMask = [.width, .height]
@@ -6897,7 +6693,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         petView.apply(state: .idle, mode: currentMode)
 
         promptBuffer = ""
-        promptHasFullSelection = false
         promptTextField.isEnabled = true
         configurePromptTextFieldForInput()
         renderPromptText()
@@ -6914,8 +6709,13 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptPanel.alphaValue = 1
         show()
         promptPanel.orderFrontRegardless()
-        installPromptKeyInterceptor()
-        installPromptOutsideClickMonitors()
+        focusPromptField()
+        petView.onDoubleClick = { [weak self] in
+            self?.closePromptFromUser()
+        }
+        petView.onDragRequested = { [weak self] startLocation in
+            self?.beginBubbleDrag(initialMouseLocation: startLocation)
+        }
     }
 
     func focusPrompt() {
@@ -6935,13 +6735,13 @@ final class PetController: NSObject, NSTextFieldDelegate {
         currentAnswerMarkerTarget = nil
         hideTargetMarker()
         isThinking = true
-        promptHasFullSelection = false
-        removePromptOutsideClickMonitors()
-        removePromptKeyInterceptor()
         promptTextField.isEnabled = false
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
         petView.apply(state: .thinking, mode: currentMode)
+        petView.onDragRequested = { [weak self] startLocation in
+            self?.beginPetThrowDrag(initialMouseLocation: startLocation)
+        }
         let targetFrame = panel.frame
 
         NSAnimationContext.runAnimationGroup { context in
@@ -6990,8 +6790,13 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptPanel.alphaValue = 1
         show()
         focusPrompt()
-        installPromptKeyInterceptor()
-        installPromptOutsideClickMonitors()
+        focusPromptField()
+        petView.onDoubleClick = { [weak self] in
+            self?.closePromptFromUser()
+        }
+        petView.onDragRequested = { [weak self] startLocation in
+            self?.beginBubbleDrag(initialMouseLocation: startLocation)
+        }
     }
 
     func clearPrompt() {
@@ -7003,6 +6808,21 @@ final class PetController: NSObject, NSTextFieldDelegate {
             return
         }
         submitPrompt()
+    }
+
+    /// Shift+Enter inserts a line break instead of submitting. AppKit binds
+    /// Enter to `insertNewline:` and dispatches it through this delegate
+    /// callback before ending editing — checking the current event's modifier
+    /// lets us swap the behavior at the point of interception.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === promptTextField,
+              commandSelector == #selector(NSResponder.insertNewline(_:)),
+              NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        else {
+            return false
+        }
+        textView.insertNewlineIgnoringFieldEditor(self)
+        return true
     }
 
     func showAnswer(_ message: String, emotion: AskNugumiEmotion?, markerTarget: NSPoint? = nil) {
@@ -7023,8 +6843,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isAnswerOpen = true
         currentAnswerMarkerTarget = nil
         promptBuffer = ""
-        promptHasFullSelection = false
-        removePromptKeyInterceptor()
 
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
@@ -7056,8 +6874,13 @@ final class PetController: NSObject, NSTextFieldDelegate {
             fromPetCenter: petCenter
         )
         panel.orderFrontRegardless()
-        petView.apply(state: .idle, mode: currentMode, emotion: emotion ?? .neutral)
-        installPromptOutsideClickMonitors()
+        petView.apply(state: .talking, mode: currentMode, emotion: .neutral)
+        petView.onDoubleClick = { [weak self] in
+            self?.closePromptFromUser()
+        }
+        petView.onDragRequested = { [weak self] startLocation in
+            self?.beginBubbleDrag(initialMouseLocation: startLocation)
+        }
     }
 
     func moveToAnswerTarget(
@@ -7103,7 +6926,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         guard isPromptOpen, promptTextField.isEnabled else { return }
         let text = promptBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            promptHasFullSelection = false
             renderPromptText()
             return
         }
@@ -7119,8 +6941,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
 
     private func clearPrompt(animate: Bool) {
         guard isPromptVisible || onPromptSubmit != nil || onPromptClose != nil else { return }
-        removePromptOutsideClickMonitors()
-        removePromptKeyInterceptor()
+        stopThrow()
         isPromptOpen = false
         isPromptLoading = false
         isAnswerOpen = false
@@ -7129,7 +6950,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onPromptSubmit = nil
         onPromptClose = nil
         promptBuffer = ""
-        promptHasFullSelection = false
         renderPromptText()
         promptTextField.isEnabled = true
         promptBubbleView.isError = false
@@ -7137,6 +6957,11 @@ final class PetController: NSObject, NSTextFieldDelegate {
         hidePromptViews()
         promptPanel.orderOut(nil)
         promptPanel.alphaValue = 1
+        // Drag + double-click are only active while Ask is visible. Drop the
+        // callbacks so the pet goes back to its plain click-to-act behavior
+        // when the user is just hovering it on idle.
+        petView.onDoubleClick = nil
+        petView.onDragRequested = nil
         if !isThinking {
             panel.ignoresMouseEvents = true
             petView.allowsClickWhenNotReady = false
@@ -7189,6 +7014,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptTextField.cell?.wraps = true
         promptTextField.cell?.isScrollable = false
         promptTextField.cell?.lineBreakMode = .byWordWrapping
+        promptTextField.isEditable = true
+        promptTextField.isSelectable = true
     }
 
     private func configureAnswerTextView(with message: String) {
@@ -7282,89 +7109,47 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     private func promptInputContentHeight(for text: String) -> CGFloat {
-        let measuredText = text.isEmpty ? Self.promptPlaceholder : text
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byWordWrapping
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NugumiFont.pixelPrompt(size: AskNugumiPromptInputMetrics.fontSize),
             .paragraphStyle: paragraphStyle
         ]
-        let boundingRect = (measuredText as NSString).boundingRect(
-            with: NSSize(
-                width: AskNugumiPromptInputMetrics.textMeasurementWidth,
-                height: .greatestFiniteMagnitude
-            ),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attributes
+        let measurementSize = NSSize(
+            width: AskNugumiPromptInputMetrics.textMeasurementWidth,
+            height: .greatestFiniteMagnitude
         )
-        return ceil(boundingRect.height) + AskNugumiPromptInputMetrics.textMeasurementBottomInset
-    }
-
-    private func insertPromptText(_ text: String) {
-        guard isPromptOpen, promptTextField.isEnabled else { return }
-        if promptHasFullSelection {
-            promptBuffer = text
-        } else {
-            promptBuffer.append(text)
+        let measure: (String) -> CGFloat = { sample in
+            (sample as NSString).boundingRect(
+                with: measurementSize,
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                attributes: attributes
+            ).height
         }
-        promptHasFullSelection = false
-        promptBubbleView.isError = false
-        setPromptPlaceholder(Self.promptPlaceholder)
-        renderPromptText()
+        // Floor the bubble height at the placeholder's measured height so the
+        // dialog never shrinks below the "empty state" size when a single
+        // short word is typed. Lets the bubble still grow for longer input.
+        let rawHeight = text.isEmpty ? measure(Self.promptPlaceholder) : max(measure(text), measure(Self.promptPlaceholder))
+        return ceil(rawHeight) + AskNugumiPromptInputMetrics.textMeasurementBottomInset
     }
 
-    private func deletePromptBackward() {
-        guard isPromptOpen, promptTextField.isEnabled else { return }
-        if promptHasFullSelection {
-            promptBuffer = ""
-            promptHasFullSelection = false
-        } else if !promptBuffer.isEmpty {
-            promptBuffer.removeLast()
+    /// Give the prompt's native NSTextField keyboard focus so the blinking
+    /// caret appears. The panel becomes key without activating Nugumi
+    /// (`.nonactivatingPanel` on promptPanel) — other apps stay active and
+    /// keep receiving keystrokes when the user clicks back into them.
+    private func focusPromptField() {
+        promptPanel.makeKeyAndOrderFront(nil)
+        promptPanel.makeFirstResponder(promptTextField)
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard (notification.object as AnyObject) === promptTextField else { return }
+        promptBuffer = promptTextField.stringValue
+        if !promptBuffer.isEmpty {
+            promptBubbleView.isError = false
+            setPromptPlaceholder(Self.promptPlaceholder)
         }
-        renderPromptText()
-    }
-
-    private func pastePromptText() {
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
-            return
-        }
-        insertPromptText(text)
-    }
-
-    private func selectAllPromptText() {
-        guard isPromptOpen, !promptBuffer.isEmpty else { return }
-        promptHasFullSelection = true
-    }
-
-    private func installPromptKeyInterceptor() {
-        guard promptKeyInterceptor == nil else { return }
-        let interceptor = PromptKeyInterceptor(
-            onInsertText: { [weak self] text in
-                self?.insertPromptText(text)
-            },
-            onBackspace: { [weak self] in
-                self?.deletePromptBackward()
-            },
-            onSubmit: { [weak self] in
-                self?.submitPrompt()
-            },
-            onCancel: { [weak self] in
-                self?.closePromptFromUser()
-            },
-            onPaste: { [weak self] in
-                self?.pastePromptText()
-            },
-            onSelectAll: { [weak self] in
-                self?.selectAllPromptText()
-            }
-        )
-        promptKeyInterceptor = interceptor
-        interceptor.enable()
-    }
-
-    private func removePromptKeyInterceptor() {
-        promptKeyInterceptor?.disable()
-        promptKeyInterceptor = nil
+        refreshPromptInputLayout()
     }
 
     private func textMovement(from notification: Notification) -> Int? {
@@ -7490,47 +7275,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    private func installPromptOutsideClickMonitors() {
-        guard promptGlobalOutsideClickMonitor == nil, promptLocalOutsideClickMonitor == nil else {
-            return
-        }
-
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        promptGlobalOutsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.closePromptIfClickIsOutside(event)
-        }
-
-        promptLocalOutsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.closePromptIfClickIsOutside(event)
-            return event
-        }
-    }
-
-    private func removePromptOutsideClickMonitors() {
-        if let promptGlobalOutsideClickMonitor {
-            NSEvent.removeMonitor(promptGlobalOutsideClickMonitor)
-            self.promptGlobalOutsideClickMonitor = nil
-        }
-        if let promptLocalOutsideClickMonitor {
-            NSEvent.removeMonitor(promptLocalOutsideClickMonitor)
-            self.promptLocalOutsideClickMonitor = nil
-        }
-    }
-
-    private func closePromptIfClickIsOutside(_ event: NSEvent) {
-        guard isPromptVisible, panel.isVisible else { return }
-
-        let screenPoint = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
-        guard AskNugumiPetDismissalPolicy.shouldDismissPrompt(
-            clickPoint: screenPoint,
-            petFrame: panel.frame
-        ) else {
-            return
-        }
-
-        closePromptFromUser()
-    }
-
     func showReady(
         selectedText: String,
         initialMode: TranslationMode,
@@ -7538,7 +7282,13 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onRewrite: @escaping (String) -> Void,
         onSmartReply: @escaping (String) -> Void
     ) {
-        guard !PetSelectionStatusPolicy.shouldPreserveCurrentStatus(isThinking: isThinking) else {
+        // Don't yank the pet back to "ready" while Ask is open (input, loading,
+        // or answer) — a casual selection in another app should leave the
+        // in-progress dialog alone instead of tearing it down.
+        guard !PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: isThinking,
+            isPromptVisible: isPromptVisible
+        ) else {
             return
         }
         clearPrompt(animate: true)
@@ -7574,9 +7324,10 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     func clearReady() {
-        guard !isPromptVisible,
-              !PetSelectionStatusPolicy.shouldPreserveCurrentStatus(isThinking: isThinking)
-        else { return }
+        guard !PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: isThinking,
+            isPromptVisible: isPromptVisible
+        ) else { return }
         cancelPointingAnimation()
         selectedText = nil
         onTranslate = nil
@@ -7607,14 +7358,19 @@ final class PetController: NSObject, NSTextFieldDelegate {
         tabInterceptor = nil
         appIconView.isHidden = true
         petView.apply(state: .thinking, mode: currentMode)
+        petView.onDragRequested = { [weak self] startLocation in
+            self?.beginPetThrowDrag(initialMouseLocation: startLocation)
+        }
         show()
     }
 
     func clearThinking() {
         isThinking = false
         isPromptLoading = false
+        stopThrow()
         panel.ignoresMouseEvents = true
         petView.allowsClickWhenNotReady = false
+        petView.onDragRequested = nil
         petView.apply(state: .idle, mode: currentMode)
         refreshAppIcon()
     }
@@ -7727,26 +7483,73 @@ final class PetController: NSObject, NSTextFieldDelegate {
         }
 
         let cursorLocation = NSEvent.mouseLocation
-        let cursorMovement = hypot(
-            cursorLocation.x - lastCursorLocation.x,
-            cursorLocation.y - lastCursorLocation.y
+        let frameDelta = NSPoint(
+            x: cursorLocation.x - lastCursorLocation.x,
+            y: cursorLocation.y - lastCursorLocation.y
         )
-        if cursorMovement > 0.75 {
-            cursorOffset = Self.trailingOffset(
-                forMovement: NSPoint(
-                    x: cursorLocation.x - lastCursorLocation.x,
-                    y: cursorLocation.y - lastCursorLocation.y
-                ),
-                size: Self.panelSize
-            )
-            lastCursorLocation = cursorLocation
+        lastCursorLocation = cursorLocation
+        let frameMagnitude = hypot(frameDelta.x, frameDelta.y)
+        if frameMagnitude > 0.75 {
             lastCursorMovementDate = Date()
         }
 
+        // Low-pass filter on cursor velocity — used ONLY by the shy-step
+        // evasion below, not for the side flip. The side commitment uses raw
+        // instantaneous frame velocity so only a true flick (high peak speed
+        // in a single tick) flips the pet.
+        let alpha: CGFloat = 0.08
+        smoothedCursorVelocity = NSPoint(
+            x: alpha * frameDelta.x + (1 - alpha) * smoothedCursorVelocity.x,
+            y: alpha * frameDelta.y + (1 - alpha) * smoothedCursorVelocity.y
+        )
+
+        // Side only flips on a real flick — a sharp single-frame jerk above
+        // this threshold. ~50pt/frame at 30Hz ≈ 1500pt/sec, which is a hard
+        // wrist-snap, not normal cursor travel. Slow or sustained movement
+        // keeps the current side no matter how long it lasts — only a sudden
+        // burst earns a new side.
+        let flickThreshold: CGFloat = 50
+        if frameMagnitude >= flickThreshold {
+            let candidate = Self.trailingOffset(
+                forMovement: frameDelta,
+                size: Self.panelSize,
+                currentOffset: cursorOffset
+            )
+            if candidate != cursorOffset {
+                cursorOffset = candidate
+            }
+        }
+
+        // Shy-step displacement: for sub-threshold motion (jitter / small
+        // moves that don't earn a side flip), nudge the pet a little further
+        // along its current trailing direction whenever the cursor is closing
+        // the gap on it. Net effect is "pet steps away" instead of "pet sits
+        // still". The nudge decays with the EMA when the cursor stops.
+        let evasion: NSPoint = {
+            let petDistance = hypot(cursorOffset.x, cursorOffset.y)
+            guard petDistance > 0 else { return .zero }
+            let petDirX = cursorOffset.x / petDistance
+            let petDirY = cursorOffset.y / petDistance
+            // Projected velocity along the pet's direction. > 0 means the
+            // cursor is moving toward where the pet currently sits.
+            let velocityTowardPet =
+                smoothedCursorVelocity.x * petDirX
+                + smoothedCursorVelocity.y * petDirY
+            guard velocityTowardPet > 0 else { return .zero }
+            let evasionGain: CGFloat = 4.0
+            let maxEvasion: CGFloat = 14.0
+            let magnitude = min(velocityTowardPet * evasionGain, maxEvasion)
+            return NSPoint(x: petDirX * magnitude, y: petDirY * magnitude)
+        }()
+
+        let effectiveOffset = NSPoint(
+            x: cursorOffset.x + evasion.x,
+            y: cursorOffset.y + evasion.y
+        )
         let targetOrigin = Self.originNearCursor(
             for: cursorLocation,
             size: Self.panelSize,
-            offset: cursorOffset
+            offset: effectiveOffset
         )
         let currentOrigin = panel.frame.origin
         let dx = targetOrigin.x - currentOrigin.x
@@ -7835,14 +7638,199 @@ final class PetController: NSObject, NSTextFieldDelegate {
         )
     }
 
-    private static func trailingOffset(forMovement movement: NSPoint, size: NSSize) -> NSPoint {
-        if abs(movement.x) >= abs(movement.y) {
+    private static func trailingOffset(
+        forMovement movement: NSPoint,
+        size: NSSize,
+        currentOffset: NSPoint? = nil
+    ) -> NSPoint {
+        // Axis-bias hysteresis: if the pet is already committed horizontally
+        // (left/right of cursor), require the vertical component to be
+        // noticeably larger than the horizontal before flipping to a vertical
+        // side — and vice-versa. Without this, diagonal motion where |dx|≈|dy|
+        // would oscillate between horizontal and vertical sides.
+        let axisBias: CGFloat = 1.9
+        let currentIsHorizontal: Bool? = currentOffset.flatMap { offset in
+            if offset.x == 12 || offset.x == -size.width - 12 {
+                return true
+            }
+            if offset.y == 12 || offset.y == -size.height - 8 {
+                return false
+            }
+            return nil
+        }
+
+        let pickHorizontal: Bool
+        switch currentIsHorizontal {
+        case .some(true):
+            pickHorizontal = abs(movement.x) * axisBias >= abs(movement.y)
+        case .some(false):
+            pickHorizontal = abs(movement.x) >= abs(movement.y) * axisBias
+        case .none:
+            pickHorizontal = abs(movement.x) >= abs(movement.y)
+        }
+
+        if pickHorizontal {
             let xOffset = movement.x > 0 ? -size.width - 12 : 12
             return NSPoint(x: xOffset, y: -size.height / 2)
         }
 
         let yOffset = movement.y > 0 ? -size.height - 8 : 12
         return NSPoint(x: -size.width / 2, y: yOffset)
+    }
+
+    /// Drag the dialog bubble — and the pet with it — by tracking mouse
+    /// movement until the user releases the button. Runs a synchronous event
+    /// loop because that's the Cocoa-blessed way to handle window drag from a
+    /// view's mouseDown. Each `.leftMouseDragged` event applies the same
+    /// screen-space delta to all three pet panels so the character, the
+    /// bubble, and the target marker move as one unit. The caller supplies
+    /// the initial screen-space mouse location captured at mouseDown so
+    /// drag-vs-click detection upstream doesn't shift the anchor.
+    private func beginBubbleDrag(initialMouseLocation: NSPoint) {
+        let initialPetOrigin = panel.frame.origin
+        let initialPromptOrigin = promptPanel.frame.origin
+        let initialMarkerOrigin = targetMarkerPanel.frame.origin
+        let markerWasVisible = targetMarkerPanel.isVisible
+
+        while true {
+            let event = NSApp.nextEvent(
+                matching: [.leftMouseDragged, .leftMouseUp],
+                until: .distantFuture,
+                inMode: .eventTracking,
+                dequeue: true
+            )
+            guard let event else { break }
+            if event.type == .leftMouseUp { break }
+
+            let current = NSEvent.mouseLocation
+            let dx = current.x - initialMouseLocation.x
+            let dy = current.y - initialMouseLocation.y
+
+            panel.setFrameOrigin(NSPoint(x: initialPetOrigin.x + dx, y: initialPetOrigin.y + dy))
+            promptPanel.setFrameOrigin(NSPoint(x: initialPromptOrigin.x + dx, y: initialPromptOrigin.y + dy))
+            if markerWasVisible {
+                targetMarkerPanel.setFrameOrigin(NSPoint(x: initialMarkerOrigin.x + dx, y: initialMarkerOrigin.y + dy))
+            }
+        }
+    }
+
+    // MARK: Throw physics (thinking-state drag)
+
+    private static let throwVelocityFrameRate: TimeInterval = 1.0 / 60.0
+    private static let throwSampleWindow: TimeInterval = 0.1   // last 100ms of motion → release velocity
+    private static let throwBounceDamping: CGFloat = 0.65       // wall-bounce energy retained
+    private static let throwFriction: CGFloat = 0.98             // per-frame velocity decay
+    private static let throwReleaseThreshold: CGFloat = 2        // pts/frame below which release is just a drag, not a throw
+    private static let throwStopThreshold: CGFloat = 0.4         // pts/frame below which the throw stops
+
+    /// During thinking, drag works like the bubble drag (pet + prompt panel
+    /// move together) but also samples the last 100ms of cursor motion. On
+    /// release, if the user was moving fast enough, hand off to the throw
+    /// simulator so the pet flies and bounces off screen edges.
+    private func beginPetThrowDrag(initialMouseLocation: NSPoint) {
+        stopThrow()   // a fresh grab cancels any in-flight throw
+
+        let initialPetOrigin = panel.frame.origin
+        let initialPromptOrigin = promptPanel.frame.origin
+        var samples: [(time: Date, point: NSPoint)] = [(Date(), initialMouseLocation)]
+
+        while true {
+            let event = NSApp.nextEvent(
+                matching: [.leftMouseDragged, .leftMouseUp],
+                until: .distantFuture,
+                inMode: .eventTracking,
+                dequeue: true
+            )
+            guard let event else { break }
+
+            let now = NSEvent.mouseLocation
+            let cutoff = Date(timeIntervalSinceNow: -Self.throwSampleWindow)
+            samples.removeAll { $0.time < cutoff }
+            samples.append((Date(), now))
+
+            if event.type == .leftMouseUp { break }
+
+            let dx = now.x - initialMouseLocation.x
+            let dy = now.y - initialMouseLocation.y
+            panel.setFrameOrigin(NSPoint(x: initialPetOrigin.x + dx, y: initialPetOrigin.y + dy))
+            promptPanel.setFrameOrigin(NSPoint(x: initialPromptOrigin.x + dx, y: initialPromptOrigin.y + dy))
+        }
+
+        guard let first = samples.first, let last = samples.last else { return }
+        let dt = last.time.timeIntervalSince(first.time)
+        guard dt > 0.001 else { return }
+        let vxPerSec = (last.point.x - first.point.x) / CGFloat(dt)
+        let vyPerSec = (last.point.y - first.point.y) / CGFloat(dt)
+        let perFrame = NSPoint(
+            x: vxPerSec * CGFloat(Self.throwVelocityFrameRate),
+            y: vyPerSec * CGFloat(Self.throwVelocityFrameRate)
+        )
+        guard hypot(perFrame.x, perFrame.y) > Self.throwReleaseThreshold else { return }
+        startThrowSimulation(initialVelocity: perFrame)
+    }
+
+    private func startThrowSimulation(initialVelocity: NSPoint) {
+        throwTimer?.invalidate()
+        throwVelocity = initialVelocity
+        petView.apply(state: .flying, mode: currentMode)
+        let timer = Timer(timeInterval: Self.throwVelocityFrameRate, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.stepThrow()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        throwTimer = timer
+    }
+
+    private func stepThrow() {
+        let petOrigin = panel.frame.origin
+        let promptOrigin = promptPanel.frame.origin
+        let petSize = panel.frame.size
+        var newOrigin = NSPoint(x: petOrigin.x + throwVelocity.x, y: petOrigin.y + throwVelocity.y)
+
+        let referencePoint = NSPoint(x: petOrigin.x + petSize.width / 2, y: petOrigin.y + petSize.height / 2)
+        let screen = NSScreen.visibleFrame(containing: referencePoint)
+        let bounce = Self.throwBounceDamping
+
+        if newOrigin.x < screen.minX {
+            newOrigin.x = screen.minX
+            throwVelocity.x = -throwVelocity.x * bounce
+        } else if newOrigin.x + petSize.width > screen.maxX {
+            newOrigin.x = screen.maxX - petSize.width
+            throwVelocity.x = -throwVelocity.x * bounce
+        }
+        if newOrigin.y < screen.minY {
+            newOrigin.y = screen.minY
+            throwVelocity.y = -throwVelocity.y * bounce
+        } else if newOrigin.y + petSize.height > screen.maxY {
+            newOrigin.y = screen.maxY - petSize.height
+            throwVelocity.y = -throwVelocity.y * bounce
+        }
+
+        let dx = newOrigin.x - petOrigin.x
+        let dy = newOrigin.y - petOrigin.y
+        panel.setFrameOrigin(newOrigin)
+        promptPanel.setFrameOrigin(NSPoint(x: promptOrigin.x + dx, y: promptOrigin.y + dy))
+
+        throwVelocity.x *= Self.throwFriction
+        throwVelocity.y *= Self.throwFriction
+
+        if hypot(throwVelocity.x, throwVelocity.y) < Self.throwStopThreshold {
+            stopThrow()
+        }
+    }
+
+    private func stopThrow() {
+        let wasFlying = throwTimer != nil
+        throwTimer?.invalidate()
+        throwTimer = nil
+        throwVelocity = .zero
+        // Snap the pet back to the state it was already in (thinking, if
+        // throw was triggered from there). Skip if no throw was running to
+        // avoid clobbering whatever state the caller is mid-setting.
+        if wasFlying, isThinking {
+            petView.apply(state: .thinking, mode: currentMode)
+        }
     }
 }
 
@@ -7853,10 +7841,14 @@ final class PetMascotView: NSView {
         case run
         case ready
         case thinking
+        case talking
+        case flying
     }
 
     var onClick: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
     var onRightClick: (() -> Void)?
+    var onDragRequested: ((NSPoint) -> Void)?
     var allowsClickWhenNotReady = false
 
     private var state: State = .idle
@@ -7879,6 +7871,41 @@ final class PetMascotView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Double-click always wins over single-click handling and short-
+        // circuits drag detection — this is how Ask gets dismissed now.
+        if event.clickCount >= 2, let onDoubleClick {
+            onDoubleClick()
+            return
+        }
+
+        // With a drag handler installed, peek the first follow-up event to
+        // decide: a movement before mouseUp means the user wants to drag,
+        // an immediate mouseUp means it was a plain click.
+        if let onDragRequested {
+            let startLocation = NSEvent.mouseLocation
+            while true {
+                let next = NSApp.nextEvent(
+                    matching: [.leftMouseDragged, .leftMouseUp],
+                    until: .distantFuture,
+                    inMode: .eventTracking,
+                    dequeue: true
+                )
+                guard let next else { return }
+                if next.type == .leftMouseUp {
+                    if state == .ready || allowsClickWhenNotReady {
+                        onClick?()
+                    }
+                    return
+                }
+                // First .leftMouseDragged — hand off to the drag handler
+                // using the location captured at mouseDown.
+                NSCursor.closedHand.push()
+                onDragRequested(startLocation)
+                NSCursor.pop()
+                return
+            }
+        }
+
         guard state == .ready || allowsClickWhenNotReady else { return }
         onClick?()
     }
@@ -7951,6 +7978,14 @@ final class PetMascotView: NSView {
             if phase < 16 { return 0.5 }
             if phase < 24 { return 1 }
             return 0.5
+        case .talking:
+            // Body holds still — only the mouth (sprite swap) and tail
+            // (drawPixelTail) animate while answering.
+            return 0
+        case .flying:
+            // Rapid wobble — sells the "thrown" feeling. Two pixels of
+            // amplitude, ~3-frame period (~100ms at 30fps).
+            return CGFloat((animationFrame / 3) % 3) - 1
         }
     }
 
@@ -8008,7 +8043,47 @@ final class PetMascotView: NSView {
             return spriteRows(faceOffset: 0, noseWidth: 1)
         case .thinking:
             return spriteRows(faceOffset: 0, noseWidth: 1)
+        case .talking:
+            // Eyes, nose, ears, body — frozen. Identical to a calm idle pose
+            // (faceOffset=0, neutral). Only the mouth (this row swap) and the
+            // tail (drawPixelTail) move while the answer is shown.
+            let mouthOpen = (animationFrame / 10) % 2 == 1
+            return mouthOpen ? talkingSpriteRows() : spriteRows(faceOffset: 0, noseWidth: 1)
+        case .flying:
+            return flyingSpriteRows()
         }
+    }
+
+    private func flyingSpriteRows() -> [String] {
+        // Shocked-in-flight expression: wide 3-pixel eyes, plain nose, no
+        // mouth. The bigger eyes carry the "thrown!" feeling on their own.
+        [
+            "................",
+            "..WG........GW..",
+            ".GWWW......WWWG.",
+            ".GWWWWWWWWWWWWG.",
+            "GWWWWWWWWWWWWWWG",
+            "WWWKKKWWWWKKKWWW",
+            "WWWKKKWWWWKKKWWW",
+            "GWWWWWWPWWWWWWWG",
+            "WWGWWWWWWWWWWGWW",
+            ".GWWWWWWWWWWWWG.",
+            "...WW......WW...",
+            "................"
+        ]
+    }
+
+    private func talkingSpriteRows() -> [String] {
+        // Neutral centered head with a single-pixel mouth at row 8, col 9 —
+        // diagonally below-right of the nose (col 7), with col 8 as a 1-pixel
+        // horizontal gap. Reads as a small mouth, not a nose drip.
+        var rows = spriteRows(faceOffset: 0, noseWidth: 1)
+        var chars = Array(rows[8])
+        if chars.count > 9 {
+            chars[9] = "K"
+            rows[8] = String(chars)
+        }
+        return rows
     }
 
     private func emotionSpriteRows(_ emotion: AskNugumiEmotion) -> [String] {
@@ -8107,12 +8182,21 @@ final class PetMascotView: NSView {
             } else {
                 cells = [(8, 9), (8, 10), (7, 11), (5, 12), (4, 12)]
             }
-        case .ready, .thinking:
+        case .ready, .thinking, .talking:
             switch (animationFrame / 16) % 2 {
             case 0:
                 cells = [(7, 9), (8, 10), (8, 11), (9, 12), (10, 12)]
             default:
                 cells = [(7, 9), (7, 10), (8, 11), (8, 12), (9, 12)]
+            }
+        case .flying:
+            // Tail flails fast — switches every 3 frames (~100ms) between
+            // hard-left and hard-right wags.
+            switch (animationFrame / 3) % 2 {
+            case 0:
+                cells = [(7, 9), (8, 10), (9, 11), (10, 12), (11, 12)]
+            default:
+                cells = [(7, 9), (6, 10), (5, 11), (4, 12), (3, 12)]
             }
         }
 
@@ -8343,6 +8427,10 @@ final class PetMascotView: NSView {
             }
         case .thinking:
             return "Thinking…"
+        case .talking:
+            return "Double-click to close"
+        case .flying:
+            return "Weeee!"
         }
     }
 }
@@ -8526,53 +8614,7 @@ private final class AskPromptTextField: NSTextField {
     }
 }
 
-private final class AskPromptTextFieldCell: NSTextFieldCell {
-    override func drawingRect(forBounds rect: NSRect) -> NSRect {
-        verticallyCenteredRect(forBounds: rect)
-    }
-
-    override func select(
-        withFrame rect: NSRect,
-        in controlView: NSView,
-        editor textObj: NSText,
-        delegate: Any?,
-        start selStart: Int,
-        length selLength: Int
-    ) {
-        super.select(
-            withFrame: verticallyCenteredRect(forBounds: rect),
-            in: controlView,
-            editor: textObj,
-            delegate: delegate,
-            start: selStart,
-            length: selLength
-        )
-    }
-
-    override func edit(
-        withFrame rect: NSRect,
-        in controlView: NSView,
-        editor textObj: NSText,
-        delegate: Any?,
-        event: NSEvent?
-    ) {
-        super.edit(
-            withFrame: verticallyCenteredRect(forBounds: rect),
-            in: controlView,
-            editor: textObj,
-            delegate: delegate,
-            event: event
-        )
-    }
-
-    private func verticallyCenteredRect(forBounds rect: NSRect) -> NSRect {
-        var centeredRect = super.drawingRect(forBounds: rect)
-        let textHeight = cellSize(forBounds: rect).height
-        centeredRect.origin.y = rect.origin.y + (rect.height - textHeight) / 2
-        centeredRect.size.height = textHeight
-        return centeredRect
-    }
-}
+private final class AskPromptTextFieldCell: NSTextFieldCell {}
 
 private final class AskPromptPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -10769,20 +10811,28 @@ enum TranslationMode {
         switch self {
         case .selection:
             """
-            Translate the user's text into natural \(targetLanguage.promptName) by preserving the intended meaning, not by translating word-for-word. Treat a single `\\n` as a wrapped line inside one paragraph — join it silently. Treat a blank line (`\\n\\n`) as a deliberate paragraph break that the user wants to keep — render it as a blank line in the output. Clean repeated spaces, OCR artifacts, and hyphenated line wraps. Preserve proper names, dates, numbers, URLs, concrete facts, and paragraph/bullet/list structure. If the source has no paragraph breaks but is long or dense, split the translation into readable paragraphs instead of returning one wall of text.
+            Translate the user's text into plain, accessible \(targetLanguage.promptName) aimed at a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. The goal is to make the content understandable, not to produce a literal word-for-word rendering. This applies whether the source is already in \(targetLanguage.promptName), in another language entirely, or a mix of both.
 
-            Same-language mode — if the entire source text is already in \(targetLanguage.promptName), do not translate and do not echo it back unchanged. Instead, rewrite it for a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. Break long sentences into shorter ones, replace jargon and rare or technical vocabulary with plain everyday words, unwind passive voice and nested clauses, and prefer concrete wording over abstract phrasing. Where a concept stays abstract after a plain-word swap, anchor it inline with a short concrete example or everyday analogy in parentheses or em-dashes — e.g. "a queue (like the line at a coffee shop — first in, first served)". Keep every fact, name, date, number, quotation, URL, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your rewrite differs from the source only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms. If only part of the source is in \(targetLanguage.promptName) and the rest is in another language, translate the foreign parts and lightly simplify the rest.
+            Render any foreign-language parts into \(targetLanguage.promptName), then simplify the whole result: break long sentences into shorter ones, replace jargon and rare or technical vocabulary with plain everyday words, unwind passive voice and nested clauses, and prefer concrete wording over abstract phrasing. Where a concept stays abstract after a plain-word swap, anchor it inline with a short concrete example or everyday analogy in parentheses or em-dashes — e.g. "a queue (like the line at a coffee shop — first in, first served)".
+
+            Match output complexity to source complexity. If the source is already a casual, simple message — a chat line, a greeting, a short sentence with no jargon, a menu item, a button label — translate it plainly and stop. Do not force analogies, examples, or expansions onto content that is already simple. The simplification rules are for when there is something genuinely complex to make accessible; short, plain inputs get short, plain outputs.
+
+            Treat a single `\\n` as a wrapped line inside one paragraph — join it silently. Treat a blank line (`\\n\\n`) as a deliberate paragraph break that the user wants to keep — render it as a blank line in the output. Clean repeated spaces, OCR artifacts, and hyphenated line wraps. If the source has no paragraph breaks but is long or dense, split the output into readable paragraphs instead of returning one wall of text.
+
+            Keep every fact, name, date, number, quotation, URL, proper noun, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your output differs from a literal translation only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms.
 
             Context — the source text is from \(appCategory.promptHint)
 
-            Return only the \(targetLanguage.promptName) translation. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the translated text directly.
+            Return only the \(targetLanguage.promptName) output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
             """
         case .draftMessage:
             if composition?.cleanup == CleanupLevel.none {
                 """
-                Translate the user's drafted outgoing message into \(targetLanguage.promptName). Preserve the user's phrasing, sentence structure, and word choices as faithfully as the target language allows — even if the result reads slightly stiff or non-idiomatic. Do not polish, smooth, naturalize, or rewrite the draft beyond what literal translation strictly requires. If the draft is already entirely in \(targetLanguage.promptName), return it essentially unchanged; correct only outright errors.
+                Translate the user's drafted outgoing message into \(targetLanguage.promptName). Preserve the user's phrasing, sentence structure, and word choices as faithfully as the target language allows — even if the result reads slightly stiff or non-idiomatic. Do not polish, smooth, naturalize, or rewrite the draft beyond what literal translation strictly requires. If the draft is already entirely in \(targetLanguage.promptName), return it essentially unchanged; correct only outright errors. If only part of the draft is in \(targetLanguage.promptName) and the rest is in one or more other languages, translate the foreign parts literally into \(targetLanguage.promptName) and keep the \(targetLanguage.promptName) parts verbatim — do not rephrase or re-translate them. Stitch the result into one coherent message, but do not naturalize beyond what is needed to make it grammatical.
 
                 The selected Writing style controls register, honorifics, and formality — apply it for those purposes only, not as a license to rephrase or stylize. Preserve verbatim: emojis, URLs, usernames, product names, numbers, line breaks. If the draft is a fragment, translate the fragment as-is without inventing extra context.
+
+                Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
 
                 Context — the user is composing this message in \(appCategory.promptHint)
 
@@ -10792,9 +10842,11 @@ enum TranslationMode {
                 """
             } else {
                 """
-                Translate the user's drafted outgoing message into natural \(targetLanguage.promptName). Infer the user's actual intent, emotion, and social situation, then say it the way a native \(targetLanguage.promptName) speaker would send it in a chat or message. If the draft is already entirely in \(targetLanguage.promptName), do not translate it; lightly rewrite/polish it only when needed so it sounds natural and sendable.
+                Translate the user's drafted outgoing message into natural \(targetLanguage.promptName). Infer the user's actual intent, emotion, and social situation, then say it the way a native \(targetLanguage.promptName) speaker would send it in a chat or message. If the draft is already entirely in \(targetLanguage.promptName), do not translate it; lightly rewrite/polish it only when needed so it sounds natural and sendable. If only part of the draft is in \(targetLanguage.promptName) and the rest is in one or more other languages, translate the foreign parts into \(targetLanguage.promptName) and weave everything into one cohesive, natural-sounding message — keep the \(targetLanguage.promptName) portions intact unless they need light polish to flow with the rest. Treat code-switching as the user reaching for words they didn't know in \(targetLanguage.promptName), not as a stylistic choice to preserve.
 
                 The selected Writing style is authoritative. The source draft tells you meaning, intent, emotion, and how direct the user wants to be, but it must not override the selected Writing style. When goals conflict, follow this priority: (1) meaning, (2) selected Writing style, (3) intended directness and emotional signal within that style, (4) cultural naturalness — idioms, honorifics, word order, (5) surface details to preserve verbatim — emojis, URLs, usernames, product names, numbers, line breaks, (6) literal wording (always lowest). If the draft is blunt, keep the result concise and direct, but still use the selected Writing style. Do not pad a curt one-liner into a long paragraph unless the meaning requires it. If the draft is awkward or phrased like a direct translation, smooth it while keeping the same intent. If the draft is a fragment, return a natural sendable fragment without inventing extra context.
+
+                Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
 
                 Context — the user is composing this message in \(appCategory.promptHint)
 
@@ -12470,7 +12522,7 @@ struct OpenAICodexClient: LLMBackend {
         )
 
         var streamed = ""
-        try await runStreaming(body: body) { delta in
+        try await runStreaming(body: body, timeoutInterval: 25) { delta in
             streamed += delta
             let partial = TextNormalizer.cleanedTranslation(streamed)
             if !partial.isEmpty { onPartial(partial) }
@@ -12514,7 +12566,7 @@ struct OpenAICodexClient: LLMBackend {
         )
 
         var answer = ""
-        try await runStreaming(body: body) { delta in
+        try await runStreaming(body: body, timeoutInterval: 60) { delta in
             answer += delta
             onPartial(answer)
         }
@@ -12527,20 +12579,22 @@ struct OpenAICodexClient: LLMBackend {
 
     private func runStreaming(
         body: CodexResponsesRequest,
+        timeoutInterval: TimeInterval,
         onDelta: @escaping (String) -> Void
     ) async throws {
         let encoded = try JSONEncoder().encode(body)
         do {
-            try await performStreamingRequest(encodedBody: encoded, allowRefresh: true, onDelta: onDelta)
+            try await performStreamingRequest(encodedBody: encoded, timeoutInterval: timeoutInterval, allowRefresh: true, onDelta: onDelta)
         } catch TranslationError.invalidAPIKey(.openAICodex) {
             // One transparent retry after a forced refresh — covers tokens
             // revoked between our last JWT-exp check and the actual request.
-            try await performStreamingRequest(encodedBody: encoded, allowRefresh: false, onDelta: onDelta)
+            try await performStreamingRequest(encodedBody: encoded, timeoutInterval: timeoutInterval, allowRefresh: false, onDelta: onDelta)
         }
     }
 
     private func performStreamingRequest(
         encodedBody: Data,
+        timeoutInterval: TimeInterval,
         allowRefresh: Bool,
         onDelta: @escaping (String) -> Void
     ) async throws {
@@ -12556,7 +12610,11 @@ struct OpenAICodexClient: LLMBackend {
         for (k, v) in Self.cloudflareHeaders(accessToken: token) {
             request.setValue(v, forHTTPHeaderField: k)
         }
-        request.timeoutInterval = 120
+        // chatgpt.com/backend-api/codex/responses returns response headers in
+        // <2s when healthy; when it black-holes, it black-holes forever.
+        // Translate uses 25s (fast iteration); Ask uses 60s (longer responses,
+        // more typing invested in the question).
+        request.timeoutInterval = timeoutInterval
         request.httpBody = encodedBody
 
         let bytes: URLSession.AsyncBytes
@@ -12569,7 +12627,16 @@ struct OpenAICodexClient: LLMBackend {
             || urlError.code == .notConnectedToInternet
             || urlError.code == .timedOut {
             CodexDebugLog.append("inference: URLError \(urlError.code.rawValue) — \(urlError.localizedDescription)")
-            throw TranslationError.cloudError(.openAICodex, urlError.localizedDescription)
+            // The subscription endpoint sometimes drops individual requests
+            // upstream — be explicit about that so users don't think Nugumi
+            // is broken.
+            let message: String
+            if urlError.code == .notConnectedToInternet {
+                message = "No internet connection."
+            } else {
+                message = "Sometimes drops requests — just try one more time."
+            }
+            throw TranslationError.cloudError(.openAICodex, message)
         }
 
         guard let http = response as? HTTPURLResponse else {

@@ -7,6 +7,7 @@ enum GlobalShortcutAction: String, CaseIterable {
     case translateSelection
     case screenshotArea
     case toggleInvisibility
+    case askNugumi
 
     var id: UInt32 {
         switch self {
@@ -14,6 +15,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .translateSelection: return 2
         case .screenshotArea: return 3
         case .toggleInvisibility: return 4
+        case .askNugumi: return 5
         }
     }
 
@@ -27,6 +29,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .translateSelection: return "Rewrite my text"
         case .screenshotArea: return "Translate screen area"
         case .toggleInvisibility: return "Toggle invisibility mode"
+        case .askNugumi: return "Ask Nugumi"
         }
     }
 
@@ -64,13 +67,24 @@ enum GlobalShortcutAction: String, CaseIterable {
                 keyEquivalent: "\\",
                 keyDisplay: "\\"
             )
+        case .askNugumi:
+            // Preserves the historical "double-tap Control" gesture; user can
+            // rebind to any combo or another double-tap modifier from the menu.
+            return GlobalShortcut(doubleTapModifier: .control)
         }
     }
 }
 
 struct GlobalShortcut: Codable, Equatable {
     static let supportedModifiers: NSEvent.ModifierFlags = [.control, .option, .shift, .command]
+    static let singleModifierOptions: [NSEvent.ModifierFlags] = [.control, .option, .shift, .command]
 
+    enum Kind: String, Codable {
+        case combo
+        case doubleTap
+    }
+
+    let kind: Kind
     let keyCode: UInt32
     private let modifiersRawValue: UInt
     let keyEquivalent: String
@@ -82,10 +96,19 @@ struct GlobalShortcut: Codable, Equatable {
         keyEquivalent: String,
         keyDisplay: String
     ) {
+        self.kind = .combo
         self.keyCode = keyCode
         self.modifiersRawValue = modifiers.intersection(Self.supportedModifiers).rawValue
         self.keyEquivalent = keyEquivalent
         self.keyDisplay = keyDisplay
+    }
+
+    init(doubleTapModifier modifier: NSEvent.ModifierFlags) {
+        self.kind = .doubleTap
+        self.keyCode = 0
+        self.modifiersRawValue = modifier.intersection(Self.supportedModifiers).rawValue
+        self.keyEquivalent = ""
+        self.keyDisplay = ""
     }
 
     init?(event: NSEvent) {
@@ -114,6 +137,24 @@ struct GlobalShortcut: Codable, Equatable {
         )
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case keyCode
+        case modifiersRawValue
+        case keyEquivalent
+        case keyDisplay
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Old encodings (pre-Ask-Nugumi) have no `kind` field — treat as .combo.
+        self.kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .combo
+        self.keyCode = try container.decode(UInt32.self, forKey: .keyCode)
+        self.modifiersRawValue = try container.decode(UInt.self, forKey: .modifiersRawValue)
+        self.keyEquivalent = try container.decode(String.self, forKey: .keyEquivalent)
+        self.keyDisplay = try container.decode(String.self, forKey: .keyDisplay)
+    }
+
     var modifiers: NSEvent.ModifierFlags {
         NSEvent.ModifierFlags(rawValue: modifiersRawValue).intersection(Self.supportedModifiers)
     }
@@ -136,14 +177,34 @@ struct GlobalShortcut: Codable, Equatable {
     }
 
     var menuKeyEquivalent: String {
-        keyEquivalent
+        kind == .combo ? keyEquivalent : ""
     }
 
     var keyEquivalentModifierMask: NSEvent.ModifierFlags {
-        modifiers
+        kind == .combo ? modifiers : []
     }
 
     var displayString: String {
+        let modifierGlyphs = Self.modifierGlyphs(for: modifiers)
+        switch kind {
+        case .combo:
+            return modifierGlyphs + keyDisplay
+        case .doubleTap:
+            // "⌃⌃" / "⌥⌥" / "⇧⇧" / "⌘⌘"
+            return modifierGlyphs + modifierGlyphs
+        }
+    }
+
+    var isValid: Bool {
+        switch kind {
+        case .combo:
+            return !modifiers.isEmpty && !keyDisplay.isEmpty
+        case .doubleTap:
+            return Self.singleModifierOptions.contains { modifiers == $0 }
+        }
+    }
+
+    private static func modifierGlyphs(for modifiers: NSEvent.ModifierFlags) -> String {
         var prefix = ""
         if modifiers.contains(.control) {
             prefix += "⌃"
@@ -157,26 +218,31 @@ struct GlobalShortcut: Codable, Equatable {
         if modifiers.contains(.command) {
             prefix += "⌘"
         }
-        return prefix + keyDisplay
-    }
-
-    var isValid: Bool {
-        !modifiers.isEmpty && !keyDisplay.isEmpty
+        return prefix
     }
 
     static func == (lhs: GlobalShortcut, rhs: GlobalShortcut) -> Bool {
-        lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers
+        guard lhs.kind == rhs.kind, lhs.modifiers == rhs.modifiers else {
+            return false
+        }
+        switch lhs.kind {
+        case .combo:
+            return lhs.keyCode == rhs.keyCode
+        case .doubleTap:
+            return true
+        }
     }
 }
 
 @MainActor
-final class DoubleControlPressDetector {
+final class DoubleModifierPressDetector {
+    private let modifier: NSEvent.ModifierFlags
     private let interval: TimeInterval
     private let onDetected: @MainActor () -> Void
     private var globalMonitor: Any?
     private var localMonitor: Any?
-    private var lastControlDownDate: Date?
-    private var wasControlDown = false
+    private var lastDownDate: Date?
+    private var wasDown = false
     var isEnabled = true {
         didSet {
             if isEnabled != oldValue {
@@ -185,7 +251,12 @@ final class DoubleControlPressDetector {
         }
     }
 
-    init(interval: TimeInterval = 0.30, onDetected: @escaping @MainActor () -> Void) {
+    init(
+        modifier: NSEvent.ModifierFlags,
+        interval: TimeInterval = 0.30,
+        onDetected: @escaping @MainActor () -> Void
+    ) {
+        self.modifier = modifier.intersection(GlobalShortcut.supportedModifiers)
         self.interval = interval
         self.onDetected = onDetected
     }
@@ -223,23 +294,27 @@ final class DoubleControlPressDetector {
     }
 
     private func resetState() {
-        lastControlDownDate = nil
-        wasControlDown = false
+        lastDownDate = nil
+        wasDown = false
     }
 
     private func handle(_ event: NSEvent) {
         guard isEnabled else { return }
 
-        let isControlDown = event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.control)
-        defer { wasControlDown = isControlDown }
-        guard isControlDown, !wasControlDown else { return }
+        let active = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // The modifier is "down" only if it is the SOLE supported modifier
+        // currently pressed — combos like Cmd+Ctrl should not feed the detector.
+        let supportedActive = active.intersection(GlobalShortcut.supportedModifiers)
+        let isDown = supportedActive == modifier
+        defer { wasDown = isDown }
+        guard isDown, !wasDown else { return }
 
         let now = Date()
-        if let last = lastControlDownDate, now.timeIntervalSince(last) <= interval {
-            lastControlDownDate = nil
+        if let last = lastDownDate, now.timeIntervalSince(last) <= interval {
+            lastDownDate = nil
             onDetected()
         } else {
-            lastControlDownDate = now
+            lastDownDate = now
         }
     }
 }
@@ -293,8 +368,8 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
     private let onShortcut: (GlobalShortcut) -> Bool
     private let onClose: () -> Void
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private let recorderView = ShortcutRecorderView()
     private let shortcutField = ShortcutCaptureFieldView()
+    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private let okButton = NSButton(title: "OK", target: nil, action: nil)
     private var pendingShortcut: GlobalShortcut?
 
@@ -344,7 +419,10 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         window.center()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(recorderView)
+        // Field is firstResponder from the start so Esc dismisses immediately.
+        // The field stays in .idle until the user clicks it — see
+        // ShortcutCaptureFieldView.mouseDown.
+        window.makeFirstResponder(shortcutField)
     }
 
     nonisolated func windowWillClose(_ notification: Notification) {
@@ -385,9 +463,6 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         rootView.addSubview(glass)
         let contentView = glass.contentView
 
-        recorderView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(recorderView)
-
         let mascotColumn = NSView()
         mascotColumn.translatesAutoresizingMaskIntoConstraints = false
 
@@ -401,36 +476,39 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        recorderView.onShortcut = { [weak self] shortcut in
-            self?.capture(shortcut)
-            return true
-        }
-        recorderView.onCancel = { [weak self] in
-            self?.close()
-        }
-        recorderView.onInvalidShortcut = { [weak self] message in
-            self?.messageLabel.stringValue = message
-        }
-
-        messageLabel.stringValue = "Click the field and press new keys for \(action.menuTitle)."
+        messageLabel.stringValue = "Click the field, then press keys for \(action.menuTitle) — or double-tap ⌃ ⌥ ⇧ ⌘."
         messageLabel.font = Self.messageFont
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 0
         messageLabel.preferredMaxLayoutWidth = textWidth
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        shortcutField.placeholder = "Click here, then press keys"
-        shortcutField.shortcutText = currentShortcut.displayString
-        shortcutField.onClick = { [weak self] in
+        shortcutField.idleDisplayText = currentShortcut.displayString
+        shortcutField.onBeginRecording = { [weak self] in
             guard let self else { return }
             self.pendingShortcut = nil
             self.okButton.isEnabled = false
-            self.messageLabel.stringValue = "Press the new shortcut now."
-            self.shortcutField.placeholder = "Press shortcut now"
-            self.shortcutField.shortcutText = nil
-            self.window?.makeFirstResponder(self.recorderView)
+            self.messageLabel.stringValue = "Press the new shortcut now, or double-tap ⌃ ⌥ ⇧ ⌘."
+        }
+        shortcutField.onCaptured = { [weak self] shortcut in
+            self?.capture(shortcut)
+        }
+        shortcutField.onCancel = { [weak self] in
+            self?.close()
+        }
+        shortcutField.onInvalidShortcut = { [weak self] message in
+            self?.messageLabel.stringValue = message
         }
         shortcutField.translatesAutoresizingMaskIntoConstraints = false
+
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelTapped)
+        cancelButton.bezelStyle = .rounded
+        cancelButton.controlSize = .regular
+        cancelButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        cancelButton.focusRingType = .none
+        cancelButton.keyEquivalent = "\u{1B}" // Esc
+        cancelButton.translatesAutoresizingMaskIntoConstraints = false
 
         okButton.target = self
         okButton.action = #selector(okTapped)
@@ -439,6 +517,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         okButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         okButton.focusRingType = .none
         okButton.isEnabled = false
+        okButton.keyEquivalent = "\r" // Return
         okButton.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(mascotColumn)
@@ -446,6 +525,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         contentView.addSubview(titleLabel)
         contentView.addSubview(messageLabel)
         contentView.addSubview(shortcutField)
+        contentView.addSubview(cancelButton)
         contentView.addSubview(okButton)
 
         NSLayoutConstraint.activate([
@@ -453,11 +533,6 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
             glass.leadingAnchor.constraint(equalTo: rootView.leadingAnchor, constant: Self.shadowMargin),
             glass.widthAnchor.constraint(equalToConstant: Self.cardSize.width),
             glass.heightAnchor.constraint(equalToConstant: Self.cardSize.height),
-
-            recorderView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            recorderView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            recorderView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            recorderView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
 
             mascotColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
             mascotColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
@@ -482,8 +557,14 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
             shortcutField.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             shortcutField.heightAnchor.constraint(equalToConstant: 42),
 
-            okButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            cancelButton.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            cancelButton.heightAnchor.constraint(equalToConstant: 30),
+            cancelButton.topAnchor.constraint(equalTo: shortcutField.bottomAnchor, constant: 10),
+            cancelButton.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -Self.verticalPadding),
+
+            okButton.leadingAnchor.constraint(equalTo: cancelButton.trailingAnchor, constant: 8),
             okButton.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            okButton.widthAnchor.constraint(equalTo: cancelButton.widthAnchor),
             okButton.heightAnchor.constraint(equalToConstant: 30),
             okButton.topAnchor.constraint(equalTo: shortcutField.bottomAnchor, constant: 10),
             okButton.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -Self.verticalPadding)
@@ -492,9 +573,13 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
 
     private func capture(_ shortcut: GlobalShortcut) {
         pendingShortcut = shortcut
-        shortcutField.shortcutText = shortcut.displayString
+        shortcutField.showCaptured(displayString: shortcut.displayString)
         messageLabel.stringValue = "Press OK to save this shortcut."
         okButton.isEnabled = true
+    }
+
+    @objc private func cancelTapped() {
+        close()
     }
 
     @objc private func okTapped() {
@@ -529,46 +614,56 @@ private final class ShortcutRecorderPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
+// Unified shortcut capture field. Self-contained event responder + display.
+// Inspired by Sindre Sorhus' KeyboardShortcuts library: clicks promote the
+// view to firstResponder, while a local NSEvent monitor intercepts keyDown /
+// flagsChanged at app dispatch time — more robust than the responder chain,
+// and naturally swallows keys destined for AppKit's text input system.
 @MainActor
 private final class ShortcutCaptureFieldView: NSView {
-    var onClick: (() -> Void)?
 
-    var placeholder: String = "" {
+    enum State {
+        case idle      // not yet armed — shows current shortcut or "click" hint
+        case recording // armed, awaiting a shortcut
+        case captured  // showing a captured shortcut pending confirmation
+        case conflict  // last capture was rejected; user must press another
+    }
+
+    var onCaptured: ((GlobalShortcut) -> Void)?
+    var onCancel: (() -> Void)?
+    var onInvalidShortcut: ((String) -> Void)?
+    var onBeginRecording: (() -> Void)?
+
+    // Text shown when the field is .idle (typically the existing shortcut).
+    var idleDisplayText: String = "" {
         didSet {
-            if shortcutText == nil {
-                label.stringValue = placeholder
+            if state == .idle {
+                refreshStyle()
             }
         }
     }
 
-    var shortcutText: String? {
-        didSet {
-            if let shortcutText {
-                label.font = NSFont.monospacedSystemFont(ofSize: 17, weight: .semibold)
-                label.stringValue = shortcutText
-                label.textColor = .labelColor
-                setBorderColor(NSColor.controlAccentColor.withAlphaComponent(0.85))
-            } else {
-                label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-                label.stringValue = placeholder
-                label.textColor = .secondaryLabelColor
-                setBorderColor(NSColor.separatorColor)
-            }
-        }
+    private(set) var state: State = .idle {
+        didSet { refreshStyle() }
     }
+    private var capturedDisplayText: String = ""
+
+    private let doubleTapInterval: TimeInterval = 0.30
+    private var lastTapModifier: NSEvent.ModifierFlags?
+    private var lastTapDate: Date?
+    private var heldModifiers: NSEvent.ModifierFlags = []
+    private var eventMonitor: Any?
 
     private let label = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        focusRingType = .none
         layer?.cornerRadius = 10
         layer?.borderWidth = 1
         layer?.backgroundColor = NSColor(calibratedWhite: 1, alpha: 0.06).cgColor
-        setBorderColor(NSColor.separatorColor)
 
-        label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        label.textColor = .secondaryLabelColor
         label.alignment = .center
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -579,71 +674,214 @@ private final class ShortcutCaptureFieldView: NSView {
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             label.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
+
+        refreshStyle()
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
+    required init?(coder: NSCoder) { nil }
+
+    deinit {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+        }
+    }
+
+    // MARK: - Responder & hit testing
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // NSTextField (even label-mode) absorbs clicks on its text region with a
+    // silent default mouseDown. Force every in-bounds click to land on us so
+    // the user can click anywhere in the field, not just the padding.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let superview else { return nil }
+        let pointInSelf = convert(point, from: superview)
+        return bounds.contains(pointInSelf) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
-        onClick?()
+        if window?.firstResponder !== self {
+            window?.makeFirstResponder(self)
+        }
+        enterRecording()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        guard super.becomeFirstResponder() else { return false }
+        startEventMonitor()
+        heldModifiers = NSEvent.modifierFlags.intersection(GlobalShortcut.supportedModifiers)
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else { return false }
+        stopEventMonitor()
+        // Drop recording-only states; preserve .captured across focus changes
+        // so a captured shortcut survives an OK-button click.
+        if state == .recording || state == .conflict {
+            state = .idle
+        }
+        return true
+    }
+
+    private func enterRecording() {
+        capturedDisplayText = ""
+        heldModifiers = NSEvent.modifierFlags.intersection(GlobalShortcut.supportedModifiers)
+        lastTapModifier = nil
+        lastTapDate = nil
+        state = .recording
+        onBeginRecording?()
+    }
+
+    // MARK: - Public state setters
+
+    func showCaptured(displayString: String) {
+        capturedDisplayText = displayString
+        state = .captured
     }
 
     func showConflict() {
-        shortcutText = nil
-        label.stringValue = "Press another shortcut"
-        label.textColor = .secondaryLabelColor
-        setBorderColor(NSColor.systemRed.withAlphaComponent(0.85))
+        capturedDisplayText = ""
+        lastTapModifier = nil
+        lastTapDate = nil
+        heldModifiers = NSEvent.modifierFlags.intersection(GlobalShortcut.supportedModifiers)
+        state = .conflict
+    }
+
+    // MARK: - Styling
+
+    private func refreshStyle() {
+        switch state {
+        case .idle:
+            if idleDisplayText.isEmpty {
+                label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+                label.stringValue = "Click here to set a shortcut"
+            } else {
+                label.font = NSFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+                label.stringValue = idleDisplayText
+            }
+            label.textColor = .secondaryLabelColor
+            setBorderColor(NSColor.separatorColor)
+
+        case .recording:
+            label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            label.stringValue = "Type a shortcut — or double-tap ⌃ ⌥ ⇧ ⌘"
+            label.textColor = .secondaryLabelColor
+            setBorderColor(NSColor.controlAccentColor.withAlphaComponent(0.85))
+
+        case .captured:
+            label.font = NSFont.monospacedSystemFont(ofSize: 17, weight: .semibold)
+            label.stringValue = capturedDisplayText
+            label.textColor = .labelColor
+            setBorderColor(NSColor.controlAccentColor.withAlphaComponent(0.85))
+
+        case .conflict:
+            label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+            label.stringValue = "Already used — try another"
+            label.textColor = .secondaryLabelColor
+            setBorderColor(NSColor.systemRed.withAlphaComponent(0.85))
+        }
     }
 
     private func setBorderColor(_ color: NSColor) {
         layer?.borderColor = color.cgColor
     }
-}
 
-@MainActor
-private final class ShortcutRecorderView: NSView {
-    var onShortcut: ((GlobalShortcut) -> Bool)?
-    var onCancel: (() -> Void)?
-    var onInvalidShortcut: ((String) -> Void)?
+    // MARK: - Event monitor
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    private func startEventMonitor() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged]
+        ) { [weak self] event in
+            guard let self else { return event }
+            return self.handleLocal(event)
+        }
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
+    private func stopEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
     }
 
-    override var acceptsFirstResponder: Bool {
-        true
+    private func handleLocal(_ event: NSEvent) -> NSEvent? {
+        // Only consume events while we own focus in our own window.
+        guard window?.firstResponder === self else { return event }
+
+        switch event.type {
+        case .keyDown:
+            if event.keyCode == UInt16(kVK_Escape) {
+                onCancel?()
+                return nil
+            }
+            // Outside recording states, swallow other keys silently — we don't
+            // want the panel to ding or insert text either.
+            guard state != .idle else { return nil }
+
+            let modifiers = event.modifierFlags.intersection(GlobalShortcut.supportedModifiers)
+            // A bare keystroke (no ⌃⌥⇧⌘) isn't a valid shortcut in our model,
+            // so let it through to AppKit's normal dispatch — that's how the
+            // OK button's Return key equivalent fires to commit a capture.
+            guard !modifiers.isEmpty else {
+                return event
+            }
+
+            lastTapModifier = nil
+            lastTapDate = nil
+            if let shortcut = GlobalShortcut(event: event) {
+                onCaptured?(shortcut)
+            } else {
+                NSSound.beep()
+                onInvalidShortcut?(
+                    "Use a modifier (⌃ ⌥ ⇧ ⌘) plus a key, or quickly tap a modifier twice."
+                )
+            }
+            return nil
+
+        case .flagsChanged:
+            handleFlagsChanged(event)
+            return nil
+
+        default:
+            return event
+        }
     }
 
-    override func keyDown(with event: NSEvent) {
-        handle(event)
-    }
+    private func handleFlagsChanged(_ event: NSEvent) {
+        let mods = event.modifierFlags.intersection(GlobalShortcut.supportedModifiers)
+        let previous = heldModifiers
+        heldModifiers = mods
 
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        handle(event)
-        return true
-    }
+        guard state != .idle else { return }
 
-    private func handle(_ event: NSEvent) {
-        if event.keyCode == UInt16(kVK_Escape) {
-            onCancel?()
+        // Rising edge: a modifier just transitioned from "not held" to "held".
+        let newlyPressed = mods.subtracting(previous)
+        guard !newlyPressed.isEmpty else { return }
+
+        // Only solo modifiers qualify for double-tap. Combos flow through keyDown.
+        let solo = GlobalShortcut.singleModifierOptions.first { mods == $0 }
+        guard let modifier = solo else {
+            lastTapModifier = nil
+            lastTapDate = nil
             return
         }
 
-        guard let shortcut = GlobalShortcut(event: event) else {
-            NSSound.beep()
-            onInvalidShortcut?("Use at least one modifier: Control, Option, Shift, or Command.")
-            return
-        }
-
-        if onShortcut?(shortcut) != true {
-            NSSound.beep()
+        let now = Date()
+        if lastTapModifier == modifier,
+           let when = lastTapDate,
+           now.timeIntervalSince(when) <= doubleTapInterval
+        {
+            lastTapModifier = nil
+            lastTapDate = nil
+            onCaptured?(GlobalShortcut(doubleTapModifier: modifier))
+        } else {
+            lastTapModifier = modifier
+            lastTapDate = now
         }
     }
 }
