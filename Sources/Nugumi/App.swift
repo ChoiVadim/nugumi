@@ -4283,6 +4283,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     @objc private func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
         updaterController?.checkForUpdates(nil)
     }
 }
@@ -5937,128 +5938,28 @@ final class ReturnKeyInterceptor {
     }
 }
 
-final class PromptKeyInterceptor {
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private let onInsertText: @MainActor (String) -> Void
-    private let onBackspace: @MainActor () -> Void
-    private let onSubmit: @MainActor () -> Void
-    private let onCancel: @MainActor () -> Void
-    private let onPaste: @MainActor () -> Void
-    private let onSelectAll: @MainActor () -> Void
-
-    init(
-        onInsertText: @escaping @MainActor (String) -> Void,
-        onBackspace: @escaping @MainActor () -> Void,
-        onSubmit: @escaping @MainActor () -> Void,
-        onCancel: @escaping @MainActor () -> Void,
-        onPaste: @escaping @MainActor () -> Void,
-        onSelectAll: @escaping @MainActor () -> Void
-    ) {
-        self.onInsertText = onInsertText
-        self.onBackspace = onBackspace
-        self.onSubmit = onSubmit
-        self.onCancel = onCancel
-        self.onPaste = onPaste
-        self.onSelectAll = onSelectAll
-    }
-
-    func enable() {
-        guard eventTap == nil else { return }
-
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: { _, type, event, userInfo in
-                guard let userInfo, type == .keyDown else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let interceptor = Unmanaged<PromptKeyInterceptor>.fromOpaque(userInfo).takeUnretainedValue()
-                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-                let flags = event.flags
-                let hasCommand = flags.contains(.maskCommand)
-                let hasControl = flags.contains(.maskControl)
-                let hasOption = flags.contains(.maskAlternate)
-
-                if keyCode == Int64(kVK_Escape) {
-                    Task { @MainActor in interceptor.onCancel() }
-                    return nil
-                }
-
-                if keyCode == Int64(kVK_Return) || keyCode == Int64(kVK_ANSI_KeypadEnter) {
-                    guard !hasCommand, !hasControl, !hasOption else {
-                        return Unmanaged.passUnretained(event)
-                    }
-                    Task { @MainActor in interceptor.onSubmit() }
-                    return nil
-                }
-
-                if keyCode == Int64(kVK_Delete) || keyCode == Int64(kVK_ForwardDelete) {
-                    guard !hasCommand, !hasControl else {
-                        return Unmanaged.passUnretained(event)
-                    }
-                    Task { @MainActor in interceptor.onBackspace() }
-                    return nil
-                }
-
-                if hasCommand, keyCode == Int64(kVK_ANSI_V) {
-                    Task { @MainActor in interceptor.onPaste() }
-                    return nil
-                }
-
-                if hasCommand, keyCode == Int64(kVK_ANSI_A) {
-                    Task { @MainActor in interceptor.onSelectAll() }
-                    return nil
-                }
-
-                guard !hasCommand, !hasControl,
-                      let nsEvent = NSEvent(cgEvent: event),
-                      let characters = nsEvent.characters,
-                      !characters.isEmpty,
-                      characters.rangeOfCharacter(from: .controlCharacters) == nil
-                else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                Task { @MainActor in interceptor.onInsertText(characters) }
-                return nil
-            },
-            userInfo: selfPointer
-        ) else {
-            return
-        }
-
-        eventTap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        runLoopSource = source
-        CGEvent.tapEnable(tap: tap, enable: true)
-    }
-
-    func disable() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        }
-        runLoopSource = nil
-        eventTap = nil
-    }
-
-    deinit {
-        disable()
-    }
-}
-
 private final class PetPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command {
+            switch event.charactersIgnoringModifiers {
+            case "v":
+                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) { return true }
+            case "c":
+                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) { return true }
+            case "x":
+                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) { return true }
+            case "a":
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) { return true }
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 private enum NugumiFont {
@@ -8619,6 +8520,25 @@ private final class AskPromptTextFieldCell: NSTextFieldCell {}
 private final class AskPromptPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command {
+            switch event.charactersIgnoringModifiers {
+            case "v":
+                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) { return true }
+            case "c":
+                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) { return true }
+            case "x":
+                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) { return true }
+            case "a":
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) { return true }
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 private final class AskPromptChromeView: NSView {
@@ -8684,8 +8604,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     private var isSubmitting = false
     private var globalOutsideClickMonitor: Any?
     private var localOutsideClickMonitor: Any?
-    private var promptInput = AskNugumiPromptInputBuffer()
-    private var keyInterceptor: PromptKeyInterceptor?
 
     var isVisible: Bool { panel.isVisible }
 
@@ -8731,22 +8649,18 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     }
 
     func show() {
-        promptInput.reset()
-        renderPromptText()
+        textField.stringValue = ""
         textField.isEnabled = true
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(textField)
-        installKeyInterceptor()
         installOutsideClickMonitors()
     }
 
     func setLoading() {
-        removeKeyInterceptor()
         panel.sharingType = .none
         textField.isEnabled = false
-        promptInput.reset()
-        renderPromptText()
+        textField.stringValue = ""
         setPlaceholder("Looking...")
     }
 
@@ -8761,19 +8675,16 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     func showError(_ message: String) {
         isSubmitting = false
         textField.isEnabled = true
-        promptInput.reset()
-        renderPromptText()
+        textField.stringValue = ""
         setPlaceholder(message)
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(textField)
-        installKeyInterceptor()
     }
 
     func close() {
         guard !didClose else { return }
         didClose = true
-        removeKeyInterceptor()
         removeOutsideClickMonitors()
         panel.close()
         onClose()
@@ -8783,15 +8694,12 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         Task { @MainActor [weak self] in
             guard let self, !self.didClose else { return }
             self.didClose = true
-            self.removeKeyInterceptor()
             self.removeOutsideClickMonitors()
             self.onClose()
         }
     }
 
     deinit {
-        keyInterceptor?.disable()
-        keyInterceptor = nil
         if let globalOutsideClickMonitor {
             NSEvent.removeMonitor(globalOutsideClickMonitor)
         }
@@ -8804,7 +8712,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         guard textMovement(from: notification) == NSTextMovement.return.rawValue else {
             return
         }
-        promptInput.replace(with: textField.stringValue)
         submit()
     }
 
@@ -8879,76 +8786,13 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
 
     private func submit() {
         guard textField.isEnabled, !isSubmitting else { return }
-        if promptInput.text != textField.stringValue {
-            promptInput.replace(with: textField.stringValue)
-        }
-        let text = promptInput.trimmedText
+        let text = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             panel.makeFirstResponder(textField)
             return
         }
         isSubmitting = true
-        removeKeyInterceptor()
         onSubmit(text)
-    }
-
-    private func renderPromptText() {
-        textField.stringValue = promptInput.text
-    }
-
-    private func insertPromptText(_ text: String) {
-        guard textField.isEnabled, !isSubmitting else { return }
-        promptInput.insert(text)
-        renderPromptText()
-    }
-
-    private func deletePromptBackward() {
-        guard textField.isEnabled, !isSubmitting else { return }
-        promptInput.deleteBackward()
-        renderPromptText()
-    }
-
-    private func pastePromptText() {
-        guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
-            return
-        }
-        insertPromptText(text)
-    }
-
-    private func selectAllPromptText() {
-        guard textField.isEnabled, !isSubmitting else { return }
-        promptInput.selectAll()
-    }
-
-    private func installKeyInterceptor() {
-        guard keyInterceptor == nil else { return }
-        let interceptor = PromptKeyInterceptor(
-            onInsertText: { [weak self] text in
-                self?.insertPromptText(text)
-            },
-            onBackspace: { [weak self] in
-                self?.deletePromptBackward()
-            },
-            onSubmit: { [weak self] in
-                self?.submit()
-            },
-            onCancel: { [weak self] in
-                self?.close()
-            },
-            onPaste: { [weak self] in
-                self?.pastePromptText()
-            },
-            onSelectAll: { [weak self] in
-                self?.selectAllPromptText()
-            }
-        )
-        keyInterceptor = interceptor
-        interceptor.enable()
-    }
-
-    private func removeKeyInterceptor() {
-        keyInterceptor?.disable()
-        keyInterceptor = nil
     }
 
     private func setPlaceholder(_ text: String) {
@@ -12518,7 +12362,8 @@ struct OpenAICodexClient: LLMBackend {
             instructions: systemPrompt,
             input: [CodexInputItem(role: "user", content: userContent)],
             stream: true,
-            store: false
+            store: false,
+            reasoning: CodexReasoningConfig(effort: thinkingLevel.cloudReasoningEffort)
         )
 
         var streamed = ""
@@ -12562,7 +12407,8 @@ struct OpenAICodexClient: LLMBackend {
             instructions: AskNugumiPromptBuilder.systemPrompt,
             input: items,
             stream: true,
-            store: false
+            store: false,
+            reasoning: CodexReasoningConfig(effort: thinkingLevel.cloudReasoningEffort)
         )
 
         var answer = ""
@@ -12704,6 +12550,11 @@ private struct CodexResponsesRequest: Encodable {
     let input: [CodexInputItem]
     let stream: Bool
     let store: Bool
+    let reasoning: CodexReasoningConfig?
+}
+
+private struct CodexReasoningConfig: Encodable {
+    let effort: String
 }
 
 private struct CodexInputItem: Encodable {

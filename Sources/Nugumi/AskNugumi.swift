@@ -220,48 +220,6 @@ struct AskNugumiPetBubblePresentation: Equatable {
     let petOrigin: CGPoint
 }
 
-struct AskNugumiPromptInputBuffer: Equatable {
-    private(set) var text = ""
-    private(set) var hasFullSelection = false
-
-    var trimmedText: String {
-        text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    mutating func insert(_ insertedText: String) {
-        guard !insertedText.isEmpty else { return }
-        if hasFullSelection {
-            text = insertedText
-        } else {
-            text.append(insertedText)
-        }
-        hasFullSelection = false
-    }
-
-    mutating func deleteBackward() {
-        if hasFullSelection {
-            text = ""
-            hasFullSelection = false
-        } else if !text.isEmpty {
-            text.removeLast()
-        }
-    }
-
-    mutating func selectAll() {
-        guard !text.isEmpty else { return }
-        hasFullSelection = true
-    }
-
-    mutating func replace(with newText: String) {
-        text = newText
-        hasFullSelection = false
-    }
-
-    mutating func reset() {
-        replace(with: "")
-    }
-}
-
 enum AskNugumiFloatingPromptMetrics {
     static let pillSize = CGSize(width: 220, height: 38)
     static let shadowMargin: CGFloat = 14
