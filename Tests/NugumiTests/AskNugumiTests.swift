@@ -305,9 +305,19 @@ final class AskNugumiTests: XCTestCase {
         ))
     }
 
-    func testSelectionStatusUpdateIsIgnoredWhilePetIsThinking() {
-        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(isThinking: true))
-        XCTAssertFalse(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(isThinking: false))
+    func testSelectionStatusUpdateIsIgnoredWhilePetIsThinkingOrPromptIsVisible() {
+        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: true,
+            isPromptVisible: false
+        ))
+        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: false,
+            isPromptVisible: true
+        ))
+        XCTAssertFalse(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: false,
+            isPromptVisible: false
+        ))
     }
 
     func testPetBubblePresentationKeepsPetStillWhenBubbleFitsAboveMascot() {
