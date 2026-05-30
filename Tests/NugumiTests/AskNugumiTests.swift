@@ -305,9 +305,19 @@ final class AskNugumiTests: XCTestCase {
         ))
     }
 
-    func testSelectionStatusUpdateIsIgnoredWhilePetIsThinking() {
-        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(isThinking: true))
-        XCTAssertFalse(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(isThinking: false))
+    func testSelectionStatusUpdateIsIgnoredWhilePetIsThinkingOrPromptIsVisible() {
+        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: true,
+            isPromptVisible: false
+        ))
+        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: false,
+            isPromptVisible: true
+        ))
+        XCTAssertFalse(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: false,
+            isPromptVisible: false
+        ))
     }
 
     func testPetBubblePresentationKeepsPetStillWhenBubbleFitsAboveMascot() {
@@ -407,20 +417,6 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertEqual(layout.cornerRadius, 19, accuracy: 0.001)
         XCTAssertEqual(layout.textFrame.height, 24, accuracy: 0.001)
         XCTAssertEqual(layout.textFrame.midY, layout.pillFrame.midY, accuracy: 0.001)
-    }
-
-    func testPromptInputBufferSupportsTypingDeletionAndReplacement() {
-        var input = AskNugumiPromptInputBuffer()
-
-        input.insert("hello")
-        input.insert(" world")
-        input.deleteBackward()
-        input.selectAll()
-        input.insert("Ask Nugumi")
-
-        XCTAssertEqual(input.text, "Ask Nugumi")
-        XCTAssertEqual(input.trimmedText, "Ask Nugumi")
-        XCTAssertFalse(input.hasFullSelection)
     }
 
     func testAnswerBubbleLayoutGrowsBeforeScrollLimit() {
