@@ -4,7 +4,9 @@
 
 # Nugumi
 
-**Highlight any text on your Mac. See it translated. Right where you are.**
+**Confidence before you send, reply, or click.**
+
+A Mac assistant for non-native professionals who work across languages.
 
 <br>
 
@@ -22,67 +24,114 @@
 
 <br>
 
-![Nugumi translating a Korean message in Telegram](docs/screenshots/translate.png)
+![Nugumi translating a message in Telegram](docs/screenshots/translate.png)
 
 ## What is Nugumi?
 
-Nugumi is a friendly translator that lives in your Mac's menu bar. Select any text in any app — a chat message, a webpage, a PDF, a Notion doc — and Nugumi shows you the translation right next to your cursor. No copy-paste. No tab switching. No sending your text to the cloud.
+Nugumi helps you understand, write, and reply in another language without leaving the Mac app you're already using.
 
-It also drafts smart replies for messages you receive, and reads text out of any area of your screen.
+It is built for the moments where translation alone is not enough:
 
-Translation runs on [Ollama](https://ollama.com) — a free helper that runs AI models locally on your Mac. **Nothing you read or write ever leaves your computer.**
+- **Before sending:** make your draft sound natural, professional, and low-risk.
+- **Before replying:** understand the message and draft a reply in your voice.
+- **Before clicking:** ask what a foreign-language screen, form, warning, or button means.
 
-## How it works
+Works in Slack, Gmail, Notion, GitHub, Telegram, PDFs, websites, code editors, and any macOS app with selectable text.
 
-1. **Highlight** any text in any app.
-2. A tiny Nugumi button appears next to your selection.
-3. **Click it** — or press <kbd>⌃</kbd> <kbd>1</kbd> — and the translation pops up in place.
+## Core actions
 
-That's it.
+### Understand any language
 
-## Features
+<kbd>Left-click</kbd> the Nugumi button after selecting text.
 
-### Translate what you select
+Nugumi translates the selection into your native language. If the text is already in your language, it explains jargon and dense writing in plain words.
 
-<img src="docs/screenshots/translate.png" alt="Translate any selected text" width="100%">
+<img src="docs/screenshots/translate.png" alt="Understand selected text" width="100%">
 
-Highlight a foreign-language message and read it in your language a moment later. Works in Telegram, Slack, Safari, Notes, VS Code, Discord, Mail — anywhere macOS lets you select text.
+### Send with confidence
+
+<kbd>Right-click</kbd> the Nugumi button after selecting your draft.
+
+Write the thought in the language that feels natural to you. Nugumi turns it into clear professional English, Korean, Japanese, or the target language you work in. If your draft is already in the target language, Nugumi polishes grammar, tone, idioms, formatting, and saved snippets.
 
 ### Reply in your voice
 
+Select an incoming message, customer request, recruiting note, or work thread. Nugumi drafts a concise reply using your selected writing style, snippets, and dictionary terms. Edit it, then paste.
+
 <img src="docs/screenshots/reply.png" alt="Smart reply suggestions" width="100%">
 
-Got a message in a language you don't speak? Select it and Nugumi suggests a natural reply written _in your_ language. Edit it, then paste.
+### Ask Nugumi about your screen
+
+Press <kbd>Control</kbd> twice and ask a question like:
+
+- “Where do I click?”
+- “What does this warning mean?”
+- “What should I fill next?”
+
+With a vision-capable model, Nugumi reads the screen and points you to the safe next action while you stay in control.
 
 ### A tiny companion, not a popup factory
 
+Nugumi appears as a small mascot next to your selection — present when you need it, invisible when you don't.
+
 <img src="docs/screenshots/pet.png" alt="Floating pet companion" width="100%">
 
-Nugumi shows up as a small mascot next to your selection — present when you need it, invisible when you don't. Pick the style you like from the menu.
+## How it works
+
+1. **Highlight text** in any Mac app.
+2. **Left-click** to understand it in your native language.
+3. **Right-click** to rewrite or translate your draft into your target language.
+4. **Press Control twice** to ask about what is on your screen.
+
+No copy-paste loop. No browser tab. No fresh prompt every time.
+
+## Privacy and models
+
+Nugumi supports both local and cloud model workflows:
+
+- **Local text mode:** pair Nugumi with [Ollama](https://ollama.com) and run text actions on your Mac.
+- **Cloud/vision mode:** use a vision-capable model for screen questions. Screenshots are captured only when you ask Nugumi a screen question.
+
+You choose the model based on speed, quality, and privacy needs.
 
 ## Install
 
-1. Click the **Download** button above (or grab `Nugumi-X.Y.Z.dmg` from the [latest release](https://github.com/ChoiVadim/nugumi/releases/latest)).
-2. Open the DMG and drag **Nugumi.app** to your **Applications** folder.
+1. Download `Nugumi-X.Y.Z.dmg` from the [latest release](https://github.com/ChoiVadim/nugumi/releases/latest).
+2. Open the DMG and drag **Nugumi.app** to **Applications**.
 3. Launch Nugumi from Applications or Spotlight.
+4. Follow the onboarding steps for permissions and model setup.
 
-On first launch, Nugumi opens a small welcome window asking for two permissions:
+On first launch, Nugumi asks for:
 
-| Permission           | What it's for                                 |
-| -------------------- | --------------------------------------------- |
-| **Accessibility**    | Reading the text you select in other apps.    |
-| **Screen Recording** | Translating text in screen areas you capture. |
+- **Accessibility:** to read the text you select in other apps.
+- **Screen Recording:** to answer questions about screen areas you explicitly ask it to inspect.
 
-Click **Open settings** next to each row, flip the toggle for Nugumi, and the welcome window closes automatically when both are granted. Nugumi only ever sees what you actively select or capture — nothing else.
+Nugumi only acts on text you select or screens you ask about.
 
 ## Updates
 
-Nugumi updates itself. When a new version ships, click **Check for Updates...** in the menu bar to install it in one tap. The updater is signed end-to-end (Apple notarization + EdDSA), so you can trust every patch you get.
+Nugumi updates itself through Sparkle. Use **Check for Updates...** in the menu bar to install the latest release. Updates are signed end-to-end.
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later — Apple Silicon and Intel both supported.
-- [Ollama](https://ollama.com) installed. Nugumi walks you through it on first launch.
+- macOS 14 Sonoma or later.
+- Apple Silicon or Intel Mac.
+- [Ollama](https://ollama.com) for local text mode.
+- Optional cloud model/API setup for vision-powered screen questions.
+
+## FAQ
+
+### How is this different from Google Translate or ChatGPT?
+
+Google Translate mostly translates. ChatGPT can help, but it lives in another tab and needs a new prompt every time. Nugumi lives next to your cursor and already knows the action from your click: understand, rewrite, reply, or ask your screen.
+
+### Which apps does Nugumi work in?
+
+Any macOS app with selectable text: Telegram, Slack, Safari, Chrome, Notion, Notes, Mail, VS Code, PDFs in Preview, Discord, Messages, and more.
+
+### Is Nugumi free?
+
+Yes. Nugumi is free during early beta. No signup required.
 
 ## License
 
