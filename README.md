@@ -26,9 +26,9 @@ A Mac assistant for non-native professionals who work across languages.
 
 <div align="center">
 
-<video src="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4" poster="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo-poster.jpg" controls muted loop playsinline width="100%" aria-label="Nugumi reading a foreign-language screen and helping the user decide what to click"></video>
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo-poster.jpg" alt="Nugumi reading a foreign-language screen and helping the user decide what to click" width="100%"></a>
 
-[Watch the landing-page demo](https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4)
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4">▶ Watch the landing-page demo</a>
 
 </div>
 
@@ -64,7 +64,7 @@ With a vision-capable model, Nugumi reads the visible screen, explains the conte
 
 Nugumi translates the selection into your native language. If the text is already in your language, it explains jargon and dense writing in plain words.
 
-<video src="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4" poster="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate-poster.jpg" controls muted loop playsinline width="100%" aria-label="Nugumi translating selected text in place"></video>
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate-poster.jpg" alt="Nugumi translating selected text in place" width="100%"></a>
 
 ### Send with confidence
 
@@ -72,17 +72,19 @@ Nugumi translates the selection into your native language. If the text is alread
 
 Write the thought in the language that feels natural to you. Nugumi turns it into clear professional English, Korean, Japanese, or the target language you work in. If your draft is already in the target language, Nugumi polishes grammar, tone, idioms, formatting, and saved snippets.
 
-<video src="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4" poster="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native-poster.jpg" controls muted loop playsinline width="100%" aria-label="Nugumi polishing a selected draft into professional text"></video>
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native-poster.jpg" alt="Nugumi polishing a selected draft into professional text" width="100%"></a>
 
 ### Reply in your voice
 
 Select an incoming message, customer request, recruiting note, or work thread. Nugumi drafts a concise reply using your selected writing style, snippets, and dictionary terms. Edit it, then paste.
 
-<video src="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4" poster="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply-poster.jpg" controls muted loop playsinline width="100%" aria-label="Nugumi generating a full reply from a selected incoming message"></video>
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply-poster.jpg" alt="Nugumi generating a full reply from a selected incoming message" width="100%"></a>
 
 ### A tiny companion, not a popup factory
 
 Nugumi appears as a small mascot next to your selection — present when you need it, invisible when you don't.
+
+<img src="docs/screenshots/pet.png" alt="Floating pet companion" width="100%">
 
 ## How it works
 
