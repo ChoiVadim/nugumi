@@ -28,8 +28,6 @@ A Mac assistant for non-native professionals who work across languages.
 
 <a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo-poster.jpg" alt="Nugumi reading a foreign-language screen and helping the user decide what to click" width="100%"></a>
 
-<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4">▶ Watch the landing-page demo</a>
-
 </div>
 
 ## What is Nugumi?
@@ -83,6 +81,8 @@ Select an incoming message, customer request, recruiting note, or work thread. N
 ### A tiny companion, not a popup factory
 
 Nugumi appears as a small mascot next to your selection — present when you need it, invisible when you don't.
+
+<img src="docs/screenshots/pet.png" alt="Floating pet companion" width="100%">
 
 ## How it works
 
