@@ -26,7 +26,7 @@ A Mac assistant for non-native professionals who work across languages.
 
 <div align="center">
 
-<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo-poster.jpg" alt="Nugumi reading a foreign-language screen and helping the user decide what to click" width="100%"></a>
+<img src="docs/screenshots/demo.gif" alt="Nugumi reading a foreign-language screen and helping the user decide what to click" width="100%">
 
 </div>
 
@@ -62,7 +62,7 @@ With a vision-capable model, Nugumi reads the visible screen, explains the conte
 
 Nugumi translates the selection into your native language. If the text is already in your language, it explains jargon and dense writing in plain words.
 
-<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate-poster.jpg" alt="Nugumi translating selected text in place" width="100%"></a>
+<img src="docs/screenshots/translate.gif" alt="Nugumi translating selected text in place" width="100%">
 
 ### Send with confidence
 
@@ -70,13 +70,13 @@ Nugumi translates the selection into your native language. If the text is alread
 
 Write the thought in the language that feels natural to you. Nugumi turns it into clear professional English, Korean, Japanese, or the target language you work in. If your draft is already in the target language, Nugumi polishes grammar, tone, idioms, formatting, and saved snippets.
 
-<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native-poster.jpg" alt="Nugumi polishing a selected draft into professional text" width="100%"></a>
+<img src="docs/screenshots/make-native.gif" alt="Nugumi polishing a selected draft into professional text" width="100%">
 
 ### Reply in your voice
 
 Select an incoming message, customer request, recruiting note, or work thread. Nugumi drafts a concise reply using your selected writing style, snippets, and dictionary terms. Edit it, then paste.
 
-<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply-poster.jpg" alt="Nugumi generating a full reply from a selected incoming message" width="100%"></a>
+<img src="docs/screenshots/reply.gif" alt="Nugumi generating a full reply from a selected incoming message" width="100%">
 
 ### A tiny companion, not a popup factory
 
