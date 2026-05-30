@@ -4,7 +4,7 @@
 
 # Nugumi
 
-**Confidence before you send, reply, or click.**
+**Ask what to say, write, reply, or click — right on your Mac.**
 
 A Mac assistant for non-native professionals who work across languages.
 
@@ -24,21 +24,39 @@ A Mac assistant for non-native professionals who work across languages.
 
 <br>
 
-![Nugumi translating a message in Telegram](docs/screenshots/translate.png)
+<div align="center">
+
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo-poster.jpg" alt="Nugumi reading a foreign-language screen and helping the user decide what to click" width="100%"></a>
+
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4">▶ Watch the landing-page demo</a>
+
+</div>
 
 ## What is Nugumi?
 
-Nugumi helps you understand, write, and reply in another language without leaving the Mac app you're already using.
+Nugumi helps you understand, write, reply, and decide what to click in another language without leaving the Mac app you're already using.
 
 It is built for the moments where translation alone is not enough:
 
+- **Ask your screen:** understand foreign-language websites, forms, warnings, and buttons.
 - **Before sending:** make your draft sound natural, professional, and low-risk.
 - **Before replying:** understand the message and draft a reply in your voice.
-- **Before clicking:** ask what a foreign-language screen, form, warning, or button means.
+- **Before reading:** translate or simplify selected text in-place.
 
 Works in Slack, Gmail, Notion, GitHub, Telegram, PDFs, websites, code editors, and any macOS app with selectable text.
 
-## Core actions
+## Main feature: Ask Nugumi
+
+Press <kbd>Control</kbd> twice and ask Nugumi about what is on your screen:
+
+- “Where do I click?”
+- “What does this warning mean?”
+- “What should I fill next?”
+- “Can I safely continue?”
+
+With a vision-capable model, Nugumi reads the visible screen, explains the context, and points you to the safe next action while you stay in control.
+
+## Other core actions
 
 ### Understand any language
 
@@ -46,7 +64,7 @@ Works in Slack, Gmail, Notion, GitHub, Telegram, PDFs, websites, code editors, a
 
 Nugumi translates the selection into your native language. If the text is already in your language, it explains jargon and dense writing in plain words.
 
-<img src="docs/screenshots/translate.png" alt="Understand selected text" width="100%">
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/translate-poster.jpg" alt="Nugumi translating selected text in place" width="100%"></a>
 
 ### Send with confidence
 
@@ -54,27 +72,17 @@ Nugumi translates the selection into your native language. If the text is alread
 
 Write the thought in the language that feels natural to you. Nugumi turns it into clear professional English, Korean, Japanese, or the target language you work in. If your draft is already in the target language, Nugumi polishes grammar, tone, idioms, formatting, and saved snippets.
 
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native-poster.jpg" alt="Nugumi polishing a selected draft into professional text" width="100%"></a>
+
 ### Reply in your voice
 
 Select an incoming message, customer request, recruiting note, or work thread. Nugumi drafts a concise reply using your selected writing style, snippets, and dictionary terms. Edit it, then paste.
 
-<img src="docs/screenshots/reply.png" alt="Smart reply suggestions" width="100%">
-
-### Ask Nugumi about your screen
-
-Press <kbd>Control</kbd> twice and ask a question like:
-
-- “Where do I click?”
-- “What does this warning mean?”
-- “What should I fill next?”
-
-With a vision-capable model, Nugumi reads the screen and points you to the safe next action while you stay in control.
+<a href="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4"><img src="https://df41nzkzrv2ws.cloudfront.net/nugumi/reply-poster.jpg" alt="Nugumi generating a full reply from a selected incoming message" width="100%"></a>
 
 ### A tiny companion, not a popup factory
 
 Nugumi appears as a small mascot next to your selection — present when you need it, invisible when you don't.
-
-<img src="docs/screenshots/pet.png" alt="Floating pet companion" width="100%">
 
 ## How it works
 
@@ -85,21 +93,31 @@ Nugumi appears as a small mascot next to your selection — present when you nee
 
 No copy-paste loop. No browser tab. No fresh prompt every time.
 
-## Privacy and models
+## Models and cost
 
-Nugumi supports both local and cloud model workflows:
+Nugumi can run with the setup you already prefer:
 
-- **Local text mode:** pair Nugumi with [Ollama](https://ollama.com) and run text actions on your Mac.
-- **Cloud/vision mode:** use a vision-capable model for screen questions. Screenshots are captured only when you ask Nugumi a screen question.
+- **ChatGPT subscription:** sign in and use Nugumi with your ChatGPT subscription path.
+- **Ollama:** run local text actions on your Mac for free with open-source models.
+- **API key:** connect your own provider key if you want direct cloud model access.
 
-You choose the model based on speed, quality, and privacy needs.
+Use Ollama when privacy/cost matters. Use ChatGPT or an API key when you want stronger cloud models or vision for Ask Nugumi.
+
+## Privacy
+
+- Text actions can run locally through [Ollama](https://ollama.com), so selected text stays on your Mac.
+- Ask Nugumi captures your screen only when you ask a screen question.
+- If you use a cloud or vision model, the selected text or screenshot is sent to that provider for that request.
+
+You choose the model based on speed, quality, privacy, and cost.
 
 ## Install
 
 1. Download `Nugumi-X.Y.Z.dmg` from the [latest release](https://github.com/ChoiVadim/nugumi/releases/latest).
 2. Open the DMG and drag **Nugumi.app** to **Applications**.
 3. Launch Nugumi from Applications or Spotlight.
-4. Follow the onboarding steps for permissions and model setup.
+4. Choose your model setup: ChatGPT subscription, Ollama, or API key.
+5. Follow the onboarding steps for permissions.
 
 On first launch, Nugumi asks for:
 
@@ -116,14 +134,14 @@ Nugumi updates itself through Sparkle. Use **Check for Updates...** in the menu 
 
 - macOS 14 Sonoma or later.
 - Apple Silicon or Intel Mac.
-- [Ollama](https://ollama.com) for local text mode.
-- Optional cloud model/API setup for vision-powered screen questions.
+- One model setup: ChatGPT subscription, free local Ollama, or your own API key.
+- Vision-capable model for Ask Nugumi screen questions.
 
 ## FAQ
 
 ### How is this different from Google Translate or ChatGPT?
 
-Google Translate mostly translates. ChatGPT can help, but it lives in another tab and needs a new prompt every time. Nugumi lives next to your cursor and already knows the action from your click: understand, rewrite, reply, or ask your screen.
+Google Translate mostly translates. ChatGPT can help, but it lives in another tab and needs a new prompt every time. Nugumi lives next to your cursor and already knows the action from your click: ask the screen, understand, rewrite, or reply.
 
 ### Which apps does Nugumi work in?
 
@@ -131,7 +149,7 @@ Any macOS app with selectable text: Telegram, Slack, Safari, Chrome, Notion, Not
 
 ### Is Nugumi free?
 
-Yes. Nugumi is free during early beta. No signup required.
+Yes. Nugumi is free during early beta. With Ollama, local text actions can run for free on your Mac. You can also use a ChatGPT subscription path or your own API key for cloud models.
 
 ## License
 
