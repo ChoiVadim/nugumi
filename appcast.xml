@@ -201,5 +201,16 @@
                 type="application/octet-stream"
                 sparkle:edSignature="0ZVfZqsvIn8DAEv0KRuzoocEnLMShOur4kPp3xRe72Hr9fSRflIUI9fZg0EObMrURN/Oxxm99EVhcwMAi1l9BQ==" length="4174669" />
         </item>
+        <item>
+            <title>Version 0.7.5</title>
+            <pubDate>Mon, 01 Jun 2026 08:31:22 +0000</pubDate>
+            <sparkle:version>20</sparkle:version>
+            <sparkle:shortVersionString>0.7.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/ChoiVadim/nugumi/releases/download/v0.7.5/Nugumi-0.7.5.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="WONy619yrFSYvfCnxVD75SffsIRLjIpUWUh80lV89RF2L2QkYS613D4mcDfcmifmPJ9kT8cC4wD9fnuOFtc0Bw==" length="4176234" />
+        </item>
     </channel>
 </rss>
