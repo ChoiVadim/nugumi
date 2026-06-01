@@ -5422,17 +5422,28 @@ enum ScreenshotCapture {
         let visibleFrame = screen.visibleFrame
 
         let imagePayload = try await Task.detached(priority: .userInitiated) {
-            guard let cgImage = CGDisplayCreateImage(screenID) else {
+            guard let captured = CGDisplayCreateImage(screenID) else {
                 throw ScreenshotTranslationError.captureFailedDetail("Could not capture the active screen.")
             }
 
+            // Retina/5K screenshots as lossless PNG routinely exceed the
+            // 5 MB cloud-backend limit. Cloud vision models (OpenAI 4o/4.1,
+            // etc.) fit images to 2048² before tiling, so downscaling here
+            // is lossless w.r.t. the model and JPEG keeps payload small.
+            let cgImage = ScreenshotCapture.downscaledForVision(captured)
             let bitmap = NSBitmapImageRep(cgImage: cgImage)
-            guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            let jpegProps: [NSBitmapImageRep.PropertyKey: Any] = [.compressionFactor: 0.85]
+            let encoded: (data: Data, mediaType: String)
+            if let jpeg = bitmap.representation(using: .jpeg, properties: jpegProps) {
+                encoded = (jpeg, "image/jpeg")
+            } else if let png = bitmap.representation(using: .png, properties: [:]) {
+                encoded = (png, "image/png")
+            } else {
                 throw ScreenshotTranslationError.captureFailedDetail("Could not encode the active screen.")
             }
 
             return (
-                image: ImageInput(data: pngData, mediaType: "image/png"),
+                image: ImageInput(data: encoded.data, mediaType: encoded.mediaType),
                 pixelSize: CGSize(width: CGFloat(cgImage.width), height: CGFloat(cgImage.height))
             )
         }.value
@@ -5443,6 +5454,33 @@ enum ScreenshotCapture {
             screenFrame: screenFrame,
             visibleFrame: visibleFrame
         )
+    }
+
+    // Matches the tile boundary cloud vision models snap to; sending larger
+    // is bandwidth waste plus risks tripping client-side size guards.
+    private static let visionMaxEdge: CGFloat = 2048
+
+    fileprivate static func downscaledForVision(_ image: CGImage) -> CGImage {
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        let longest = max(width, height)
+        guard longest > visionMaxEdge else { return image }
+        let scale = visionMaxEdge / longest
+        let targetWidth = Int((width * scale).rounded())
+        let targetHeight = Int((height * scale).rounded())
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+        return context.makeImage() ?? image
     }
 
     static func captureInteractiveArea() async throws -> URL {
@@ -7593,16 +7631,15 @@ final class PetController: NSObject, NSTextFieldDelegate {
     /// Drag the dialog bubble — and the pet with it — by tracking mouse
     /// movement until the user releases the button. Runs a synchronous event
     /// loop because that's the Cocoa-blessed way to handle window drag from a
-    /// view's mouseDown. Each `.leftMouseDragged` event applies the same
-    /// screen-space delta to all three pet panels so the character, the
-    /// bubble, and the target marker move as one unit. The caller supplies
-    /// the initial screen-space mouse location captured at mouseDown so
-    /// drag-vs-click detection upstream doesn't shift the anchor.
+    /// view's mouseDown. The target marker is intentionally NOT translated:
+    /// it anchors to whatever on-screen object the answer is about, so the
+    /// user can drag the bubble to a readable spot without the pointer
+    /// losing its target. The caller supplies the initial screen-space mouse
+    /// location captured at mouseDown so drag-vs-click detection upstream
+    /// doesn't shift the anchor.
     private func beginBubbleDrag(initialMouseLocation: NSPoint) {
         let initialPetOrigin = panel.frame.origin
         let initialPromptOrigin = promptPanel.frame.origin
-        let initialMarkerOrigin = targetMarkerPanel.frame.origin
-        let markerWasVisible = targetMarkerPanel.isVisible
 
         while true {
             let event = NSApp.nextEvent(
@@ -7620,9 +7657,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
 
             panel.setFrameOrigin(NSPoint(x: initialPetOrigin.x + dx, y: initialPetOrigin.y + dy))
             promptPanel.setFrameOrigin(NSPoint(x: initialPromptOrigin.x + dx, y: initialPromptOrigin.y + dy))
-            if markerWasVisible {
-                targetMarkerPanel.setFrameOrigin(NSPoint(x: initialMarkerOrigin.x + dx, y: initialMarkerOrigin.y + dy))
-            }
         }
     }
 
