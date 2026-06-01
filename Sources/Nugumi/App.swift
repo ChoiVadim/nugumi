@@ -5270,22 +5270,11 @@ enum ClipboardSelectionReader {
 }
 
 enum KeyboardShortcutPoster {
-    // Small gap between modifier-down and the key event so the target app's
-    // modifier state has a chance to update before processing the keystroke.
-    // Without this, fast double-clicks (which cause this poster to fire from
-    // an AX-fail clipboard fallback) can race and the target sees an
-    // unmodified key — typing a literal "c" into editable fields instead of
-    // performing the Copy. 10ms is well below perceptual threshold and
-    // adequate margin across the apps tested.
-    private static let modifierSettleInterval: useconds_t = 10_000
-
     static func postCommandShortcut(keyCode: CGKeyCode) {
         let source = CGEventSource(stateID: .hidSystemState)
         postKey(CGKeyCode(kVK_Command), keyDown: true, flags: .maskCommand, source: source)
-        usleep(modifierSettleInterval)
         postKey(keyCode, keyDown: true, flags: .maskCommand, source: source)
         postKey(keyCode, keyDown: false, flags: .maskCommand, source: source)
-        usleep(modifierSettleInterval)
         postKey(CGKeyCode(kVK_Command), keyDown: false, flags: [], source: source)
     }
 
