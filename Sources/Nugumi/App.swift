@@ -36,6 +36,7 @@ private enum MenuItemTag: Int {
     case invisibilityMode = 124
     case contactSupport = 125
     case permissionsOnboarding = 126
+    case liveTranslation = 127
 }
 
 enum InvisibilityState {
@@ -535,6 +536,11 @@ struct TranslationLanguage: Equatable {
     static func language(id: String) -> TranslationLanguage {
         all.first { $0.id == id } ?? defaultLanguage
     }
+
+    /// The user's active target language, read from the same default the menu writes.
+    static var current: TranslationLanguage {
+        language(id: UserDefaults.standard.string(forKey: "targetLanguageID") ?? defaultLanguage.id)
+    }
 }
 
 private enum TextNormalizer {
@@ -849,6 +855,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var screenshotPanelSide: TranslationPanelController.Side?
     private var screenshotDragTracker: ScreenshotDragTracker?
     private var globalHotKeys: [GlobalHotKey] = []
+    private lazy var liveTranslationController: LiveTranslationController = {
+        let controller = LiveTranslationController()
+        controller.onMissingAPIKey = { [weak self] in self?.presentLiveTranslationAPIKeyAlert() }
+        return controller
+    }()
     private var modifierDetectors: [DoubleModifierPressDetector] = []
     private var shortcutRecorderWindowController: ShortcutRecorderWindowController?
     private var lastReplacementSourcePID: pid_t?
@@ -1094,7 +1105,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             (.translateSelection, { [weak self] in self?.startSelectedTextTranslationForReplacement() }),
             (.translateOrReply, { [weak self] in self?.startSelectionTranslateOrReply() }),
             (.toggleInvisibility, { [weak self] in self?.toggleInvisibilityMode() }),
-            (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() })
+            (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() }),
+            (.liveTranslation, { [weak self] in self?.toggleLiveTranslation() })
         ]
 
         for (action, handler) in bindings {
@@ -1803,6 +1815,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             action: #selector(translateOrReplySelectionFromMenu),
             keyEquivalent: shortcut(for: .translateOrReply).menuKeyEquivalent,
             keyEquivalentModifierMask: shortcut(for: .translateOrReply).keyEquivalentModifierMask
+        ))
+
+        menu.addItem(makeMenuItem(
+            title: "Live translation captions",
+            tag: .liveTranslation,
+            symbolName: "captions.bubble",
+            action: #selector(toggleLiveTranslationFromMenu)
         ))
 
         menu.addItem(makeMenuItem(
@@ -3478,6 +3497,28 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @objc private func translateOrReplySelectionFromMenu() {
         startSelectionTranslateOrReply()
+    }
+
+    @MainActor
+    @objc private func toggleLiveTranslationFromMenu() {
+        toggleLiveTranslation()
+    }
+
+    @MainActor
+    private func toggleLiveTranslation() {
+        liveTranslationController.toggle(
+            apiKey: KeychainStore.apiKey(for: .openAI),
+            targetLanguage: TranslationLanguage.current
+        )
+    }
+
+    @MainActor
+    private func presentLiveTranslationAPIKeyAlert() {
+        let alert = NSAlert()
+        alert.messageText = "OpenAI API key required"
+        alert.informativeText = "Live translation uses OpenAI's realtime model. Add an OpenAI API key from the model menu (API key models) and try again."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func contactSupport() {
