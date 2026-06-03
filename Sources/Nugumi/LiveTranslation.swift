@@ -1074,12 +1074,8 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         [statusLabel, costLabel, collapseButton, closeButton, separator, scrollView, bottomSeparator,
-         summarizeButton, sourceToggleButton, vsep1, systemAudioButton, micButton]
+         summarizeButton, sourceToggleButton, vsep1, systemAudioButton, micButton, pauseButton]
             .forEach { content.addSubview($0) }
-        // The round white play button is the only control with a background, so add
-        // it to the unmasked root (above the glass) — the glass corner radius can't
-        // clip it there. It stays inside the visible card via its inset constraints.
-        panel.contentView?.addSubview(pauseButton)
 
         let tb: CGFloat = 24
         // Keep this below required so it can never break the play button's
@@ -1151,7 +1147,7 @@ final class LiveCaptionPanelController: NSObject {
             // Round play/pause (in the unmasked root) — smaller and inset to sit
             // inside the card without being clipped.
             pauseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
-            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
             pauseButton.widthAnchor.constraint(equalToConstant: 24),
             pauseButton.heightAnchor.constraint(equalToConstant: 24),
             pauseButton.widthAnchor.constraint(equalTo: pauseButton.heightAnchor),
