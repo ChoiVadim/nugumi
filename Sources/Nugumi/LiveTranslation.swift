@@ -702,6 +702,33 @@ final class RecordIndicatorView: NSView {
     }
 }
 
+/// Borderless icon button with a soft rounded hover highlight — used for the
+/// captions header controls (pause/minimize/close).
+final class HoverIconButton: NSButton {
+    var hoverColor = NSColor(calibratedWhite: 1.0, alpha: 0.14)
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseEnteredAndExited, .activeAlways],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        wantsLayer = true
+        layer?.cornerRadius = 5
+        layer?.backgroundColor = hoverColor.cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+}
+
 @MainActor
 final class LiveCaptionPanelController: NSObject {
     private let panel: NSPanel
@@ -811,13 +838,24 @@ final class LiveCaptionPanelController: NSObject {
         return glass.contentView
     }
 
-    private func iconButton(_ symbol: String, tint: NSColor, action: Selector, help: String) -> NSButton {
-        let button = NSButton(title: "", target: self, action: action)
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)
-        button.imageScaling = .scaleProportionallyUpOrDown
+    private static let hoverNeutral = NSColor(calibratedWhite: 1.0, alpha: 0.14)
+    private static let hoverDanger = NSColor.systemRed.withAlphaComponent(0.85)
+
+    private static func symbolImage(_ name: String, _ description: String) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        return NSImage(systemSymbolName: name, accessibilityDescription: description)?
+            .withSymbolConfiguration(config)
+    }
+
+    private func iconButton(_ symbol: String, tint: NSColor, hover: NSColor,
+                            action: Selector, help: String) -> HoverIconButton {
+        let button = HoverIconButton(title: "", target: self, action: action)
+        button.image = Self.symbolImage(symbol, help)
+        button.imagePosition = .imageOnly
         button.isBordered = false
         button.bezelStyle = .regularSquare
         button.contentTintColor = tint
+        button.hoverColor = hover
         button.toolTip = help
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
@@ -836,12 +874,12 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let pauseButton = iconButton("pause.fill", tint: Self.iconColor,
+        let pauseButton = iconButton("pause.fill", tint: Self.iconColor, hover: Self.hoverNeutral,
                                      action: #selector(pauseTapped), help: "Pause")
         self.pauseButton = pauseButton
-        let collapseButton = iconButton("minus.circle.fill", tint: Self.iconColor,
+        let collapseButton = iconButton("minus", tint: Self.iconColor, hover: Self.hoverNeutral,
                                         action: #selector(collapseTapped), help: "Minimize")
-        let closeButton = iconButton("xmark.circle.fill", tint: .systemRed,
+        let closeButton = iconButton("xmark", tint: Self.iconColor, hover: Self.hoverDanger,
                                      action: #selector(stopTapped), help: "Stop and close")
 
         sourceControl.target = self
@@ -869,35 +907,39 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
+        // Thin, auto-hiding overlay scroller instead of the heavy legacy bar.
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerKnobStyle = .light
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         [statusLabel, costLabel, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
             .forEach { content.addSubview($0) }
 
         NSLayoutConstraint.activate([
-            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
-            closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            closeButton.widthAnchor.constraint(equalToConstant: 15),
-            closeButton.heightAnchor.constraint(equalToConstant: 15),
+            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
+            closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            closeButton.widthAnchor.constraint(equalToConstant: 22),
+            closeButton.heightAnchor.constraint(equalToConstant: 22),
 
             collapseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
-            collapseButton.widthAnchor.constraint(equalToConstant: 15),
-            collapseButton.heightAnchor.constraint(equalToConstant: 15),
+            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
+            collapseButton.widthAnchor.constraint(equalToConstant: 22),
+            collapseButton.heightAnchor.constraint(equalToConstant: 22),
 
             pauseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            pauseButton.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8),
-            pauseButton.widthAnchor.constraint(equalToConstant: 14),
-            pauseButton.heightAnchor.constraint(equalToConstant: 14),
+            pauseButton.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -2),
+            pauseButton.widthAnchor.constraint(equalToConstant: 22),
+            pauseButton.heightAnchor.constraint(equalToConstant: 22),
 
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: pauseButton.leadingAnchor, constant: -10),
+            costLabel.trailingAnchor.constraint(equalTo: pauseButton.leadingAnchor, constant: -8),
             costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
-            sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 10),
+            sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
             sourceControl.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
             sourceControl.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
 
@@ -963,8 +1005,8 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     func setPaused(_ paused: Bool) {
-        pauseButton?.image = NSImage(systemSymbolName: paused ? "play.fill" : "pause.fill",
-                                     accessibilityDescription: paused ? "Resume" : "Pause")
+        pauseButton?.image = Self.symbolImage(paused ? "play.fill" : "pause.fill",
+                                              paused ? "Resume" : "Pause")
         pauseButton?.toolTip = paused ? "Resume" : "Pause"
         recordIndicator?.setPaused(paused)
     }
