@@ -381,3 +381,109 @@ private extension CMSampleBuffer {
         return status == noErr ? buffer : nil
     }
 }
+
+/// Floating, draggable, always-on-top captions window. Pure view layer — the
+/// controller pushes transcript + status updates in.
+@MainActor
+final class LiveCaptionPanelController: NSObject {
+    private let panel: NSPanel
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let costLabel = NSTextField(labelWithString: "")
+    private let textView = NSTextView()
+    private let scrollView = NSScrollView()
+    var onStop: (() -> Void)?
+
+    override init() {
+        panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+            styleMask: [.borderless, .nonactivatingPanel, .resizable],
+            backing: .buffered, defer: false
+        )
+        super.init()
+
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96)
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+
+        let root = NSView(frame: panel.contentLayoutRect)
+        root.autoresizingMask = [.width, .height]
+
+        statusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        costLabel.font = .systemFont(ofSize: 11)
+        costLabel.textColor = .tertiaryLabelColor
+        costLabel.alignment = .right
+        costLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let stopButton = NSButton(title: "Stop", target: self, action: #selector(stopTapped))
+        stopButton.bezelStyle = .rounded
+        stopButton.translatesAutoresizingMaskIntoConstraints = false
+
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.font = .systemFont(ofSize: 14)
+        textView.textContainerInset = NSSize(width: 8, height: 8)
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(statusLabel)
+        root.addSubview(costLabel)
+        root.addSubview(stopButton)
+        root.addSubview(scrollView)
+        panel.contentView = root
+
+        NSLayoutConstraint.activate([
+            statusLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            costLabel.centerYAnchor.constraint(equalTo: statusLabel.centerYAnchor),
+            costLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            scrollView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
+            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: stopButton.topAnchor, constant: -8),
+            stopButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+            stopButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+        ])
+    }
+
+    func show() {
+        if let screen = NSScreen.main {
+            let visible = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: visible.maxX - 440, y: visible.minY + 40))
+        }
+        panel.orderFrontRegardless()
+    }
+
+    func close() { panel.orderOut(nil) }
+
+    func update(status: String) { statusLabel.stringValue = status }
+    func update(cost: String) { costLabel.stringValue = cost }
+
+    func render(_ transcript: LiveTranscript) {
+        let body = NSMutableAttributedString()
+        for line in transcript.lines {
+            let speaker = NSAttributedString(string: "\(line.speaker.label): ", attributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .bold),
+                .foregroundColor: line.speaker == .me ? NSColor.systemBlue : NSColor.systemGreen
+            ])
+            let text = NSAttributedString(string: line.text + "\n", attributes: [
+                .font: NSFont.systemFont(ofSize: 14),
+                .foregroundColor: line.isFinalized ? NSColor.labelColor : NSColor.secondaryLabelColor
+            ])
+            body.append(speaker); body.append(text)
+        }
+        textView.textStorage?.setAttributedString(body)
+        textView.scrollToEndOfDocument(nil)
+    }
+
+    @objc private func stopTapped() { onStop?() }
+}
