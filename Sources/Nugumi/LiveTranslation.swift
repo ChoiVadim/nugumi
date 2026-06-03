@@ -704,6 +704,60 @@ final class RecordIndicatorView: NSView {
     }
 }
 
+/// One-shot transcript summary via OpenAI chat completions. Kept minimal (no
+/// temperature / max_tokens) so it works across the gpt-5 model family.
+enum LiveSummarizer {
+    static func summarize(_ transcript: String, apiKey: String,
+                          model: String = "gpt-5.4-mini") async throws -> String {
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let system = "You summarize transcripts of live audio (calls, videos, lectures, meetings). "
+            + "Produce a concise summary: a one-line TL;DR, then the key points as short bullets, "
+            + "then any action items if present. Stay faithful to the content and reply in the same "
+            + "language as the transcript."
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": transcript]
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw NSError(domain: "LiveSummarizer", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "No response"])
+        }
+        guard http.statusCode == 200 else {
+            var detail = "HTTP \(http.statusCode)"
+            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = obj["error"] as? [String: Any], let msg = err["message"] as? String {
+                detail = msg
+            }
+            throw NSError(domain: "LiveSummarizer", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            throw NSError(domain: "LiveSummarizer", code: -2,
+                          userInfo: [NSLocalizedDescriptionKey: "Unexpected response"])
+        }
+        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Borderless panel that can still become key (needed so the summary panel's
+/// Cmd+C key equivalent fires).
+final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 /// Borderless icon button with a soft rounded hover highlight — used for the
 /// captions header controls (pause/minimize/close).
 final class HoverIconButton: NSButton {
@@ -735,6 +789,9 @@ final class HoverIconButton: NSButton {
 final class LiveCaptionPanelController: NSObject {
     private let panel: NSPanel
     private let indicatorPanel: NSPanel
+    private let summaryPanel: KeyablePanel
+    private let summaryTextView = NSTextView()
+    private var summaryText = ""
 
     private let statusLabel = NSTextField(labelWithString: "")
     private let costLabel = NSTextField(labelWithString: "")
@@ -768,6 +825,7 @@ final class LiveCaptionPanelController: NSObject {
     var onToggleCollapse: (() -> Void)?
     var onTogglePause: (() -> Void)?
     var onToggleSource: (() -> Void)?
+    var onSummarize: (() -> Void)?
     var onSourceChange: ((LiveAudioSource) -> Void)?
 
     override init() {
@@ -781,11 +839,18 @@ final class LiveCaptionPanelController: NSObject {
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
+        summaryPanel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 480),
+            styleMask: [.borderless, .resizable],
+            backing: .buffered, defer: false
+        )
         super.init()
         configureFloating(panel)
         configureFloating(indicatorPanel)
+        configureFloating(summaryPanel)
         buildCaptions()
         buildIndicator()
+        buildSummary()
 
         // Track user drags of either window so they share one anchor.
         for window in [panel, indicatorPanel] {
@@ -880,6 +945,8 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let summarizeButton = iconButton("list.bullet.rectangle", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                         action: #selector(summarizeTapped), help: "Summarize")
         let sourceToggleButton = iconButton("character.bubble", tint: Self.iconColor, hover: Self.hoverNeutral,
                                             action: #selector(sourceToggled), help: "Show original")
         self.sourceToggleButton = sourceToggleButton
@@ -922,7 +989,7 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.scrollerKnobStyle = .light
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        [statusLabel, costLabel, sourceToggleButton, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
+        [statusLabel, costLabel, summarizeButton, sourceToggleButton, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
             .forEach { content.addSubview($0) }
 
         NSLayoutConstraint.activate([
@@ -946,11 +1013,16 @@ final class LiveCaptionPanelController: NSObject {
             sourceToggleButton.widthAnchor.constraint(equalToConstant: 22),
             sourceToggleButton.heightAnchor.constraint(equalToConstant: 22),
 
+            summarizeButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            summarizeButton.trailingAnchor.constraint(equalTo: sourceToggleButton.leadingAnchor, constant: -2),
+            summarizeButton.widthAnchor.constraint(equalToConstant: 22),
+            summarizeButton.heightAnchor.constraint(equalToConstant: 22),
+
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: sourceToggleButton.leadingAnchor, constant: -8),
+            costLabel.trailingAnchor.constraint(equalTo: summarizeButton.leadingAnchor, constant: -8),
             costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
             sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
@@ -1060,10 +1132,86 @@ final class LiveCaptionPanelController: NSObject {
         sourceToggleButton?.toolTip = on ? "Hide original" : "Show original"
     }
 
+    private func buildSummary() {
+        let content = installGlass(in: summaryPanel, cornerRadius: Self.glassCornerRadius)
+
+        let title = NSTextField(labelWithString: "Summary")
+        title.font = .systemFont(ofSize: 12, weight: .semibold)
+        title.textColor = Self.titleColor
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        let copyButton = iconButton("doc.on.doc", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                    action: #selector(copySummaryTapped), help: "Copy summary (⌘C)")
+        copyButton.keyEquivalent = "c"
+        copyButton.keyEquivalentModifierMask = .command
+        let closeButton = iconButton("xmark", tint: Self.iconColor, hover: Self.hoverDanger,
+                                     action: #selector(closeSummaryTapped), help: "Close")
+
+        summaryTextView.isEditable = false
+        summaryTextView.isSelectable = true
+        summaryTextView.drawsBackground = false
+        summaryTextView.font = .systemFont(ofSize: 14)
+        summaryTextView.textColor = Self.bodyColor
+        summaryTextView.textContainerInset = NSSize(width: 6, height: 8)
+        summaryTextView.isVerticallyResizable = true
+        summaryTextView.isHorizontallyResizable = false
+        summaryTextView.autoresizingMask = [.width]
+        summaryTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        summaryTextView.textContainer?.widthTracksTextView = true
+
+        let scroll = NSScrollView()
+        scroll.documentView = summaryTextView
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.scrollerKnobStyle = .light
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+
+        [title, copyButton, closeButton, scroll].forEach { content.addSubview($0) }
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
+            closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            closeButton.widthAnchor.constraint(equalToConstant: 22),
+            closeButton.heightAnchor.constraint(equalToConstant: 22),
+            copyButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            copyButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
+            copyButton.widthAnchor.constraint(equalToConstant: 22),
+            copyButton.heightAnchor.constraint(equalToConstant: 22),
+            title.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            title.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            scroll.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+            scroll.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+        ])
+    }
+
+    func showSummary(_ text: String) {
+        summaryText = text
+        summaryTextView.string = text
+        summaryTextView.textColor = Self.bodyColor
+        if summaryPanel.frame.origin == .zero, let screen = NSScreen.main {
+            let v = screen.visibleFrame
+            summaryPanel.setFrameOrigin(NSPoint(x: v.midX - summaryPanel.frame.width / 2,
+                                                y: v.midY - summaryPanel.frame.height / 2))
+        }
+        summaryPanel.makeKeyAndOrderFront(nil)
+    }
+
+    func copySummary() {
+        guard !summaryText.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summaryText, forType: .string)
+    }
+
     @objc private func stopTapped() { onStop?() }
     @objc private func collapseTapped() { onToggleCollapse?() }
     @objc private func pauseTapped() { onTogglePause?() }
     @objc private func sourceToggled() { onToggleSource?() }
+    @objc private func summarizeTapped() { onSummarize?() }
+    @objc private func copySummaryTapped() { copySummary() }
+    @objc private func closeSummaryTapped() { summaryPanel.orderOut(nil) }
     @objc private func sourceChanged() {
         onSourceChange?(sourceControl.selectedSegment == 0 ? .systemAudio : .microphone)
     }
@@ -1126,6 +1274,7 @@ final class LiveTranslationController: NSObject {
         panel.onToggleCollapse = { [weak self] in self?.toggleCollapsed() }
         panel.onTogglePause = { [weak self] in self?.togglePauseResume() }
         panel.onToggleSource = { [weak self] in self?.toggleSource() }
+        panel.onSummarize = { [weak self] in self?.summarize() }
         panel.onSourceChange = { [weak self] newSource in self?.changeSource(to: newSource) }
         panel.setSource(LiveAudioSource.current)
         panel.setShowSource(showSource)
@@ -1144,6 +1293,31 @@ final class LiveTranslationController: NSObject {
         showSource.toggle()
         panel.setShowSource(showSource)
         renderTranscripts()
+    }
+
+    private func currentStatusText() -> String {
+        if isPaused { return "Paused — press play to continue" }
+        if isRunning { return "Listening → \(targetLanguage.displayName)" }
+        return "Stopped"
+    }
+
+    private func summarize() {
+        let text = transcript.lines.map(\.text).joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { panel.update(status: "Nothing to summarize yet."); return }
+        guard !apiKey.isEmpty else { onMissingAPIKey?(); return }
+        panel.update(status: "Summarizing…")
+        let key = apiKey
+        Task { [weak self] in
+            do {
+                let summary = try await LiveSummarizer.summarize(text, apiKey: key)
+                guard let self else { return }
+                self.panel.showSummary(summary)
+                self.panel.update(status: self.currentStatusText())
+            } catch {
+                self?.panel.update(status: "Summary failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// Spins up a session + capture + timers for the current source, keeping the
