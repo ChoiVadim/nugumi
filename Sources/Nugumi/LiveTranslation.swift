@@ -727,6 +727,10 @@ final class LiveCaptionPanelController: NSObject {
 
     private var pauseButton: NSButton?
     private var recordIndicator: RecordIndicatorView?
+    /// Shared top-right corner (screen coords) both windows anchor to, so the
+    /// captions window and the collapsed pill always appear in the same spot and
+    /// remember wherever the user drags either one.
+    private var anchorTopRight: NSPoint?
 
     var onStop: (() -> Void)?
     var onToggleCollapse: (() -> Void)?
@@ -749,6 +753,32 @@ final class LiveCaptionPanelController: NSObject {
         configureFloating(indicatorPanel)
         buildCaptions()
         buildIndicator()
+
+        // Track user drags of either window so they share one anchor.
+        for window in [panel, indicatorPanel] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(panelDidMove(_:)),
+                name: NSWindow.didMoveNotification, object: window)
+        }
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    private func cornerTopRight(of p: NSPanel) -> NSPoint {
+        NSPoint(x: p.frame.maxX, y: p.frame.maxY)
+    }
+
+    private func place(_ p: NSPanel, topRight: NSPoint) {
+        p.setFrameOrigin(NSPoint(x: topRight.x - p.frame.width, y: topRight.y - p.frame.height))
+    }
+
+    @objc private func panelDidMove(_ note: Notification) {
+        guard let moved = note.object as? NSWindow else { return }
+        if moved === indicatorPanel, indicatorPanel.isVisible {
+            anchorTopRight = cornerTopRight(of: indicatorPanel)
+        } else if moved === panel, panel.isVisible {
+            anchorTopRight = cornerTopRight(of: panel)
+        }
     }
 
     private func configureFloating(_ p: NSPanel) {
@@ -903,25 +933,18 @@ final class LiveCaptionPanelController: NSObject {
 
     func showCaptions() {
         indicatorPanel.orderOut(nil)
-        if panel.frame.origin == .zero, let screen = NSScreen.main {
-            let visible = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: visible.maxX - panel.frame.width - 20,
-                                         y: visible.minY + 60))
+        if anchorTopRight == nil, let screen = NSScreen.main {
+            let v = screen.visibleFrame
+            anchorTopRight = NSPoint(x: v.maxX - 20, y: v.maxY - 40)
         }
+        if let topRight = anchorTopRight { place(panel, topRight: topRight) }
         panel.orderFrontRegardless()
     }
 
     func showIndicator() {
-        let anchor = panel.frame
+        if anchorTopRight == nil { anchorTopRight = cornerTopRight(of: panel) }
         panel.orderOut(nil)
-        let origin: NSPoint
-        if anchor.origin == .zero {
-            let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-            origin = NSPoint(x: visible.maxX - indicatorPanel.frame.width - 20, y: visible.minY + 60)
-        } else {
-            origin = NSPoint(x: anchor.maxX - indicatorPanel.frame.width, y: anchor.minY)
-        }
-        indicatorPanel.setFrameOrigin(origin)
+        if let topRight = anchorTopRight { place(indicatorPanel, topRight: topRight) }
         indicatorPanel.orderFrontRegardless()
     }
 
@@ -1144,7 +1167,7 @@ final class LiveTranslationController: NSObject {
     }
 
     func toggleCollapsed() {
-        guard isRunning else { return }
+        guard isRunning || isPaused else { return }
         isCollapsed.toggle()
         if isCollapsed { panel.showIndicator() } else { panel.showCaptions() }
     }
