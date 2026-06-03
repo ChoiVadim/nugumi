@@ -40,9 +40,7 @@ struct LiveTranscript {
         if let last = lines.last, !last.isFinalized, last.speaker == speaker {
             lines[lines.count - 1].text += text
         } else {
-            if !lines.isEmpty, lines[lines.count - 1].isFinalized == false {
-                lines[lines.count - 1].isFinalized = true
-            }
+            finalizeCurrent() // close the open line (no-op if empty/already finalized)
             lines.append(CaptionLine(speaker: speaker, text: text, isFinalized: false))
         }
     }
@@ -56,6 +54,10 @@ struct LiveTranscript {
 /// Accumulates raw PCM bytes and flushes whole chunks once they reach a byte
 /// threshold (~100 ms), so we send fewer, larger `input_audio_buffer.append`
 /// frames instead of one per capture callback.
+///
+/// Thread-safe. The flush callback runs outside the lock, so `onChunk` may be
+/// called from the caller's thread; it must not assume the batcher's internal
+/// lock is held.
 final class AudioBatcher {
     private let thresholdBytes: Int
     private let onChunk: (Data) -> Void
@@ -123,6 +125,9 @@ enum RealtimeServerEvent: Equatable {
 /// Converts arbitrary-format capture buffers to the Realtime API's required
 /// 24 kHz mono PCM16 little-endian byte stream. One converter is lazily built
 /// per distinct input format.
+///
+/// Not internally synchronized: use one instance per capture source, fed from
+/// that source's single serial callback queue.
 final class PCM16Downsampler {
     static let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true
@@ -137,7 +142,11 @@ final class PCM16Downsampler {
             converter = AVAudioConverter(from: inputFormat, to: Self.targetFormat)
             converterInputFormat = inputFormat
         }
-        guard let converter else { return Data() }
+        guard let converter else {
+            throw NSError(domain: "PCM16Downsampler", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "No audio converter available for input format \(inputFormat)"
+            ])
+        }
 
         let ratio = Self.targetFormat.sampleRate / inputFormat.sampleRate
         let capacity = AVAudioFrameCount((Double(input.frameLength) * ratio).rounded(.up)) + 1024
