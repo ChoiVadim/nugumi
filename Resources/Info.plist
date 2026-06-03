@@ -22,6 +22,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Nugumi uses Accessibility to read the currently selected text and translate it.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Nugumi uses the microphone to translate what you say in real time into live captions.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Nugumi captures the selected screen area so it can recognize visible text and translate it.</string>
 	<key>NugumiPostHogAPIKey</key>
