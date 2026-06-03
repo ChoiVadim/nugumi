@@ -3977,6 +3977,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         targetLanguage = TranslationLanguage.language(id: languageID)
         translationPanelController?.close()
         translationPanelController = nil
+        // Live translation follows this target language; update a running session.
+        liveTranslationController.updateTargetLanguage(targetLanguage)
         updateMenuState()
     }
 
@@ -6335,6 +6337,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private let answerTextView: NSTextView
     private let continueButton = NSButton()
     private var workspaceObserver: NSObjectProtocol?
+    private var escapeLocalMonitor: Any?
+    private var escapeGlobalMonitor: Any?
     private var trackingTimer: Timer?
     private var throwTimer: Timer?
     private var throwVelocity: NSPoint = .zero
@@ -6863,6 +6867,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         petView.onDragRequested = { [weak self] startLocation in
             self?.beginBubbleDrag(initialMouseLocation: startLocation)
         }
+        installAnswerEscapeMonitorsIfNeeded()
     }
 
     func moveToAnswerTarget(
@@ -6921,9 +6926,40 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onClose?()
     }
 
+    private func installAnswerEscapeMonitorsIfNeeded() {
+        if escapeLocalMonitor == nil {
+            escapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, event.keyCode == 53, self.isAnswerOpen else { return event }
+                self.closePromptFromUser()
+                return nil
+            }
+        }
+        if escapeGlobalMonitor == nil {
+            escapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard event.keyCode == 53 else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, self.isAnswerOpen else { return }
+                    self.closePromptFromUser()
+                }
+            }
+        }
+    }
+
+    private func removeAnswerEscapeMonitors() {
+        if let monitor = escapeLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeLocalMonitor = nil
+        }
+        if let monitor = escapeGlobalMonitor {
+            NSEvent.removeMonitor(monitor)
+            escapeGlobalMonitor = nil
+        }
+    }
+
     private func clearPrompt(animate: Bool) {
         guard isPromptVisible || onPromptSubmit != nil || onPromptClose != nil else { return }
         stopThrow()
+        removeAnswerEscapeMonitors()
         isPromptOpen = false
         isPromptLoading = false
         isAnswerOpen = false

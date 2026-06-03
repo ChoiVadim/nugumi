@@ -238,7 +238,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     var onStatusChange: ((Status) -> Void)?
 
     private let apiKey: String
-    private let languageCode: String
+    private var languageCode: String
     private let safetyIdentifier: String
     private var session: URLSession?
     private var task: URLSessionWebSocketTask?
@@ -279,6 +279,13 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     /// Feed raw 24 kHz mono PCM16 bytes; batched and sent as base64.
     func append(pcm: Data) {
         batcher.add(pcm)
+    }
+
+    /// Change the translation output language on the fly (and keep it for reconnects).
+    func setLanguage(_ code: String) {
+        languageCode = code
+        sendJSON(["type": "session.update",
+                  "session": ["audio": ["output": ["language": code]]]])
     }
 
     func close() {
@@ -1359,13 +1366,23 @@ final class LiveTranslationController: NSObject {
     var onMissingAPIKey: (() -> Void)?
 
     func toggle(apiKey: String?, targetLanguage: TranslationLanguage) {
-        if isPaused {
-            resume()
-        } else if isRunning {
+        // The hotkey only shows/hides the window — it never changes pause/run state.
+        // (Resume is via the pause button or the pill's record glyph.)
+        if isRunning || isPaused {
             toggleCollapsed()
         } else {
             start(apiKey: apiKey, targetLanguage: targetLanguage)
         }
+    }
+
+    /// Live-update the target language (e.g. when the user changes it in the menu
+    /// while a session is active), reconfiguring the running session.
+    func updateTargetLanguage(_ language: TranslationLanguage) {
+        guard isRunning || isPaused else { return }
+        guard language != targetLanguage else { return }
+        targetLanguage = language
+        session?.setLanguage(LiveTranslationLanguage.apiCode(for: language))
+        panel.update(status: currentStatusText())
     }
 
     func start(apiKey: String?, targetLanguage: TranslationLanguage) {
