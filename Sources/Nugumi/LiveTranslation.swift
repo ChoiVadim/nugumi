@@ -246,6 +246,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     enum Status: Equatable { case connecting, listening, reconnecting, failed(String), closed }
 
     var onTranslatedDelta: ((String) -> Void)?
+    var onSourceDelta: ((String) -> Void)?
     var onStatusChange: ((Status) -> Void)?
 
     private let apiKey: String
@@ -349,9 +350,10 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     private func handle(event: RealtimeServerEvent) {
         switch event {
         case .translatedDelta(let text): onTranslatedDelta?(text)
+        case .sourceDelta(let text): onSourceDelta?(text)
         case .error(let message): onStatusChange?(.failed(message))
         case .closed: onStatusChange?(.closed)
-        case .sourceDelta, .ignored: break
+        case .ignored: break
         }
     }
 
@@ -750,9 +752,12 @@ final class LiveCaptionPanelController: NSObject {
     private static let costColor = NSColor(calibratedWhite: 1.0, alpha: 0.45)
     private static let bodyColor = NSColor(calibratedWhite: 0.94, alpha: 0.96)
     private static let partialColor = NSColor(calibratedWhite: 1.0, alpha: 0.5)
+    private static let sourceColor = NSColor(calibratedWhite: 1.0, alpha: 0.42)
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
+    private static let iconColorActive = NSColor.controlAccentColor
 
     private var pauseButton: NSButton?
+    private var sourceToggleButton: NSButton?
     private var recordIndicator: RecordIndicatorView?
     /// Shared top-right corner (screen coords) both windows anchor to, so the
     /// captions window and the collapsed pill always appear in the same spot and
@@ -762,6 +767,7 @@ final class LiveCaptionPanelController: NSObject {
     var onStop: (() -> Void)?
     var onToggleCollapse: (() -> Void)?
     var onTogglePause: (() -> Void)?
+    var onToggleSource: (() -> Void)?
     var onSourceChange: ((LiveAudioSource) -> Void)?
 
     override init() {
@@ -874,6 +880,9 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let sourceToggleButton = iconButton("character.bubble", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                            action: #selector(sourceToggled), help: "Show original")
+        self.sourceToggleButton = sourceToggleButton
         let pauseButton = iconButton("pause.fill", tint: Self.iconColor, hover: Self.hoverNeutral,
                                      action: #selector(pauseTapped), help: "Pause")
         self.pauseButton = pauseButton
@@ -913,7 +922,7 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.scrollerKnobStyle = .light
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        [statusLabel, costLabel, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
+        [statusLabel, costLabel, sourceToggleButton, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
             .forEach { content.addSubview($0) }
 
         NSLayoutConstraint.activate([
@@ -932,11 +941,16 @@ final class LiveCaptionPanelController: NSObject {
             pauseButton.widthAnchor.constraint(equalToConstant: 22),
             pauseButton.heightAnchor.constraint(equalToConstant: 22),
 
+            sourceToggleButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            sourceToggleButton.trailingAnchor.constraint(equalTo: pauseButton.leadingAnchor, constant: -2),
+            sourceToggleButton.widthAnchor.constraint(equalToConstant: 22),
+            sourceToggleButton.heightAnchor.constraint(equalToConstant: 22),
+
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: pauseButton.leadingAnchor, constant: -8),
+            costLabel.trailingAnchor.constraint(equalTo: sourceToggleButton.leadingAnchor, constant: -8),
             costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
             sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
@@ -1011,29 +1025,45 @@ final class LiveCaptionPanelController: NSObject {
         recordIndicator?.setPaused(paused)
     }
 
-    func render(_ transcript: LiveTranscript) {
+    /// Renders translation lines, optionally with the original (source) line shown
+    /// muted above each, paired by index.
+    func render(source: LiveTranscript, translation: LiveTranscript, showSource: Bool) {
         let body = NSMutableAttributedString()
-        let count = transcript.lines.count
-        for (idx, line) in transcript.lines.enumerated() {
-            let suffix = idx < count - 1 ? "\n\n" : ""
-            body.append(NSAttributedString(string: line.text + suffix, attributes: [
-                .font: NSFont.systemFont(ofSize: 15),
-                .foregroundColor: line.isFinalized ? Self.bodyColor : Self.partialColor
-            ]))
+        let count = max(showSource ? source.lines.count : 0, translation.lines.count)
+        for i in 0..<count {
+            if showSource, i < source.lines.count {
+                body.append(NSAttributedString(string: source.lines[i].text + "\n", attributes: [
+                    .font: NSFont.systemFont(ofSize: 12),
+                    .foregroundColor: Self.sourceColor
+                ]))
+            }
+            if i < translation.lines.count {
+                let line = translation.lines[i]
+                body.append(NSAttributedString(string: line.text + "\n", attributes: [
+                    .font: NSFont.systemFont(ofSize: 15),
+                    .foregroundColor: line.isFinalized ? Self.bodyColor : Self.partialColor
+                ]))
+            }
+            body.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
         }
         textView.textStorage?.setAttributedString(body)
         // Force layout of the freshly-appended text before scrolling, otherwise
-        // scrollToEndOfDocument uses stale geometry and lags behind the partial
-        // line (only catching up when a sentence finalizes).
+        // scrollToEndOfDocument uses stale geometry and lags behind the partial line.
         if let container = textView.textContainer, let layoutManager = textView.layoutManager {
             layoutManager.ensureLayout(for: container)
         }
         textView.scrollToEndOfDocument(nil)
     }
 
+    func setShowSource(_ on: Bool) {
+        sourceToggleButton?.contentTintColor = on ? Self.iconColorActive : Self.iconColor
+        sourceToggleButton?.toolTip = on ? "Hide original" : "Show original"
+    }
+
     @objc private func stopTapped() { onStop?() }
     @objc private func collapseTapped() { onToggleCollapse?() }
     @objc private func pauseTapped() { onTogglePause?() }
+    @objc private func sourceToggled() { onToggleSource?() }
     @objc private func sourceChanged() {
         onSourceChange?(sourceControl.selectedSegment == 0 ? .systemAudio : .microphone)
     }
@@ -1050,6 +1080,11 @@ final class LiveTranslationController: NSObject {
     private(set) var isCollapsed = false
     private let panel = LiveCaptionPanelController()
     private var transcript = LiveTranscript()
+    private var sourceTranscript = LiveTranscript()
+    private var showSource: Bool {
+        get { UserDefaults.standard.object(forKey: "liveTranslationShowSource") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "liveTranslationShowSource") }
+    }
     private var systemCapture: SystemAudioCapture?
     private var micCapture: MicrophoneCapture?
     private var session: RealtimeTranslationSession?
@@ -1083,19 +1118,32 @@ final class LiveTranslationController: NSObject {
         self.apiKey = apiKey
         self.targetLanguage = targetLanguage
         transcript = LiveTranscript()
+        sourceTranscript = LiveTranscript()
         accumulatedSeconds = 0
         isCollapsed = false
 
         panel.onStop = { [weak self] in self?.stop() }
         panel.onToggleCollapse = { [weak self] in self?.toggleCollapsed() }
         panel.onTogglePause = { [weak self] in self?.togglePauseResume() }
+        panel.onToggleSource = { [weak self] in self?.toggleSource() }
         panel.onSourceChange = { [weak self] newSource in self?.changeSource(to: newSource) }
         panel.setSource(LiveAudioSource.current)
-        panel.render(transcript)
+        panel.setShowSource(showSource)
+        renderTranscripts()
         panel.update(cost: "00:00 · ~$0.00")
         panel.showCaptions()
 
         launchSession()
+    }
+
+    private func renderTranscripts() {
+        panel.render(source: sourceTranscript, translation: transcript, showSource: showSource)
+    }
+
+    private func toggleSource() {
+        showSource.toggle()
+        panel.setShowSource(showSource)
+        renderTranscripts()
     }
 
     /// Spins up a session + capture + timers for the current source, keeping the
@@ -1118,7 +1166,13 @@ final class LiveTranslationController: NSObject {
         session.onTranslatedDelta = { [weak self] delta in
             guard let self else { return }
             self.transcript.append(delta: delta)
-            self.panel.render(self.transcript)
+            self.renderTranscripts()
+            self.reschedulePauseFinalize()
+        }
+        session.onSourceDelta = { [weak self] delta in
+            guard let self else { return }
+            self.sourceTranscript.append(delta: delta)
+            self.renderTranscripts()
             self.reschedulePauseFinalize()
         }
         session.onStatusChange = { [weak self] status in
@@ -1150,7 +1204,8 @@ final class LiveTranslationController: NSObject {
         accumulateActiveTime()
         teardownCaptureAndSession()
         transcript.finalizeCurrent()
-        panel.render(transcript)
+        sourceTranscript.finalizeCurrent()
+        renderTranscripts()
         panel.setPaused(true)
         panel.update(status: "Paused — press play to continue")
         updateCost()
@@ -1222,8 +1277,9 @@ final class LiveTranslationController: NSObject {
         accumulateActiveTime()
         teardownCaptureAndSession()
         transcript.finalizeCurrent()
+        sourceTranscript.finalizeCurrent()
         panel.setPaused(false)
-        panel.render(transcript)
+        renderTranscripts()
         panel.update(status: finalStatus)
         if keepVisible { panel.showCaptions() } else { panel.close() }
     }
@@ -1234,7 +1290,8 @@ final class LiveTranslationController: NSObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.transcript.finalizeCurrent()
-                self.panel.render(self.transcript)
+                self.sourceTranscript.finalizeCurrent()
+                self.renderTranscripts()
             }
         }
     }
