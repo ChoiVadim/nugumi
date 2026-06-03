@@ -771,7 +771,7 @@ final class HoverIconButton: NSButton {
     var hoverBG: NSColor?
     private var tracking: NSTrackingArea?
 
-    private var radius: CGFloat { roundedFull ? bounds.height / 2 : corner }
+    private var radius: CGFloat { roundedFull ? min(bounds.width, bounds.height) / 2 : corner }
     private var usesBackground: Bool { hoverBG != nil || restingBG != .clear }
 
     override func updateTrackingAreas() {
@@ -1048,6 +1048,10 @@ final class LiveCaptionPanelController: NSObject {
         panel.contentView?.addSubview(pauseButton)
 
         let tb: CGFloat = 24
+        // Keep this below required so it can never break the play button's
+        // width/height (which would stretch it into a pill instead of a circle).
+        let playLeading = pauseButton.leadingAnchor.constraint(greaterThanOrEqualTo: micButton.trailingAnchor, constant: 8)
+        playLeading.priority = .defaultHigh
         NSLayoutConstraint.activate([
             // Top row: status + cost + minimize + close.
             closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
@@ -1116,7 +1120,8 @@ final class LiveCaptionPanelController: NSObject {
             pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             pauseButton.widthAnchor.constraint(equalToConstant: 24),
             pauseButton.heightAnchor.constraint(equalToConstant: 24),
-            pauseButton.leadingAnchor.constraint(greaterThanOrEqualTo: micButton.trailingAnchor, constant: 8),
+            pauseButton.widthAnchor.constraint(equalTo: pauseButton.heightAnchor),
+            playLeading,
         ])
     }
 
