@@ -171,3 +171,131 @@ final class PCM16Downsampler {
         return Data(bytes: channel[0], count: Int(output.frameLength) * MemoryLayout<Int16>.size)
     }
 }
+
+/// One WebSocket to `gpt-realtime-translate` for a single audio direction.
+/// Sends 24 kHz PCM16 audio up; surfaces translated transcript deltas.
+final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
+    enum Status: Equatable { case connecting, listening, reconnecting, failed(String), closed }
+
+    var onTranslatedDelta: ((String) -> Void)?
+    var onStatusChange: ((Status) -> Void)?
+
+    private let apiKey: String
+    private let languageCode: String
+    private let safetyIdentifier: String
+    private var session: URLSession?
+    private var task: URLSessionWebSocketTask?
+    private lazy var batcher = AudioBatcher(thresholdBytes: 4800) { [weak self] chunk in
+        self?.sendAudioChunk(chunk)
+    }
+    private var isClosing = false
+    private var reconnectAttempts = 0
+
+    init(apiKey: String, languageCode: String, safetyIdentifier: String) {
+        self.apiKey = apiKey
+        self.languageCode = languageCode
+        self.safetyIdentifier = safetyIdentifier
+    }
+
+    func connect() {
+        isClosing = false
+        onStatusChange?(reconnectAttempts == 0 ? .connecting : .reconnecting)
+
+        var request = URLRequest(
+            url: URL(string: "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate")!
+        )
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(safetyIdentifier, forHTTPHeaderField: "OpenAI-Safety-Identifier")
+
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        let task = session.webSocketTask(with: request)
+        self.session = session
+        self.task = task
+        task.resume()
+        receiveNext()
+    }
+
+    /// Feed raw 24 kHz mono PCM16 bytes; batched and sent as base64.
+    func append(pcm: Data) {
+        batcher.add(pcm)
+    }
+
+    func close() {
+        isClosing = true
+        batcher.flush()
+        sendJSON(["type": "session.close"])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.task?.cancel(with: .normalClosure, reason: nil)
+            self?.onStatusChange?(.closed)
+        }
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol protocol: String?) {
+        reconnectAttempts = 0
+        sendJSON([
+            "type": "session.update",
+            "session": ["audio": ["output": ["language": languageCode]]]
+        ])
+        onStatusChange?(.listening)
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        guard !isClosing else { return }
+        scheduleReconnect()
+    }
+
+    private func receiveNext() {
+        task?.receive { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure:
+                if !self.isClosing { self.scheduleReconnect() }
+            case .success(let message):
+                if case let .string(text) = message {
+                    self.handle(event: RealtimeServerEvent(jsonString: text))
+                }
+                self.receiveNext()
+            }
+        }
+    }
+
+    private func handle(event: RealtimeServerEvent) {
+        switch event {
+        case .translatedDelta(let text):
+            DispatchQueue.main.async { self.onTranslatedDelta?(text) }
+        case .error(let message):
+            DispatchQueue.main.async { self.onStatusChange?(.failed(message)) }
+        case .closed:
+            DispatchQueue.main.async { self.onStatusChange?(.closed) }
+        case .sourceDelta, .ignored:
+            break
+        }
+    }
+
+    private func sendAudioChunk(_ pcm: Data) {
+        sendJSON(["type": "session.input_audio_buffer.append",
+                  "audio": pcm.base64EncodedString()])
+    }
+
+    private func sendJSON(_ object: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let string = String(data: data, encoding: .utf8) else { return }
+        task?.send(.string(string)) { _ in }
+    }
+
+    private func scheduleReconnect() {
+        reconnectAttempts += 1
+        guard reconnectAttempts <= 5 else {
+            DispatchQueue.main.async { self.onStatusChange?(.failed("Connection lost")) }
+            return
+        }
+        let delay = min(pow(2.0, Double(reconnectAttempts)), 16.0)
+        DispatchQueue.main.async { self.onStatusChange?(.reconnecting) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.isClosing else { return }
+            self.connect()
+        }
+    }
+}
