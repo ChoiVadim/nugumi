@@ -1821,7 +1821,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             title: "Live translation captions",
             tag: .liveTranslation,
             symbolName: "captions.bubble",
-            action: #selector(toggleLiveTranslationFromMenu)
+            action: #selector(toggleLiveTranslationFromMenu),
+            keyEquivalent: shortcut(for: .liveTranslation).menuKeyEquivalent,
+            keyEquivalentModifierMask: shortcut(for: .liveTranslation).keyEquivalentModifierMask
         ))
 
         menu.addItem(makeMenuItem(
