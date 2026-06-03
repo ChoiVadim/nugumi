@@ -325,6 +325,44 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     }
 }
 
+/// Captures the default input device via AVAudioEngine and emits 24 kHz mono
+/// PCM16 byte chunks.
+final class MicrophoneCapture {
+    var onPCM: ((Data) -> Void)?
+    var onError: ((String) -> Void)?
+
+    private let engine = AVAudioEngine()
+    private let downsampler = PCM16Downsampler()
+
+    /// Requests mic authorization, returning whether capture may proceed.
+    static func requestAuthorization() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return true
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
+        default: return false
+        }
+    }
+
+    func start() {
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        input.installTap(onBus: 0, bufferSize: 2400, format: format) { [weak self] buffer, _ in
+            guard let self, let data = try? self.downsampler.pcm16Data(from: buffer) else { return }
+            self.onPCM?(data)
+        }
+        do {
+            try engine.start()
+        } catch {
+            onError?("Microphone capture failed: \(error.localizedDescription)")
+        }
+    }
+
+    func stop() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+    }
+}
+
 /// Captures system/app audio via ScreenCaptureKit, downsamples to 24 kHz mono
 /// PCM16, and emits byte chunks. Audio-only: a minimal display filter is required
 /// even though we discard video.
@@ -523,6 +561,8 @@ final class LiveTranslationController: NSObject {
     private var transcript = LiveTranscript()
     private var systemCapture: SystemAudioCapture?
     private var systemSession: RealtimeTranslationSession?
+    private var micCapture: MicrophoneCapture?
+    private var micSession: RealtimeTranslationSession?
     private var elapsedTimer: Timer?
     private var startDate: Date?
     /// Number of concurrently billed sessions (1 in Phase 1, 2 in Phase 2).
@@ -570,6 +610,33 @@ final class LiveTranslationController: NSObject {
         Task { await capture.start() }
 
         startCostTimer()
+
+        // Microphone direction (best-effort; system audio works without it).
+        let safetyID = LiveTranslationController.safetyIdentifier()
+        Task { [weak self] in
+            guard await MicrophoneCapture.requestAuthorization() else {
+                self?.panel.update(status: "Microphone permission denied — captions show their audio only.")
+                return
+            }
+            guard let self, self.isRunning else { return }
+            let micSession = RealtimeTranslationSession(
+                apiKey: apiKey, languageCode: languageCode, safetyIdentifier: safetyID
+            )
+            micSession.onTranslatedDelta = { [weak self] delta in
+                guard let self else { return }
+                self.transcript.appendDelta(speaker: .me, text: delta)
+                self.panel.render(self.transcript)
+            }
+            micSession.connect()
+            self.micSession = micSession
+
+            let mic = MicrophoneCapture()
+            mic.onPCM = { [weak micSession] data in micSession?.append(pcm: data) }
+            mic.onError = { [weak self] message in self?.panel.update(status: message) }
+            mic.start()
+            self.micCapture = mic
+            self.activeSessionCount = 2
+        }
     }
 
     func stop() {
@@ -578,6 +645,9 @@ final class LiveTranslationController: NSObject {
         elapsedTimer?.invalidate(); elapsedTimer = nil
         systemCapture?.stop(); systemCapture = nil
         systemSession?.close(); systemSession = nil
+        micCapture?.stop(); micCapture = nil
+        micSession?.close(); micSession = nil
+        activeSessionCount = 1
         transcript.finalizeCurrent()
         panel.render(transcript)
         panel.update(status: "Stopped")
