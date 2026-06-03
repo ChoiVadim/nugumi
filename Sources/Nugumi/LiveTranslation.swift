@@ -23,30 +23,33 @@ enum LiveTranslationLanguage {
 /// arrives — keeping original and translation paired and in sync (instead of
 /// drifting when the two streams segment differently).
 struct LiveDialogue: Equatable {
-    struct Segment: Equatable {
-        var original: String
-        var translation: String
+    struct Line: Equatable {
+        var isOriginal: Bool
+        var text: String
+        var start: Int   // audio position (elapsed_ms) where this segment began
     }
 
-    /// Audio gap (ms) that ends one utterance and starts the next. Both streams
-    /// carry `elapsed_ms` (audio position), so segmenting both on the same pauses
-    /// keeps the N-th original paired with the N-th translation — real sync.
+    /// Audio gap (ms) that starts a new segment within a stream.
     static let gapMs = 700
 
-    private(set) var originals: [String] = []
-    private(set) var translations: [String] = []
+    private(set) var originals: [Line] = []
+    private(set) var translations: [Line] = []
     private var lastOriginalMs: Int?
     private var lastTranslationMs: Int?
 
     mutating func appendOriginal(_ token: String, ms: Int?) {
-        if originals.isEmpty || isGap(ms, since: lastOriginalMs) { originals.append("") }
-        originals[originals.count - 1] += token
+        if originals.isEmpty || isGap(ms, since: lastOriginalMs) {
+            originals.append(Line(isOriginal: true, text: "", start: ms ?? lastOriginalMs ?? 0))
+        }
+        originals[originals.count - 1].text += token
         if let ms { lastOriginalMs = ms }
     }
 
     mutating func appendTranslation(_ token: String, ms: Int?) {
-        if translations.isEmpty || isGap(ms, since: lastTranslationMs) { translations.append("") }
-        translations[translations.count - 1] += token
+        if translations.isEmpty || isGap(ms, since: lastTranslationMs) {
+            translations.append(Line(isOriginal: false, text: "", start: ms ?? lastTranslationMs ?? 0))
+        }
+        translations[translations.count - 1].text += token
         if let ms { lastTranslationMs = ms }
     }
 
@@ -55,20 +58,22 @@ struct LiveDialogue: Equatable {
         return ms - last > Self.gapMs
     }
 
-    /// Paired view for rendering: index i = the i-th utterance, original + translation.
-    var segments: [Segment] {
-        let count = max(originals.count, translations.count)
-        return (0..<count).map { i in
-            Segment(
-                original: i < originals.count ? originals[i].trimmingCharacters(in: .whitespacesAndNewlines) : "",
-                translation: i < translations.count ? translations[i].trimmingCharacters(in: .whitespacesAndNewlines) : ""
-            )
-        }
+    /// Original + translation lines merged in audio-time order, so each translation
+    /// sits next to the original of the same audio span — robust to the streams
+    /// starting at different offsets, lagging, or arriving in batches. (Index
+    /// pairing drifted; time ordering does not.) Ties put the original first.
+    var timeline: [Line] {
+        (originals + translations)
+            .map { Line(isOriginal: $0.isOriginal,
+                        text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                        start: $0.start) }
+            .filter { !$0.text.isEmpty }
+            .sorted { a, b in a.start != b.start ? a.start < b.start : (a.isOriginal && !b.isOriginal) }
     }
 
     /// All translation text joined (for Summarize).
     var translationText: String {
-        translations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        translations.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
@@ -1282,20 +1287,21 @@ final class LiveCaptionPanelController: NSObject {
     /// above (when enabled) — plus the in-progress translation as a dim partial.
     func render(_ dialogue: LiveDialogue, showSource: Bool) {
         let body = NSMutableAttributedString()
-        for segment in dialogue.segments {
-            if showSource, !segment.original.isEmpty {
-                body.append(NSAttributedString(string: segment.original + "\n", attributes: [
+        for line in dialogue.timeline {
+            if line.isOriginal {
+                guard showSource else { continue }
+                body.append(NSAttributedString(string: line.text + "\n", attributes: [
                     .font: NSFont.systemFont(ofSize: 12),
                     .foregroundColor: Self.sourceColor
                 ]))
-            }
-            if !segment.translation.isEmpty {
-                body.append(NSAttributedString(string: segment.translation + "\n", attributes: [
+            } else {
+                body.append(NSAttributedString(string: line.text + "\n", attributes: [
                     .font: NSFont.systemFont(ofSize: 15),
                     .foregroundColor: Self.bodyColor
                 ]))
+                // Paragraph gap after each translation (ends an utterance).
+                body.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
             }
-            body.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
         }
         textView.textStorage?.setAttributedString(body)
         // Force layout of the freshly-appended text before scrolling, otherwise

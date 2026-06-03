@@ -41,39 +41,42 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(RealtimeServerEvent(jsonString: "not json"), .ignored)
     }
 
+    private func tagged(_ d: LiveDialogue) -> [String] {
+        d.timeline.map { ($0.isOriginal ? "o:" : "t:") + $0.text }
+    }
+
     func testDialogueAccumulatesTokensIntoOneSegmentWithoutGaps() {
         var d = LiveDialogue()
         d.appendOriginal("안녕", ms: 100)
         d.appendOriginal("하세요", ms: 200)
         d.appendTranslation("Hi ", ms: 300)
         d.appendTranslation("there", ms: 400)
-        XCTAssertEqual(d.segments.count, 1)
-        XCTAssertEqual(d.segments[0].original, "안녕하세요")
-        XCTAssertEqual(d.segments[0].translation, "Hi there")
+        XCTAssertEqual(tagged(d), ["o:안녕하세요", "t:Hi there"])
     }
 
-    func testDialogueSplitsOnAudioGapAndPairsByIndex() {
+    func testTimelineOrdersByAudioTimeNotArrival() {
         var d = LiveDialogue()
-        // Utterance 1
-        d.appendOriginal("안녕하세요", ms: 100)
-        d.appendTranslation("Hello", ms: 300)
-        // Big audio gap (> gapMs) → utterance 2 on both streams
-        d.appendOriginal("잘 지내요", ms: 100 + LiveDialogue.gapMs + 200)
-        d.appendTranslation("I'm fine", ms: 300 + LiveDialogue.gapMs + 200)
-        XCTAssertEqual(d.segments.map(\.original), ["안녕하세요", "잘 지내요"])
-        XCTAssertEqual(d.segments.map(\.translation), ["Hello", "I'm fine"])
+        // Both originals arrive first; translations arrive later in a batch.
+        // Sorting by audio time must still interleave each pair correctly.
+        d.appendOriginal("привет", ms: 1000)
+        d.appendOriginal("пока", ms: 1000 + LiveDialogue.gapMs + 100)
+        d.appendTranslation("hello", ms: 1100)
+        d.appendTranslation("bye", ms: 1000 + LiveDialogue.gapMs + 200)
+        XCTAssertEqual(tagged(d), ["o:привет", "t:hello", "o:пока", "t:bye"])
     }
 
-    func testDialoguePairsTranslationThatLagsBehindOriginal() {
+    func testTimelineSplitsStreamOnAudioGap() {
         var d = LiveDialogue()
-        // Original finishes utterance 1 and starts utterance 2 before the
-        // translation of utterance 1 even arrives — they still pair by index.
-        d.appendOriginal("first", ms: 0)
-        d.appendOriginal("second", ms: LiveDialogue.gapMs + 100)
-        d.appendTranslation("один", ms: 200)
-        d.appendTranslation("два", ms: LiveDialogue.gapMs + 300)
-        XCTAssertEqual(d.segments.map(\.original), ["first", "second"])
-        XCTAssertEqual(d.segments.map(\.translation), ["один", "два"])
+        d.appendTranslation("one", ms: 0)
+        d.appendTranslation("two", ms: LiveDialogue.gapMs + 100)
+        XCTAssertEqual(d.timeline.filter { !$0.isOriginal }.map(\.text), ["one", "two"])
+    }
+
+    func testTimelineTiePutsOriginalBeforeTranslation() {
+        var d = LiveDialogue()
+        d.appendTranslation("hi", ms: 500)
+        d.appendOriginal("привет", ms: 500)
+        XCTAssertEqual(d.timeline.map(\.isOriginal), [true, false])
     }
 
     func testDialogueTranslationTextJoinsAllSegments() {
