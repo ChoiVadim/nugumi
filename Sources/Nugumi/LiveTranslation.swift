@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import ScreenCaptureKit
 
 /// Maps Nugumi's target-language setting to the ISO code the Realtime
 /// translation API expects in `session.audio.output.language`.
@@ -297,5 +298,86 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
             guard let self, !self.isClosing else { return }
             self.connect()
         }
+    }
+}
+
+/// Captures system/app audio via ScreenCaptureKit, downsamples to 24 kHz mono
+/// PCM16, and emits byte chunks. Audio-only: a minimal display filter is required
+/// even though we discard video.
+final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
+    var onPCM: ((Data) -> Void)?
+    var onError: ((String) -> Void)?
+
+    private var stream: SCStream?
+    private let downsampler = PCM16Downsampler()
+    private let sampleQueue = DispatchQueue(label: "com.nugumi.live.systemaudio")
+
+    func start() async {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false,
+                                                                               onScreenWindowsOnly: false)
+            guard let display = content.displays.first else {
+                await report("No display available for audio capture.")
+                return
+            }
+            let filter = SCContentFilter(display: display, excludingWindows: [])
+
+            let config = SCStreamConfiguration()
+            config.capturesAudio = true
+            config.excludesCurrentProcessAudio = true
+            config.sampleRate = 24000
+            config.channelCount = 1
+            config.width = 2
+            config.height = 2
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            config.showsCursor = false
+
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
+            try await stream.startCapture()
+            self.stream = stream
+        } catch {
+            await report("Screen recording permission is required for system-audio translation.")
+        }
+    }
+
+    func stop() {
+        stream?.stopCapture { _ in }
+        stream = nil
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+                of type: SCStreamOutputType) {
+        guard type == .audio,
+              let pcmBuffer = sampleBuffer.toPCMBuffer(),
+              let data = try? downsampler.pcm16Data(from: pcmBuffer) else { return }
+        onPCM?(data)
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        Task { await report("System-audio capture stopped: \(error.localizedDescription)") }
+    }
+
+    @MainActor private func report(_ message: String) { onError?(message) }
+}
+
+private extension CMSampleBuffer {
+    /// Convert a CMSampleBuffer of audio into an AVAudioPCMBuffer.
+    func toPCMBuffer() -> AVAudioPCMBuffer? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(self),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription) else {
+            return nil
+        }
+        let format = AVAudioFormat(streamDescription: asbd)
+        guard let format else { return nil }
+        let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(self))
+        guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
+            return nil
+        }
+        buffer.frameLength = frames
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            self, at: 0, frameCount: Int32(frames), into: buffer.mutableAudioBufferList
+        )
+        return status == noErr ? buffer : nil
     }
 }
