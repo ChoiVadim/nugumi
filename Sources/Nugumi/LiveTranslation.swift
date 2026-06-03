@@ -268,6 +268,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
 
     var onTranslatedDelta: ((String) -> Void)?
     var onSourceDelta: ((String) -> Void)?
+    var onServerError: ((String) -> Void)?
     var onStatusChange: ((Status) -> Void)?
 
     private let apiKey: String
@@ -337,6 +338,13 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
                 "type": "session.update",
                 "session": ["audio": ["output": ["language": self.languageCode]]]
             ])
+            // Enable source-language transcription so we also receive the original
+            // text (session.input_transcript.delta). Sent as a separate update so a
+            // rejection here can't drop the (working) output-language config.
+            self.sendJSON([
+                "type": "session.update",
+                "session": ["audio": ["input": ["transcription": ["model": "whisper-1"]]]]
+            ])
             self.onStatusChange?(.listening)
         }
     }
@@ -373,7 +381,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
         switch event {
         case .translatedDelta(let text): onTranslatedDelta?(text)
         case .sourceDelta(let text): onSourceDelta?(text)
-        case .error(let message): onStatusChange?(.failed(message))
+        case .error(let message): onServerError?(message)   // non-fatal; keep the session
         case .closed: onStatusChange?(.closed)
         case .ignored: break
         }
@@ -1398,6 +1406,10 @@ final class LiveTranslationController: NSObject {
             self.sourceTranscript.append(delta: delta)
             self.renderTranscripts()
             self.reschedulePauseFinalize()
+        }
+        session.onServerError = { [weak self] message in
+            // Non-fatal: surface briefly, keep translating.
+            self?.panel.update(status: "⚠︎ \(message)")
         }
         session.onStatusChange = { [weak self] status in
             guard let self else { return }
