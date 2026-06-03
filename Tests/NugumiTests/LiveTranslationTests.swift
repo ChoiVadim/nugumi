@@ -56,8 +56,23 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(t.lines.count, 2)
         XCTAssertEqual(t.lines[0].text, "Hello there.")
         XCTAssertTrue(t.lines[0].isFinalized)
-        XCTAssertEqual(t.lines[1].text, "How are")
+        // The open partial is kept raw (trailing space invisible in the UI).
+        XCTAssertEqual(t.lines[1].text.trimmingCharacters(in: .whitespaces), "How are")
         XCTAssertFalse(t.lines[1].isFinalized)
+    }
+
+    func testTranscriptJoinsAcrossSplitRegardlessOfTokenSpacing() {
+        // After a sentence split, the partial must keep joining the next delta
+        // whether the next token leads with a space or the partial trails one.
+        var trailing = LiveTranscript()
+        trailing.append(delta: "Done. How are ")   // partial trails a space
+        trailing.append(delta: "you?")             // next token has no leading space
+        XCTAssertEqual(trailing.lines.map(\.text), ["Done.", "How are you?"])
+
+        var leading = LiveTranscript()
+        leading.append(delta: "Done. How are")     // partial has no trailing space
+        leading.append(delta: " you?")             // next token leads with a space
+        XCTAssertEqual(leading.lines.map(\.text), ["Done.", "How are you?"])
     }
 
     func testTranscriptDoesNotSplitDecimalsOrAbbreviations() {

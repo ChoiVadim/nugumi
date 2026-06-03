@@ -40,12 +40,12 @@ struct LiveTranscript {
         for sentence in sentences where !sentence.isEmpty {
             lines.append(CaptionLine(text: sentence, isFinalized: true))
         }
-        // When sentences were split, trim the remainder so it starts clean.
-        // When there were no splits (pure accumulation), keep trailing spaces so
-        // the next streaming delta joins correctly ("This is " + "a test" → "This is a test").
-        let storedRemainder = sentences.isEmpty ? remainder : remainder.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !storedRemainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append(CaptionLine(text: storedRemainder, isFinalized: false))
+        // Keep the open remainder raw (untrimmed) so the next streaming delta
+        // joins correctly whether tokens carry leading OR trailing spaces
+        // ("How are " + "you?" and "How are" + " you?" both work). Trimming
+        // happens only when the line is finalized or split off as a sentence.
+        if !remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append(CaptionLine(text: remainder, isFinalized: false))
         }
     }
 
