@@ -191,6 +191,8 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     }
     private var isClosing = false
     private var reconnectAttempts = 0
+    private let taskLock = NSLock()
+    private var reconnectScheduled = false
 
     init(apiKey: String, languageCode: String, safetyIdentifier: String) {
         self.apiKey = apiKey
@@ -199,7 +201,9 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     }
 
     func connect() {
+        session?.invalidateAndCancel()   // break the old session->delegate(self) retain cycle
         isClosing = false
+        reconnectScheduled = false
         onStatusChange?(reconnectAttempts == 0 ? .connecting : .reconnecting)
 
         var request = URLRequest(
@@ -209,10 +213,10 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
         request.setValue(safetyIdentifier, forHTTPHeaderField: "OpenAI-Safety-Identifier")
 
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-        let task = session.webSocketTask(with: request)
+        let newTask = session.webSocketTask(with: request)
         self.session = session
-        self.task = task
-        task.resume()
+        setTask(newTask)
+        newTask.resume()
         receiveNext()
     }
 
@@ -225,37 +229,50 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
         isClosing = true
         batcher.flush()
         sendJSON(["type": "session.close"])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.task?.cancel(with: .normalClosure, reason: nil)
-            self?.onStatusChange?(.closed)
+        let closingTask = currentTask()
+        let closingSession = session
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            closingTask?.cancel(with: .normalClosure, reason: nil)
+            closingSession?.invalidateAndCancel()
         }
+        onStatusChange?(.closed)
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
-        reconnectAttempts = 0
-        sendJSON([
-            "type": "session.update",
-            "session": ["audio": ["output": ["language": languageCode]]]
-        ])
-        onStatusChange?(.listening)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.reconnectAttempts = 0
+            self.reconnectScheduled = false
+            self.sendJSON([
+                "type": "session.update",
+                "session": ["audio": ["output": ["language": self.languageCode]]]
+            ])
+            self.onStatusChange?(.listening)
+        }
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        guard !isClosing else { return }
-        scheduleReconnect()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.isClosing, !self.reconnectScheduled else { return }
+            self.scheduleReconnect()
+        }
     }
 
     private func receiveNext() {
-        task?.receive { [weak self] result in
+        currentTask()?.receive { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure:
-                if !self.isClosing { self.scheduleReconnect() }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.isClosing, !self.reconnectScheduled else { return }
+                    self.scheduleReconnect()
+                }
             case .success(let message):
                 if case let .string(text) = message {
-                    self.handle(event: RealtimeServerEvent(jsonString: text))
+                    let event = RealtimeServerEvent(jsonString: text)
+                    DispatchQueue.main.async { [weak self] in self?.handle(event: event) }
                 }
                 self.receiveNext()
             }
@@ -264,14 +281,10 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
 
     private func handle(event: RealtimeServerEvent) {
         switch event {
-        case .translatedDelta(let text):
-            DispatchQueue.main.async { self.onTranslatedDelta?(text) }
-        case .error(let message):
-            DispatchQueue.main.async { self.onStatusChange?(.failed(message)) }
-        case .closed:
-            DispatchQueue.main.async { self.onStatusChange?(.closed) }
-        case .sourceDelta, .ignored:
-            break
+        case .translatedDelta(let text): onTranslatedDelta?(text)
+        case .error(let message): onStatusChange?(.failed(message))
+        case .closed: onStatusChange?(.closed)
+        case .sourceDelta, .ignored: break
         }
     }
 
@@ -280,21 +293,32 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
                   "audio": pcm.base64EncodedString()])
     }
 
+    private func currentTask() -> URLSessionWebSocketTask? {
+        taskLock.lock(); defer { taskLock.unlock() }
+        return task
+    }
+
+    private func setTask(_ newTask: URLSessionWebSocketTask?) {
+        taskLock.lock(); defer { taskLock.unlock() }
+        task = newTask
+    }
+
     private func sendJSON(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let string = String(data: data, encoding: .utf8) else { return }
-        task?.send(.string(string)) { _ in }
+        currentTask()?.send(.string(string)) { _ in }
     }
 
     private func scheduleReconnect() {
+        reconnectScheduled = true
         reconnectAttempts += 1
         guard reconnectAttempts <= 5 else {
-            DispatchQueue.main.async { self.onStatusChange?(.failed("Connection lost")) }
+            onStatusChange?(.failed("Connection lost"))
             return
         }
         let delay = min(pow(2.0, Double(reconnectAttempts)), 16.0)
-        DispatchQueue.main.async { self.onStatusChange?(.reconnecting) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+        onStatusChange?(.reconnecting)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, !self.isClosing else { return }
             self.connect()
         }
@@ -342,8 +366,9 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() {
-        stream?.stopCapture { _ in }
+        let capturingStream = stream
         stream = nil
+        capturingStream?.stopCapture { _ in }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
