@@ -957,9 +957,11 @@ final class LiveCaptionPanelController: NSObject {
     private static let hoverDanger = NSColor.systemRed.withAlphaComponent(0.85)
 
     private static func symbolImage(_ name: String, _ description: String, pointSize: CGFloat = 11) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
-        return NSImage(systemSymbolName: name, accessibilityDescription: description)?
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular, scale: .medium)
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: description)?
             .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image
     }
 
     private func iconButton(_ symbol: String, tint: NSColor, hover: NSColor,
@@ -967,6 +969,7 @@ final class LiveCaptionPanelController: NSObject {
         let button = HoverIconButton(title: "", target: self, action: action)
         button.image = Self.symbolImage(symbol, help, pointSize: pointSize)
         button.imagePosition = .imageOnly
+        button.imageScaling = .scaleNone          // render at the symbol's natural size — no squishing
         button.isBordered = false
         button.bezelStyle = .regularSquare
         button.contentTintColor = tint
@@ -974,6 +977,17 @@ final class LiveCaptionPanelController: NSObject {
         button.toolTip = help
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
+    }
+
+    /// Applies a selected "chip" look (accent tint + soft accent background) to a
+    /// toggle/source icon, or clears it.
+    private func applySelection(_ button: NSButton?, selected: Bool) {
+        guard let button = button as? HoverIconButton else { return }
+        button.contentTintColor = selected ? Self.iconColorActive : Self.iconColor
+        button.restingColor = selected ? Self.iconColorActive.withAlphaComponent(0.16) : .clear
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
+        button.layer?.backgroundColor = button.restingColor.cgColor
     }
 
     private func roundWhiteButton(_ symbol: String, action: Selector, help: String) -> HoverIconButton {
@@ -1006,7 +1020,7 @@ final class LiveCaptionPanelController: NSObject {
 
         // Bottom toolbar.
         let pt: CGFloat = 14
-        let summarizeButton = iconButton("list.bullet.rectangle", tint: Self.iconColor, hover: Self.hoverNeutral,
+        let summarizeButton = iconButton("sparkles", tint: Self.iconColor, hover: Self.hoverNeutral,
                                          action: #selector(summarizeTapped), help: "Summarize", pointSize: pt)
         let sourceToggleButton = iconButton("character.bubble", tint: Self.iconColor, hover: Self.hoverNeutral,
                                             action: #selector(sourceToggled), help: "Show original", pointSize: pt)
@@ -1136,8 +1150,8 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     func setSource(_ source: LiveAudioSource) {
-        systemAudioButton?.contentTintColor = source == .systemAudio ? Self.iconColorActive : Self.iconColor
-        micButton?.contentTintColor = source == .microphone ? Self.iconColorActive : Self.iconColor
+        applySelection(systemAudioButton, selected: source == .systemAudio)
+        applySelection(micButton, selected: source == .microphone)
     }
 
     func showCaptions() {
@@ -1209,7 +1223,7 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     func setShowSource(_ on: Bool) {
-        sourceToggleButton?.contentTintColor = on ? Self.iconColorActive : Self.iconColor
+        applySelection(sourceToggleButton, selected: on)
         sourceToggleButton?.toolTip = on ? "Hide original" : "Show original"
     }
 
