@@ -578,7 +578,7 @@ final class RecordIndicatorView: NSView {
         timeLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         timeLayer.fontSize = 11
         timeLayer.foregroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.55).cgColor
-        timeLayer.alignmentMode = .center
+        timeLayer.alignmentMode = .left
         timeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         layer?.addSublayer(timeLayer)
     }
@@ -607,8 +607,9 @@ final class RecordIndicatorView: NSView {
             if !isPausedState && bar.animation(forKey: "eq") == nil { addEqualizer(to: bar, index: i) }
         }
 
-        timeLayer.frame = CGRect(x: bounds.maxX - Self.timerWidth - Self.leadingInset,
-                                 y: cy - 7, width: Self.timerWidth, height: 14)
+        let barsEnd = startX + CGFloat(Self.barCount) * Self.barWidth
+            + CGFloat(Self.barCount - 1) * Self.barGap
+        timeLayer.frame = CGRect(x: barsEnd + 10, y: cy - 7, width: Self.timerWidth, height: 14)
         CATransaction.commit()
     }
 
@@ -835,7 +836,7 @@ final class LiveCaptionPanelController: NSObject {
             backing: .buffered, defer: false
         )
         indicatorPanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 160, height: 40),
+            contentRect: NSRect(x: 0, y: 0, width: 148, height: 40),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
