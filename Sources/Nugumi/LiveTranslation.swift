@@ -840,10 +840,11 @@ final class LiveCaptionPanelController: NSObject {
     private var systemAudioButton: NSButton?
     private var micButton: NSButton?
     private var recordIndicator: RecordIndicatorView?
-    /// Shared top-right corner (screen coords) both windows anchor to, so the
-    /// captions window and the collapsed pill always appear in the same spot and
-    /// remember wherever the user drags either one.
-    private var anchorTopRight: NSPoint?
+    /// Shared center point (screen coords). The captions window and the collapsed
+    /// pill are placed centered on this point (then clamped to fit the screen), so
+    /// expanding/collapsing keeps them centered on each other and the choice
+    /// follows wherever the user drags either one.
+    private var anchorCenter: NSPoint?
 
     var onStop: (() -> Void)?
     var onToggleCollapse: (() -> Void)?
@@ -886,20 +887,44 @@ final class LiveCaptionPanelController: NSObject {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    private func cornerTopRight(of p: NSPanel) -> NSPoint {
-        NSPoint(x: p.frame.maxX, y: p.frame.maxY)
+    private func center(of p: NSPanel) -> NSPoint {
+        NSPoint(x: p.frame.midX, y: p.frame.midY)
     }
 
-    private func place(_ p: NSPanel, topRight: NSPoint) {
-        p.setFrameOrigin(NSPoint(x: topRight.x - p.frame.width, y: topRight.y - p.frame.height))
+    /// Visible frame of the screen containing the anchor (or main screen).
+    private func anchorScreen() -> NSRect {
+        if let c = anchorCenter, let screen = NSScreen.screens.first(where: { $0.frame.contains(c) }) {
+            return screen.visibleFrame
+        }
+        return NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    /// Places a panel centered on the shared anchor, then clamps it fully inside
+    /// the visible screen (so a window expanded near an edge doesn't run off).
+    /// The anchor itself is NOT changed by clamping — only user drags move it —
+    /// so the pill returns to where it was dragged.
+    private func placeCentered(_ p: NSPanel) {
+        let size = p.frame.size
+        if anchorCenter == nil {
+            let v = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            anchorCenter = NSPoint(x: v.maxX - size.width / 2 - 20, y: v.maxY - size.height / 2 - 40)
+        }
+        guard let c = anchorCenter else { return }
+        let screen = anchorScreen()
+        let margin: CGFloat = 8
+        var x = c.x - size.width / 2
+        var y = c.y - size.height / 2
+        x = min(max(x, screen.minX + margin), screen.maxX - size.width - margin)
+        y = min(max(y, screen.minY + margin), screen.maxY - size.height - margin)
+        p.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     @objc private func panelDidMove(_ note: Notification) {
         guard let moved = note.object as? NSWindow else { return }
         if moved === indicatorPanel, indicatorPanel.isVisible {
-            anchorTopRight = cornerTopRight(of: indicatorPanel)
+            anchorCenter = center(of: indicatorPanel)
         } else if moved === panel, panel.isVisible {
-            anchorTopRight = cornerTopRight(of: panel)
+            anchorCenter = center(of: panel)
         }
     }
 
@@ -1146,18 +1171,13 @@ final class LiveCaptionPanelController: NSObject {
 
     func showCaptions() {
         indicatorPanel.orderOut(nil)
-        if anchorTopRight == nil, let screen = NSScreen.main {
-            let v = screen.visibleFrame
-            anchorTopRight = NSPoint(x: v.maxX - 20, y: v.maxY - 40)
-        }
-        if let topRight = anchorTopRight { place(panel, topRight: topRight) }
+        placeCentered(panel)            // centered on the shared anchor, clamped to screen
         panel.orderFrontRegardless()
     }
 
     func showIndicator() {
-        if anchorTopRight == nil { anchorTopRight = cornerTopRight(of: panel) }
         panel.orderOut(nil)
-        if let topRight = anchorTopRight { place(indicatorPanel, topRight: topRight) }
+        placeCentered(indicatorPanel)   // pill centered on the same anchor, clamped
         indicatorPanel.orderFrontRegardless()
     }
 
