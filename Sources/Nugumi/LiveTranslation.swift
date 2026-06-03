@@ -163,18 +163,26 @@ final class AudioBatcher {
 enum LiveTranslationDebug {
     private static let lock = NSLock()
     private static var seen = Set<String>()
+    private static var inputDumpCount = 0
 
     static func noteRawEvent(_ json: String) {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = obj["type"] as? String else { return }
-        lock.lock(); let isNew = seen.insert(type).inserted; lock.unlock()
-        guard isNew else { return }
-        var sample = ""
-        if type.contains("transcript"), let delta = obj["delta"] as? String {
-            sample = " sample=\"\(delta.prefix(40))\""
+        lock.lock()
+        let isNew = seen.insert(type).inserted
+        var dumpInput = false
+        if type == "session.input_transcript.delta" {
+            inputDumpCount += 1
+            dumpInput = inputDumpCount <= 8
         }
-        CodexDebugLog.append("[LiveTranslation] event type: \(type)\(sample)")
+        lock.unlock()
+        if dumpInput {
+            // Full payload so we can find which field carries the original text.
+            CodexDebugLog.append("[LiveTranslation] input_transcript raw: \(json.prefix(300))")
+        } else if isNew {
+            CodexDebugLog.append("[LiveTranslation] event type: \(type)")
+        }
     }
 }
 
