@@ -757,15 +757,22 @@ final class KeyablePanel: NSPanel {
 
 /// Borderless icon button with a soft rounded hover highlight — used for the
 /// captions header controls (pause/minimize/close).
+/// Two modes:
+/// - tint mode (default, no background): hover/selection are shown by changing
+///   the icon tint only — nothing to clip against the glass corners.
+/// - background mode (the round white play button): a persistent `restingBG`
+///   that brightens to `hoverBG` on hover.
 final class HoverIconButton: NSButton {
-    var hoverColor = NSColor(calibratedWhite: 1.0, alpha: 0.14)
-    var restingColor: NSColor = .clear
     var roundedFull = false
-    var corner: CGFloat = 5
+    var corner: CGFloat = 6
+    var baseTint: NSColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
+    var hoverTint: NSColor = NSColor(calibratedWhite: 1.0, alpha: 0.9)
+    var restingBG: NSColor = .clear
+    var hoverBG: NSColor?
     private var tracking: NSTrackingArea?
-    private var inside = false
 
     private var radius: CGFloat { roundedFull ? bounds.height / 2 : corner }
+    private var usesBackground: Bool { hoverBG != nil || restingBG != .clear }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -779,21 +786,28 @@ final class HoverIconButton: NSButton {
 
     override func layout() {
         super.layout()
+        guard usesBackground else { return }
         wantsLayer = true
         layer?.cornerRadius = radius
-        layer?.backgroundColor = (inside ? hoverColor : restingColor).cgColor
+        layer?.backgroundColor = restingBG.cgColor
     }
 
     override func mouseEntered(with event: NSEvent) {
-        inside = true
-        wantsLayer = true
-        layer?.cornerRadius = radius
-        layer?.backgroundColor = hoverColor.cgColor
+        if let hoverBG {
+            wantsLayer = true
+            layer?.cornerRadius = radius
+            layer?.backgroundColor = hoverBG.cgColor
+        } else {
+            contentTintColor = hoverTint
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        inside = false
-        layer?.backgroundColor = restingColor.cgColor
+        if hoverBG != nil {
+            layer?.backgroundColor = restingBG.cgColor
+        } else {
+            contentTintColor = baseTint
+        }
     }
 }
 
@@ -820,7 +834,6 @@ final class LiveCaptionPanelController: NSObject {
     private static let sourceColor = NSColor(calibratedWhite: 1.0, alpha: 0.42)
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
     private static let iconColorActive = NSColor(calibratedWhite: 1.0, alpha: 0.95)
-    private static let selectionChip = NSColor(calibratedWhite: 1.0, alpha: 0.14)
 
     private var pauseButton: HoverIconButton?
     private var sourceToggleButton: NSButton?
@@ -920,8 +933,9 @@ final class LiveCaptionPanelController: NSObject {
         return glass.contentView
     }
 
-    private static let hoverNeutral = NSColor(calibratedWhite: 1.0, alpha: 0.14)
-    private static let hoverDanger = NSColor.systemRed.withAlphaComponent(0.85)
+    // Hover is shown by brightening the icon tint (no background to clip).
+    private static let hoverNeutral = NSColor(calibratedWhite: 1.0, alpha: 0.92)
+    private static let hoverDanger = NSColor.systemRed
 
     private static func symbolImage(_ name: String, _ description: String, pointSize: CGFloat = 11) -> NSImage? {
         let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular, scale: .medium)
@@ -939,29 +953,27 @@ final class LiveCaptionPanelController: NSObject {
         button.imageScaling = .scaleNone          // render at the symbol's natural size — no squishing
         button.isBordered = false
         button.bezelStyle = .regularSquare
+        button.baseTint = tint
+        button.hoverTint = hover
         button.contentTintColor = tint
-        button.hoverColor = hover
         button.toolTip = help
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }
 
-    /// Applies a selected "chip" look (accent tint + soft accent background) to a
-    /// toggle/source icon, or clears it.
+    /// Active state is shown by a brighter icon tint only — no background chip.
     private func applySelection(_ button: NSButton?, selected: Bool) {
         guard let button = button as? HoverIconButton else { return }
-        button.contentTintColor = selected ? Self.iconColorActive : Self.iconColor
-        button.restingColor = selected ? Self.selectionChip : .clear
-        button.wantsLayer = true
-        button.layer?.cornerRadius = button.corner
-        button.layer?.backgroundColor = button.restingColor.cgColor
+        button.baseTint = selected ? Self.iconColorActive : Self.iconColor
+        button.contentTintColor = button.baseTint
     }
 
     private func roundWhiteButton(_ symbol: String, action: Selector, help: String) -> HoverIconButton {
         let button = iconButton(symbol, tint: NSColor.black.withAlphaComponent(0.82),
-                                hover: NSColor(calibratedWhite: 0.86, alpha: 1.0),
+                                hover: NSColor.black.withAlphaComponent(0.82),
                                 action: action, help: help, pointSize: 13)
-        button.restingColor = .white
+        button.restingBG = .white
+        button.hoverBG = NSColor(calibratedWhite: 0.86, alpha: 1.0)
         button.roundedFull = true
         return button
     }
@@ -1068,8 +1080,8 @@ final class LiveCaptionPanelController: NSObject {
             bottomSeparator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             bottomSeparator.heightAnchor.constraint(equalToConstant: 1),
 
-            summarizeButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
+            summarizeButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             summarizeButton.widthAnchor.constraint(equalToConstant: tb),
             summarizeButton.heightAnchor.constraint(equalToConstant: tb),
 
@@ -1094,11 +1106,11 @@ final class LiveCaptionPanelController: NSObject {
             micButton.heightAnchor.constraint(equalToConstant: tb),
 
             // Prominent round white play/pause on the right.
-            // Round play/pause — inset from the rounded glass corner so it isn't clipped.
+            // Round play/pause — well inset from the rounded glass corner so it isn't clipped.
             pauseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
-            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            pauseButton.widthAnchor.constraint(equalToConstant: 30),
-            pauseButton.heightAnchor.constraint(equalToConstant: 30),
+            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -26),
+            pauseButton.widthAnchor.constraint(equalToConstant: 28),
+            pauseButton.heightAnchor.constraint(equalToConstant: 28),
             pauseButton.leadingAnchor.constraint(greaterThanOrEqualTo: micButton.trailingAnchor, constant: 8),
         ])
     }
