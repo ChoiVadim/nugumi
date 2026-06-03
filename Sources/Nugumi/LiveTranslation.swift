@@ -382,6 +382,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let downsampler = PCM16Downsampler()
     private let sampleQueue = DispatchQueue(label: "com.nugumi.live.systemaudio")
+    private var isStopped = false
 
     func start() async {
         do {
@@ -406,6 +407,10 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             let stream = SCStream(filter: filter, configuration: config, delegate: self)
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
             try await stream.startCapture()
+            if isStopped {
+                stream.stopCapture { _ in }
+                return
+            }
             self.stream = stream
         } catch {
             await report("Screen recording permission is required for system-audio translation.")
@@ -413,6 +418,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() {
+        isStopped = true
         let capturingStream = stream
         stream = nil
         capturingStream?.stopCapture { _ in }
@@ -610,7 +616,12 @@ final class LiveTranslationController: NSObject {
             self.panel.render(self.transcript)
         }
         session.onStatusChange = { [weak self] status in
-            self?.panel.update(status: Self.statusText(status, language: targetLanguage))
+            guard let self else { return }
+            if case .failed(let message) = status {
+                self.stop(finalStatus: "Error: \(message) — stopped.")
+            } else {
+                self.panel.update(status: Self.statusText(status, language: targetLanguage))
+            }
         }
         session.connect()
         systemSession = session
@@ -643,6 +654,12 @@ final class LiveTranslationController: NSObject {
                 self.transcript.appendDelta(speaker: .me, text: delta)
                 self.panel.render(self.transcript)
             }
+            micSession.onStatusChange = { [weak self] status in
+                guard let self else { return }
+                if case .failed(let message) = status {
+                    self.stop(finalStatus: "Error: \(message) — stopped.")
+                }
+            }
             micSession.connect()
             self.micSession = micSession
 
@@ -655,18 +672,20 @@ final class LiveTranslationController: NSObject {
         }
     }
 
-    func stop() {
+    func stop(finalStatus: String = "Stopped") {
         guard isRunning else { return }
         isRunning = false
         elapsedTimer?.invalidate(); elapsedTimer = nil
-        systemCapture?.stop(); systemCapture = nil
-        systemSession?.close(); systemSession = nil
+        systemSession?.onStatusChange = nil
+        micSession?.onStatusChange = nil
         micCapture?.stop(); micCapture = nil
         micSession?.close(); micSession = nil
+        systemCapture?.stop(); systemCapture = nil
+        systemSession?.close(); systemSession = nil
         activeSessionCount = 1
         transcript.finalizeCurrent()
         panel.render(transcript)
-        panel.update(status: "Stopped")
+        panel.update(status: finalStatus)
     }
 
     private func startCostTimer() {
