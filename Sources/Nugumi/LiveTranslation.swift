@@ -13,6 +13,46 @@ enum LiveTranslationLanguage {
     }
 }
 
+enum CaptionSpeaker: Equatable {
+    case them   // system audio
+    case me     // microphone
+
+    var label: String {
+        switch self {
+        case .them: return "Them"
+        case .me: return "Me"
+        }
+    }
+}
+
+struct CaptionLine: Equatable {
+    let speaker: CaptionSpeaker
+    var text: String
+    var isFinalized: Bool
+}
+
+/// Ordered caption lines. Output deltas append to the current open line; a
+/// speaker change or an explicit finalize closes it and opens a new one.
+struct LiveTranscript {
+    private(set) var lines: [CaptionLine] = []
+
+    mutating func appendDelta(speaker: CaptionSpeaker, text: String) {
+        if let last = lines.last, !last.isFinalized, last.speaker == speaker {
+            lines[lines.count - 1].text += text
+        } else {
+            if !lines.isEmpty, lines[lines.count - 1].isFinalized == false {
+                lines[lines.count - 1].isFinalized = true
+            }
+            lines.append(CaptionLine(speaker: speaker, text: text, isFinalized: false))
+        }
+    }
+
+    mutating func finalizeCurrent() {
+        guard let last = lines.last, !last.isFinalized else { return }
+        lines[lines.count - 1].isFinalized = true
+    }
+}
+
 /// Typed view over the Realtime translation socket's server events. Unknown or
 /// malformed payloads decode to `.ignored` so a protocol drift can never crash
 /// the receive loop.

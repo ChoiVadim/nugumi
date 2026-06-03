@@ -39,4 +39,34 @@ final class LiveTranslationTests: XCTestCase {
     func testDecodeMalformedIsIgnored() {
         XCTAssertEqual(RealtimeServerEvent(jsonString: "not json"), .ignored)
     }
+
+    func testTranscriptAccumulatesDeltasIntoOnePartialLine() {
+        var t = LiveTranscript()
+        t.appendDelta(speaker: .them, text: "Hel")
+        t.appendDelta(speaker: .them, text: "lo")
+        XCTAssertEqual(t.lines.count, 1)
+        XCTAssertEqual(t.lines[0].speaker, .them)
+        XCTAssertEqual(t.lines[0].text, "Hello")
+        XCTAssertFalse(t.lines[0].isFinalized)
+    }
+
+    func testSwitchingSpeakerFinalizesPreviousLine() {
+        var t = LiveTranscript()
+        t.appendDelta(speaker: .them, text: "Hello")
+        t.appendDelta(speaker: .me, text: "Hi")
+        XCTAssertEqual(t.lines.count, 2)
+        XCTAssertTrue(t.lines[0].isFinalized)
+        XCTAssertEqual(t.lines[1].speaker, .me)
+        XCTAssertEqual(t.lines[1].text, "Hi")
+    }
+
+    func testFinalizeRollsToNewLineForSameSpeaker() {
+        var t = LiveTranscript()
+        t.appendDelta(speaker: .them, text: "First")
+        t.finalizeCurrent()
+        t.appendDelta(speaker: .them, text: "Second")
+        XCTAssertEqual(t.lines.map(\.text), ["First", "Second"])
+        XCTAssertTrue(t.lines[0].isFinalized)
+        XCTAssertFalse(t.lines[1].isFinalized)
+    }
 }
