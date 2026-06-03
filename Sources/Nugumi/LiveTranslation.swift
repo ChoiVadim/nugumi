@@ -535,10 +535,12 @@ private extension CMSampleBuffer {
 /// dragging) to expand back to the captions.
 final class RecordIndicatorView: NSView {
     var onClick: (() -> Void)?
+    var onToggleRecord: (() -> Void)?
 
-    private let recSquare = CALayer()
+    private let recGlyph = CAShapeLayer()
     private var bars: [CALayer] = []
     private let timeLayer = CATextLayer()
+    private var isPausedState = false
 
     private static let barCount = 12
     private static let squareSize: CGFloat = 14
@@ -556,10 +558,9 @@ final class RecordIndicatorView: NSView {
         wantsLayer = true
         layer?.masksToBounds = false
 
-        recSquare.backgroundColor = NSColor.systemRed.cgColor
-        recSquare.cornerRadius = 3
-        recSquare.bounds = CGRect(x: 0, y: 0, width: Self.squareSize, height: Self.squareSize)
-        layer?.addSublayer(recSquare)
+        recGlyph.bounds = CGRect(x: 0, y: 0, width: Self.squareSize, height: Self.squareSize)
+        layer?.addSublayer(recGlyph)
+        updateGlyph()
 
         let barColor = NSColor(calibratedWhite: 1.0, alpha: 0.78).cgColor
         for _ in 0..<Self.barCount {
@@ -595,13 +596,13 @@ final class RecordIndicatorView: NSView {
         CATransaction.setDisableActions(true)
 
         let cy = bounds.midY
-        recSquare.position = CGPoint(x: Self.leadingInset + Self.squareSize / 2, y: cy)
-        if recSquare.animation(forKey: "spin") == nil { addSpin() }
+        recGlyph.position = CGPoint(x: Self.leadingInset + Self.squareSize / 2, y: cy)
+        if !isPausedState && recGlyph.animation(forKey: "spin") == nil { addSpin() }
 
         let startX = Self.leadingInset + Self.squareSize + 10
         for (i, bar) in bars.enumerated() {
             bar.position = CGPoint(x: startX + CGFloat(i) * (Self.barWidth + Self.barGap) + Self.barWidth / 2, y: cy)
-            if bar.animation(forKey: "eq") == nil { addEqualizer(to: bar, index: i) }
+            if !isPausedState && bar.animation(forKey: "eq") == nil { addEqualizer(to: bar, index: i) }
         }
 
         timeLayer.frame = CGRect(x: bounds.maxX - Self.timerWidth - Self.leadingInset,
@@ -616,7 +617,44 @@ final class RecordIndicatorView: NSView {
         spin.duration = 2
         spin.repeatCount = .infinity
         spin.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        recSquare.add(spin, forKey: "spin")
+        recGlyph.add(spin, forKey: "spin")
+    }
+
+    /// Reflects paused state: the rec square becomes a play ▶ glyph and the
+    /// spin/equalizer animations freeze.
+    func setPaused(_ paused: Bool) {
+        guard paused != isPausedState else { return }
+        isPausedState = paused
+        updateGlyph()
+        if paused {
+            recGlyph.removeAnimation(forKey: "spin")
+            recGlyph.transform = CATransform3DIdentity
+            bars.forEach { bar in
+                bar.removeAnimation(forKey: "eq")
+                bar.transform = CATransform3DIdentity
+            }
+        } else {
+            addSpin()
+            for (i, bar) in bars.enumerated() { addEqualizer(to: bar, index: i) }
+        }
+    }
+
+    private func updateGlyph() {
+        let size = Self.squareSize
+        let path = CGMutablePath()
+        if isPausedState {
+            // Play ▶ triangle — "tap to continue".
+            path.move(to: CGPoint(x: 2, y: 1))
+            path.addLine(to: CGPoint(x: 2, y: size - 1))
+            path.addLine(to: CGPoint(x: size - 1, y: size / 2))
+            path.closeSubpath()
+            recGlyph.fillColor = NSColor(calibratedWhite: 1.0, alpha: 0.92).cgColor
+        } else {
+            path.addPath(CGPath(roundedRect: CGRect(x: 0, y: 0, width: size, height: size),
+                                cornerWidth: 3, cornerHeight: 3, transform: nil))
+            recGlyph.fillColor = NSColor.systemRed.cgColor
+        }
+        recGlyph.path = path
     }
 
     private func addEqualizer(to bar: CALayer, index: Int) {
@@ -649,7 +687,16 @@ final class RecordIndicatorView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if !didDrag { onClick?() }
+        if !didDrag {
+            // Clicking the rec glyph toggles pause/resume; anywhere else expands.
+            let point = convert(event.locationInWindow, from: nil)
+            let glyphZone = Self.leadingInset + Self.squareSize + 8
+            if point.x <= glyphZone {
+                onToggleRecord?()
+            } else {
+                onClick?()
+            }
+        }
         initialMouseLocation = nil
         initialWindowOrigin = nil
     }
@@ -845,6 +892,7 @@ final class LiveCaptionPanelController: NSObject {
         let indicator = RecordIndicatorView(frame: content.bounds)
         indicator.autoresizingMask = [.width, .height]
         indicator.onClick = { [weak self] in self?.onToggleCollapse?() }
+        indicator.onToggleRecord = { [weak self] in self?.onTogglePause?() }
         content.addSubview(indicator)
         recordIndicator = indicator
     }
@@ -895,6 +943,7 @@ final class LiveCaptionPanelController: NSObject {
         pauseButton?.image = NSImage(systemSymbolName: paused ? "play.fill" : "pause.fill",
                                      accessibilityDescription: paused ? "Resume" : "Pause")
         pauseButton?.toolTip = paused ? "Resume" : "Pause"
+        recordIndicator?.setPaused(paused)
     }
 
     func render(_ transcript: LiveTranscript) {
