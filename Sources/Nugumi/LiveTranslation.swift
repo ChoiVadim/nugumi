@@ -793,7 +793,13 @@ final class KeyablePanel: NSPanel {
 /// captions header controls (pause/minimize/close).
 final class HoverIconButton: NSButton {
     var hoverColor = NSColor(calibratedWhite: 1.0, alpha: 0.14)
+    var restingColor: NSColor = .clear
+    var roundedFull = false
+    var corner: CGFloat = 5
     private var tracking: NSTrackingArea?
+    private var inside = false
+
+    private var radius: CGFloat { roundedFull ? bounds.height / 2 : corner }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -805,14 +811,23 @@ final class HoverIconButton: NSButton {
         tracking = area
     }
 
-    override func mouseEntered(with event: NSEvent) {
+    override func layout() {
+        super.layout()
         wantsLayer = true
-        layer?.cornerRadius = 5
+        layer?.cornerRadius = radius
+        layer?.backgroundColor = (inside ? hoverColor : restingColor).cgColor
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        inside = true
+        wantsLayer = true
+        layer?.cornerRadius = radius
         layer?.backgroundColor = hoverColor.cgColor
     }
 
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.clear.cgColor
+        inside = false
+        layer?.backgroundColor = restingColor.cgColor
     }
 }
 
@@ -826,10 +841,6 @@ final class LiveCaptionPanelController: NSObject {
 
     private let statusLabel = NSTextField(labelWithString: "")
     private let costLabel = NSTextField(labelWithString: "")
-    private let sourceControl = NSSegmentedControl(
-        labels: LiveAudioSource.allCases.map { $0.title },
-        trackingMode: .selectOne, target: nil, action: nil
-    )
     private let textView = NSTextView()
     private let scrollView = NSScrollView()
 
@@ -844,8 +855,10 @@ final class LiveCaptionPanelController: NSObject {
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
     private static let iconColorActive = NSColor.controlAccentColor
 
-    private var pauseButton: NSButton?
+    private var pauseButton: HoverIconButton?
     private var sourceToggleButton: NSButton?
+    private var systemAudioButton: NSButton?
+    private var micButton: NSButton?
     private var recordIndicator: RecordIndicatorView?
     /// Shared top-right corner (screen coords) both windows anchor to, so the
     /// captions window and the collapsed pill always appear in the same spot and
@@ -963,6 +976,15 @@ final class LiveCaptionPanelController: NSObject {
         return button
     }
 
+    private func roundWhiteButton(_ symbol: String, action: Selector, help: String) -> HoverIconButton {
+        let button = iconButton(symbol, tint: NSColor.black.withAlphaComponent(0.82),
+                                hover: NSColor(calibratedWhite: 0.86, alpha: 1.0),
+                                action: action, help: help, pointSize: 13)
+        button.restingColor = .white
+        button.roundedFull = true
+        return button
+    }
+
     private func buildCaptions() {
         let content = installGlass(in: panel, cornerRadius: Self.glassCornerRadius)
 
@@ -976,28 +998,29 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let toolbarPointSize: CGFloat = 14
-        let summarizeButton = iconButton("list.bullet.rectangle", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                         action: #selector(summarizeTapped), help: "Summarize", pointSize: toolbarPointSize)
-        let sourceToggleButton = iconButton("character.bubble", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                            action: #selector(sourceToggled), help: "Show original", pointSize: toolbarPointSize)
-        self.sourceToggleButton = sourceToggleButton
-        let pauseButton = iconButton("pause.fill", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                     action: #selector(pauseTapped), help: "Pause", pointSize: toolbarPointSize)
-        self.pauseButton = pauseButton
+        // Top-right window controls.
         let collapseButton = iconButton("minus", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                        action: #selector(collapseTapped), help: "Minimize", pointSize: toolbarPointSize)
+                                        action: #selector(collapseTapped), help: "Minimize")
         let closeButton = iconButton("xmark", tint: Self.iconColor, hover: Self.hoverDanger,
                                      action: #selector(stopTapped), help: "Stop and close")
 
-        let vsep1 = HairlineSeparatorView(); vsep1.translatesAutoresizingMaskIntoConstraints = false
-        let vsep2 = HairlineSeparatorView(); vsep2.translatesAutoresizingMaskIntoConstraints = false
+        // Bottom toolbar.
+        let pt: CGFloat = 14
+        let summarizeButton = iconButton("list.bullet.rectangle", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                         action: #selector(summarizeTapped), help: "Summarize", pointSize: pt)
+        let sourceToggleButton = iconButton("character.bubble", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                            action: #selector(sourceToggled), help: "Show original", pointSize: pt)
+        self.sourceToggleButton = sourceToggleButton
+        let systemAudioButton = iconButton("speaker.wave.2", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                           action: #selector(selectSystemAudio), help: "System audio", pointSize: pt)
+        self.systemAudioButton = systemAudioButton
+        let micButton = iconButton("mic", tint: Self.iconColor, hover: Self.hoverNeutral,
+                                   action: #selector(selectMicrophone), help: "Microphone", pointSize: pt)
+        self.micButton = micButton
+        let pauseButton = roundWhiteButton("pause.fill", action: #selector(pauseTapped), help: "Pause")
+        self.pauseButton = pauseButton
 
-        sourceControl.target = self
-        sourceControl.action = #selector(sourceChanged)
-        sourceControl.segmentDistribution = .fillEqually
-        sourceControl.controlSize = .small
-        sourceControl.translatesAutoresizingMaskIntoConstraints = false
+        let vsep1 = HairlineSeparatorView(); vsep1.translatesAutoresizingMaskIntoConstraints = false
 
         let separator = HairlineSeparatorView()
         separator.translatesAutoresizingMaskIntoConstraints = false
@@ -1009,8 +1032,6 @@ final class LiveCaptionPanelController: NSObject {
         textView.drawsBackground = false
         textView.font = .systemFont(ofSize: 15)
         textView.textContainerInset = NSSize(width: 6, height: 8)
-        // Configure as a vertically-growing text view so auto-scroll-to-bottom
-        // has correct geometry on every delta (not just on sentence breaks).
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -1020,82 +1041,83 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
-        // Thin, auto-hiding overlay scroller instead of the heavy legacy bar.
         scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.scrollerKnobStyle = .light
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        [statusLabel, costLabel, closeButton, sourceControl, separator, scrollView, bottomSeparator,
-         summarizeButton, sourceToggleButton, vsep1, pauseButton, vsep2, collapseButton]
+        [statusLabel, costLabel, collapseButton, closeButton, separator, scrollView, bottomSeparator,
+         summarizeButton, sourceToggleButton, vsep1, systemAudioButton, micButton, pauseButton]
             .forEach { content.addSubview($0) }
 
-        let toolButton: CGFloat = 26
+        let tb: CGFloat = 26
         NSLayoutConstraint.activate([
-            // Top row: status + cost + close (close stays top-right).
+            // Top row: status + cost + minimize + close.
             closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
             closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             closeButton.widthAnchor.constraint(equalToConstant: 22),
             closeButton.heightAnchor.constraint(equalToConstant: 22),
 
+            collapseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
+            collapseButton.widthAnchor.constraint(equalToConstant: 22),
+            collapseButton.heightAnchor.constraint(equalToConstant: 22),
+
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -10),
+            costLabel.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -10),
             costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
-            // Source switcher.
-            sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
-            sourceControl.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            sourceControl.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-
-            separator.topAnchor.constraint(equalTo: sourceControl.bottomAnchor, constant: 10),
+            separator.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 10),
             separator.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             separator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             separator.heightAnchor.constraint(equalToConstant: 1),
 
-            // Transcript fills between the two separators.
+            // Transcript between separators.
             scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
             scrollView.bottomAnchor.constraint(equalTo: bottomSeparator.topAnchor, constant: -6),
 
-            // Bottom toolbar: summarize · original | pause | minimize.
+            // Bottom toolbar: summarize · original | system · mic ......... [play].
             bottomSeparator.bottomAnchor.constraint(equalTo: summarizeButton.topAnchor, constant: -8),
             bottomSeparator.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             bottomSeparator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             bottomSeparator.heightAnchor.constraint(equalToConstant: 1),
 
             summarizeButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
-            summarizeButton.widthAnchor.constraint(equalToConstant: toolButton),
-            summarizeButton.heightAnchor.constraint(equalToConstant: toolButton),
+            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+            summarizeButton.widthAnchor.constraint(equalToConstant: tb),
+            summarizeButton.heightAnchor.constraint(equalToConstant: tb),
 
             sourceToggleButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
             sourceToggleButton.leadingAnchor.constraint(equalTo: summarizeButton.trailingAnchor, constant: 4),
-            sourceToggleButton.widthAnchor.constraint(equalToConstant: toolButton),
-            sourceToggleButton.heightAnchor.constraint(equalToConstant: toolButton),
+            sourceToggleButton.widthAnchor.constraint(equalToConstant: tb),
+            sourceToggleButton.heightAnchor.constraint(equalToConstant: tb),
 
             vsep1.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
             vsep1.leadingAnchor.constraint(equalTo: sourceToggleButton.trailingAnchor, constant: 8),
             vsep1.widthAnchor.constraint(equalToConstant: 1),
             vsep1.heightAnchor.constraint(equalToConstant: 16),
 
+            systemAudioButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            systemAudioButton.leadingAnchor.constraint(equalTo: vsep1.trailingAnchor, constant: 8),
+            systemAudioButton.widthAnchor.constraint(equalToConstant: tb),
+            systemAudioButton.heightAnchor.constraint(equalToConstant: tb),
+
+            micButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            micButton.leadingAnchor.constraint(equalTo: systemAudioButton.trailingAnchor, constant: 4),
+            micButton.widthAnchor.constraint(equalToConstant: tb),
+            micButton.heightAnchor.constraint(equalToConstant: tb),
+
+            // Prominent round white play/pause on the right.
             pauseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
-            pauseButton.leadingAnchor.constraint(equalTo: vsep1.trailingAnchor, constant: 8),
-            pauseButton.widthAnchor.constraint(equalToConstant: toolButton),
-            pauseButton.heightAnchor.constraint(equalToConstant: toolButton),
-
-            vsep2.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
-            vsep2.leadingAnchor.constraint(equalTo: pauseButton.trailingAnchor, constant: 8),
-            vsep2.widthAnchor.constraint(equalToConstant: 1),
-            vsep2.heightAnchor.constraint(equalToConstant: 16),
-
-            collapseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
-            collapseButton.leadingAnchor.constraint(equalTo: vsep2.trailingAnchor, constant: 8),
-            collapseButton.widthAnchor.constraint(equalToConstant: toolButton),
-            collapseButton.heightAnchor.constraint(equalToConstant: toolButton),
+            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            pauseButton.widthAnchor.constraint(equalToConstant: 32),
+            pauseButton.heightAnchor.constraint(equalToConstant: 32),
+            pauseButton.leadingAnchor.constraint(greaterThanOrEqualTo: micButton.trailingAnchor, constant: 8),
         ])
     }
 
@@ -1114,7 +1136,8 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     func setSource(_ source: LiveAudioSource) {
-        sourceControl.selectedSegment = (source == .systemAudio) ? 0 : 1
+        systemAudioButton?.contentTintColor = source == .systemAudio ? Self.iconColorActive : Self.iconColor
+        micButton?.contentTintColor = source == .microphone ? Self.iconColorActive : Self.iconColor
     }
 
     func showCaptions() {
@@ -1150,7 +1173,7 @@ final class LiveCaptionPanelController: NSObject {
 
     func setPaused(_ paused: Bool) {
         pauseButton?.image = Self.symbolImage(paused ? "play.fill" : "pause.fill",
-                                              paused ? "Resume" : "Pause", pointSize: 14)
+                                              paused ? "Resume" : "Pause", pointSize: 13)
         pauseButton?.toolTip = paused ? "Resume" : "Pause"
         recordIndicator?.setPaused(paused)
     }
@@ -1270,9 +1293,8 @@ final class LiveCaptionPanelController: NSObject {
     @objc private func summarizeTapped() { onSummarize?() }
     @objc private func copySummaryTapped() { copySummary() }
     @objc private func closeSummaryTapped() { summaryPanel.orderOut(nil) }
-    @objc private func sourceChanged() {
-        onSourceChange?(sourceControl.selectedSegment == 0 ? .systemAudio : .microphone)
-    }
+    @objc private func selectSystemAudio() { onSourceChange?(.systemAudio) }
+    @objc private func selectMicrophone() { onSourceChange?(.microphone) }
 }
 
 /// Owns the live-translation lifecycle: single switchable audio source,
