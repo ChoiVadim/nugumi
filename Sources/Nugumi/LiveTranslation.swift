@@ -53,6 +53,40 @@ struct LiveTranscript {
     }
 }
 
+/// Accumulates raw PCM bytes and flushes whole chunks once they reach a byte
+/// threshold (~100 ms), so we send fewer, larger `input_audio_buffer.append`
+/// frames instead of one per capture callback.
+final class AudioBatcher {
+    private let thresholdBytes: Int
+    private let onChunk: (Data) -> Void
+    private var buffer = Data()
+    private let lock = NSLock()
+
+    init(thresholdBytes: Int, onChunk: @escaping (Data) -> Void) {
+        self.thresholdBytes = thresholdBytes
+        self.onChunk = onChunk
+    }
+
+    func add(_ data: Data) {
+        lock.lock()
+        buffer.append(data)
+        guard buffer.count >= thresholdBytes else { lock.unlock(); return }
+        let chunk = buffer
+        buffer = Data()
+        lock.unlock()
+        onChunk(chunk)
+    }
+
+    func flush() {
+        lock.lock()
+        guard !buffer.isEmpty else { lock.unlock(); return }
+        let chunk = buffer
+        buffer = Data()
+        lock.unlock()
+        onChunk(chunk)
+    }
+}
+
 /// Typed view over the Realtime translation socket's server events. Unknown or
 /// malformed payloads decode to `.ignored` so a protocol drift can never crash
 /// the receive loop.

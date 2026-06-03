@@ -69,4 +69,24 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertTrue(t.lines[0].isFinalized)
         XCTAssertFalse(t.lines[1].isFinalized)
     }
+
+    func testBatcherFlushesAtThreshold() {
+        var flushed: [Data] = []
+        let batcher = AudioBatcher(thresholdBytes: 4800) { flushed.append($0) }
+        batcher.add(Data(count: 3000))
+        XCTAssertTrue(flushed.isEmpty)
+        batcher.add(Data(count: 2000))
+        XCTAssertEqual(flushed.count, 1)
+        XCTAssertEqual(flushed[0].count, 5000)
+    }
+
+    func testBatcherFlushPushesRemainder() {
+        var flushed: [Data] = []
+        let batcher = AudioBatcher(thresholdBytes: 4800) { flushed.append($0) }
+        batcher.add(Data(count: 100))
+        batcher.flush()
+        XCTAssertEqual(flushed.map(\.count), [100])
+        batcher.flush()
+        XCTAssertEqual(flushed.count, 1)
+    }
 }
