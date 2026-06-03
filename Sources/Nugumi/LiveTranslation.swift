@@ -333,6 +333,7 @@ final class MicrophoneCapture {
 
     private let engine = AVAudioEngine()
     private let downsampler = PCM16Downsampler()
+    private var didInstallTap = false
 
     /// Requests mic authorization, returning whether capture may proceed.
     static func requestAuthorization() async -> Bool {
@@ -346,10 +347,15 @@ final class MicrophoneCapture {
     func start() {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0 else {
+            onError?("No microphone available.")
+            return
+        }
         input.installTap(onBus: 0, bufferSize: 2400, format: format) { [weak self] buffer, _ in
             guard let self, let data = try? self.downsampler.pcm16Data(from: buffer) else { return }
             self.onPCM?(data)
         }
+        didInstallTap = true
         do {
             try engine.start()
         } catch {
@@ -358,7 +364,10 @@ final class MicrophoneCapture {
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
+        if didInstallTap {
+            engine.inputNode.removeTap(onBus: 0)
+            didInstallTap = false
+        }
         engine.stop()
     }
 }
@@ -567,6 +576,7 @@ final class LiveTranslationController: NSObject {
     private var startDate: Date?
     /// Number of concurrently billed sessions (1 in Phase 1, 2 in Phase 2).
     private var activeSessionCount = 1
+    private var startGeneration = 0
 
     var onMissingAPIKey: (() -> Void)?
 
@@ -578,6 +588,8 @@ final class LiveTranslationController: NSObject {
         guard let apiKey, !apiKey.isEmpty else { onMissingAPIKey?(); return }
         guard !isRunning else { return }
         isRunning = true
+        startGeneration += 1
+        let generation = startGeneration
         transcript = LiveTranscript()
         startDate = Date()
 
@@ -618,7 +630,11 @@ final class LiveTranslationController: NSObject {
                 self?.panel.update(status: "Microphone permission denied — captions show their audio only.")
                 return
             }
-            guard let self, self.isRunning else { return }
+            // Bail if a stop()/restart happened while the auth dialog was up:
+            // this Task belongs to a previous run if the generation no longer matches.
+            // NOTE: there must be NO `await` between this guard and the assignments
+            // below — the main-actor body must stay synchronous so stop() cannot interleave.
+            guard let self, self.isRunning, self.startGeneration == generation else { return }
             let micSession = RealtimeTranslationSession(
                 apiKey: apiKey, languageCode: languageCode, safetyIdentifier: safetyID
             )
