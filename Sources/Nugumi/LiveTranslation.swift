@@ -487,3 +487,109 @@ final class LiveCaptionPanelController: NSObject {
 
     @objc private func stopTapped() { onStop?() }
 }
+
+/// Owns the live-translation lifecycle for Phase 1 (system audio only).
+@MainActor
+final class LiveTranslationController: NSObject {
+    static let perMinuteCostUSD = 0.034
+
+    private(set) var isRunning = false
+    private let panel = LiveCaptionPanelController()
+    private var transcript = LiveTranscript()
+    private var systemCapture: SystemAudioCapture?
+    private var systemSession: RealtimeTranslationSession?
+    private var elapsedTimer: Timer?
+    private var startDate: Date?
+    /// Number of concurrently billed sessions (1 in Phase 1, 2 in Phase 2).
+    private var activeSessionCount = 1
+
+    var onMissingAPIKey: (() -> Void)?
+
+    func toggle(apiKey: String?, targetLanguage: TranslationLanguage) {
+        if isRunning { stop() } else { start(apiKey: apiKey, targetLanguage: targetLanguage) }
+    }
+
+    func start(apiKey: String?, targetLanguage: TranslationLanguage) {
+        guard let apiKey, !apiKey.isEmpty else { onMissingAPIKey?(); return }
+        guard !isRunning else { return }
+        isRunning = true
+        transcript = LiveTranscript()
+        startDate = Date()
+
+        panel.onStop = { [weak self] in self?.stop() }
+        panel.show()
+        panel.render(transcript)
+        panel.update(status: "Connecting… → \(targetLanguage.displayName)")
+
+        let languageCode = LiveTranslationLanguage.apiCode(for: targetLanguage)
+        let session = RealtimeTranslationSession(
+            apiKey: apiKey,
+            languageCode: languageCode,
+            safetyIdentifier: LiveTranslationController.safetyIdentifier()
+        )
+        session.onTranslatedDelta = { [weak self] delta in
+            guard let self else { return }
+            self.transcript.appendDelta(speaker: .them, text: delta)
+            self.panel.render(self.transcript)
+        }
+        session.onStatusChange = { [weak self] status in
+            self?.panel.update(status: Self.statusText(status, language: targetLanguage))
+        }
+        session.connect()
+        systemSession = session
+
+        let capture = SystemAudioCapture()
+        capture.onPCM = { [weak session] data in session?.append(pcm: data) }
+        capture.onError = { [weak self] message in self?.panel.update(status: message) }
+        systemCapture = capture
+        Task { await capture.start() }
+
+        startCostTimer()
+    }
+
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        elapsedTimer?.invalidate(); elapsedTimer = nil
+        systemCapture?.stop(); systemCapture = nil
+        systemSession?.close(); systemSession = nil
+        transcript.finalizeCurrent()
+        panel.render(transcript)
+        panel.update(status: "Stopped")
+    }
+
+    private func startCostTimer() {
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateCost() }
+        }
+        updateCost()
+    }
+
+    private func updateCost() {
+        guard let startDate else { return }
+        let minutes = Date().timeIntervalSince(startDate) / 60.0
+        let cost = minutes * Self.perMinuteCostUSD * Double(activeSessionCount)
+        let elapsed = Int(Date().timeIntervalSince(startDate))
+        panel.update(cost: String(format: "%02d:%02d · ~$%.2f", elapsed / 60, elapsed % 60, cost))
+    }
+
+    private static func statusText(_ status: RealtimeTranslationSession.Status,
+                                   language: TranslationLanguage) -> String {
+        switch status {
+        case .connecting: return "Connecting… → \(language.displayName)"
+        case .listening: return "Listening → \(language.displayName)"
+        case .reconnecting: return "Reconnecting…"
+        case .failed(let message): return "Error: \(message)"
+        case .closed: return "Stopped"
+        }
+    }
+
+    /// Stable, non-identifying per-install id for OpenAI-Safety-Identifier.
+    private static func safetyIdentifier() -> String {
+        let key = "liveTranslationSafetyID"
+        if let existing = UserDefaults.standard.string(forKey: key) { return existing }
+        let new = UUID().uuidString
+        UserDefaults.standard.set(new, forKey: key)
+        return new
+    }
+}
