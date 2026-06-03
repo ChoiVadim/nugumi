@@ -529,6 +529,74 @@ private extension CMSampleBuffer {
 
 /// Floating, draggable, always-on-top captions window. Pure view layer — the
 /// controller pushes transcript + status updates in.
+/// Round collapsed indicator: a pulsing red record dot. Drag to move the window,
+/// click (without dragging) to expand back to the captions.
+final class RecordIndicatorView: NSView {
+    var onClick: (() -> Void)?
+
+    private let dot = NSView()
+    private var initialMouseLocation: NSPoint?
+    private var initialWindowOrigin: NSPoint?
+    private var didDrag = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dot)
+        NSLayoutConstraint.activate([
+            dot.centerXAnchor.constraint(equalTo: centerXAnchor),
+            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 14),
+            dot.heightAnchor.constraint(equalToConstant: 14),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        dot.layer?.cornerRadius = dot.bounds.width / 2
+        if dot.layer?.animation(forKey: "blink") == nil { startBlinking() }
+    }
+
+    private func startBlinking() {
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1.0
+        pulse.toValue = 0.2
+        pulse.duration = 0.7
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        dot.layer?.add(pulse, forKey: "blink")
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        initialMouseLocation = NSEvent.mouseLocation
+        initialWindowOrigin = window?.frame.origin
+        didDrag = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let startMouse = initialMouseLocation,
+              let startOrigin = initialWindowOrigin,
+              let window else { return }
+        let current = NSEvent.mouseLocation
+        let dx = current.x - startMouse.x
+        let dy = current.y - startMouse.y
+        if abs(dx) > 2 || abs(dy) > 2 { didDrag = true }
+        window.setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: startOrigin.y + dy))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !didDrag { onClick?() }
+        initialMouseLocation = nil
+        initialWindowOrigin = nil
+    }
+}
+
 @MainActor
 final class LiveCaptionPanelController: NSObject {
     private let panel: NSPanel
@@ -542,7 +610,6 @@ final class LiveCaptionPanelController: NSObject {
     )
     private let textView = NSTextView()
     private let scrollView = NSScrollView()
-    private let indicatorTimeLabel = NSTextField(labelWithString: "0:00")
 
     // Glass palette — mirrors TranslationPanelPalette (which is private to App.swift)
     // so the captions window matches the translate window's white-on-glass look.
@@ -564,7 +631,7 @@ final class LiveCaptionPanelController: NSObject {
             backing: .buffered, defer: false
         )
         indicatorPanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 116, height: 34),
+            contentRect: NSRect(x: 0, y: 0, width: 46, height: 46),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -692,42 +759,15 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     private func buildIndicator() {
-        let content = installGlass(in: indicatorPanel, cornerRadius: 17)
+        let content = installGlass(in: indicatorPanel, cornerRadius: 23)
+        // We handle dragging ourselves (drag to move, click to expand), so don't
+        // let the window also move on background drags.
+        indicatorPanel.isMovableByWindowBackground = false
 
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
-        dot.layer?.cornerRadius = 4
-        dot.translatesAutoresizingMaskIntoConstraints = false
-
-        indicatorTimeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
-        indicatorTimeLabel.textColor = Self.titleColor
-        indicatorTimeLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        // The whole pill is a single click target → expand back to the captions.
-        let hit = NSButton(title: "", target: self, action: #selector(collapseTapped))
-        hit.isBordered = false
-        hit.isTransparent = true
-        hit.toolTip = "Expand captions"
-        hit.translatesAutoresizingMaskIntoConstraints = false
-
-        [dot, indicatorTimeLabel, hit].forEach { content.addSubview($0) }
-
-        NSLayoutConstraint.activate([
-            dot.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            dot.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 8),
-            dot.heightAnchor.constraint(equalToConstant: 8),
-
-            indicatorTimeLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
-            indicatorTimeLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            indicatorTimeLabel.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -14),
-
-            hit.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            hit.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            hit.topAnchor.constraint(equalTo: content.topAnchor),
-            hit.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-        ])
+        let indicator = RecordIndicatorView(frame: content.bounds)
+        indicator.autoresizingMask = [.width, .height]
+        indicator.onClick = { [weak self] in self?.onToggleCollapse?() }
+        content.addSubview(indicator)
     }
 
     func setSource(_ source: LiveAudioSource) {
@@ -766,9 +806,6 @@ final class LiveCaptionPanelController: NSObject {
 
     func update(cost: String) {
         costLabel.stringValue = cost
-        // The collapsed pill shows just the elapsed time (drop the cost tail).
-        indicatorTimeLabel.stringValue = cost.components(separatedBy: " · ").first?
-            .trimmingCharacters(in: .whitespaces) ?? cost
     }
 
     func render(_ transcript: LiveTranscript) {
