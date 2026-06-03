@@ -781,6 +781,14 @@ final class LiveCaptionPanelController: NSObject {
         textView.drawsBackground = false
         textView.font = .systemFont(ofSize: 15)
         textView.textContainerInset = NSSize(width: 6, height: 8)
+        // Configure as a vertically-growing text view so auto-scroll-to-bottom
+        // has correct geometry on every delta (not just on sentence breaks).
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
@@ -900,6 +908,12 @@ final class LiveCaptionPanelController: NSObject {
             ]))
         }
         textView.textStorage?.setAttributedString(body)
+        // Force layout of the freshly-appended text before scrolling, otherwise
+        // scrollToEndOfDocument uses stale geometry and lags behind the partial
+        // line (only catching up when a sentence finalizes).
+        if let container = textView.textContainer, let layoutManager = textView.layoutManager {
+            layoutManager.ensureLayout(for: container)
+        }
         textView.scrollToEndOfDocument(nil)
     }
 
