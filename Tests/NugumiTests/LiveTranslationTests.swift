@@ -13,14 +13,14 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(LiveTranslationLanguage.apiCode(for: TranslationLanguage.language(id: "fr")), "fr")
     }
 
-    func testDecodeTranslatedDelta() {
-        let json = #"{"type":"session.output_transcript.delta","delta":"안녕"}"#
-        XCTAssertEqual(RealtimeServerEvent(jsonString: json), .translatedDelta("안녕"))
+    func testDecodeTranslatedDeltaWithTimestamp() {
+        let json = #"{"type":"session.output_transcript.delta","delta":"안녕","elapsed_ms":24000}"#
+        XCTAssertEqual(RealtimeServerEvent(jsonString: json), .translatedDelta("안녕", ms: 24000))
     }
 
-    func testDecodeSourceDelta() {
+    func testDecodeSourceDeltaWithoutTimestamp() {
         let json = #"{"type":"session.input_transcript.delta","delta":"hello"}"#
-        XCTAssertEqual(RealtimeServerEvent(jsonString: json), .sourceDelta("hello"))
+        XCTAssertEqual(RealtimeServerEvent(jsonString: json), .sourceDelta("hello", ms: nil))
     }
 
     func testDecodeClosed() {
@@ -41,48 +41,47 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(RealtimeServerEvent(jsonString: "not json"), .ignored)
     }
 
-    func testDialogueBuffersTranslationUntilUtteranceCompletes() {
+    func testDialogueAccumulatesTokensIntoOneSegmentWithoutGaps() {
         var d = LiveDialogue()
-        d.appendTranslation("Hello ")
-        d.appendTranslation("there")
-        XCTAssertTrue(d.segments.isEmpty)
-        XCTAssertEqual(d.pendingTranslation, "Hello there")
-    }
-
-    func testDialoguePairsOriginalWithBufferedTranslation() {
-        var d = LiveDialogue()
-        d.appendTranslation("Hello there")
-        d.completeUtterance(original: "안녕하세요")
+        d.appendOriginal("안녕", ms: 100)
+        d.appendOriginal("하세요", ms: 200)
+        d.appendTranslation("Hi ", ms: 300)
+        d.appendTranslation("there", ms: 400)
         XCTAssertEqual(d.segments.count, 1)
         XCTAssertEqual(d.segments[0].original, "안녕하세요")
-        XCTAssertEqual(d.segments[0].translation, "Hello there")
-        XCTAssertEqual(d.pendingTranslation, "")
+        XCTAssertEqual(d.segments[0].translation, "Hi there")
     }
 
-    func testDialogueKeepsConsecutiveUtterancesInSync() {
+    func testDialogueSplitsOnAudioGapAndPairsByIndex() {
         var d = LiveDialogue()
-        d.appendTranslation("How are you?")
-        d.completeUtterance(original: "어떻게 지내세요?")
-        d.appendTranslation("I'm fine.")
-        d.completeUtterance(original: "잘 지내요.")
-        XCTAssertEqual(d.segments.map(\.original), ["어떻게 지내세요?", "잘 지내요."])
-        XCTAssertEqual(d.segments.map(\.translation), ["How are you?", "I'm fine."])
+        // Utterance 1
+        d.appendOriginal("안녕하세요", ms: 100)
+        d.appendTranslation("Hello", ms: 300)
+        // Big audio gap (> gapMs) → utterance 2 on both streams
+        d.appendOriginal("잘 지내요", ms: 100 + LiveDialogue.gapMs + 200)
+        d.appendTranslation("I'm fine", ms: 300 + LiveDialogue.gapMs + 200)
+        XCTAssertEqual(d.segments.map(\.original), ["안녕하세요", "잘 지내요"])
+        XCTAssertEqual(d.segments.map(\.translation), ["Hello", "I'm fine"])
     }
 
-    func testDialogueFlushPendingCreatesTranslationOnlySegment() {
+    func testDialoguePairsTranslationThatLagsBehindOriginal() {
         var d = LiveDialogue()
-        d.appendTranslation("Trailing translation")
-        d.flushPending()
-        XCTAssertEqual(d.segments.count, 1)
-        XCTAssertEqual(d.segments[0].original, "")
-        XCTAssertEqual(d.segments[0].translation, "Trailing translation")
+        // Original finishes utterance 1 and starts utterance 2 before the
+        // translation of utterance 1 even arrives — they still pair by index.
+        d.appendOriginal("first", ms: 0)
+        d.appendOriginal("second", ms: LiveDialogue.gapMs + 100)
+        d.appendTranslation("один", ms: 200)
+        d.appendTranslation("два", ms: LiveDialogue.gapMs + 300)
+        XCTAssertEqual(d.segments.map(\.original), ["first", "second"])
+        XCTAssertEqual(d.segments.map(\.translation), ["один", "два"])
     }
 
-    func testDialogueIgnoresEmptyUtterance() {
+    func testDialogueTranslationTextJoinsAllSegments() {
         var d = LiveDialogue()
-        d.completeUtterance(original: "   ")
-        d.flushPending()
-        XCTAssertTrue(d.segments.isEmpty)
+        d.appendTranslation("Hello", ms: 0)
+        d.appendTranslation(".", ms: 100)
+        d.appendTranslation("Bye", ms: LiveDialogue.gapMs + 200)
+        XCTAssertEqual(d.translationText, "Hello. Bye")
     }
 
     func testBatcherFlushesAtThreshold() {

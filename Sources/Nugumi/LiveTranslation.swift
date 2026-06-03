@@ -28,31 +28,48 @@ struct LiveDialogue: Equatable {
         var translation: String
     }
 
-    private(set) var segments: [Segment] = []
-    private(set) var pendingTranslation = ""
+    /// Audio gap (ms) that ends one utterance and starts the next. Both streams
+    /// carry `elapsed_ms` (audio position), so segmenting both on the same pauses
+    /// keeps the N-th original paired with the N-th translation — real sync.
+    static let gapMs = 700
 
-    /// A streamed translation token for the in-progress utterance.
-    mutating func appendTranslation(_ token: String) {
-        pendingTranslation += token
+    private(set) var originals: [String] = []
+    private(set) var translations: [String] = []
+    private var lastOriginalMs: Int?
+    private var lastTranslationMs: Int?
+
+    mutating func appendOriginal(_ token: String, ms: Int?) {
+        if originals.isEmpty || isGap(ms, since: lastOriginalMs) { originals.append("") }
+        originals[originals.count - 1] += token
+        if let ms { lastOriginalMs = ms }
     }
 
-    /// A complete original utterance arrived → close the current segment, pairing
-    /// it with the translation buffered so far.
-    mutating func completeUtterance(original: String) {
-        let originalText = original.trimmingCharacters(in: .whitespacesAndNewlines)
-        let translationText = pendingTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
-        pendingTranslation = ""
-        guard !originalText.isEmpty || !translationText.isEmpty else { return }
-        segments.append(Segment(original: originalText, translation: translationText))
+    mutating func appendTranslation(_ token: String, ms: Int?) {
+        if translations.isEmpty || isGap(ms, since: lastTranslationMs) { translations.append("") }
+        translations[translations.count - 1] += token
+        if let ms { lastTranslationMs = ms }
     }
 
-    /// Pause/stop fallback: if translation arrived but no original closed it,
-    /// flush it as a translation-only segment so nothing is lost.
-    mutating func flushPending() {
-        let translationText = pendingTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
-        pendingTranslation = ""
-        guard !translationText.isEmpty else { return }
-        segments.append(Segment(original: "", translation: translationText))
+    private func isGap(_ ms: Int?, since last: Int?) -> Bool {
+        guard let ms, let last else { return false }
+        return ms - last > Self.gapMs
+    }
+
+    /// Paired view for rendering: index i = the i-th utterance, original + translation.
+    var segments: [Segment] {
+        let count = max(originals.count, translations.count)
+        return (0..<count).map { i in
+            Segment(
+                original: i < originals.count ? originals[i].trimmingCharacters(in: .whitespacesAndNewlines) : "",
+                translation: i < translations.count ? translations[i].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            )
+        }
+    }
+
+    /// All translation text joined (for Summarize).
+    var translationText: String {
+        translations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
 
@@ -150,8 +167,8 @@ enum LiveTranslationDebug {
 /// malformed payloads decode to `.ignored` so a protocol drift can never crash
 /// the receive loop.
 enum RealtimeServerEvent: Equatable {
-    case translatedDelta(String)
-    case sourceDelta(String)
+    case translatedDelta(String, ms: Int?)
+    case sourceDelta(String, ms: Int?)
     case closed
     case error(String)
     case ignored
@@ -163,11 +180,12 @@ enum RealtimeServerEvent: Equatable {
             self = .ignored
             return
         }
+        let ms = root["elapsed_ms"] as? Int
         switch type {
         case "session.output_transcript.delta":
-            self = (root["delta"] as? String).map(RealtimeServerEvent.translatedDelta) ?? .ignored
+            self = (root["delta"] as? String).map { .translatedDelta($0, ms: ms) } ?? .ignored
         case "session.input_transcript.delta":
-            self = (root["delta"] as? String).map(RealtimeServerEvent.sourceDelta) ?? .ignored
+            self = (root["delta"] as? String).map { .sourceDelta($0, ms: ms) } ?? .ignored
         case "session.closed":
             self = .closed
         case "error":
@@ -234,8 +252,8 @@ final class PCM16Downsampler {
 final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     enum Status: Equatable { case connecting, listening, reconnecting, failed(String), closed }
 
-    var onTranslatedDelta: ((String) -> Void)?
-    var onSourceDelta: ((String) -> Void)?
+    var onTranslatedDelta: ((String, Int?) -> Void)?
+    var onSourceDelta: ((String, Int?) -> Void)?
     var onServerError: ((String) -> Void)?
     var onStatusChange: ((Status) -> Void)?
 
@@ -354,8 +372,8 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
 
     private func handle(event: RealtimeServerEvent) {
         switch event {
-        case .translatedDelta(let text): onTranslatedDelta?(text)
-        case .sourceDelta(let text): onSourceDelta?(text)
+        case let .translatedDelta(text, ms): onTranslatedDelta?(text, ms)
+        case let .sourceDelta(text, ms): onSourceDelta?(text, ms)
         case .error(let message): onServerError?(message)   // non-fatal; keep the session
         case .closed: onStatusChange?(.closed)
         case .ignored: break
@@ -820,6 +838,68 @@ final class HoverIconButton: NSButton {
     }
 }
 
+/// Round white play/pause control. Draws the circle as an ellipse inscribed in a
+/// square (side = min(width, height)), so it stays perfectly circular regardless
+/// of the view's frame — immune to Auto Layout stretching it into a pill.
+final class RoundPlayButton: NSView {
+    var onClick: (() -> Void)?
+
+    private let circle = CAShapeLayer()
+    private let imageView = NSImageView()
+    private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        circle.fillColor = NSColor.white.cgColor
+        layer?.addSublayer(circle)
+
+        imageView.imageScaling = .scaleProportionallyDown
+        imageView.contentTintColor = NSColor.black.withAlphaComponent(0.82)
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setSymbol(_ name: String, help: String) {
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        imageView.image = NSImage(systemSymbolName: name, accessibilityDescription: help)?
+            .withSymbolConfiguration(config)
+        toolTip = help
+    }
+
+    override func layout() {
+        super.layout()
+        let d = min(bounds.width, bounds.height)
+        let rect = CGRect(x: (bounds.width - d) / 2, y: (bounds.height - d) / 2, width: d, height: d)
+        circle.path = CGPath(ellipseIn: rect, transform: nil)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        circle.fillColor = NSColor(calibratedWhite: 0.86, alpha: 1.0).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        circle.fillColor = NSColor.white.cgColor
+    }
+
+    override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
 @MainActor
 final class LiveCaptionPanelController: NSObject {
     private let panel: NSPanel
@@ -844,7 +924,7 @@ final class LiveCaptionPanelController: NSObject {
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
     private static let iconColorActive = NSColor(calibratedWhite: 1.0, alpha: 0.95)
 
-    private var pauseButton: HoverIconButton?
+    private var pauseButton: RoundPlayButton?
     private var sourceToggleButton: NSButton?
     private var systemAudioButton: NSButton?
     private var micButton: NSButton?
@@ -1002,16 +1082,6 @@ final class LiveCaptionPanelController: NSObject {
         button.contentTintColor = button.baseTint
     }
 
-    private func roundWhiteButton(_ symbol: String, action: Selector, help: String) -> HoverIconButton {
-        let button = iconButton(symbol, tint: NSColor.black.withAlphaComponent(0.82),
-                                hover: NSColor.black.withAlphaComponent(0.82),
-                                action: action, help: help, pointSize: 13)
-        button.restingBG = .white
-        button.hoverBG = NSColor(calibratedWhite: 0.86, alpha: 1.0)
-        button.roundedFull = true
-        return button
-    }
-
     private func buildCaptions() {
         let content = installGlass(in: panel, cornerRadius: Self.glassCornerRadius)
 
@@ -1044,7 +1114,10 @@ final class LiveCaptionPanelController: NSObject {
         let micButton = iconButton("mic", tint: Self.iconColor, hover: Self.hoverNeutral,
                                    action: #selector(selectMicrophone), help: "Microphone", pointSize: pt)
         self.micButton = micButton
-        let pauseButton = roundWhiteButton("pause.fill", action: #selector(pauseTapped), help: "Pause")
+        let pauseButton = RoundPlayButton()
+        pauseButton.translatesAutoresizingMaskIntoConstraints = false
+        pauseButton.setSymbol("pause.fill", help: "Pause")
+        pauseButton.onClick = { [weak self] in self?.onTogglePause?() }
         self.pauseButton = pauseButton
 
         let vsep1 = HairlineSeparatorView(); vsep1.translatesAutoresizingMaskIntoConstraints = false
@@ -1201,9 +1274,7 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     func setPaused(_ paused: Bool) {
-        pauseButton?.image = Self.symbolImage(paused ? "play.fill" : "pause.fill",
-                                              paused ? "Resume" : "Pause", pointSize: 13)
-        pauseButton?.toolTip = paused ? "Resume" : "Pause"
+        pauseButton?.setSymbol(paused ? "play.fill" : "pause.fill", help: paused ? "Resume" : "Pause")
         recordIndicator?.setPaused(paused)
     }
 
@@ -1225,13 +1296,6 @@ final class LiveCaptionPanelController: NSObject {
                 ]))
             }
             body.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
-        }
-        let pending = dialogue.pendingTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !pending.isEmpty {
-            body.append(NSAttributedString(string: pending, attributes: [
-                .font: NSFont.systemFont(ofSize: 15),
-                .foregroundColor: Self.partialColor
-            ]))
         }
         textView.textStorage?.setAttributedString(body)
         // Force layout of the freshly-appended text before scrolling, otherwise
@@ -1424,8 +1488,7 @@ final class LiveTranslationController: NSObject {
     }
 
     private func summarize() {
-        let text = dialogue.segments.map(\.translation).joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = dialogue.translationText
         guard !text.isEmpty else { panel.update(status: "Nothing to summarize yet."); return }
         guard !apiKey.isEmpty else { onMissingAPIKey?(); return }
         panel.update(status: "Summarizing…")
@@ -1459,17 +1522,14 @@ final class LiveTranslationController: NSObject {
             languageCode: LiveTranslationLanguage.apiCode(for: targetLanguage),
             safetyIdentifier: LiveTranslationController.safetyIdentifier()
         )
-        session.onTranslatedDelta = { [weak self] delta in
+        session.onTranslatedDelta = { [weak self] delta, ms in
             guard let self else { return }
-            self.dialogue.appendTranslation(delta)
+            self.dialogue.appendTranslation(delta, ms: ms)
             self.renderTranscripts()
-            self.reschedulePauseFinalize()
         }
-        session.onSourceDelta = { [weak self] original in
+        session.onSourceDelta = { [weak self] delta, ms in
             guard let self else { return }
-            // A complete original utterance closes the current segment, pairing it
-            // with the translation buffered so far.
-            self.dialogue.completeUtterance(original: original)
+            self.dialogue.appendOriginal(delta, ms: ms)
             self.renderTranscripts()
         }
         session.onServerError = { [weak self] message in
@@ -1504,7 +1564,6 @@ final class LiveTranslationController: NSObject {
         isPaused = true
         accumulateActiveTime()
         teardownCaptureAndSession()
-        dialogue.flushPending()
         renderTranscripts()
         panel.setPaused(true)
         panel.update(status: "Paused — press play to continue")
@@ -1576,22 +1635,10 @@ final class LiveTranslationController: NSObject {
         isCollapsed = false
         accumulateActiveTime()
         teardownCaptureAndSession()
-        dialogue.flushPending()
         panel.setPaused(false)
         renderTranscripts()
         panel.update(status: finalStatus)
         if keepVisible { panel.showCaptions() } else { panel.close() }
-    }
-
-    private func reschedulePauseFinalize() {
-        pauseTimer?.invalidate()
-        pauseTimer = Timer.scheduledTimer(withTimeInterval: 1.3, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.dialogue.flushPending()
-                self.renderTranscripts()
-            }
-        }
     }
 
     private func startCostTimer() {
