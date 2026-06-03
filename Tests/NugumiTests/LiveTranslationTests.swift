@@ -41,60 +41,48 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(RealtimeServerEvent(jsonString: "not json"), .ignored)
     }
 
-    func testTranscriptAccumulatesPartialUntilSentenceEnd() {
-        var t = LiveTranscript()
-        t.append(delta: "This is ")
-        t.append(delta: "a test")
-        XCTAssertEqual(t.lines.count, 1)
-        XCTAssertEqual(t.lines[0].text, "This is a test")
-        XCTAssertFalse(t.lines[0].isFinalized)
+    func testDialogueBuffersTranslationUntilUtteranceCompletes() {
+        var d = LiveDialogue()
+        d.appendTranslation("Hello ")
+        d.appendTranslation("there")
+        XCTAssertTrue(d.segments.isEmpty)
+        XCTAssertEqual(d.pendingTranslation, "Hello there")
     }
 
-    func testTranscriptSplitsCompletedSentences() {
-        var t = LiveTranscript()
-        t.append(delta: "Hello there. How are ")
-        XCTAssertEqual(t.lines.count, 2)
-        XCTAssertEqual(t.lines[0].text, "Hello there.")
-        XCTAssertTrue(t.lines[0].isFinalized)
-        // The open partial is kept raw (trailing space invisible in the UI).
-        XCTAssertEqual(t.lines[1].text.trimmingCharacters(in: .whitespaces), "How are")
-        XCTAssertFalse(t.lines[1].isFinalized)
+    func testDialoguePairsOriginalWithBufferedTranslation() {
+        var d = LiveDialogue()
+        d.appendTranslation("Hello there")
+        d.completeUtterance(original: "안녕하세요")
+        XCTAssertEqual(d.segments.count, 1)
+        XCTAssertEqual(d.segments[0].original, "안녕하세요")
+        XCTAssertEqual(d.segments[0].translation, "Hello there")
+        XCTAssertEqual(d.pendingTranslation, "")
     }
 
-    func testTranscriptJoinsAcrossSplitRegardlessOfTokenSpacing() {
-        // After a sentence split, the partial must keep joining the next delta
-        // whether the next token leads with a space or the partial trails one.
-        var trailing = LiveTranscript()
-        trailing.append(delta: "Done. How are ")   // partial trails a space
-        trailing.append(delta: "you?")             // next token has no leading space
-        XCTAssertEqual(trailing.lines.map(\.text), ["Done.", "How are you?"])
-
-        var leading = LiveTranscript()
-        leading.append(delta: "Done. How are")     // partial has no trailing space
-        leading.append(delta: " you?")             // next token leads with a space
-        XCTAssertEqual(leading.lines.map(\.text), ["Done.", "How are you?"])
+    func testDialogueKeepsConsecutiveUtterancesInSync() {
+        var d = LiveDialogue()
+        d.appendTranslation("How are you?")
+        d.completeUtterance(original: "어떻게 지내세요?")
+        d.appendTranslation("I'm fine.")
+        d.completeUtterance(original: "잘 지내요.")
+        XCTAssertEqual(d.segments.map(\.original), ["어떻게 지내세요?", "잘 지내요."])
+        XCTAssertEqual(d.segments.map(\.translation), ["How are you?", "I'm fine."])
     }
 
-    func testTranscriptDoesNotSplitDecimalsOrAbbreviations() {
-        var t = LiveTranscript()
-        t.append(delta: "It heats to 1.600 degrees via www.x.com")
-        XCTAssertEqual(t.lines.count, 1)
-        XCTAssertFalse(t.lines[0].isFinalized)
+    func testDialogueFlushPendingCreatesTranslationOnlySegment() {
+        var d = LiveDialogue()
+        d.appendTranslation("Trailing translation")
+        d.flushPending()
+        XCTAssertEqual(d.segments.count, 1)
+        XCTAssertEqual(d.segments[0].original, "")
+        XCTAssertEqual(d.segments[0].translation, "Trailing translation")
     }
 
-    func testFinalizeClosesTrailingFragment() {
-        var t = LiveTranscript()
-        t.append(delta: "An unfinished thought")
-        t.finalizeCurrent()
-        XCTAssertEqual(t.lines.count, 1)
-        XCTAssertTrue(t.lines[0].isFinalized)
-        XCTAssertEqual(t.lines[0].text, "An unfinished thought")
-    }
-
-    func testSplitSentencesHelperSeparatesMultiple() {
-        let (sentences, remainder) = LiveTranscript.splitSentences("One. Two! Three? four")
-        XCTAssertEqual(sentences, ["One.", "Two!", "Three?"])
-        XCTAssertEqual(remainder.trimmingCharacters(in: .whitespaces), "four")
+    func testDialogueIgnoresEmptyUtterance() {
+        var d = LiveDialogue()
+        d.completeUtterance(original: "   ")
+        d.flushPending()
+        XCTAssertTrue(d.segments.isEmpty)
     }
 
     func testBatcherFlushesAtThreshold() {

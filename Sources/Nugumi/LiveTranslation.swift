@@ -14,87 +14,45 @@ enum LiveTranslationLanguage {
     }
 }
 
-struct CaptionLine: Equatable {
-    var text: String
-    var isFinalized: Bool
-}
-
-/// Unified translated transcript for a single audio source (no speaker
-/// attribution). Streaming deltas accumulate into one open line; complete
-/// sentences are split off and finalized as they arrive, and `finalizeCurrent()`
-/// (driven by a pause timer or stop) closes any trailing fragment.
-struct LiveTranscript {
-    private(set) var lines: [CaptionLine] = []
-
-    private static let cjkEnders: Set<Character> = ["。", "！", "？"]
-    private static let latinEnders: Set<Character> = [".", "!", "?", "…"]
-    private static let closers: Set<Character> = ["\"", "\u{201D}", ")", "»", "'"]
-
-    mutating func append(delta: String) {
-        var open = ""
-        if let last = lines.last, !last.isFinalized {
-            open = lines.removeLast().text
-        }
-        open += delta
-        let (sentences, remainder) = Self.splitSentences(open)
-        for sentence in sentences where !sentence.isEmpty {
-            lines.append(CaptionLine(text: sentence, isFinalized: true))
-        }
-        // Keep the open remainder raw (untrimmed) so the next streaming delta
-        // joins correctly whether tokens carry leading OR trailing spaces
-        // ("How are " + "you?" and "How are" + " you?" both work). Trimming
-        // happens only when the line is finalized or split off as a sentence.
-        if !remainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append(CaptionLine(text: remainder, isFinalized: false))
-        }
+/// One spoken utterance paired with its translation.
+///
+/// The Realtime translate model streams the translation token-by-token
+/// (`output_transcript.delta`) *during* speech, and emits the original as a
+/// single complete `input_transcript.delta` at the *end* of each utterance. So
+/// we buffer translation tokens and close a segment when the matching original
+/// arrives — keeping original and translation paired and in sync (instead of
+/// drifting when the two streams segment differently).
+struct LiveDialogue: Equatable {
+    struct Segment: Equatable {
+        var original: String
+        var translation: String
     }
 
-    mutating func finalizeCurrent() {
-        guard let last = lines.last, !last.isFinalized else { return }
-        let trimmed = last.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            lines.removeLast()
-        } else {
-            lines[lines.count - 1].text = trimmed
-            lines[lines.count - 1].isFinalized = true
-        }
+    private(set) var segments: [Segment] = []
+    private(set) var pendingTranslation = ""
+
+    /// A streamed translation token for the in-progress utterance.
+    mutating func appendTranslation(_ token: String) {
+        pendingTranslation += token
     }
 
-    /// Splits text into complete sentences plus a trailing incomplete remainder.
-    /// A latin `. ! ? …` ends a sentence only when followed by whitespace, a
-    /// closing quote/paren, or end-of-text (so "3.14" / "www.x.com" don't split);
-    /// CJK enders always end a sentence.
-    static func splitSentences(_ text: String) -> (sentences: [String], remainder: String) {
-        var sentences: [String] = []
-        var current = ""
-        let chars = Array(text)
-        var i = 0
-        while i < chars.count {
-            let c = chars[i]
-            current.append(c)
-            let isEnder: Bool
-            if cjkEnders.contains(c) {
-                isEnder = true
-            } else if latinEnders.contains(c) {
-                let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
-                isEnder = next == nil || next == " " || next == "\n" || next == "\t" || (next.map { closers.contains($0) } ?? false)
-            } else {
-                isEnder = false
-            }
-            if isEnder {
-                var j = i + 1
-                while j < chars.count, chars[j] == " " || chars[j] == "\n" || chars[j] == "\t" || closers.contains(chars[j]) {
-                    current.append(chars[j]); j += 1
-                }
-                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { sentences.append(trimmed) }
-                current = ""
-                i = j
-                continue
-            }
-            i += 1
-        }
-        return (sentences, current)
+    /// A complete original utterance arrived → close the current segment, pairing
+    /// it with the translation buffered so far.
+    mutating func completeUtterance(original: String) {
+        let originalText = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        let translationText = pendingTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingTranslation = ""
+        guard !originalText.isEmpty || !translationText.isEmpty else { return }
+        segments.append(Segment(original: originalText, translation: translationText))
+    }
+
+    /// Pause/stop fallback: if translation arrived but no original closed it,
+    /// flush it as a translation-only segment so nothing is lost.
+    mutating func flushPending() {
+        let translationText = pendingTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingTranslation = ""
+        guard !translationText.isEmpty else { return }
+        segments.append(Segment(original: "", translation: translationText))
     }
 }
 
@@ -1200,26 +1158,31 @@ final class LiveCaptionPanelController: NSObject {
         recordIndicator?.setPaused(paused)
     }
 
-    /// Renders translation lines, optionally with the original (source) line shown
-    /// muted above each, paired by index.
-    func render(source: LiveTranscript, translation: LiveTranscript, showSource: Bool) {
+    /// Renders paired segments — each translation with its original shown muted
+    /// above (when enabled) — plus the in-progress translation as a dim partial.
+    func render(_ dialogue: LiveDialogue, showSource: Bool) {
         let body = NSMutableAttributedString()
-        let count = max(showSource ? source.lines.count : 0, translation.lines.count)
-        for i in 0..<count {
-            if showSource, i < source.lines.count {
-                body.append(NSAttributedString(string: source.lines[i].text + "\n", attributes: [
+        for segment in dialogue.segments {
+            if showSource, !segment.original.isEmpty {
+                body.append(NSAttributedString(string: segment.original + "\n", attributes: [
                     .font: NSFont.systemFont(ofSize: 12),
                     .foregroundColor: Self.sourceColor
                 ]))
             }
-            if i < translation.lines.count {
-                let line = translation.lines[i]
-                body.append(NSAttributedString(string: line.text + "\n", attributes: [
+            if !segment.translation.isEmpty {
+                body.append(NSAttributedString(string: segment.translation + "\n", attributes: [
                     .font: NSFont.systemFont(ofSize: 15),
-                    .foregroundColor: line.isFinalized ? Self.bodyColor : Self.partialColor
+                    .foregroundColor: Self.bodyColor
                 ]))
             }
             body.append(NSAttributedString(string: "\n", attributes: [.font: NSFont.systemFont(ofSize: 6)]))
+        }
+        let pending = dialogue.pendingTranslation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !pending.isEmpty {
+            body.append(NSAttributedString(string: pending, attributes: [
+                .font: NSFont.systemFont(ofSize: 15),
+                .foregroundColor: Self.partialColor
+            ]))
         }
         textView.textStorage?.setAttributedString(body)
         // Force layout of the freshly-appended text before scrolling, otherwise
@@ -1329,8 +1292,7 @@ final class LiveTranslationController: NSObject {
     private(set) var isPaused = false
     private(set) var isCollapsed = false
     private let panel = LiveCaptionPanelController()
-    private var transcript = LiveTranscript()
-    private var sourceTranscript = LiveTranscript()
+    private var dialogue = LiveDialogue()
     private var showSource: Bool {
         get { UserDefaults.standard.object(forKey: "liveTranslationShowSource") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "liveTranslationShowSource") }
@@ -1367,8 +1329,7 @@ final class LiveTranslationController: NSObject {
         guard !isRunning, !isPaused else { return }
         self.apiKey = apiKey
         self.targetLanguage = targetLanguage
-        transcript = LiveTranscript()
-        sourceTranscript = LiveTranscript()
+        dialogue = LiveDialogue()
         accumulatedSeconds = 0
         isCollapsed = false
 
@@ -1388,7 +1349,7 @@ final class LiveTranslationController: NSObject {
     }
 
     private func renderTranscripts() {
-        panel.render(source: sourceTranscript, translation: transcript, showSource: showSource)
+        panel.render(dialogue, showSource: showSource)
     }
 
     private func toggleSource() {
@@ -1404,7 +1365,7 @@ final class LiveTranslationController: NSObject {
     }
 
     private func summarize() {
-        let text = transcript.lines.map(\.text).joined(separator: "\n")
+        let text = dialogue.segments.map(\.translation).joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { panel.update(status: "Nothing to summarize yet."); return }
         guard !apiKey.isEmpty else { onMissingAPIKey?(); return }
@@ -1441,15 +1402,16 @@ final class LiveTranslationController: NSObject {
         )
         session.onTranslatedDelta = { [weak self] delta in
             guard let self else { return }
-            self.transcript.append(delta: delta)
+            self.dialogue.appendTranslation(delta)
             self.renderTranscripts()
             self.reschedulePauseFinalize()
         }
-        session.onSourceDelta = { [weak self] delta in
+        session.onSourceDelta = { [weak self] original in
             guard let self else { return }
-            self.sourceTranscript.append(delta: delta)
+            // A complete original utterance closes the current segment, pairing it
+            // with the translation buffered so far.
+            self.dialogue.completeUtterance(original: original)
             self.renderTranscripts()
-            self.reschedulePauseFinalize()
         }
         session.onServerError = { [weak self] message in
             // Non-fatal: surface briefly, keep translating.
@@ -1483,8 +1445,7 @@ final class LiveTranslationController: NSObject {
         isPaused = true
         accumulateActiveTime()
         teardownCaptureAndSession()
-        transcript.finalizeCurrent()
-        sourceTranscript.finalizeCurrent()
+        dialogue.flushPending()
         renderTranscripts()
         panel.setPaused(true)
         panel.update(status: "Paused — press play to continue")
@@ -1556,8 +1517,7 @@ final class LiveTranslationController: NSObject {
         isCollapsed = false
         accumulateActiveTime()
         teardownCaptureAndSession()
-        transcript.finalizeCurrent()
-        sourceTranscript.finalizeCurrent()
+        dialogue.flushPending()
         panel.setPaused(false)
         renderTranscripts()
         panel.update(status: finalStatus)
@@ -1569,8 +1529,7 @@ final class LiveTranslationController: NSObject {
         pauseTimer = Timer.scheduledTimer(withTimeInterval: 1.3, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.transcript.finalizeCurrent()
-                self.sourceTranscript.finalizeCurrent()
+                self.dialogue.flushPending()
                 self.renderTranscripts()
             }
         }
