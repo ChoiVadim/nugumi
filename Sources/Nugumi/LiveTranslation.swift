@@ -157,6 +157,27 @@ final class AudioBatcher {
     }
 }
 
+/// Logs each distinct server event type once to ~/Library/Logs/Nugumi/codex.log,
+/// so we can verify which transcript events the server actually emits (e.g.
+/// whether `session.input_transcript.delta` ever arrives).
+enum LiveTranslationDebug {
+    private static let lock = NSLock()
+    private static var seen = Set<String>()
+
+    static func noteRawEvent(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+        lock.lock(); let isNew = seen.insert(type).inserted; lock.unlock()
+        guard isNew else { return }
+        var sample = ""
+        if type.contains("transcript"), let delta = obj["delta"] as? String {
+            sample = " sample=\"\(delta.prefix(40))\""
+        }
+        CodexDebugLog.append("[LiveTranslation] event type: \(type)\(sample)")
+    }
+}
+
 /// Typed view over the Realtime translation socket's server events. Unknown or
 /// malformed payloads decode to `.ignored` so a protocol drift can never crash
 /// the receive loop.
@@ -339,6 +360,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
                 }
             case .success(let message):
                 if case let .string(text) = message {
+                    LiveTranslationDebug.noteRawEvent(text)
                     let event = RealtimeServerEvent(jsonString: text)
                     DispatchQueue.main.async { [weak self] in self?.handle(event: event) }
                 }
