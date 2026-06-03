@@ -542,7 +542,16 @@ final class LiveCaptionPanelController: NSObject {
     )
     private let textView = NSTextView()
     private let scrollView = NSScrollView()
-    private let indicatorLabel = NSTextField(labelWithString: "● REC")
+    private let indicatorTimeLabel = NSTextField(labelWithString: "0:00")
+
+    // Glass palette — mirrors TranslationPanelPalette (which is private to App.swift)
+    // so the captions window matches the translate window's white-on-glass look.
+    private static let glassCornerRadius: CGFloat = 22
+    private static let titleColor = NSColor(calibratedWhite: 1.0, alpha: 0.84)
+    private static let costColor = NSColor(calibratedWhite: 1.0, alpha: 0.45)
+    private static let bodyColor = NSColor(calibratedWhite: 0.94, alpha: 0.96)
+    private static let partialColor = NSColor(calibratedWhite: 1.0, alpha: 0.5)
+    private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
 
     var onStop: (() -> Void)?
     var onToggleCollapse: (() -> Void)?
@@ -550,12 +559,12 @@ final class LiveCaptionPanelController: NSObject {
 
     override init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 260),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 300),
             styleMask: [.borderless, .nonactivatingPanel, .resizable],
             backing: .buffered, defer: false
         )
         indicatorPanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 170, height: 36),
+            contentRect: NSRect(x: 0, y: 0, width: 116, height: 34),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -571,123 +580,153 @@ final class LiveCaptionPanelController: NSObject {
         p.isFloatingPanel = true
         p.hidesOnDeactivate = false
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        p.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.97)
+        p.isOpaque = false
+        p.backgroundColor = .clear
         p.hasShadow = true
         p.isMovableByWindowBackground = true
     }
 
-    private func buildCaptions() {
-        let root = NSView()
+    /// Installs the shared glass card (blur + hairline border) into a panel and
+    /// returns the content view to lay out into.
+    private func installGlass(in panel: NSPanel, cornerRadius: CGFloat) -> NSView {
+        let root = NSView(frame: NSRect(origin: .zero, size: panel.frame.size))
         root.autoresizingMask = [.width, .height]
 
-        statusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        statusLabel.textColor = .secondaryLabelColor
+        let glass = GlassHostView(frame: root.bounds, cornerRadius: cornerRadius, tintColor: nil, style: .regular)
+        glass.autoresizingMask = [.width, .height]
+        root.addSubview(glass)
+
+        let chrome = GlassChromeOverlayView(frame: root.bounds)
+        chrome.cornerRadius = cornerRadius
+        chrome.autoresizingMask = [.width, .height]
+        root.addSubview(chrome)
+
+        panel.contentView = root
+        return glass.contentView
+    }
+
+    private func iconButton(_ symbol: String, tint: NSColor, action: Selector, help: String) -> NSButton {
+        let button = NSButton(title: "", target: self, action: action)
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.contentTintColor = tint
+        button.toolTip = help
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }
+
+    private func buildCaptions() {
+        let content = installGlass(in: panel, cornerRadius: Self.glassCornerRadius)
+
+        statusLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        statusLabel.textColor = Self.titleColor
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        costLabel.font = .systemFont(ofSize: 11)
-        costLabel.textColor = .tertiaryLabelColor
+        costLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        costLabel.textColor = Self.costColor
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let collapseButton = NSButton(title: "", target: self, action: #selector(collapseTapped))
-        collapseButton.image = NSImage(systemSymbolName: "minus.circle.fill", accessibilityDescription: "Minimize")
-        collapseButton.isBordered = false
-        collapseButton.translatesAutoresizingMaskIntoConstraints = false
-
-        let closeButton = NSButton(title: "", target: self, action: #selector(stopTapped))
-        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop and close")
-        closeButton.isBordered = false
-        closeButton.contentTintColor = .systemRed
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        let collapseButton = iconButton("minus.circle.fill", tint: Self.iconColor,
+                                        action: #selector(collapseTapped), help: "Minimize")
+        let closeButton = iconButton("xmark.circle.fill", tint: .systemRed,
+                                     action: #selector(stopTapped), help: "Stop and close")
 
         sourceControl.target = self
         sourceControl.action = #selector(sourceChanged)
         sourceControl.segmentDistribution = .fillEqually
+        sourceControl.controlSize = .small
         sourceControl.translatesAutoresizingMaskIntoConstraints = false
+
+        let separator = HairlineSeparatorView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
 
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
         textView.font = .systemFont(ofSize: 15)
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainerInset = NSSize(width: 6, height: 8)
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        [statusLabel, costLabel, collapseButton, closeButton, sourceControl, scrollView].forEach { root.addSubview($0) }
-        panel.contentView = root
+        [statusLabel, costLabel, collapseButton, closeButton, sourceControl, separator, scrollView]
+            .forEach { content.addSubview($0) }
 
         NSLayoutConstraint.activate([
-            closeButton.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
-            closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            closeButton.widthAnchor.constraint(equalToConstant: 18),
-            closeButton.heightAnchor.constraint(equalToConstant: 18),
+            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            closeButton.widthAnchor.constraint(equalToConstant: 15),
+            closeButton.heightAnchor.constraint(equalToConstant: 15),
 
             collapseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
-            collapseButton.widthAnchor.constraint(equalToConstant: 18),
-            collapseButton.heightAnchor.constraint(equalToConstant: 18),
+            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            collapseButton.widthAnchor.constraint(equalToConstant: 15),
+            collapseButton.heightAnchor.constraint(equalToConstant: 15),
 
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8),
-            costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 6),
+            costLabel.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -10),
+            costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
-            sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
-            sourceControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            sourceControl.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 10),
+            sourceControl.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            sourceControl.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
 
-            scrollView.topAnchor.constraint(equalTo: sourceControl.bottomAnchor, constant: 8),
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+            separator.topAnchor.constraint(equalTo: sourceControl.bottomAnchor, constant: 10),
+            separator.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            separator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+
+            scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 6),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
+            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
         ])
     }
 
     private func buildIndicator() {
-        let root = NSView()
-        root.autoresizingMask = [.width, .height]
+        let content = installGlass(in: indicatorPanel, cornerRadius: 17)
 
-        indicatorLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        indicatorLabel.textColor = .systemRed
-        indicatorLabel.translatesAutoresizingMaskIntoConstraints = false
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.cornerRadius = 4
+        dot.translatesAutoresizingMaskIntoConstraints = false
 
-        let expandButton = NSButton(title: "", target: self, action: #selector(collapseTapped))
-        expandButton.image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right", accessibilityDescription: "Expand")
-        expandButton.isBordered = false
-        expandButton.translatesAutoresizingMaskIntoConstraints = false
+        indicatorTimeLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        indicatorTimeLabel.textColor = Self.titleColor
+        indicatorTimeLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let closeButton = NSButton(title: "", target: self, action: #selector(stopTapped))
-        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop")
-        closeButton.isBordered = false
-        closeButton.contentTintColor = .systemRed
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        // The whole pill is a single click target → expand back to the captions.
+        let hit = NSButton(title: "", target: self, action: #selector(collapseTapped))
+        hit.isBordered = false
+        hit.isTransparent = true
+        hit.toolTip = "Expand captions"
+        hit.translatesAutoresizingMaskIntoConstraints = false
 
-        let expandHit = NSButton(title: "", target: self, action: #selector(collapseTapped))
-        expandHit.isBordered = false
-        expandHit.isTransparent = true
-        expandHit.translatesAutoresizingMaskIntoConstraints = false
-
-        [indicatorLabel, expandButton, closeButton, expandHit].forEach { root.addSubview($0) }
-        indicatorPanel.contentView = root
+        [dot, indicatorTimeLabel, hit].forEach { content.addSubview($0) }
 
         NSLayoutConstraint.activate([
-            indicatorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            indicatorLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+            dot.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            dot.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
 
-            expandHit.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            expandHit.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor),
-            expandHit.topAnchor.constraint(equalTo: root.topAnchor),
-            expandHit.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            indicatorTimeLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
+            indicatorTimeLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            indicatorTimeLabel.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -14),
 
-            expandButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
-            expandButton.centerYAnchor.constraint(equalTo: root.centerYAnchor),
-            closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -10),
-            closeButton.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+            hit.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            hit.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            hit.topAnchor.constraint(equalTo: content.topAnchor),
+            hit.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
     }
 
@@ -727,7 +766,9 @@ final class LiveCaptionPanelController: NSObject {
 
     func update(cost: String) {
         costLabel.stringValue = cost
-        indicatorLabel.stringValue = "● REC  \(cost)"
+        // The collapsed pill shows just the elapsed time (drop the cost tail).
+        indicatorTimeLabel.stringValue = cost.components(separatedBy: " · ").first?
+            .trimmingCharacters(in: .whitespaces) ?? cost
     }
 
     func render(_ transcript: LiveTranscript) {
@@ -737,7 +778,7 @@ final class LiveCaptionPanelController: NSObject {
             let suffix = idx < count - 1 ? "\n\n" : ""
             body.append(NSAttributedString(string: line.text + suffix, attributes: [
                 .font: NSFont.systemFont(ofSize: 15),
-                .foregroundColor: line.isFinalized ? NSColor.labelColor : NSColor.secondaryLabelColor
+                .foregroundColor: line.isFinalized ? Self.bodyColor : Self.partialColor
             ]))
         }
         textView.textStorage?.setAttributedString(body)
