@@ -14,41 +14,108 @@ enum LiveTranslationLanguage {
     }
 }
 
-enum CaptionSpeaker: Equatable {
-    case them   // system audio
-    case me     // microphone
-
-    var label: String {
-        switch self {
-        case .them: return "Them"
-        case .me: return "Me"
-        }
-    }
-}
-
 struct CaptionLine: Equatable {
-    let speaker: CaptionSpeaker
     var text: String
     var isFinalized: Bool
 }
 
-/// Ordered caption lines. Output deltas append to the current open line; a
-/// speaker change or an explicit finalize closes it and opens a new one.
+/// Unified translated transcript for a single audio source (no speaker
+/// attribution). Streaming deltas accumulate into one open line; complete
+/// sentences are split off and finalized as they arrive, and `finalizeCurrent()`
+/// (driven by a pause timer or stop) closes any trailing fragment.
 struct LiveTranscript {
     private(set) var lines: [CaptionLine] = []
 
-    mutating func appendDelta(speaker: CaptionSpeaker, text: String) {
-        if let last = lines.last, !last.isFinalized, last.speaker == speaker {
-            lines[lines.count - 1].text += text
-        } else {
-            finalizeCurrent() // close the open line (no-op if empty/already finalized)
-            lines.append(CaptionLine(speaker: speaker, text: text, isFinalized: false))
+    private static let cjkEnders: Set<Character> = ["。", "！", "？"]
+    private static let latinEnders: Set<Character> = [".", "!", "?", "…"]
+    private static let closers: Set<Character> = ["\"", "\u{201D}", ")", "»", "'"]
+
+    mutating func append(delta: String) {
+        var open = ""
+        if let last = lines.last, !last.isFinalized {
+            open = lines.removeLast().text
+        }
+        open += delta
+        let (sentences, remainder) = Self.splitSentences(open)
+        for sentence in sentences where !sentence.isEmpty {
+            lines.append(CaptionLine(text: sentence, isFinalized: true))
+        }
+        // When sentences were split, trim the remainder so it starts clean.
+        // When there were no splits (pure accumulation), keep trailing spaces so
+        // the next streaming delta joins correctly ("This is " + "a test" → "This is a test").
+        let storedRemainder = sentences.isEmpty ? remainder : remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !storedRemainder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append(CaptionLine(text: storedRemainder, isFinalized: false))
         }
     }
 
     mutating func finalizeCurrent() {
         guard let last = lines.last, !last.isFinalized else { return }
-        lines[lines.count - 1].isFinalized = true
+        let trimmed = last.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            lines.removeLast()
+        } else {
+            lines[lines.count - 1].text = trimmed
+            lines[lines.count - 1].isFinalized = true
+        }
+    }
+
+    /// Splits text into complete sentences plus a trailing incomplete remainder.
+    /// A latin `. ! ? …` ends a sentence only when followed by whitespace, a
+    /// closing quote/paren, or end-of-text (so "3.14" / "www.x.com" don't split);
+    /// CJK enders always end a sentence.
+    static func splitSentences(_ text: String) -> (sentences: [String], remainder: String) {
+        var sentences: [String] = []
+        var current = ""
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            current.append(c)
+            let isEnder: Bool
+            if cjkEnders.contains(c) {
+                isEnder = true
+            } else if latinEnders.contains(c) {
+                let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+                isEnder = next == nil || next == " " || next == "\n" || next == "\t" || (next.map { closers.contains($0) } ?? false)
+            } else {
+                isEnder = false
+            }
+            if isEnder {
+                var j = i + 1
+                while j < chars.count, chars[j] == " " || chars[j] == "\n" || chars[j] == "\t" || closers.contains(chars[j]) {
+                    current.append(chars[j]); j += 1
+                }
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { sentences.append(trimmed) }
+                current = ""
+                i = j
+                continue
+            }
+            i += 1
+        }
+        return (sentences, current)
+    }
+}
+
+/// Which audio Live Translation listens to. One at a time — never both, to
+/// avoid the same speech being transcribed twice.
+enum LiveAudioSource: String, CaseIterable {
+    case systemAudio
+    case microphone
+
+    var title: String {
+        switch self {
+        case .systemAudio: return "System audio"
+        case .microphone: return "Microphone"
+        }
+    }
+
+    static let defaultsKey = "liveTranslationSource"
+
+    static var current: LiveAudioSource {
+        get { LiveAudioSource(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .systemAudio }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
     }
 }
 
@@ -465,33 +532,57 @@ private extension CMSampleBuffer {
 @MainActor
 final class LiveCaptionPanelController: NSObject {
     private let panel: NSPanel
+    private let indicatorPanel: NSPanel
+
     private let statusLabel = NSTextField(labelWithString: "")
     private let costLabel = NSTextField(labelWithString: "")
+    private let sourceControl = NSSegmentedControl(
+        labels: LiveAudioSource.allCases.map { $0.title },
+        trackingMode: .selectOne, target: nil, action: nil
+    )
     private let textView = NSTextView()
     private let scrollView = NSScrollView()
+    private let indicatorLabel = NSTextField(labelWithString: "● REC")
+
     var onStop: (() -> Void)?
+    var onToggleCollapse: (() -> Void)?
+    var onSourceChange: ((LiveAudioSource) -> Void)?
 
     override init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 260),
             styleMask: [.borderless, .nonactivatingPanel, .resizable],
             backing: .buffered, defer: false
         )
+        indicatorPanel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 170, height: 36),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false
+        )
         super.init()
+        configureFloating(panel)
+        configureFloating(indicatorPanel)
+        buildCaptions()
+        buildIndicator()
+    }
 
-        panel.level = .floating
-        panel.isFloatingPanel = true
-        panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96)
-        panel.hasShadow = true
-        panel.isMovableByWindowBackground = true
+    private func configureFloating(_ p: NSPanel) {
+        p.level = .floating
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.97)
+        p.hasShadow = true
+        p.isMovableByWindowBackground = true
+    }
 
-        let root = NSView(frame: panel.contentLayoutRect)
+    private func buildCaptions() {
+        let root = NSView()
         root.autoresizingMask = [.width, .height]
 
         statusLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
         costLabel.font = .systemFont(ofSize: 11)
@@ -499,193 +590,312 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let stopButton = NSButton(title: "Stop", target: self, action: #selector(stopTapped))
-        stopButton.bezelStyle = .rounded
-        stopButton.translatesAutoresizingMaskIntoConstraints = false
+        let collapseButton = NSButton(title: "", target: self, action: #selector(collapseTapped))
+        collapseButton.image = NSImage(systemSymbolName: "minus.circle.fill", accessibilityDescription: "Minimize")
+        collapseButton.isBordered = false
+        collapseButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let closeButton = NSButton(title: "", target: self, action: #selector(stopTapped))
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop and close")
+        closeButton.isBordered = false
+        closeButton.contentTintColor = .systemRed
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+
+        sourceControl.target = self
+        sourceControl.action = #selector(sourceChanged)
+        sourceControl.segmentDistribution = .fillEqually
+        sourceControl.translatesAutoresizingMaskIntoConstraints = false
 
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.font = .systemFont(ofSize: 14)
+        textView.font = .systemFont(ofSize: 15)
         textView.textContainerInset = NSSize(width: 8, height: 8)
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addSubview(statusLabel)
-        root.addSubview(costLabel)
-        root.addSubview(stopButton)
-        root.addSubview(scrollView)
+        [statusLabel, costLabel, collapseButton, closeButton, sourceControl, scrollView].forEach { root.addSubview($0) }
         panel.contentView = root
 
         NSLayoutConstraint.activate([
-            statusLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            closeButton.topAnchor.constraint(equalTo: root.topAnchor, constant: 8),
+            closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+            closeButton.widthAnchor.constraint(equalToConstant: 18),
+            closeButton.heightAnchor.constraint(equalToConstant: 18),
+
+            collapseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
+            collapseButton.widthAnchor.constraint(equalToConstant: 18),
+            collapseButton.heightAnchor.constraint(equalToConstant: 18),
+
+            statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            costLabel.centerYAnchor.constraint(equalTo: statusLabel.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            scrollView.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 8),
+
+            costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            costLabel.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8),
+            costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 6),
+
+            sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
+            sourceControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            sourceControl.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+
+            scrollView.topAnchor.constraint(equalTo: sourceControl.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 8),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            scrollView.bottomAnchor.constraint(equalTo: stopButton.topAnchor, constant: -8),
-            stopButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
-            stopButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
         ])
     }
 
-    func show() {
-        if let screen = NSScreen.main {
+    private func buildIndicator() {
+        let root = NSView()
+        root.autoresizingMask = [.width, .height]
+
+        indicatorLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        indicatorLabel.textColor = .systemRed
+        indicatorLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let expandButton = NSButton(title: "", target: self, action: #selector(collapseTapped))
+        expandButton.image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right", accessibilityDescription: "Expand")
+        expandButton.isBordered = false
+        expandButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let closeButton = NSButton(title: "", target: self, action: #selector(stopTapped))
+        closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Stop")
+        closeButton.isBordered = false
+        closeButton.contentTintColor = .systemRed
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let expandHit = NSButton(title: "", target: self, action: #selector(collapseTapped))
+        expandHit.isBordered = false
+        expandHit.isTransparent = true
+        expandHit.translatesAutoresizingMaskIntoConstraints = false
+
+        [indicatorLabel, expandButton, closeButton, expandHit].forEach { root.addSubview($0) }
+        indicatorPanel.contentView = root
+
+        NSLayoutConstraint.activate([
+            indicatorLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
+            indicatorLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+
+            expandHit.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            expandHit.trailingAnchor.constraint(equalTo: expandButton.leadingAnchor),
+            expandHit.topAnchor.constraint(equalTo: root.topAnchor),
+            expandHit.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            expandButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
+            expandButton.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -10),
+            closeButton.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+        ])
+    }
+
+    func setSource(_ source: LiveAudioSource) {
+        sourceControl.selectedSegment = (source == .systemAudio) ? 0 : 1
+    }
+
+    func showCaptions() {
+        indicatorPanel.orderOut(nil)
+        if panel.frame.origin == .zero, let screen = NSScreen.main {
             let visible = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: visible.maxX - 440, y: visible.minY + 40))
+            panel.setFrameOrigin(NSPoint(x: visible.maxX - 460, y: visible.minY + 60))
         }
         panel.orderFrontRegardless()
     }
 
-    func close() { panel.orderOut(nil) }
+    func showIndicator() {
+        let anchor = panel.frame
+        panel.orderOut(nil)
+        let origin: NSPoint
+        if anchor.origin == .zero {
+            let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+            origin = NSPoint(x: visible.maxX - indicatorPanel.frame.width - 20, y: visible.minY + 60)
+        } else {
+            origin = NSPoint(x: anchor.maxX - indicatorPanel.frame.width, y: anchor.minY)
+        }
+        indicatorPanel.setFrameOrigin(origin)
+        indicatorPanel.orderFrontRegardless()
+    }
+
+    func close() {
+        panel.orderOut(nil)
+        indicatorPanel.orderOut(nil)
+    }
 
     func update(status: String) { statusLabel.stringValue = status }
-    func update(cost: String) { costLabel.stringValue = cost }
+
+    func update(cost: String) {
+        costLabel.stringValue = cost
+        indicatorLabel.stringValue = "● REC  \(cost)"
+    }
 
     func render(_ transcript: LiveTranscript) {
         let body = NSMutableAttributedString()
-        for line in transcript.lines {
-            let speaker = NSAttributedString(string: "\(line.speaker.label): ", attributes: [
-                .font: NSFont.systemFont(ofSize: 14, weight: .bold),
-                .foregroundColor: line.speaker == .me ? NSColor.systemBlue : NSColor.systemGreen
-            ])
-            let text = NSAttributedString(string: line.text + "\n", attributes: [
-                .font: NSFont.systemFont(ofSize: 14),
+        let count = transcript.lines.count
+        for (idx, line) in transcript.lines.enumerated() {
+            let suffix = idx < count - 1 ? "\n\n" : ""
+            body.append(NSAttributedString(string: line.text + suffix, attributes: [
+                .font: NSFont.systemFont(ofSize: 15),
                 .foregroundColor: line.isFinalized ? NSColor.labelColor : NSColor.secondaryLabelColor
-            ])
-            body.append(speaker); body.append(text)
+            ]))
         }
         textView.textStorage?.setAttributedString(body)
         textView.scrollToEndOfDocument(nil)
     }
 
     @objc private func stopTapped() { onStop?() }
+    @objc private func collapseTapped() { onToggleCollapse?() }
+    @objc private func sourceChanged() {
+        onSourceChange?(sourceControl.selectedSegment == 0 ? .systemAudio : .microphone)
+    }
 }
 
-/// Owns the live-translation lifecycle for Phase 1 (system audio only).
+/// Owns the live-translation lifecycle: single switchable audio source,
+/// sentence-segmented transcript, collapsible panel.
 @MainActor
 final class LiveTranslationController: NSObject {
     static let perMinuteCostUSD = 0.034
 
     private(set) var isRunning = false
+    private(set) var isCollapsed = false
     private let panel = LiveCaptionPanelController()
     private var transcript = LiveTranscript()
     private var systemCapture: SystemAudioCapture?
-    private var systemSession: RealtimeTranslationSession?
     private var micCapture: MicrophoneCapture?
-    private var micSession: RealtimeTranslationSession?
+    private var session: RealtimeTranslationSession?
     private var elapsedTimer: Timer?
+    private var pauseTimer: Timer?
     private var startDate: Date?
-    /// Number of concurrently billed sessions (1 in Phase 1, 2 in Phase 2).
-    private var activeSessionCount = 1
     private var startGeneration = 0
+    private var activeSource: LiveAudioSource = .systemAudio
+    private var targetLanguage: TranslationLanguage = .defaultLanguage
 
     var onMissingAPIKey: (() -> Void)?
 
     func toggle(apiKey: String?, targetLanguage: TranslationLanguage) {
-        if isRunning { stop() } else { start(apiKey: apiKey, targetLanguage: targetLanguage) }
+        if isRunning {
+            toggleCollapsed()
+        } else {
+            start(apiKey: apiKey, targetLanguage: targetLanguage)
+        }
     }
 
     func start(apiKey: String?, targetLanguage: TranslationLanguage) {
         guard let apiKey, !apiKey.isEmpty else { onMissingAPIKey?(); return }
         guard !isRunning else { return }
         isRunning = true
+        isCollapsed = false
         startGeneration += 1
-        let generation = startGeneration
         transcript = LiveTranscript()
         startDate = Date()
+        self.targetLanguage = targetLanguage
+        let source = LiveAudioSource.current
+        activeSource = source
 
         panel.onStop = { [weak self] in self?.stop() }
-        panel.show()
+        panel.onToggleCollapse = { [weak self] in self?.toggleCollapsed() }
+        panel.onSourceChange = { [weak self] newSource in self?.changeSource(to: newSource) }
+        panel.setSource(source)
         panel.render(transcript)
         panel.update(status: "Connecting… → \(targetLanguage.displayName)")
+        panel.update(cost: "00:00 · ~$0.00")
+        panel.showCaptions()
 
-        let languageCode = LiveTranslationLanguage.apiCode(for: targetLanguage)
         let session = RealtimeTranslationSession(
             apiKey: apiKey,
-            languageCode: languageCode,
+            languageCode: LiveTranslationLanguage.apiCode(for: targetLanguage),
             safetyIdentifier: LiveTranslationController.safetyIdentifier()
         )
         session.onTranslatedDelta = { [weak self] delta in
             guard let self else { return }
-            self.transcript.appendDelta(speaker: .them, text: delta)
+            self.transcript.append(delta: delta)
             self.panel.render(self.transcript)
+            self.reschedulePauseFinalize()
         }
         session.onStatusChange = { [weak self] status in
             guard let self else { return }
             if case .failed(let message) = status {
-                self.stop(finalStatus: "Error: \(message) — stopped.")
+                self.stop(finalStatus: "Error: \(message) — stopped.", keepVisible: true)
             } else {
-                self.panel.update(status: Self.statusText(status, language: targetLanguage))
+                self.panel.update(status: Self.statusText(status, language: self.targetLanguage))
             }
         }
         session.connect()
-        systemSession = session
+        self.session = session
 
-        let capture = SystemAudioCapture()
-        capture.onPCM = { [weak session] data in session?.append(pcm: data) }
-        capture.onError = { [weak self] message in self?.panel.update(status: message) }
-        systemCapture = capture
-        Task { await capture.start() }
-
+        startCapture(source, into: session, generation: startGeneration)
         startCostTimer()
+    }
 
-        // Microphone direction (best-effort; system audio works without it).
-        let safetyID = LiveTranslationController.safetyIdentifier()
-        Task { [weak self] in
-            guard await MicrophoneCapture.requestAuthorization() else {
-                self?.panel.update(status: "Microphone permission denied — captions show their audio only.")
-                return
-            }
-            // Bail if a stop()/restart happened while the auth dialog was up:
-            // this Task belongs to a previous run if the generation no longer matches.
-            // NOTE: there must be NO `await` between this guard and the assignments
-            // below — the main-actor body must stay synchronous so stop() cannot interleave.
-            guard let self, self.isRunning, self.startGeneration == generation else { return }
-            let micSession = RealtimeTranslationSession(
-                apiKey: apiKey, languageCode: languageCode, safetyIdentifier: safetyID
-            )
-            micSession.onTranslatedDelta = { [weak self] delta in
-                guard let self else { return }
-                self.transcript.appendDelta(speaker: .me, text: delta)
-                self.panel.render(self.transcript)
-            }
-            micSession.onStatusChange = { [weak self] status in
-                guard let self else { return }
-                if case .failed(let message) = status {
-                    self.stop(finalStatus: "Error: \(message) — stopped.")
+    private func startCapture(_ source: LiveAudioSource, into session: RealtimeTranslationSession, generation: Int) {
+        switch source {
+        case .systemAudio:
+            let capture = SystemAudioCapture()
+            capture.onPCM = { [weak session] data in session?.append(pcm: data) }
+            capture.onError = { [weak self] message in self?.panel.update(status: message) }
+            systemCapture = capture
+            Task { await capture.start() }
+        case .microphone:
+            Task { [weak self] in
+                guard await MicrophoneCapture.requestAuthorization() else {
+                    self?.panel.update(status: "Microphone access denied — enable it in System Settings ▸ Privacy ▸ Microphone.")
+                    return
                 }
+                guard let self, self.isRunning, self.startGeneration == generation else { return }
+                let mic = MicrophoneCapture()
+                mic.onPCM = { [weak session] data in session?.append(pcm: data) }
+                mic.onError = { [weak self] message in self?.panel.update(status: message) }
+                mic.start()
+                self.micCapture = mic
             }
-            micSession.connect()
-            self.micSession = micSession
-
-            let mic = MicrophoneCapture()
-            mic.onPCM = { [weak micSession] data in micSession?.append(pcm: data) }
-            mic.onError = { [weak self] message in self?.panel.update(status: message) }
-            mic.start()
-            self.micCapture = mic
-            self.activeSessionCount = 2
         }
     }
 
-    func stop(finalStatus: String = "Stopped") {
+    private func changeSource(to newSource: LiveAudioSource) {
+        LiveAudioSource.current = newSource
+        guard newSource != activeSource else { return }
+        activeSource = newSource
+        panel.setSource(newSource)
+        guard isRunning, let session else { return }
+        startGeneration += 1
+        systemCapture?.stop(); systemCapture = nil
+        micCapture?.stop(); micCapture = nil
+        panel.update(status: "Switching to \(newSource.title)…")
+        startCapture(newSource, into: session, generation: startGeneration)
+    }
+
+    func toggleCollapsed() {
+        guard isRunning else { return }
+        isCollapsed.toggle()
+        if isCollapsed { panel.showIndicator() } else { panel.showCaptions() }
+    }
+
+    func stop(finalStatus: String = "Stopped", keepVisible: Bool = false) {
         guard isRunning else { return }
         isRunning = false
+        isCollapsed = false
+        pauseTimer?.invalidate(); pauseTimer = nil
         elapsedTimer?.invalidate(); elapsedTimer = nil
-        systemSession?.onStatusChange = nil
-        micSession?.onStatusChange = nil
-        micCapture?.stop(); micCapture = nil
-        micSession?.close(); micSession = nil
+        session?.onStatusChange = nil
         systemCapture?.stop(); systemCapture = nil
-        systemSession?.close(); systemSession = nil
-        activeSessionCount = 1
+        micCapture?.stop(); micCapture = nil
+        session?.close(); session = nil
         transcript.finalizeCurrent()
         panel.render(transcript)
         panel.update(status: finalStatus)
+        if keepVisible { panel.showCaptions() } else { panel.close() }
+    }
+
+    private func reschedulePauseFinalize() {
+        pauseTimer?.invalidate()
+        pauseTimer = Timer.scheduledTimer(withTimeInterval: 1.3, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.transcript.finalizeCurrent()
+                self.panel.render(self.transcript)
+            }
+        }
     }
 
     private func startCostTimer() {
@@ -697,9 +907,9 @@ final class LiveTranslationController: NSObject {
 
     private func updateCost() {
         guard let startDate else { return }
-        let minutes = Date().timeIntervalSince(startDate) / 60.0
-        let cost = minutes * Self.perMinuteCostUSD * Double(activeSessionCount)
-        let elapsed = Int(Date().timeIntervalSince(startDate))
+        let seconds = Date().timeIntervalSince(startDate)
+        let cost = (seconds / 60.0) * Self.perMinuteCostUSD
+        let elapsed = Int(seconds)
         panel.update(cost: String(format: "%02d:%02d · ~$%.2f", elapsed / 60, elapsed % 60, cost))
     }
 

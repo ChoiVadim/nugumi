@@ -41,34 +41,45 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(RealtimeServerEvent(jsonString: "not json"), .ignored)
     }
 
-    func testTranscriptAccumulatesDeltasIntoOnePartialLine() {
+    func testTranscriptAccumulatesPartialUntilSentenceEnd() {
         var t = LiveTranscript()
-        t.appendDelta(speaker: .them, text: "Hel")
-        t.appendDelta(speaker: .them, text: "lo")
+        t.append(delta: "This is ")
+        t.append(delta: "a test")
         XCTAssertEqual(t.lines.count, 1)
-        XCTAssertEqual(t.lines[0].speaker, .them)
-        XCTAssertEqual(t.lines[0].text, "Hello")
+        XCTAssertEqual(t.lines[0].text, "This is a test")
         XCTAssertFalse(t.lines[0].isFinalized)
     }
 
-    func testSwitchingSpeakerFinalizesPreviousLine() {
+    func testTranscriptSplitsCompletedSentences() {
         var t = LiveTranscript()
-        t.appendDelta(speaker: .them, text: "Hello")
-        t.appendDelta(speaker: .me, text: "Hi")
+        t.append(delta: "Hello there. How are ")
         XCTAssertEqual(t.lines.count, 2)
+        XCTAssertEqual(t.lines[0].text, "Hello there.")
         XCTAssertTrue(t.lines[0].isFinalized)
-        XCTAssertEqual(t.lines[1].speaker, .me)
-        XCTAssertEqual(t.lines[1].text, "Hi")
+        XCTAssertEqual(t.lines[1].text, "How are")
+        XCTAssertFalse(t.lines[1].isFinalized)
     }
 
-    func testFinalizeRollsToNewLineForSameSpeaker() {
+    func testTranscriptDoesNotSplitDecimalsOrAbbreviations() {
         var t = LiveTranscript()
-        t.appendDelta(speaker: .them, text: "First")
+        t.append(delta: "It heats to 1.600 degrees via www.x.com")
+        XCTAssertEqual(t.lines.count, 1)
+        XCTAssertFalse(t.lines[0].isFinalized)
+    }
+
+    func testFinalizeClosesTrailingFragment() {
+        var t = LiveTranscript()
+        t.append(delta: "An unfinished thought")
         t.finalizeCurrent()
-        t.appendDelta(speaker: .them, text: "Second")
-        XCTAssertEqual(t.lines.map(\.text), ["First", "Second"])
+        XCTAssertEqual(t.lines.count, 1)
         XCTAssertTrue(t.lines[0].isFinalized)
-        XCTAssertFalse(t.lines[1].isFinalized)
+        XCTAssertEqual(t.lines[0].text, "An unfinished thought")
+    }
+
+    func testSplitSentencesHelperSeparatesMultiple() {
+        let (sentences, remainder) = LiveTranscript.splitSentences("One. Two! Three? four")
+        XCTAssertEqual(sentences, ["One.", "Two!", "Three?"])
+        XCTAssertEqual(remainder.trimmingCharacters(in: .whitespaces), "four")
     }
 
     func testBatcherFlushesAtThreshold() {
