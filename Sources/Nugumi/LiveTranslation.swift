@@ -529,12 +529,24 @@ private extension CMSampleBuffer {
 
 /// Floating, draggable, always-on-top captions window. Pure view layer — the
 /// controller pushes transcript + status updates in.
-/// Round collapsed indicator: a pulsing red record dot. Drag to move the window,
-/// click (without dragging) to expand back to the captions.
+/// Collapsed indicator pill — a native recreation of the VoiceInput component:
+/// a continuously rotating rounded-square "rec" glyph, a 12-bar animated
+/// equalizer, and an elapsed timer. Drag to move the window; click (without
+/// dragging) to expand back to the captions.
 final class RecordIndicatorView: NSView {
     var onClick: (() -> Void)?
 
-    private let dot = NSView()
+    private let recSquare = CALayer()
+    private var bars: [CALayer] = []
+    private let timeLayer = CATextLayer()
+
+    private static let barCount = 12
+    private static let squareSize: CGFloat = 14
+    private static let barWidth: CGFloat = 2
+    private static let barGap: CGFloat = 2
+    private static let timerWidth: CGFloat = 40
+    private static let leadingInset: CGFloat = 14
+
     private var initialMouseLocation: NSPoint?
     private var initialWindowOrigin: NSPoint?
     private var didDrag = false
@@ -542,35 +554,81 @@ final class RecordIndicatorView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dot)
-        NSLayoutConstraint.activate([
-            dot.centerXAnchor.constraint(equalTo: centerXAnchor),
-            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 14),
-            dot.heightAnchor.constraint(equalToConstant: 14),
-        ])
+        layer?.masksToBounds = false
+
+        recSquare.backgroundColor = NSColor.systemRed.cgColor
+        recSquare.cornerRadius = 3
+        recSquare.bounds = CGRect(x: 0, y: 0, width: Self.squareSize, height: Self.squareSize)
+        layer?.addSublayer(recSquare)
+
+        let barColor = NSColor(calibratedWhite: 1.0, alpha: 0.78).cgColor
+        for _ in 0..<Self.barCount {
+            let bar = CALayer()
+            bar.backgroundColor = barColor
+            bar.cornerRadius = Self.barWidth / 2
+            bar.bounds = CGRect(x: 0, y: 0, width: Self.barWidth, height: 3)
+            layer?.addSublayer(bar)
+            bars.append(bar)
+        }
+
+        timeLayer.string = "00:00"
+        timeLayer.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        timeLayer.fontSize = 11
+        timeLayer.foregroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.55).cgColor
+        timeLayer.alignmentMode = .center
+        timeLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        layer?.addSublayer(timeLayer)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    override func layout() {
-        super.layout()
-        dot.layer?.cornerRadius = dot.bounds.width / 2
-        if dot.layer?.animation(forKey: "blink") == nil { startBlinking() }
+    func setTime(_ text: String) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        timeLayer.string = text
+        CATransaction.commit()
     }
 
-    private func startBlinking() {
-        let pulse = CABasicAnimation(keyPath: "opacity")
-        pulse.fromValue = 1.0
-        pulse.toValue = 0.2
-        pulse.duration = 0.7
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        dot.layer?.add(pulse, forKey: "blink")
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        let cy = bounds.midY
+        recSquare.position = CGPoint(x: Self.leadingInset + Self.squareSize / 2, y: cy)
+        if recSquare.animation(forKey: "spin") == nil { addSpin() }
+
+        let startX = Self.leadingInset + Self.squareSize + 10
+        for (i, bar) in bars.enumerated() {
+            bar.position = CGPoint(x: startX + CGFloat(i) * (Self.barWidth + Self.barGap) + Self.barWidth / 2, y: cy)
+            if bar.animation(forKey: "eq") == nil { addEqualizer(to: bar, index: i) }
+        }
+
+        timeLayer.frame = CGRect(x: bounds.maxX - Self.timerWidth - Self.leadingInset,
+                                 y: cy - 7, width: Self.timerWidth, height: 14)
+        CATransaction.commit()
+    }
+
+    private func addSpin() {
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = Double.pi * 2
+        spin.duration = 2
+        spin.repeatCount = .infinity
+        spin.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        recSquare.add(spin, forKey: "spin")
+    }
+
+    private func addEqualizer(to bar: CALayer, index: Int) {
+        let anim = CAKeyframeAnimation(keyPath: "transform.scale.y")
+        let peak = 2.5 + Double.random(in: 1.0...4.0)
+        anim.values = [1.0, peak, 1.8, peak * 0.7, 1.0]
+        anim.keyTimes = [0, 0.25, 0.5, 0.75, 1.0]
+        anim.duration = 0.9 + Double.random(in: 0...0.4)
+        anim.beginTime = CACurrentMediaTime() + Double(index) * 0.05
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        bar.add(anim, forKey: "eq")
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -621,6 +679,7 @@ final class LiveCaptionPanelController: NSObject {
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
 
     private var pauseButton: NSButton?
+    private var recordIndicator: RecordIndicatorView?
 
     var onStop: (() -> Void)?
     var onToggleCollapse: (() -> Void)?
@@ -634,7 +693,7 @@ final class LiveCaptionPanelController: NSObject {
             backing: .buffered, defer: false
         )
         indicatorPanel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 46, height: 46),
+            contentRect: NSRect(x: 0, y: 0, width: 160, height: 40),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -770,7 +829,7 @@ final class LiveCaptionPanelController: NSObject {
     }
 
     private func buildIndicator() {
-        let content = installGlass(in: indicatorPanel, cornerRadius: 23)
+        let content = installGlass(in: indicatorPanel, cornerRadius: 20)
         // We handle dragging ourselves (drag to move, click to expand), so don't
         // let the window also move on background drags.
         indicatorPanel.isMovableByWindowBackground = false
@@ -779,6 +838,7 @@ final class LiveCaptionPanelController: NSObject {
         indicator.autoresizingMask = [.width, .height]
         indicator.onClick = { [weak self] in self?.onToggleCollapse?() }
         content.addSubview(indicator)
+        recordIndicator = indicator
     }
 
     func setSource(_ source: LiveAudioSource) {
@@ -818,6 +878,9 @@ final class LiveCaptionPanelController: NSObject {
 
     func update(cost: String) {
         costLabel.stringValue = cost
+        // The collapsed pill shows just the elapsed time (drop the cost tail).
+        recordIndicator?.setTime(cost.components(separatedBy: " · ").first?
+            .trimmingCharacters(in: .whitespaces) ?? cost)
     }
 
     func setPaused(_ paused: Bool) {
