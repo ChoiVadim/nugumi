@@ -819,7 +819,8 @@ final class LiveCaptionPanelController: NSObject {
     private static let partialColor = NSColor(calibratedWhite: 1.0, alpha: 0.5)
     private static let sourceColor = NSColor(calibratedWhite: 1.0, alpha: 0.42)
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
-    private static let iconColorActive = NSColor.controlAccentColor
+    private static let iconColorActive = NSColor(calibratedWhite: 1.0, alpha: 0.95)
+    private static let selectionChip = NSColor(calibratedWhite: 1.0, alpha: 0.14)
 
     private var pauseButton: HoverIconButton?
     private var sourceToggleButton: NSButton?
@@ -950,9 +951,9 @@ final class LiveCaptionPanelController: NSObject {
     private func applySelection(_ button: NSButton?, selected: Bool) {
         guard let button = button as? HoverIconButton else { return }
         button.contentTintColor = selected ? Self.iconColorActive : Self.iconColor
-        button.restingColor = selected ? Self.iconColorActive.withAlphaComponent(0.16) : .clear
+        button.restingColor = selected ? Self.selectionChip : .clear
         button.wantsLayer = true
-        button.layer?.cornerRadius = 6
+        button.layer?.cornerRadius = button.corner
         button.layer?.backgroundColor = button.restingColor.cgColor
     }
 
@@ -1030,18 +1031,18 @@ final class LiveCaptionPanelController: NSObject {
          summarizeButton, sourceToggleButton, vsep1, systemAudioButton, micButton, pauseButton]
             .forEach { content.addSubview($0) }
 
-        let tb: CGFloat = 26
+        let tb: CGFloat = 24
         NSLayoutConstraint.activate([
             // Top row: status + cost + minimize + close.
-            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
+            closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
             closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            closeButton.widthAnchor.constraint(equalToConstant: 22),
-            closeButton.heightAnchor.constraint(equalToConstant: 22),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 24),
 
             collapseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
-            collapseButton.widthAnchor.constraint(equalToConstant: 22),
-            collapseButton.heightAnchor.constraint(equalToConstant: 22),
+            collapseButton.widthAnchor.constraint(equalToConstant: 24),
+            collapseButton.heightAnchor.constraint(equalToConstant: 24),
 
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
@@ -1067,8 +1068,8 @@ final class LiveCaptionPanelController: NSObject {
             bottomSeparator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             bottomSeparator.heightAnchor.constraint(equalToConstant: 1),
 
-            summarizeButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+            summarizeButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
             summarizeButton.widthAnchor.constraint(equalToConstant: tb),
             summarizeButton.heightAnchor.constraint(equalToConstant: tb),
 
@@ -1093,10 +1094,11 @@ final class LiveCaptionPanelController: NSObject {
             micButton.heightAnchor.constraint(equalToConstant: tb),
 
             // Prominent round white play/pause on the right.
+            // Round play/pause — inset from the rounded glass corner so it isn't clipped.
             pauseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
-            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            pauseButton.widthAnchor.constraint(equalToConstant: 32),
-            pauseButton.heightAnchor.constraint(equalToConstant: 32),
+            pauseButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            pauseButton.widthAnchor.constraint(equalToConstant: 30),
+            pauseButton.heightAnchor.constraint(equalToConstant: 30),
             pauseButton.leadingAnchor.constraint(greaterThanOrEqualTo: micButton.trailingAnchor, constant: 8),
         ])
     }
