@@ -620,13 +620,16 @@ final class LiveCaptionPanelController: NSObject {
     private static let partialColor = NSColor(calibratedWhite: 1.0, alpha: 0.5)
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
 
+    private var pauseButton: NSButton?
+
     var onStop: (() -> Void)?
     var onToggleCollapse: (() -> Void)?
+    var onTogglePause: (() -> Void)?
     var onSourceChange: ((LiveAudioSource) -> Void)?
 
     override init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 300),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 560),
             styleMask: [.borderless, .nonactivatingPanel, .resizable],
             backing: .buffered, defer: false
         )
@@ -697,6 +700,9 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let pauseButton = iconButton("pause.fill", tint: Self.iconColor,
+                                     action: #selector(pauseTapped), help: "Pause")
+        self.pauseButton = pauseButton
         let collapseButton = iconButton("minus.circle.fill", tint: Self.iconColor,
                                         action: #selector(collapseTapped), help: "Minimize")
         let closeButton = iconButton("xmark.circle.fill", tint: .systemRed,
@@ -721,7 +727,7 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        [statusLabel, costLabel, collapseButton, closeButton, sourceControl, separator, scrollView]
+        [statusLabel, costLabel, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
             .forEach { content.addSubview($0) }
 
         NSLayoutConstraint.activate([
@@ -735,11 +741,16 @@ final class LiveCaptionPanelController: NSObject {
             collapseButton.widthAnchor.constraint(equalToConstant: 15),
             collapseButton.heightAnchor.constraint(equalToConstant: 15),
 
+            pauseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            pauseButton.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -8),
+            pauseButton.widthAnchor.constraint(equalToConstant: 14),
+            pauseButton.heightAnchor.constraint(equalToConstant: 14),
+
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -10),
+            costLabel.trailingAnchor.constraint(equalTo: pauseButton.leadingAnchor, constant: -10),
             costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
             sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 10),
@@ -778,7 +789,8 @@ final class LiveCaptionPanelController: NSObject {
         indicatorPanel.orderOut(nil)
         if panel.frame.origin == .zero, let screen = NSScreen.main {
             let visible = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: visible.maxX - 460, y: visible.minY + 60))
+            panel.setFrameOrigin(NSPoint(x: visible.maxX - panel.frame.width - 20,
+                                         y: visible.minY + 60))
         }
         panel.orderFrontRegardless()
     }
@@ -808,6 +820,12 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.stringValue = cost
     }
 
+    func setPaused(_ paused: Bool) {
+        pauseButton?.image = NSImage(systemSymbolName: paused ? "play.fill" : "pause.fill",
+                                     accessibilityDescription: paused ? "Resume" : "Pause")
+        pauseButton?.toolTip = paused ? "Resume" : "Pause"
+    }
+
     func render(_ transcript: LiveTranscript) {
         let body = NSMutableAttributedString()
         let count = transcript.lines.count
@@ -824,6 +842,7 @@ final class LiveCaptionPanelController: NSObject {
 
     @objc private func stopTapped() { onStop?() }
     @objc private func collapseTapped() { onToggleCollapse?() }
+    @objc private func pauseTapped() { onTogglePause?() }
     @objc private func sourceChanged() {
         onSourceChange?(sourceControl.selectedSegment == 0 ? .systemAudio : .microphone)
     }
@@ -836,6 +855,7 @@ final class LiveTranslationController: NSObject {
     static let perMinuteCostUSD = 0.034
 
     private(set) var isRunning = false
+    private(set) var isPaused = false
     private(set) var isCollapsed = false
     private let panel = LiveCaptionPanelController()
     private var transcript = LiveTranscript()
@@ -844,15 +864,22 @@ final class LiveTranslationController: NSObject {
     private var session: RealtimeTranslationSession?
     private var elapsedTimer: Timer?
     private var pauseTimer: Timer?
-    private var startDate: Date?
     private var startGeneration = 0
     private var activeSource: LiveAudioSource = .systemAudio
     private var targetLanguage: TranslationLanguage = .defaultLanguage
+    private var apiKey: String = ""
+
+    // Active-time accounting. Pause freezes it, so cost/billing only count the
+    // time audio is actually streaming, not wall-clock since first start.
+    private var accumulatedSeconds: TimeInterval = 0
+    private var segmentStart: Date?
 
     var onMissingAPIKey: (() -> Void)?
 
     func toggle(apiKey: String?, targetLanguage: TranslationLanguage) {
-        if isRunning {
+        if isPaused {
+            resume()
+        } else if isRunning {
             toggleCollapsed()
         } else {
             start(apiKey: apiKey, targetLanguage: targetLanguage)
@@ -861,24 +888,36 @@ final class LiveTranslationController: NSObject {
 
     func start(apiKey: String?, targetLanguage: TranslationLanguage) {
         guard let apiKey, !apiKey.isEmpty else { onMissingAPIKey?(); return }
-        guard !isRunning else { return }
-        isRunning = true
-        isCollapsed = false
-        startGeneration += 1
-        transcript = LiveTranscript()
-        startDate = Date()
+        guard !isRunning, !isPaused else { return }
+        self.apiKey = apiKey
         self.targetLanguage = targetLanguage
-        let source = LiveAudioSource.current
-        activeSource = source
+        transcript = LiveTranscript()
+        accumulatedSeconds = 0
+        isCollapsed = false
 
         panel.onStop = { [weak self] in self?.stop() }
         panel.onToggleCollapse = { [weak self] in self?.toggleCollapsed() }
+        panel.onTogglePause = { [weak self] in self?.togglePauseResume() }
         panel.onSourceChange = { [weak self] newSource in self?.changeSource(to: newSource) }
-        panel.setSource(source)
+        panel.setSource(LiveAudioSource.current)
         panel.render(transcript)
-        panel.update(status: "Connecting… → \(targetLanguage.displayName)")
         panel.update(cost: "00:00 · ~$0.00")
         panel.showCaptions()
+
+        launchSession()
+    }
+
+    /// Spins up a session + capture + timers for the current source, keeping the
+    /// existing transcript. Shared by start() (fresh transcript) and resume().
+    private func launchSession() {
+        isRunning = true
+        isPaused = false
+        startGeneration += 1
+        segmentStart = Date()
+        let source = LiveAudioSource.current
+        activeSource = source
+        panel.setPaused(false)
+        panel.update(status: "Connecting… → \(targetLanguage.displayName)")
 
         let session = RealtimeTranslationSession(
             apiKey: apiKey,
@@ -904,6 +943,41 @@ final class LiveTranslationController: NSObject {
 
         startCapture(source, into: session, generation: startGeneration)
         startCostTimer()
+    }
+
+    func togglePauseResume() {
+        if isPaused { resume() }
+        else if isRunning { pause() }
+    }
+
+    /// Stops capture + billing but keeps the transcript and panel open so the
+    /// user can resume into the same history.
+    func pause() {
+        guard isRunning else { return }
+        isRunning = false
+        isPaused = true
+        accumulateActiveTime()
+        teardownCaptureAndSession()
+        transcript.finalizeCurrent()
+        panel.render(transcript)
+        panel.setPaused(true)
+        panel.update(status: "Paused — press play to continue")
+        updateCost()
+    }
+
+    func resume() {
+        guard isPaused else { return }
+        panel.update(status: "Resuming…")
+        launchSession()
+    }
+
+    private func teardownCaptureAndSession() {
+        pauseTimer?.invalidate(); pauseTimer = nil
+        elapsedTimer?.invalidate(); elapsedTimer = nil
+        session?.onStatusChange = nil
+        systemCapture?.stop(); systemCapture = nil
+        micCapture?.stop(); micCapture = nil
+        session?.close(); session = nil
     }
 
     private func startCapture(_ source: LiveAudioSource, into session: RealtimeTranslationSession, generation: Int) {
@@ -950,16 +1024,14 @@ final class LiveTranslationController: NSObject {
     }
 
     func stop(finalStatus: String = "Stopped", keepVisible: Bool = false) {
-        guard isRunning else { return }
+        guard isRunning || isPaused else { return }
         isRunning = false
+        isPaused = false
         isCollapsed = false
-        pauseTimer?.invalidate(); pauseTimer = nil
-        elapsedTimer?.invalidate(); elapsedTimer = nil
-        session?.onStatusChange = nil
-        systemCapture?.stop(); systemCapture = nil
-        micCapture?.stop(); micCapture = nil
-        session?.close(); session = nil
+        accumulateActiveTime()
+        teardownCaptureAndSession()
         transcript.finalizeCurrent()
+        panel.setPaused(false)
         panel.render(transcript)
         panel.update(status: finalStatus)
         if keepVisible { panel.showCaptions() } else { panel.close() }
@@ -977,15 +1049,26 @@ final class LiveTranslationController: NSObject {
     }
 
     private func startCostTimer() {
+        elapsedTimer?.invalidate()
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.updateCost() }
         }
         updateCost()
     }
 
+    private func accumulateActiveTime() {
+        if let segmentStart {
+            accumulatedSeconds += Date().timeIntervalSince(segmentStart)
+            self.segmentStart = nil
+        }
+    }
+
+    private func totalActiveSeconds() -> TimeInterval {
+        accumulatedSeconds + (segmentStart.map { Date().timeIntervalSince($0) } ?? 0)
+    }
+
     private func updateCost() {
-        guard let startDate else { return }
-        let seconds = Date().timeIntervalSince(startDate)
+        let seconds = totalActiveSeconds()
         let cost = (seconds / 60.0) * Self.perMinuteCostUSD
         let elapsed = Int(seconds)
         panel.update(cost: String(format: "%02d:%02d · ~$%.2f", elapsed / 60, elapsed % 60, cost))
