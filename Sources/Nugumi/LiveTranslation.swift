@@ -121,7 +121,7 @@ final class AudioBatcher {
 enum LiveTranslationDebug {
     private static let lock = NSLock()
     private static var seen = Set<String>()
-    private static var inputDumpCount = 0
+    private static var dumpCounts: [String: Int] = [:]
 
     static func noteRawEvent(_ json: String) {
         guard let data = json.data(using: .utf8),
@@ -129,15 +129,17 @@ enum LiveTranslationDebug {
               let type = obj["type"] as? String else { return }
         lock.lock()
         let isNew = seen.insert(type).inserted
-        var dumpInput = false
-        if type == "session.input_transcript.delta" {
-            inputDumpCount += 1
-            dumpInput = inputDumpCount <= 8
+        // Dump full payloads of the first few input/output transcript events so we
+        // can see delta granularity and whether elapsed_ms (audio timing) is set.
+        var dump = false
+        if type == "session.input_transcript.delta" || type == "session.output_transcript.delta" {
+            let n = (dumpCounts[type] ?? 0) + 1
+            dumpCounts[type] = n
+            dump = n <= 8
         }
         lock.unlock()
-        if dumpInput {
-            // Full payload so we can find which field carries the original text.
-            CodexDebugLog.append("[LiveTranslation] input_transcript raw: \(json.prefix(300))")
+        if dump {
+            CodexDebugLog.append("[LiveTranslation] raw: \(json.prefix(320))")
         } else if isNew {
             CodexDebugLog.append("[LiveTranslation] event type: \(type)")
         }
@@ -316,7 +318,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
             // rejection here can't drop the (working) output-language config.
             self.sendJSON([
                 "type": "session.update",
-                "session": ["audio": ["input": ["transcription": ["model": "whisper-1"]]]]
+                "session": ["audio": ["input": ["transcription": ["model": "gpt-realtime-whisper"]]]]
             ])
             self.onStatusChange?(.listening)
         }
