@@ -119,3 +119,46 @@ enum RealtimeServerEvent: Equatable {
         }
     }
 }
+
+/// Converts arbitrary-format capture buffers to the Realtime API's required
+/// 24 kHz mono PCM16 little-endian byte stream. One converter is lazily built
+/// per distinct input format.
+final class PCM16Downsampler {
+    static let targetFormat = AVAudioFormat(
+        commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true
+    )!
+
+    private var converter: AVAudioConverter?
+    private var converterInputFormat: AVAudioFormat?
+
+    func pcm16Data(from input: AVAudioPCMBuffer) throws -> Data {
+        let inputFormat = input.format
+        if converter == nil || converterInputFormat != inputFormat {
+            converter = AVAudioConverter(from: inputFormat, to: Self.targetFormat)
+            converterInputFormat = inputFormat
+        }
+        guard let converter else { return Data() }
+
+        let ratio = Self.targetFormat.sampleRate / inputFormat.sampleRate
+        let capacity = AVAudioFrameCount((Double(input.frameLength) * ratio).rounded(.up)) + 1024
+        guard let output = AVAudioPCMBuffer(pcmFormat: Self.targetFormat, frameCapacity: capacity) else {
+            return Data()
+        }
+
+        var consumed = false
+        var conversionError: NSError?
+        converter.convert(to: output, error: &conversionError) { _, statusPtr in
+            if consumed {
+                statusPtr.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            statusPtr.pointee = .haveData
+            return input
+        }
+        if let conversionError { throw conversionError }
+
+        guard let channel = output.int16ChannelData else { return Data() }
+        return Data(bytes: channel[0], count: Int(output.frameLength) * MemoryLayout<Int16>.size)
+    }
+}

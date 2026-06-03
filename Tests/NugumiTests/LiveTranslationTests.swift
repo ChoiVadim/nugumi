@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import Nugumi
 
@@ -88,5 +89,18 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(flushed.map(\.count), [100])
         batcher.flush()
         XCTAssertEqual(flushed.count, 1)
+    }
+
+    func testDownsampler48kFloatTo24kPCM16HalvesFrames() throws {
+        let inFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+        let frames: AVAudioFrameCount = 4800
+        let inBuffer = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: frames)!
+        inBuffer.frameLength = frames
+        for i in 0..<Int(frames) { inBuffer.floatChannelData![0][i] = 0 }
+
+        let downsampler = PCM16Downsampler()
+        let data = try downsampler.pcm16Data(from: inBuffer)
+        XCTAssertGreaterThan(data.count, 4000)
+        XCTAssertLessThan(data.count, 5200)
     }
 }
