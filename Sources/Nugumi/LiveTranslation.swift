@@ -935,16 +935,16 @@ final class LiveCaptionPanelController: NSObject {
     private static let hoverNeutral = NSColor(calibratedWhite: 1.0, alpha: 0.14)
     private static let hoverDanger = NSColor.systemRed.withAlphaComponent(0.85)
 
-    private static func symbolImage(_ name: String, _ description: String) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+    private static func symbolImage(_ name: String, _ description: String, pointSize: CGFloat = 11) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
         return NSImage(systemSymbolName: name, accessibilityDescription: description)?
             .withSymbolConfiguration(config)
     }
 
     private func iconButton(_ symbol: String, tint: NSColor, hover: NSColor,
-                            action: Selector, help: String) -> HoverIconButton {
+                            action: Selector, help: String, pointSize: CGFloat = 11) -> HoverIconButton {
         let button = HoverIconButton(title: "", target: self, action: action)
-        button.image = Self.symbolImage(symbol, help)
+        button.image = Self.symbolImage(symbol, help, pointSize: pointSize)
         button.imagePosition = .imageOnly
         button.isBordered = false
         button.bezelStyle = .regularSquare
@@ -968,18 +968,22 @@ final class LiveCaptionPanelController: NSObject {
         costLabel.alignment = .right
         costLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let toolbarPointSize: CGFloat = 14
         let summarizeButton = iconButton("list.bullet.rectangle", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                         action: #selector(summarizeTapped), help: "Summarize")
+                                         action: #selector(summarizeTapped), help: "Summarize", pointSize: toolbarPointSize)
         let sourceToggleButton = iconButton("character.bubble", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                            action: #selector(sourceToggled), help: "Show original")
+                                            action: #selector(sourceToggled), help: "Show original", pointSize: toolbarPointSize)
         self.sourceToggleButton = sourceToggleButton
         let pauseButton = iconButton("pause.fill", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                     action: #selector(pauseTapped), help: "Pause")
+                                     action: #selector(pauseTapped), help: "Pause", pointSize: toolbarPointSize)
         self.pauseButton = pauseButton
         let collapseButton = iconButton("minus", tint: Self.iconColor, hover: Self.hoverNeutral,
-                                        action: #selector(collapseTapped), help: "Minimize")
+                                        action: #selector(collapseTapped), help: "Minimize", pointSize: toolbarPointSize)
         let closeButton = iconButton("xmark", tint: Self.iconColor, hover: Self.hoverDanger,
                                      action: #selector(stopTapped), help: "Stop and close")
+
+        let vsep1 = HairlineSeparatorView(); vsep1.translatesAutoresizingMaskIntoConstraints = false
+        let vsep2 = HairlineSeparatorView(); vsep2.translatesAutoresizingMaskIntoConstraints = false
 
         sourceControl.target = self
         sourceControl.action = #selector(sourceChanged)
@@ -989,6 +993,8 @@ final class LiveCaptionPanelController: NSObject {
 
         let separator = HairlineSeparatorView()
         separator.translatesAutoresizingMaskIntoConstraints = false
+        let bottomSeparator = HairlineSeparatorView()
+        bottomSeparator.translatesAutoresizingMaskIntoConstraints = false
 
         textView.isEditable = false
         textView.isSelectable = true
@@ -1012,42 +1018,26 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.scrollerKnobStyle = .light
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        [statusLabel, costLabel, summarizeButton, sourceToggleButton, pauseButton, collapseButton, closeButton, sourceControl, separator, scrollView]
+        [statusLabel, costLabel, closeButton, sourceControl, separator, scrollView, bottomSeparator,
+         summarizeButton, sourceToggleButton, vsep1, pauseButton, vsep2, collapseButton]
             .forEach { content.addSubview($0) }
 
+        let toolButton: CGFloat = 26
         NSLayoutConstraint.activate([
+            // Top row: status + cost + close (close stays top-right).
             closeButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
             closeButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             closeButton.widthAnchor.constraint(equalToConstant: 22),
             closeButton.heightAnchor.constraint(equalToConstant: 22),
 
-            collapseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            collapseButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
-            collapseButton.widthAnchor.constraint(equalToConstant: 22),
-            collapseButton.heightAnchor.constraint(equalToConstant: 22),
-
-            pauseButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            pauseButton.trailingAnchor.constraint(equalTo: collapseButton.leadingAnchor, constant: -2),
-            pauseButton.widthAnchor.constraint(equalToConstant: 22),
-            pauseButton.heightAnchor.constraint(equalToConstant: 22),
-
-            sourceToggleButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            sourceToggleButton.trailingAnchor.constraint(equalTo: pauseButton.leadingAnchor, constant: -2),
-            sourceToggleButton.widthAnchor.constraint(equalToConstant: 22),
-            sourceToggleButton.heightAnchor.constraint(equalToConstant: 22),
-
-            summarizeButton.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            summarizeButton.trailingAnchor.constraint(equalTo: sourceToggleButton.leadingAnchor, constant: -2),
-            summarizeButton.widthAnchor.constraint(equalToConstant: 22),
-            summarizeButton.heightAnchor.constraint(equalToConstant: 22),
-
             statusLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
 
             costLabel.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-            costLabel.trailingAnchor.constraint(equalTo: summarizeButton.leadingAnchor, constant: -8),
+            costLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -10),
             costLabel.leadingAnchor.constraint(greaterThanOrEqualTo: statusLabel.trailingAnchor, constant: 8),
 
+            // Source switcher.
             sourceControl.topAnchor.constraint(equalTo: closeButton.bottomAnchor, constant: 8),
             sourceControl.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
             sourceControl.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
@@ -1057,10 +1047,47 @@ final class LiveCaptionPanelController: NSObject {
             separator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             separator.heightAnchor.constraint(equalToConstant: 1),
 
+            // Transcript fills between the two separators.
             scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
-            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: bottomSeparator.topAnchor, constant: -6),
+
+            // Bottom toolbar: summarize · original | pause | minimize.
+            bottomSeparator.bottomAnchor.constraint(equalTo: summarizeButton.topAnchor, constant: -8),
+            bottomSeparator.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            bottomSeparator.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            bottomSeparator.heightAnchor.constraint(equalToConstant: 1),
+
+            summarizeButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            summarizeButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
+            summarizeButton.widthAnchor.constraint(equalToConstant: toolButton),
+            summarizeButton.heightAnchor.constraint(equalToConstant: toolButton),
+
+            sourceToggleButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            sourceToggleButton.leadingAnchor.constraint(equalTo: summarizeButton.trailingAnchor, constant: 4),
+            sourceToggleButton.widthAnchor.constraint(equalToConstant: toolButton),
+            sourceToggleButton.heightAnchor.constraint(equalToConstant: toolButton),
+
+            vsep1.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            vsep1.leadingAnchor.constraint(equalTo: sourceToggleButton.trailingAnchor, constant: 8),
+            vsep1.widthAnchor.constraint(equalToConstant: 1),
+            vsep1.heightAnchor.constraint(equalToConstant: 16),
+
+            pauseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            pauseButton.leadingAnchor.constraint(equalTo: vsep1.trailingAnchor, constant: 8),
+            pauseButton.widthAnchor.constraint(equalToConstant: toolButton),
+            pauseButton.heightAnchor.constraint(equalToConstant: toolButton),
+
+            vsep2.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            vsep2.leadingAnchor.constraint(equalTo: pauseButton.trailingAnchor, constant: 8),
+            vsep2.widthAnchor.constraint(equalToConstant: 1),
+            vsep2.heightAnchor.constraint(equalToConstant: 16),
+
+            collapseButton.centerYAnchor.constraint(equalTo: summarizeButton.centerYAnchor),
+            collapseButton.leadingAnchor.constraint(equalTo: vsep2.trailingAnchor, constant: 8),
+            collapseButton.widthAnchor.constraint(equalToConstant: toolButton),
+            collapseButton.heightAnchor.constraint(equalToConstant: toolButton),
         ])
     }
 
@@ -1115,7 +1142,7 @@ final class LiveCaptionPanelController: NSObject {
 
     func setPaused(_ paused: Bool) {
         pauseButton?.image = Self.symbolImage(paused ? "play.fill" : "pause.fill",
-                                              paused ? "Resume" : "Pause")
+                                              paused ? "Resume" : "Pause", pointSize: 14)
         pauseButton?.toolTip = paused ? "Resume" : "Pause"
         recordIndicator?.setPaused(paused)
     }
