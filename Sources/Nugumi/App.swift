@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import CoreServices
 import CoreText
 import Darwin
 import Foundation
@@ -108,28 +109,76 @@ struct LLMModel: Equatable {
         return nil
     }
 
+    // Models are grouped by provider in the picker, so display names omit the
+    // provider (it's the section header) and keep only the speed/tier hint.
     static let all: [LLMModel] = [
-        // Ollama
-        .init(id: "gpt-oss:120b-cloud", shortName: "Online",  displayName: "Online (Ollama Cloud, needs sign-in)", backend: .ollama(requiresAccount: true),  supportsImages: false),
-        .init(id: "gpt-oss:20b",        shortName: "Offline", displayName: "Offline (Ollama local)",                backend: .ollama(requiresAccount: false), supportsImages: false),
+        // Ollama — curated defaults shown under their real model names, matching
+        // whatever `/api/tags` discovers (see makeOllamaModel).
+        .init(id: "gpt-oss:120b-cloud", shortName: "gpt-oss:120b", displayName: "gpt-oss:120b", backend: .ollama(requiresAccount: true),  supportsImages: false),
+        .init(id: "gpt-oss:20b",        shortName: "gpt-oss:20b",  displayName: "gpt-oss:20b",  backend: .ollama(requiresAccount: false), supportsImages: false),
         // OpenAI (GPT-5 family, all vision-capable)
-        .init(id: "gpt-5.4-mini", shortName: "GPT-5.4 mini", displayName: "GPT-5.4 mini (OpenAI, fast)",  backend: .cloud(.openAI), supportsImages: true),
-        .init(id: "gpt-5.4",      shortName: "GPT-5.4",      displayName: "GPT-5.4 (OpenAI, affordable)", backend: .cloud(.openAI), supportsImages: true),
-        .init(id: "gpt-5.5",      shortName: "GPT-5.5",      displayName: "GPT-5.5 (OpenAI, flagship)",   backend: .cloud(.openAI), supportsImages: true),
+        .init(id: "gpt-5.4-mini", shortName: "GPT-5.4 mini", displayName: "GPT-5.4 mini (fast)",  backend: .cloud(.openAI), supportsImages: true),
+        .init(id: "gpt-5.4",      shortName: "GPT-5.4",      displayName: "GPT-5.4 (affordable)", backend: .cloud(.openAI), supportsImages: true),
+        .init(id: "gpt-5.5",      shortName: "GPT-5.5",      displayName: "GPT-5.5 (flagship)",   backend: .cloud(.openAI), supportsImages: true),
         // Anthropic
-        .init(id: "claude-haiku-4-5-20251001", shortName: "Claude Haiku 4.5",  displayName: "Claude Haiku 4.5 (Anthropic, fast)",  backend: .cloud(.anthropic), supportsImages: true),
-        .init(id: "claude-sonnet-4-6",         shortName: "Claude Sonnet 4.6", displayName: "Claude Sonnet 4.6 (Anthropic)",       backend: .cloud(.anthropic), supportsImages: true),
-        .init(id: "claude-opus-4-7",           shortName: "Claude Opus 4.7",   displayName: "Claude Opus 4.7 (Anthropic, top)",    backend: .cloud(.anthropic), supportsImages: true),
+        .init(id: "claude-haiku-4-5-20251001", shortName: "Claude Haiku 4.5",  displayName: "Claude Haiku 4.5 (fast)",  backend: .cloud(.anthropic), supportsImages: true),
+        .init(id: "claude-sonnet-4-6",         shortName: "Claude Sonnet 4.6", displayName: "Claude Sonnet 4.6",        backend: .cloud(.anthropic), supportsImages: true),
+        .init(id: "claude-opus-4-7",           shortName: "Claude Opus 4.7",   displayName: "Claude Opus 4.7 (top)",    backend: .cloud(.anthropic), supportsImages: true),
         // Gemini
-        .init(id: "gemini-2.5-flash-lite", shortName: "Gemini 2.5 Flash Lite", displayName: "Gemini 2.5 Flash Lite (Google, fastest)", backend: .cloud(.gemini), supportsImages: true),
-        .init(id: "gemini-2.5-flash",      shortName: "Gemini 2.5 Flash",      displayName: "Gemini 2.5 Flash (Google)",               backend: .cloud(.gemini), supportsImages: true),
-        .init(id: "gemini-2.5-pro",        shortName: "Gemini 2.5 Pro",        displayName: "Gemini 2.5 Pro (Google, top)",            backend: .cloud(.gemini), supportsImages: true),
+        .init(id: "gemini-2.5-flash-lite", shortName: "Gemini 2.5 Flash Lite", displayName: "Gemini 2.5 Flash Lite (fastest)", backend: .cloud(.gemini), supportsImages: true),
+        .init(id: "gemini-2.5-flash",      shortName: "Gemini 2.5 Flash",      displayName: "Gemini 2.5 Flash",                backend: .cloud(.gemini), supportsImages: true),
+        .init(id: "gemini-2.5-pro",        shortName: "Gemini 2.5 Pro",        displayName: "Gemini 2.5 Pro (top)",            backend: .cloud(.gemini), supportsImages: true),
     ]
 
-    static let ollamaModels = all.filter(\.isOllama)
+    /// Curated Ollama defaults (gpt-oss cloud + local). Always shown, even
+    /// before the server reports anything, so users know the baseline.
+    static let curatedOllamaModels = all.filter(\.isOllama)
     static let apiKeyModels = all.filter { $0.cloudProvider != nil }
-    static let apiKeyMenuTitle = "API key models"
-    static let chatGPTSubscriptionMenuTitle = "ChatGPT subscription"
+
+    /// Models for one cloud provider, in `all` order. The picker headers use
+    /// `CloudProvider.displayName`, so the section names match Cloud access.
+    static func models(for provider: CloudProvider) -> [LLMModel] {
+        apiKeyModels.filter { $0.cloudProvider == provider }
+    }
+
+    /// All Ollama models to offer: the curated Online/Offline defaults, then
+    /// whatever the running server reported via `/api/tags` (see
+    /// OllamaModelCache). When signed in, the server already lists the cloud
+    /// catalog, so there's no hand-maintained cloud list to drift or collide
+    /// with the curated entries. Deduped by id, curated entries win.
+    static var ollamaModels: [LLMModel] {
+        var seen = Set<String>()
+        var out: [LLMModel] = []
+        func add(_ model: LLMModel) {
+            if seen.insert(model.id).inserted { out.append(model) }
+        }
+        curatedOllamaModels.forEach(add)
+        OllamaModelCache.discovered.map(makeOllamaModel).forEach(add)
+        return out
+    }
+
+    /// Build an LLMModel for a raw Ollama model name (as it appears in
+    /// `ollama list` / `/api/tags`). Cloud models carry either a `-cloud` or a
+    /// `:cloud` suffix (e.g. `gpt-oss:120b-cloud`, `glm-5.1:cloud`).
+    private static func makeOllamaModel(name: String) -> LLMModel {
+        let isCloud = name.hasSuffix("-cloud") || name.hasSuffix(":cloud")
+        let short = name
+            .replacingOccurrences(of: "-cloud", with: "")
+            .replacingOccurrences(of: ":cloud", with: "")
+            .replacingOccurrences(of: ":latest", with: "")
+        return LLMModel(
+            id: name,
+            apiModelID: name,
+            shortName: short,
+            // Local vs cloud is conveyed by the picker subsection header, so the
+            // row is just the bare model name.
+            displayName: short,
+            backend: .ollama(requiresAccount: isCloud),
+            // Vision support comes from the server's reported capabilities
+            // (`/api/show`); only vision models surface in Ask Nugumi.
+            supportsImages: OllamaModelCache.visionCapable.contains(name)
+        )
+    }
 
     /// Models served by the Codex (ChatGPT subscription) backend. The slugs
     /// come from CodexModelCache (live discovery → UserDefaults → fallback),
@@ -149,7 +198,8 @@ struct LLMModel: Equatable {
             id: "codex/\(slug)",
             apiModelID: slug,
             shortName: pretty,
-            displayName: "\(pretty) (ChatGPT)",
+            // Grouped under the "ChatGPT" header, so no provider suffix here.
+            displayName: pretty,
             backend: .cloud(.openAICodex),
             // Vision support varies by model — backend rejects images for
             // text-only slugs. Optimistic default avoids hiding usable models.
@@ -164,23 +214,12 @@ struct LLMModel: Equatable {
             let slug = String(id.dropFirst("codex/".count))
             return codexModels.first { $0.id == id } ?? makeCodexModel(slug: slug)
         }
-        return all.first { $0.id == id } ?? defaultModel
+        if let curated = all.first(where: { $0.id == id }) { return curated }
+        // Discovered Ollama models live outside `all`; resolve them so the
+        // backend dispatch and the menu label can find them.
+        if let ollama = ollamaModels.first(where: { $0.id == id }) { return ollama }
+        return defaultModel
     }
-
-    static var modeMenuEntries: [LLMModelMenuEntry] {
-        var entries: [LLMModelMenuEntry] = ollamaModels.map(LLMModelMenuEntry.model)
-        entries.append(.apiKeyModels(title: apiKeyMenuTitle, models: apiKeyModels))
-        let codex = codexModels
-        if !codex.isEmpty {
-            entries.append(.apiKeyModels(title: chatGPTSubscriptionMenuTitle, models: codex))
-        }
-        return entries
-    }
-}
-
-enum LLMModelMenuEntry: Equatable {
-    case model(LLMModel)
-    case apiKeyModels(title: String, models: [LLMModel])
 }
 
 enum ModelUseScope: String, CaseIterable {
@@ -842,9 +881,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         baseURL: ollamaBaseURL,
         models: LLMModel.ollamaModels
     )
-    private var onboardingWindowController: OnboardingWindowController?
     private var snippetsWindowController: SnippetsWindowController?
     private var mainWindowController: MainWindowController?
+    /// Ollama model whose pull the user kicked off from the AI Engine setup card.
+    /// When it finishes we promote it to the everyday-text default once, mirroring
+    /// the retired onboarding window's `onOllamaReady` behavior.
+    private var pendingOllamaAutoSelectID: String?
     private var accessibilityTrustTimer: Timer?
     private var screenRecordingTrustTimer: Timer?
 
@@ -1019,10 +1061,112 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     private static func defaultStyle(for category: AppCategory) -> WritingStyle {
-        switch category {
-        case .personalMessages, .other: return .casual
-        case .workMessages: return .polite
-        case .email: return .formal
+        category.defaultWritingStyle
+    }
+
+    // MARK: - Custom app → category assignments
+
+    private static let customAppAssignmentsKey = "customAppAssignmentsV1"
+    private static let suppressedBuiltInAppsKey = "suppressedBuiltInAppsV1"
+
+    func customAppAssignments() -> [CustomAppAssignment] {
+        guard let data = UserDefaults.standard.data(forKey: Self.customAppAssignmentsKey),
+              let list = try? JSONDecoder().decode([CustomAppAssignment].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    private func saveCustomAppAssignments(_ list: [CustomAppAssignment]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: Self.customAppAssignmentsKey)
+        }
+        syncAppClassifierOverrides()
+    }
+
+    func suppressedBuiltInApps() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: Self.suppressedBuiltInAppsKey) ?? [])
+    }
+
+    private func saveSuppressedBuiltInApps(_ ids: Set<String>) {
+        UserDefaults.standard.set(Array(ids), forKey: Self.suppressedBuiltInAppsKey)
+        syncAppClassifierOverrides()
+    }
+
+    /// Push persisted assignments into the classifier's static lookup so the live
+    /// rewrite path (`AppCategoryClassifier.category(for:)`) honors them.
+    func syncAppClassifierOverrides() {
+        var overrides: [String: AppCategory] = [:]
+        for assignment in customAppAssignments() {
+            overrides[assignment.bundleID] = assignment.category
+        }
+        AppCategoryClassifier.userOverrides = overrides
+        AppCategoryClassifier.suppressedBuiltIns = suppressedBuiltInApps()
+        AppCategoryClassifier.urlRules = urlRules().map { ($0.pattern, $0.category) }
+    }
+
+    // MARK: - URL → category rules
+
+    private static let urlRulesKey = "urlCategoryRulesV1"
+
+    func urlRules() -> [URLCategoryRule] {
+        guard let data = UserDefaults.standard.data(forKey: Self.urlRulesKey),
+              let list = try? JSONDecoder().decode([URLCategoryRule].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    private func saveURLRules(_ list: [URLCategoryRule]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: Self.urlRulesKey)
+        }
+        syncAppClassifierOverrides()
+    }
+
+    func addURLRule(pattern: String, category: AppCategory) {
+        let cleaned = Self.normalizeURLPattern(pattern)
+        guard !cleaned.isEmpty else { return }
+        var list = urlRules().filter { $0.pattern.caseInsensitiveCompare(cleaned) != .orderedSame }
+        list.append(URLCategoryRule(pattern: cleaned, category: category))
+        saveURLRules(list)
+        AppCategoryClassifier.promptAutomationForLikelyBrowsers()
+    }
+
+    func removeURLRule(pattern: String, category: AppCategory) {
+        saveURLRules(urlRules().filter {
+            !($0.pattern == pattern && $0.category == category)
+        })
+    }
+
+    /// Trims a typed pattern down to a host-ish substring (drops scheme, path, spaces).
+    private static func normalizeURLPattern(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
+        if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
+        return s
+    }
+
+    func addCustomApp(bundleID: String, name: String, category: AppCategory) {
+        var list = customAppAssignments().filter { $0.bundleID != bundleID }
+        list.append(CustomAppAssignment(bundleID: bundleID, name: name, category: category))
+        saveCustomAppAssignments(list)
+        // If the user re-adds a previously-removed built-in, un-suppress it.
+        if AppCategoryClassifier.bundleIDMap[bundleID] != nil {
+            var suppressed = suppressedBuiltInApps()
+            suppressed.remove(bundleID)
+            saveSuppressedBuiltInApps(suppressed)
+        }
+    }
+
+    /// Removes an app from its category. Built-in mapped apps are suppressed (so they
+    /// stop auto-classifying); user-added apps are deleted outright.
+    func removeApp(bundleID: String) {
+        if customAppAssignments().contains(where: { $0.bundleID == bundleID }) {
+            saveCustomAppAssignments(customAppAssignments().filter { $0.bundleID != bundleID })
+        }
+        if AppCategoryClassifier.bundleIDMap[bundleID] != nil {
+            var suppressed = suppressedBuiltInApps()
+            suppressed.insert(bundleID)
+            saveSuppressedBuiltInApps(suppressed)
         }
     }
 
@@ -1052,6 +1196,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         startKeyboardMonitor()
         applySelectionDisplayMode()
         setupGlobalHotKeys()
+        syncAppClassifierOverrides()
         setupBootstrap()
         _ = updaterController
         analyticsClient.trackInstallIfNeeded()
@@ -1063,8 +1208,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     /// First launch after settings moved into the window: open it once so existing
-    /// users discover where their settings went. Skipped while the onboarding or
-    /// permissions windows are up, so we never stack on top of a fresh-install flow.
+    /// users discover where their settings went. Skipped while the permissions
+    /// window is up, so we never stack on top of a fresh-install flow.
     @MainActor
     private func showMainWindowOnFirstRunIfNeeded() {
         let key = "mainWindowAutoShownV1"
@@ -1073,7 +1218,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard let self,
-                  self.onboardingWindowController == nil,
                   self.permissionsWindowController == nil
             else { return }
             self.openMainWindow()
@@ -1591,7 +1735,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let self else { return }
             if !self.bootstrap.isReady(for: self.textModelID) {
-                self.presentOnboardingWindow()
+                self.presentMainWindow(section: .aiEngine)
             }
         }
     }
@@ -1611,7 +1755,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let self else { return }
             if !self.bootstrap.isReady(for: self.textModelID) {
-                self.presentOnboardingWindow()
+                self.presentMainWindow(section: .aiEngine)
             }
         }
     }
@@ -1622,10 +1766,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let previous = lastObservedModelReadyState[currentID] ?? .unknown
         let current = state.modelReady(for: currentID)
         lastObservedModelReadyState[currentID] = current
-        if case .working = previous,
-           case .ok = current,
-           onboardingWindowController == nil {
+        if case .working = previous, case .ok = current {
             postTranslatorReadyNotification()
+        }
+        // A pull the user started from the AI Engine setup card just finished —
+        // promote it to the everyday-text default, once.
+        if let pendingID = pendingOllamaAutoSelectID,
+           case .ok = state.modelReady(for: pendingID) {
+            pendingOllamaAutoSelectID = nil
+            applyModelSelection(pendingID, for: .textActions)
         }
         updateMenuState()
         mainWindowController?.bridge.refreshFromHost()
@@ -1664,43 +1813,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
-    @MainActor
-    private func presentOnboardingWindow() {
-        if let onboardingWindowController {
-            onboardingWindowController.presentAndRefresh()
-            return
-        }
-        let controller = OnboardingWindowController(
-            bootstrap: bootstrap,
-            onClose: { [weak self] in
-                self?.onboardingWindowController = nil
-            },
-            onCloudPick: { [weak self] provider in
-                guard let self else { return }
-                // Auto-assign sensible defaults for this provider so the user
-                // doesn't have to hunt through model menus after onboarding:
-                // a fast/cheap model for everyday text, the flagship for Ask
-                // Nugumi (which is multimodal and benefits from the smarter
-                // model when the screenshot needs understanding).
-                self.applyModelSelection(provider.preferredTextModelID, for: .textActions)
-                self.applyModelSelection(provider.preferredAskModelID, for: .askNugumi)
-            },
-            onCloudTest: { [weak self] provider in
-                await self?.runCloudTest(for: provider) ?? .failure("Internal error.")
-            },
-            onOllamaReady: { [weak self] modelID in
-                guard let self else { return }
-                // First-session Ollama setup just completed: lock in this
-                // model as the everyday-text default. Ask Nugumi stays on
-                // whatever it was — Ollama models don't support vision, so
-                // we don't auto-rewire that scope.
-                self.applyModelSelection(modelID, for: .textActions)
-            }
-        )
-        onboardingWindowController = controller
-        controller.presentAndRefresh()
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
         if let mouseMonitor {
             NSEvent.removeMonitor(mouseMonitor)
@@ -1728,58 +1840,59 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             button.imageScaling = .scaleNone
             button.toolTip = "Nugumi"
             button.target = self
-            button.action = #selector(openMainWindow)
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         self.statusItem = statusItem
     }
 
-    private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
-        let size = NSSize(width: 22, height: 22)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        let backgroundDiameter: CGFloat = 18.5
-        let backgroundOrigin = (size.width - backgroundDiameter) / 2
-        let backgroundRect = NSRect(
-            x: backgroundOrigin,
-            y: backgroundOrigin,
-            width: backgroundDiameter,
-            height: backgroundDiameter
-        )
-        NSColor(calibratedWhite: 0.12, alpha: 0.92).setFill()
-        NSBezierPath(ovalIn: backgroundRect).fill()
-
-        switch mode {
-        case .translate:
-            let paragraphStyle = NSMutableParagraphStyle()
-            paragraphStyle.alignment = .center
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 13.5, weight: .semibold),
-                .foregroundColor: NSColor.white,
-                .paragraphStyle: paragraphStyle
-            ]
-            ("あ" as NSString).draw(
-                in: NSRect(x: 0, y: 3.25, width: size.width, height: 16),
-                withAttributes: attributes
-            )
-        case .smartReply:
-            if let baseImage = NSImage(systemSymbolName: "bubble.left.fill", accessibilityDescription: nil) {
-                let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-                    .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
-                let symbol = baseImage.withSymbolConfiguration(config) ?? baseImage
-                let symbolSize = symbol.size
-                let drawRect = NSRect(
-                    x: (size.width - symbolSize.width) / 2,
-                    y: (size.height - symbolSize.height) / 2,
-                    width: symbolSize.width,
-                    height: symbolSize.height
-                )
-                symbol.draw(in: drawRect)
-            }
+    @MainActor
+    @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        let isContextClick = event?.type == .rightMouseUp
+            || (event?.modifierFlags.contains(.control) ?? false)
+        if isContextClick, let button = statusItem?.button {
+            let menu = makeStatusBarMenu()
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
+        } else {
+            openMainWindow()
         }
+    }
 
-        image.unlockFocus()
+    @MainActor
+    private func makeStatusBarMenu() -> NSMenu {
+        let menu = NSMenu()
+        if isRunningFromAppBundle {
+            let updates = NSMenuItem(title: "Check for updates...", action: #selector(checkForUpdates), keyEquivalent: "")
+            updates.target = self
+            menu.addItem(updates)
+        }
+        let contact = NSMenuItem(title: "Contact me...", action: #selector(contactSupport), keyEquivalent: "")
+        contact.target = self
+        menu.addItem(contact)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Nugumi", action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+        return menu
+    }
+
+    /// The Nugumi pixel character with no background, rendered in its own colours
+    /// (so the eyes and nose stay visible — a template would flatten it to a blob).
+    private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
+        let renderSize = NSSize(width: 42, height: 34)
+        let mascot = PetMascotView(frame: NSRect(origin: .zero, size: renderSize))
+        mascot.wantsLayer = false  // draw straight via draw(_:) so off-window cacheDisplay is reliable
+        mascot.apply(state: .idle, mode: mode.translationMode)
+        guard let rep = mascot.bitmapImageRepForCachingDisplay(in: mascot.bounds) else {
+            return NSApp.applicationIconImage
+        }
+        mascot.cacheDisplay(in: mascot.bounds, to: rep)
+
+        let targetHeight: CGFloat = 20
+        let image = NSImage(size: NSSize(width: renderSize.width * targetHeight / renderSize.height, height: targetHeight))
+        image.addRepresentation(rep)
         image.isTemplate = false
         return image
     }
@@ -2510,7 +2623,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         case .serverUnavailable, .modelMissing, .signInRequired:
             controller?.close()
             bootstrap.refresh()
-            presentOnboardingWindow()
+            presentMainWindow(section: .aiEngine)
             return true
         case .invalidAPIKey(let provider):
             controller?.close()
@@ -2803,7 +2916,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     @objc private func openOnboardingWindow() {
-        presentOnboardingWindow()
+        presentMainWindow(section: .aiEngine)
     }
 
     @MainActor
@@ -2826,15 +2939,23 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     @objc private func openMainWindow() {
+        presentMainWindow()
+    }
+
+    /// Opens (or focuses) the main window, optionally jumping to a section. This
+    /// is also the entry point for "setup" — the AI Engine section now hosts the
+    /// full backend setup flow that used to live in a standalone window.
+    @MainActor
+    private func presentMainWindow(section: MainWindowSection? = nil) {
         if let mainWindowController {
-            mainWindowController.presentAndFocus()
+            mainWindowController.presentAndFocus(section: section)
             return
         }
         let controller = MainWindowController(host: self) { [weak self] in
             self?.mainWindowController = nil
         }
         mainWindowController = controller
-        controller.presentAndFocus()
+        controller.presentAndFocus(section: section)
     }
 
     @MainActor
@@ -3313,7 +3434,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func runCloudTest(for provider: CloudProvider) async -> CloudTestResult {
+    func runCloudTest(for provider: CloudProvider) async -> CloudTestResult {
         let model: LLMModel
         let client: any LLMBackend
         switch provider {
@@ -5578,7 +5699,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     private static let mascotSize = NSSize(width: 42, height: 34)
-    private static let appIconSize = NSSize(width: 14, height: 14)
+    private static let appIconSize = NSSize(width: 13, height: 13)
     private static let panelPadding: CGFloat = 6
     private static let panelSize = NSSize(
         width: mascotSize.width + panelPadding * 2,
@@ -5794,7 +5915,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
             self?.invokeRewriteMode()
         }
 
-        refreshAppIcon()
+        refreshStyleBadge()
         subscribeToFrontmostAppChanges()
     }
 
@@ -5805,30 +5926,24 @@ final class PetController: NSObject, NSTextFieldDelegate {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.refreshAppIcon()
+                self?.refreshStyleBadge()
             }
         }
     }
 
-    private func refreshAppIcon() {
-        guard !isReadyState, !isThinking, !isPromptVisible else {
-            appIconView.isHidden = true
-            return
+    /// Dresses the pet in the writing register Nugumi will use for the frontmost app
+    /// (formal = hat + mustache, casual = cap, polite = bare). Uses the app-based
+    /// category only — deliberately not the AppleScript URL read — so passively
+    /// switching apps never triggers an Automation prompt. The legacy corner badge
+    /// view stays hidden.
+    private func refreshStyleBadge() {
+        appIconView.isHidden = true
+        guard let runningApp = NSWorkspace.shared.frontmostApplication,
+              runningApp.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return // keep the last register while Nugumi itself is frontmost
         }
-        guard let runningApp = NSWorkspace.shared.frontmostApplication else {
-            appIconView.isHidden = true
-            return
-        }
-        if runningApp.bundleIdentifier == Bundle.main.bundleIdentifier {
-            appIconView.isHidden = true
-            return
-        }
-        if let icon = runningApp.icon {
-            appIconView.image = icon
-            appIconView.isHidden = false
-        } else {
-            appIconView.isHidden = true
-        }
+        let category = AppCategoryClassifier.category(for: runningApp.bundleIdentifier)
+        petView.setWritingStyle(WritingStyle.resolved(for: category))
     }
 
     func show() {
@@ -6153,7 +6268,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
             panel.ignoresMouseEvents = true
             petView.allowsClickWhenNotReady = false
             petView.apply(state: .idle, mode: currentMode, emotion: .neutral)
-            refreshAppIcon()
+            refreshStyleBadge()
         }
     }
 
@@ -6525,7 +6640,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         tabInterceptor?.disable()
         tabInterceptor = nil
         petView.apply(state: .idle, mode: currentMode)
-        refreshAppIcon()
+        refreshStyleBadge()
     }
 
     func showThinking() {
@@ -6559,7 +6674,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         petView.allowsClickWhenNotReady = false
         petView.onDragRequested = nil
         petView.apply(state: .idle, mode: currentMode)
-        refreshAppIcon()
+        refreshStyleBadge()
     }
 
     func pointTemporarily(at destination: NSPoint, holdDuration: TimeInterval = 3.0) {
@@ -6583,7 +6698,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
             Task { @MainActor [weak self] in
                 self?.pointingTarget = nil
                 self?.pointingReturnTimer = nil
-                self?.refreshAppIcon()
+                self?.refreshStyleBadge()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -6623,7 +6738,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         currentMode = mode
         guard !isPromptVisible else { return }
         petView.apply(state: selectedText == nil && !isReadyLockedUntilPanelCloses ? .idle : .ready, mode: currentMode)
-        refreshAppIcon()
+        refreshStyleBadge()
     }
 
     private func startTracking() {
@@ -7038,6 +7153,15 @@ final class PetMascotView: NSView {
     private var mode: TranslationMode = .selection
     private var emotion: AskNugumiEmotion = .neutral
     private var animationFrame = 0
+    /// Writing register dressed onto the character: formal = top hat + mustache,
+    /// casual = cap, polite = bare (no accessory).
+    private var writingStyle: WritingStyle = .polite
+
+    func setWritingStyle(_ style: WritingStyle) {
+        guard writingStyle != style else { return }
+        writingStyle = style
+        needsDisplay = true
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -7136,14 +7260,98 @@ final class PetMascotView: NSView {
             y: floor((bounds.height - spriteSize.height) / 2) + 1 + spriteYOffset
         )
 
+        let accessory = styleAccessoryCells(rowCount: rows.count, faceOffset: currentFaceOffset())
+
+        // Combined silhouette of body + accessory, used to stamp a thin dark rim
+        // so the pale character stays legible on light backgrounds.
+        var occupied = Set<MascotCell>()
+        for (rowIndex, row) in rows.enumerated() {
+            for (columnIndex, pixel) in row.enumerated() where color(for: pixel) != nil {
+                occupied.insert(MascotCell(col: columnIndex, row: rowIndex))
+            }
+        }
+        for cell in accessory { occupied.insert(MascotCell(col: cell.col, row: cell.row)) }
+
         drawPixelShadow(origin: origin)
+        drawSpriteOutline(occupied, origin: origin, cellSize: cellSize, rowCount: rows.count)
         drawPixelTail(origin: origin, cellSize: cellSize)
         drawPixelRows(rows, origin: origin, cellSize: cellSize)
+        drawAccessoryCells(accessory, origin: origin, cellSize: cellSize, rowCount: rows.count)
         if state == .ready {
             drawPixelActionBadge()
         }
         if state == .thinking {
             drawThinkingBadge()
+        }
+    }
+
+    private struct MascotCell: Hashable { let col: Int; let row: Int }
+
+    private func mascotCellRect(col: Int, row: Int, origin: NSPoint, cellSize: CGFloat, rowCount: Int) -> NSRect {
+        NSRect(
+            x: origin.x + CGFloat(col) * cellSize,
+            y: origin.y + CGFloat(rowCount - row - 1) * cellSize,
+            width: cellSize,
+            height: cellSize
+        )
+    }
+
+    /// One soft cell in every empty 4-neighbor of the silhouette → a 1-cell rim.
+    /// A muted, semi-transparent slate (not hard black) so it reads as a gentle
+    /// edge on light backgrounds without looking like a heavy outline.
+    private func drawSpriteOutline(_ occupied: Set<MascotCell>, origin: NSPoint, cellSize: CGFloat, rowCount: Int) {
+        NSColor(srgbRed: 0.40, green: 0.43, blue: 0.49, alpha: 0.6).setFill()
+        for cell in occupied {
+            let neighbors = [
+                MascotCell(col: cell.col - 1, row: cell.row),
+                MascotCell(col: cell.col + 1, row: cell.row),
+                MascotCell(col: cell.col, row: cell.row - 1),
+                MascotCell(col: cell.col, row: cell.row + 1),
+            ]
+            for n in neighbors where !occupied.contains(n) {
+                NSBezierPath(rect: mascotCellRect(col: n.col, row: n.row, origin: origin, cellSize: cellSize, rowCount: rowCount)).fill()
+            }
+        }
+    }
+
+    /// Pixel cells for the current register's accessory. `row` is measured from the
+    /// sprite top (row 0); negative rows sit just above the head.
+    private func styleAccessoryCells(rowCount: Int, faceOffset: Int) -> [(col: Int, row: Int, color: NSColor)] {
+        switch writingStyle {
+        case .polite:
+            return []
+        case .formal:
+            let hat = NSColor(srgbRed: 0.16, green: 0.17, blue: 0.21, alpha: 1)
+            let band = NSColor(srgbRed: 0.55, green: 0.16, blue: 0.20, alpha: 1)
+            var cells: [(col: Int, row: Int, color: NSColor)] = []
+            // Top hat: wide brim, red hatband, narrow crown above. The hat is
+            // fixed to the head; only the mustache tracks the face's idle drift.
+            for c in 4...11 { cells.append((c, 1, hat)) }      // brim
+            for c in 5...10 { cells.append((c, 0, band)) }     // hatband
+            for c in 5...10 { cells.append((c, -1, hat)) }     // crown
+            for c in 5...10 { cells.append((c, -2, hat)) }     // crown top
+            // Tidy mustache centered under the nose, shifted with the face.
+            for c in [5, 6, 8, 9] { cells.append((c + faceOffset, 8, hat)) }
+            return cells
+        case .casual:
+            let cap = NSColor(srgbRed: 0.20, green: 0.52, blue: 0.50, alpha: 1)
+            let capDark = NSColor(srgbRed: 0.13, green: 0.40, blue: 0.39, alpha: 1)
+            var cells: [(col: Int, row: Int, color: NSColor)] = []
+            // Baseball cap: rounded crown sitting up-right, a flat visor jutting left.
+            for c in 6...10 { cells.append((c, -1, cap)) }     // crown top
+            for c in 5...11 { cells.append((c, 0, cap)) }      // crown
+            for c in 5...12 { cells.append((c, 1, cap)) }      // crown base (right side)
+            for c in 1...4 { cells.append((c, 1, capDark)) }   // visor jutting left
+            cells.append((1, 2, capDark))                       // visor tip droop
+            cells.append((2, 2, capDark))
+            return cells
+        }
+    }
+
+    private func drawAccessoryCells(_ cells: [(col: Int, row: Int, color: NSColor)], origin: NSPoint, cellSize: CGFloat, rowCount: Int) {
+        for cell in cells {
+            cell.color.setFill()
+            NSBezierPath(rect: mascotCellRect(col: cell.col, row: cell.row, origin: origin, cellSize: cellSize, rowCount: rowCount)).fill()
         }
     }
 
@@ -7181,6 +7389,12 @@ final class PetMascotView: NSView {
         default:
             return 0
         }
+    }
+
+    /// Horizontal drift of the face this frame — the mustache rides along so it
+    /// stays under the nose. Only the neutral idle animation shifts the face.
+    private func currentFaceOffset() -> Int {
+        state == .idle && emotion == .neutral ? idleFaceOffset() : 0
     }
 
     private func spriteRows() -> [String] {
@@ -10093,6 +10307,28 @@ enum WritingStyle: String, CaseIterable, Codable {
             return "casual register — the way you'd write to a close friend. In English: natural casual capitalization (still capitalize names and sentence starts). In Korean: use 반말 (-해, -야, -지), never 해요체 and never 합쇼체. In Japanese: use plain form (だ/する). In Russian: use ты-forms. Lighter punctuation — periods optional at the ends of short messages. Conversational rhythm."
         }
     }
+
+    /// The style currently in effect for `category`, honoring the user's saved
+    /// per-category choice and falling back to the category default.
+    static func resolved(for category: AppCategory) -> WritingStyle {
+        let key = "writingStyle.\(category.rawValue)"
+        if let raw = UserDefaults.standard.string(forKey: key),
+           let style = WritingStyle(rawValue: raw) {
+            return style
+        }
+        return category.defaultWritingStyle
+    }
+}
+
+extension AppCategory {
+    /// Default register when the user hasn't picked one for this category.
+    var defaultWritingStyle: WritingStyle {
+        switch self {
+        case .personalMessages, .other: return .casual
+        case .workMessages: return .polite
+        case .email: return .formal
+        }
+    }
 }
 
 enum CleanupLevel: String, CaseIterable, Codable {
@@ -10144,8 +10380,31 @@ enum AppCategoryClassifier {
         "com.hnc.Discord": .personalMessages,
     ]
 
+    /// User-added app→category assignments. Take precedence over `bundleIDMap`.
+    /// Kept in sync by `NugumiApp` from persisted `CustomAppAssignment`s.
+    static var userOverrides: [String: AppCategory] = [:]
+    /// Built-in `bundleIDMap` apps the user removed — treated as unclassified.
+    static var suppressedBuiltIns: Set<String> = []
+    /// URL substring → category rules, applied when the frontmost app is a browser.
+    static var urlRules: [(pattern: String, category: AppCategory)] = []
+
+    /// Browsers whose active-tab URL can be read via AppleScript, keyed by bundle ID.
+    static let browserScriptNames: [String: String] = [
+        "com.apple.Safari": "Safari",
+        "com.apple.SafariTechnologyPreview": "Safari Technology Preview",
+        "com.google.Chrome": "Google Chrome",
+        "com.google.Chrome.canary": "Google Chrome Canary",
+        "com.microsoft.edgemac": "Microsoft Edge",
+        "com.brave.Browser": "Brave Browser",
+        "company.thebrowser.Browser": "Arc",
+        "com.operasoftware.Opera": "Opera",
+        "com.vivaldi.Vivaldi": "Vivaldi",
+    ]
+
     static func category(for bundleID: String?) -> AppCategory {
         guard let id = bundleID else { return .other }
+        if let override = userOverrides[id] { return override }
+        if suppressedBuiltIns.contains(id) { return .other }
         if let mapped = bundleIDMap[id] { return mapped }
         let lower = id.lowercased()
         if lower.contains("mail") || lower.contains("outlook") { return .email }
@@ -10155,8 +10414,89 @@ enum AppCategoryClassifier {
 
     static func detectFrontmost() -> (bundleID: String?, category: AppCategory) {
         let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        // URL rules win when the user has any AND the frontmost app is a browser
+        // whose tab URL we can read. Skipping the AppleScript call when there are
+        // no rules means non-users never trigger an Automation permission prompt.
+        if !urlRules.isEmpty,
+           let bundleID,
+           let scriptName = browserScriptNames[bundleID],
+           let url = BrowserURLReader.currentURL(appName: scriptName,
+                                                 isSafari: bundleID.hasPrefix("com.apple.Safari")) {
+            let lower = url.lowercased()
+            if let match = urlRules.first(where: { lower.contains($0.pattern.lowercased()) }) {
+                return (bundleID, match.category)
+            }
+        }
         return (bundleID, category(for: bundleID))
     }
+
+    /// Best-effort bundle ID of the app that opens https URLs (the default browser).
+    static func defaultBrowserBundleID() -> String? {
+        guard let url = URL(string: "https://example.com"),
+              let appURL = NSWorkspace.shared.urlForApplication(toOpen: url)
+        else { return nil }
+        return Bundle(url: appURL)?.bundleIdentifier
+    }
+
+    /// Triggers the system Automation (Apple Events) prompt for one browser by
+    /// probing permission. No real event is sent. Blocks on the dialog, so call
+    /// this off the main thread.
+    static func requestAutomationPermission(forBrowser bundleID: String) {
+        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
+        guard let desc = target.aeDesc else { return }
+        _ = AEDeterminePermissionToAutomateTarget(desc, typeWildCard, typeWildCard, true)
+    }
+
+    /// URL rules read a browser's active-tab URL via AppleScript, which needs
+    /// Automation permission. Proactively surface the system prompt for the
+    /// default browser (and the frontmost one, if it's a different scriptable
+    /// browser) so a freshly added rule works right away instead of silently
+    /// failing until permission is granted. macOS only re-prompts when the
+    /// decision is still undetermined, so calling this repeatedly is harmless.
+    static func promptAutomationForLikelyBrowsers() {
+        var targets: [String] = []
+        if let def = defaultBrowserBundleID(), browserScriptNames[def] != nil {
+            targets.append(def)
+        }
+        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           browserScriptNames[front] != nil, !targets.contains(front) {
+            targets.append(front)
+        }
+        guard !targets.isEmpty else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            for bundleID in targets {
+                requestAutomationPermission(forBrowser: bundleID)
+            }
+        }
+    }
+}
+
+/// A user-defined "URL contains X → category" rule, persisted in UserDefaults.
+struct URLCategoryRule: Codable, Equatable {
+    let pattern: String
+    let category: AppCategory
+}
+
+/// Reads the active tab URL of a scriptable browser via AppleScript. Returns nil
+/// if the browser isn't running, has no window, or Automation permission is denied.
+enum BrowserURLReader {
+    static func currentURL(appName: String, isSafari: Bool) -> String? {
+        let source = isSafari
+            ? "tell application \"\(appName)\" to get URL of front document"
+            : "tell application \"\(appName)\" to get URL of active tab of front window"
+        guard let script = NSAppleScript(source: source) else { return nil }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        guard error == nil else { return nil }
+        return result.stringValue
+    }
+}
+
+/// A user-added app→category assignment, persisted in UserDefaults.
+struct CustomAppAssignment: Codable, Equatable {
+    let bundleID: String
+    let name: String
+    let category: AppCategory
 }
 
 enum CloudProvider: String, Codable, CaseIterable {
@@ -10185,12 +10525,16 @@ enum CloudProvider: String, Codable, CaseIterable {
 
     var keychainService: String { "com.nugumi.app.\(rawValue.lowercased())" }
 
+    /// Single brand label used everywhere the provider is named — the
+    /// Cloud access rows and the model picker section headers — so the two
+    /// agree. The API-key vs subscription distinction is carried by the
+    /// sign-in button ("Add key" vs "Sign in"), not the name.
     var displayName: String {
         switch self {
         case .openAI:      "OpenAI"
-        case .openAICodex: "ChatGPT subscription"
+        case .openAICodex: "ChatGPT"
         case .anthropic:   "Anthropic"
-        case .gemini:      "Google Gemini"
+        case .gemini:      "Google"
         }
     }
 
@@ -10354,7 +10698,77 @@ struct OllamaClient: LLMBackend {
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> AskNugumiResponse {
-        throw TranslationError.ollama("Ask Nugumi is available with a cloud provider.")
+        if image != nil, !LLMModel.option(id: model).supportsImages {
+            throw TranslationError.ollama("Selected Ollama model doesn't support images.")
+        }
+
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty else {
+            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+        }
+
+        var messages: [ChatMessage] = [
+            ChatMessage(role: "system", content: AskNugumiPromptBuilder.systemPrompt)
+        ]
+        for turn in history {
+            messages.append(ChatMessage(role: "user", content: turn.question))
+            messages.append(ChatMessage(role: "assistant", content: turn.answer))
+        }
+        let prompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
+        messages.append(ChatMessage(role: "user", content: prompt, images: image.map { [$0.base64String] }))
+
+        let url = baseURL.appending(path: "api/chat")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = try JSONEncoder().encode(
+            ChatRequest(model: model, stream: true, think: thinkingLevel.rawValue, messages: messages)
+        )
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await URLSession.shared.bytes(for: request)
+        } catch let urlError as URLError where urlError.code == .cannotConnectToHost
+            || urlError.code == .cannotFindHost
+            || urlError.code == .networkConnectionLost
+            || urlError.code == .notConnectedToInternet {
+            throw TranslationError.serverUnavailable
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw TranslationError.ollama("invalid response")
+        }
+        if httpResponse.statusCode == 404 {
+            throw TranslationError.modelMissing(model)
+        }
+        if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+            throw TranslationError.signInRequired
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw TranslationError.ollama("HTTP \(httpResponse.statusCode)")
+        }
+
+        var answer = ""
+        let decoder = JSONDecoder()
+        for try await line in bytes.lines {
+            guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
+            if let streamError = try? decoder.decode(StreamError.self, from: data),
+               let message = streamError.error {
+                throw OllamaClient.classifyStreamError(message: message, model: model)
+            }
+            let decoded = try decoder.decode(ChatResponse.self, from: data)
+            answer += decoded.message.content
+            onPartial(answer)
+            if decoded.done { break }
+        }
+
+        let parsed = AskNugumiResponse.parse(answer)
+        guard !parsed.message.isEmpty else {
+            throw TranslationError.emptyResponse
+        }
+        return parsed
     }
 
     func translate(
@@ -11563,6 +11977,57 @@ enum CodexModelDiscovery {
 
 extension Notification.Name {
     static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
+    static let ollamaModelsUpdated = Notification.Name("com.nugumi.ollama.modelsUpdated")
+}
+
+// MARK: Discovered Ollama models (live /api/tags + cached fallback)
+
+/// Thread-safe cache of Ollama model names discovered from the running
+/// server's `/api/tags`. Fed by OllamaBootstrap's existing tags request (see
+/// Bootstrap.swift `modelsPresent()`), persisted to UserDefaults so the menu
+/// has something to show before the first refresh lands. Lives outside any
+/// actor so `LLMModel.ollamaModels` can be read from any thread.
+enum OllamaModelCache {
+    private static let cacheKey = "ollama.discoveredModels.v1"
+    private static let visionKey = "ollama.visionModels.v1"
+    private static let lock = NSLock()
+    private static var memoNames: [String]?
+    private static var memoVision: Set<String>?
+
+    /// Model names from the last successful `/api/tags`. Empty until the
+    /// server is reachable.
+    static var discovered: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        if let memoNames { return memoNames }
+        let stored = UserDefaults.standard.stringArray(forKey: cacheKey) ?? []
+        memoNames = stored
+        return stored
+    }
+
+    /// Names the server reported as vision-capable (`/api/show` capabilities
+    /// include "vision"). Drives `supportsImages` so only these appear in the
+    /// vision-only Ask Nugumi picker.
+    static var visionCapable: Set<String> {
+        lock.lock()
+        defer { lock.unlock() }
+        if let memoVision { return memoVision }
+        let stored = Set(UserDefaults.standard.stringArray(forKey: visionKey) ?? [])
+        memoVision = stored
+        return stored
+    }
+
+    static func update(names: [String], vision: Set<String>) {
+        lock.lock()
+        let changed = memoNames != names || memoVision != vision
+        memoNames = names
+        memoVision = vision
+        lock.unlock()
+        guard changed else { return }
+        UserDefaults.standard.set(names, forKey: cacheKey)
+        UserDefaults.standard.set(Array(vision), forKey: visionKey)
+        NotificationCenter.default.post(name: .ollamaModelsUpdated, object: nil)
+    }
 }
 
 // MARK: OpenAICodexClient — Responses API + Cloudflare allow-list headers
@@ -12146,6 +12611,10 @@ extension NugumiApp: SettingsHost {
         provider.hasCredentials
     }
 
+    var bootstrapState: BootstrapState { bootstrap.state }
+    var ollamaModels: [OllamaModelOption] { bootstrap.models }
+    var requiresOllamaAccount: Bool { bootstrap.requiresOllamaAccount }
+
     func makeSettingsSnapshot() -> SettingsSnapshot {
         var styles: [AppCategory: WritingStyle] = [:]
         for category in AppCategory.allCases {
@@ -12168,8 +12637,95 @@ extension NugumiApp: SettingsHost {
             askNugumiModelID: askNugumiModelID,
             textThinkingLevel: textThinkingLevel,
             askNugumiThinkingLevel: askNugumiThinkingLevel,
-            shortcuts: shortcuts
+            shortcuts: shortcuts,
+            appsByCategory: appsByCategory(),
+            urlRulesByCategory: urlRulesByCategory()
         )
+    }
+
+    private func urlRulesByCategory() -> [AppCategory: [String]] {
+        var result: [AppCategory: [String]] = [:]
+        for category in AppCategory.allCases { result[category] = [] }
+        for rule in urlRules() {
+            result[rule.category, default: []].append(rule.pattern)
+        }
+        return result
+    }
+
+    private static let appsMigratedKey = "appCategoryDefaultsMigratedV1"
+
+    /// One-time: fold the built-in `bundleIDMap` defaults into the persisted
+    /// assignment list (installed apps only, de-duplicated by name). After this the
+    /// strip is built purely from the persisted list, so hardcoded defaults can no
+    /// longer collide with user edits — which is what produced duplicate icons (two
+    /// Telegram bundle IDs) and apps re-appearing after add/remove.
+    private func migrateDefaultAppsIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: Self.appsMigratedKey) else { return }
+        UserDefaults.standard.set(true, forKey: Self.appsMigratedKey)
+
+        var list = customAppAssignments()
+        var seenBundles = Set(list.map(\.bundleID))
+        var seenNames = Set(list.map { $0.name.lowercased() })
+        let suppressed = suppressedBuiltInApps()
+
+        for (bundleID, category) in AppCategoryClassifier.bundleIDMap.sorted(by: { $0.key < $1.key }) {
+            guard !suppressed.contains(bundleID),
+                  !seenBundles.contains(bundleID),
+                  let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+            else { continue }
+            let name = FileManager.default.displayName(atPath: url.path)
+                .replacingOccurrences(of: ".app", with: "")
+            guard !seenNames.contains(name.lowercased()) else { continue }
+            seenBundles.insert(bundleID)
+            seenNames.insert(name.lowercased())
+            list.append(CustomAppAssignment(bundleID: bundleID, name: name, category: category))
+        }
+        saveCustomAppAssignments(list)
+    }
+
+    /// Apps shown per category in the Style page — built purely from the persisted
+    /// assignment list (defaults migrated in once), de-duplicated by app name so the
+    /// same app never shows twice. Icons are resolved lazily in the UI by bundle ID.
+    private func appsByCategory() -> [AppCategory: [AppRef]] {
+        migrateDefaultAppsIfNeeded()
+        var result: [AppCategory: [AppRef]] = [:]
+        for category in AppCategory.allCases { result[category] = [] }
+
+        var seenNames: Set<String> = []
+        for assignment in customAppAssignments() {
+            let nameKey = assignment.name.lowercased()
+            guard !seenNames.contains(nameKey) else { continue }
+            seenNames.insert(nameKey)
+            result[assignment.category, default: []].append(
+                AppRef(bundleID: assignment.bundleID, name: assignment.name, isBuiltIn: false)
+            )
+        }
+        for category in result.keys {
+            result[category]?.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+        return result
+    }
+
+    /// Presents an open panel scoped to applications so the user can assign any
+    /// installed app to a Style category.
+    @MainActor
+    private func presentAppPicker(for category: AppCategory) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Add"
+        panel.message = "Choose an app to assign to “\(category.displayName)”."
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let bundleID = Bundle(url: url)?.bundleIdentifier
+        else { return }
+        let name = FileManager.default.displayName(atPath: url.path)
+            .replacingOccurrences(of: ".app", with: "")
+        addCustomApp(bundleID: bundleID, name: name, category: category)
+        mainWindowController?.bridge.refreshFromHost()
     }
 
     func performSettingsIntent(_ intent: SettingsIntent) {
@@ -12201,6 +12757,14 @@ extension NugumiApp: SettingsHost {
         case .setWritingStyle(let style, let category):
             setWritingStyle(style, for: category)
             updateMenuState()
+        case .addAppToCategory(let category):
+            presentAppPicker(for: category)
+        case .removeApp(let bundleID):
+            removeApp(bundleID: bundleID)
+        case .addURLRule(let pattern, let category):
+            addURLRule(pattern: pattern, category: category)
+        case .removeURLRule(let pattern, let category):
+            removeURLRule(pattern: pattern, category: category)
         case .setThinkingLevel(let level, let scope):
             guard level != thinkingLevel(for: scope) else { return }
             setThinkingLevel(level, for: scope)
@@ -12226,6 +12790,23 @@ extension NugumiApp: SettingsHost {
             presentCredentialPrompt(for: provider) { [weak self] _ in
                 self?.mainWindowController?.bridge.refreshFromHost()
             }
+        case .openOllamaInstall:
+            bootstrap.openInstallPage()
+        case .launchOllama:
+            bootstrap.launchOllamaApp()
+        case .openOllamaSignIn:
+            bootstrap.openOllamaForSignIn()
+        case .refreshBootstrap:
+            bootstrap.refresh()
+        case .startModelPull(let modelID):
+            // Remember the model the user just requested so that when its pull
+            // finishes we can auto-promote it to the everyday-text default —
+            // mirroring the old onboarding window's onOllamaReady behavior.
+            pendingOllamaAutoSelectID = modelID
+            bootstrap.startModelPull(for: modelID)
+        case .cancelModelPull(let modelID):
+            if pendingOllamaAutoSelectID == modelID { pendingOllamaAutoSelectID = nil }
+            bootstrap.cancelPull(for: modelID)
         case .checkForUpdates:
             checkForUpdates()
         case .contactSupport:
@@ -12233,7 +12814,7 @@ extension NugumiApp: SettingsHost {
         case .openPermissionsHelp:
             presentPermissionsWindow(force: true)
         case .openSetup:
-            presentOnboardingWindow()
+            presentMainWindow(section: .aiEngine)
         case .resetSettings:
             resetSettings()
         case .quit:

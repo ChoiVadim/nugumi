@@ -101,9 +101,17 @@ struct SettingsSnapshot {
     var textThinkingLevel: ThinkingLevel
     var askNugumiThinkingLevel: ThinkingLevel
     var shortcuts: [GlobalShortcutAction: GlobalShortcut]
+    var appsByCategory: [AppCategory: [AppRef]] = [:]
+    var urlRulesByCategory: [AppCategory: [String]] = [:]
 
     func writingStyle(for category: AppCategory) -> WritingStyle {
         writingStyles[category] ?? .casual
+    }
+    func apps(for category: AppCategory) -> [AppRef] {
+        appsByCategory[category] ?? []
+    }
+    func urlRules(for category: AppCategory) -> [String] {
+        urlRulesByCategory[category] ?? []
     }
     func modelID(for scope: ModelUseScope) -> String {
         scope == .textActions ? textModelID : askNugumiModelID
@@ -114,6 +122,14 @@ struct SettingsSnapshot {
     func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
         shortcuts[action] ?? action.defaultShortcut
     }
+}
+
+/// One app shown in a category's icon strip. `isBuiltIn` apps come from the
+/// classifier's static map (removal suppresses them); others are user-added.
+struct AppRef: Equatable, Hashable {
+    let bundleID: String
+    let name: String
+    let isBuiltIn: Bool
 }
 
 // MARK: - Settings intents (writes with side effects)
@@ -129,12 +145,22 @@ enum SettingsIntent {
     case setReplacementMode(ReplacementMode)
     case setCleanupLevel(CleanupLevel)
     case setWritingStyle(WritingStyle, AppCategory)
+    case addAppToCategory(AppCategory)
+    case removeApp(String)
+    case addURLRule(String, AppCategory)
+    case removeURLRule(String, AppCategory)
     case setThinkingLevel(ThinkingLevel, ModelUseScope)
     case chooseModel(String, ModelUseScope)
     case toggleInvisibility
     case recordShortcut(GlobalShortcutAction)
     case resetShortcuts
     case signInCloud(CloudProvider)
+    case openOllamaInstall
+    case launchOllama
+    case openOllamaSignIn
+    case refreshBootstrap
+    case startModelPull(String)
+    case cancelModelPull(String)
     case checkForUpdates
     case contactSupport
     case openPermissionsHelp
@@ -154,6 +180,10 @@ protocol SettingsHost: AnyObject {
     var snippets: SnippetsStore { get }
     var history: TranslationHistoryStore { get }
     func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
+    func runCloudTest(for provider: CloudProvider) async -> CloudTestResult
+    var bootstrapState: BootstrapState { get }
+    var ollamaModels: [OllamaModelOption] { get }
+    var requiresOllamaAccount: Bool { get }
     var appVersionString: String { get }
     var isAppBundle: Bool { get }
 }
@@ -169,6 +199,15 @@ final class NugumiSettingsBridge: ObservableObject {
 
     @Published var section: MainWindowSection = .home
     @Published private(set) var settings: SettingsSnapshot
+    @Published private(set) var bootstrap: BootstrapState
+
+    /// Local Ollama models offered in setup, plus whether an Ollama account is
+    /// required for the current selection. Read once — the set is static for a
+    /// session; live status lives in `bootstrap`.
+    let ollamaModels: [OllamaModelOption]
+    let requiresOllamaAccount: Bool
+
+    private var modelListObservers: [NSObjectProtocol] = []
 
     init(host: any SettingsHost) {
         self.host = host
@@ -176,6 +215,23 @@ final class NugumiSettingsBridge: ObservableObject {
         self.snippets = host.snippets
         self.history = host.history
         self.settings = host.makeSettingsSnapshot()
+        self.bootstrap = host.bootstrapState
+        self.ollamaModels = host.ollamaModels
+        self.requiresOllamaAccount = host.requiresOllamaAccount
+
+        // Re-render the model picker when live discovery updates either catalog.
+        for name in [Notification.Name.ollamaModelsUpdated, .codexModelsUpdated] {
+            let token = NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            modelListObservers.append(token)
+        }
+    }
+
+    deinit {
+        modelListObservers.forEach(NotificationCenter.default.removeObserver)
     }
 
     /// Re-read from the host. Called after every `perform`, and externally by the
@@ -184,6 +240,14 @@ final class NugumiSettingsBridge: ObservableObject {
     func refreshFromHost() {
         guard let host else { return }
         settings = host.makeSettingsSnapshot()
+        bootstrap = host.bootstrapState
+    }
+
+    /// Run a connectivity test for a cloud provider and return the result so the
+    /// caller can surface it inline.
+    func testCloud(_ provider: CloudProvider) async -> CloudTestResult {
+        guard let host else { return .failure("Not available.") }
+        return await host.runCloudTest(for: provider)
     }
 
     func perform(_ intent: SettingsIntent) {
@@ -236,9 +300,9 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     var id: String { rawValue }
 
     static var primary: [MainWindowSection] {
-        [.home, .insights, .dictionary, .snippets, .style, .languages, .aiEngine, .shortcuts]
+        [.home, .insights, .style, .languages, .aiEngine, .dictionary, .snippets]
     }
-    static var secondary: [MainWindowSection] { [.settings, .help] }
+    static var secondary: [MainWindowSection] { [.shortcuts, .settings, .help] }
 
     var title: String {
         switch self {
@@ -319,7 +383,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.onClose = onClose
 
         let window = MainWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 820),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -330,7 +394,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 940, height: 620)
-        window.setFrameAutosaveName("NugumiMainWindow")
+        window.setFrameAutosaveName("NugumiMainWindowV2")
         window.isOpaque = false
         window.backgroundColor = .clear
         window.appearance = NSAppearance(named: .darkAqua)
@@ -428,17 +492,17 @@ struct SidebarView: View {
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 24, height: 24)
-            Text("Nugumi")
-                .font(.nugumiPixel(18))
-                .foregroundStyle(.white)
-                .fixedSize()
-            Text("Beta")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(FlowTheme.accent))
-                .fixedSize()
+            // "Nugumi" with a small round β badge raised like a superscript.
+            HStack(alignment: .top, spacing: 1) {
+                Text("Nugumi")
+                    .font(.nugumiPixel(18))
+                    .foregroundStyle(.white)
+                    .fixedSize()
+                Text("β")
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundStyle(FlowTheme.accent)
+                    .offset(y: -2)
+            }
             Spacer(minLength: 0)
         }
         .frame(height: 26)
@@ -495,7 +559,10 @@ struct DetailCard<Content: View>: View {
     var body: some View {
         content()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(VisualEffectBackground(material: .menu))
+            .background(
+                VisualEffectBackground(material: .menu)
+                    .overlay(Color.black.opacity(0.26))
+            )
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -520,23 +587,31 @@ struct DetailContainer<Content: View>: View {
 
     var body: some View {
         DetailCard {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(title)
-                            .font(FlowTheme.serif(30))
-                            .foregroundStyle(FlowTheme.ink)
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.system(size: 14))
-                                .foregroundStyle(FlowTheme.inkSecondary)
-                        }
+            VStack(alignment: .leading, spacing: 0) {
+                // Pinned header — only the content below scrolls.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(FlowTheme.serif(30))
+                        .foregroundStyle(FlowTheme.ink)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 14))
+                            .foregroundStyle(FlowTheme.inkSecondary)
                     }
-                    content()
                 }
-                .padding(38)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(ScrollerConfigurator())
+                .padding(.horizontal, 38)
+                .padding(.top, 38)
+                .padding(.bottom, 20)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 26) {
+                        content()
+                    }
+                    .padding(.horizontal, 38)
+                    .padding(.bottom, 38)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ScrollerConfigurator())
+                }
             }
         }
     }
@@ -545,11 +620,12 @@ struct DetailContainer<Content: View>: View {
 /// A bordered sub-panel inside a page.
 struct SubCard<Content: View>: View {
     var padding: CGFloat = 20
+    var fillHeight: Bool = false
     @ViewBuilder var content: () -> Content
     var body: some View {
         content()
             .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: fillHeight ? .infinity : nil, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(FlowTheme.subtleFill)
@@ -632,28 +708,27 @@ struct StatTile: View {
     let value: String
     let label: String
     var accent: Bool = false
-    var compact: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(value)
-                .font(FlowTheme.serif(compact ? 22 : 28, weight: .medium))
+                .font(FlowTheme.serif(28, weight: .medium))
                 .foregroundStyle(accent ? FlowTheme.accent : FlowTheme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             Text(label)
-                .font(.system(size: compact ? 11 : 12))
+                .font(.system(size: 12))
                 .foregroundStyle(FlowTheme.inkSecondary)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(compact ? 13 : 18)
+        .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: compact ? 12 : 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(FlowTheme.subtleFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: compact ? 12 : 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
     }
@@ -691,30 +766,73 @@ struct SettingRow<Trailing: View>: View {
     }
 }
 
-/// Square-ish heatmap grid reused by Home (compact) and Insights (full).
+/// A GitHub-style activity calendar that fills the available width: weekday
+/// labels down the left, square cells sized to the card, and a Less–More legend.
 struct ActivityHeatmap: View {
     let weeks: [[UsageStatsDayBucket]]
-    var cell: CGFloat = 13
-    var spacing: CGFloat = 3
 
-    private var maxWords: Int {
-        max(1, weeks.flatMap { $0 }.map(\.wordCount).max() ?? 1)
+    private let spacing: CGFloat = 5
+    private let labelWidth: CGFloat = 22
+    @State private var availableWidth: CGFloat = 0
+
+    private var maxWords: Int { max(1, weeks.flatMap { $0 }.map(\.wordCount).max() ?? 1) }
+    private var columns: Int { max(weeks.count, 1) }
+    private var cell: CGFloat {
+        guard availableWidth > 0 else { return 18 }
+        let usable = availableWidth - labelWidth - spacing * CGFloat(columns)
+        return max(14, min(36, usable / CGFloat(columns)))
+    }
+    private var gridHeight: CGFloat { cell * 7 + spacing * 6 }
+    private var weekdayLabels: [String] {
+        let calendar = Calendar.current
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        guard symbols.count == 7 else { return ["S", "M", "T", "W", "T", "F", "S"] }
+        let first = calendar.firstWeekday - 1
+        return (0..<7).map { symbols[(first + $0) % 7] }
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: spacing) {
-            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
-                VStack(spacing: spacing) {
-                    ForEach(week) { bucket in
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(fill(for: bucket))
-                            .frame(width: cell, height: cell)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                    .stroke(bucket.isToday ? FlowTheme.accent : .clear, lineWidth: 1.5)
-                            )
+        VStack(alignment: .leading, spacing: 12) {
+            GeometryReader { geo in
+                HStack(alignment: .top, spacing: spacing) {
+                    VStack(spacing: spacing) {
+                        ForEach(0..<7, id: \.self) { row in
+                            Text(weekdayLabels[row])
+                                .font(.system(size: 9))
+                                .foregroundStyle(FlowTheme.inkTertiary)
+                                .frame(width: labelWidth, height: cell, alignment: .leading)
+                        }
                     }
+                    HStack(spacing: spacing) {
+                        ForEach(weeks.indices, id: \.self) { column in
+                            VStack(spacing: spacing) {
+                                ForEach(weeks[column]) { bucket in
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .fill(fill(for: bucket))
+                                        .frame(width: cell, height: cell)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                .stroke(bucket.isToday ? FlowTheme.accent : .clear, lineWidth: 1.5)
+                                        )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)
                 }
+                .onAppear { availableWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, newValue in availableWidth = newValue }
+            }
+            .frame(height: gridHeight)
+
+            HStack(spacing: 5) {
+                Text("Less").font(.system(size: 10)).foregroundStyle(FlowTheme.inkTertiary)
+                ForEach(Array([0.12, 0.35, 0.58, 0.8, 1.0].enumerated()), id: \.offset) { _, value in
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(FlowTheme.accent.opacity(value))
+                        .frame(width: 11, height: 11)
+                }
+                Text("More").font(.system(size: 10)).foregroundStyle(FlowTheme.inkTertiary)
             }
         }
     }
