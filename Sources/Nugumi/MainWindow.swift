@@ -1,0 +1,727 @@
+import AppKit
+import Combine
+import SwiftUI
+
+// MARK: - Theme
+
+/// Flow-inspired flat, opaque palette. Deliberately NOT the frosted GlassHostView
+/// look used by the small panels — the main window is a calm cream + white sheet.
+enum FlowTheme {
+    /// The single accent — Nugumi green (#11766E).
+    static let accent = Color(red: 0.067, green: 0.463, blue: 0.431)
+    static let accentSoft = Color(red: 0.067, green: 0.463, blue: 0.431).opacity(0.22)
+
+    /// Two backgrounds only: translucent liquid glass everywhere (clear, shows the
+    /// window's NSVisualEffectView), and an opaque near-black settings container.
+    static let glass = Color.clear
+    static let card = Color.white.opacity(0.06)          // translucent gray settings panel
+
+    /// Text is white throughout.
+    static let ink = Color.white
+    static let inkSecondary = Color(white: 0.74)
+    static let inkTertiary = Color(white: 0.55)
+
+    static let hairline = Color.white.opacity(0.10)
+    static let subtleFill = Color.white.opacity(0.08)
+
+    static func serif(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight, design: .serif)
+    }
+}
+
+extension Font {
+    /// Pixelify wordmark. Reuse NugumiFont's resolved NSFont (which registers the
+    /// bundled Pixelify and falls back safely), then bridge to SwiftUI via CoreText
+    /// so the custom family resolves reliably under `swift run` and in the app.
+    static func nugumiPixel(_ size: CGFloat) -> Font {
+        let nsFont = NugumiFont.pixelPrompt(size: size)
+        return Font(CTFontCreateWithName(nsFont.fontName as CFString, size, nil))
+    }
+}
+
+/// Forces subtle, auto-hiding overlay scrollers even when macOS is set to
+/// "always show scroll bars". Drop inside a ScrollView's content so it can reach
+/// the backing `NSScrollView` via `enclosingScrollView`.
+struct ScrollerConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { Self.apply(from: view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { Self.apply(from: nsView) }
+    }
+
+    private static func apply(from view: NSView) {
+        guard let scrollView = view.enclosingScrollView else { return }
+        scrollView.scrollerStyle = .overlay
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerKnobStyle = .light
+    }
+}
+
+/// SwiftUI bridge to `NSVisualEffectView` so a container can use a real system
+/// material (the same dark translucent look as the status-bar dropdown menu)
+/// instead of a flat translucent fill.
+struct VisualEffectBackground: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        view.appearance = NSAppearance(named: .darkAqua)
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blendingMode
+    }
+}
+
+// MARK: - Settings snapshot (reads)
+
+/// Plain value-type mirror of every window-configurable setting. The host builds
+/// one cheaply from UserDefaults; the bridge re-reads it after each mutation.
+struct SettingsSnapshot {
+    var targetLanguage: TranslationLanguage
+    var draftTargetLanguage: TranslationLanguage
+    var floatingDefaultMode: FloatingButtonDefaultMode
+    var selectionDisplayMode: SelectionDisplayMode
+    var replacementMode: ReplacementMode
+    var cleanupLevel: CleanupLevel
+    var invisibilityEnabled: Bool
+    var writingStyles: [AppCategory: WritingStyle]
+    var textModelID: String
+    var askNugumiModelID: String
+    var textThinkingLevel: ThinkingLevel
+    var askNugumiThinkingLevel: ThinkingLevel
+    var shortcuts: [GlobalShortcutAction: GlobalShortcut]
+
+    func writingStyle(for category: AppCategory) -> WritingStyle {
+        writingStyles[category] ?? .casual
+    }
+    func modelID(for scope: ModelUseScope) -> String {
+        scope == .textActions ? textModelID : askNugumiModelID
+    }
+    func thinkingLevel(for scope: ModelUseScope) -> ThinkingLevel {
+        scope == .textActions ? textThinkingLevel : askNugumiThinkingLevel
+    }
+    func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
+        shortcuts[action] ?? action.defaultShortcut
+    }
+}
+
+// MARK: - Settings intents (writes with side effects)
+
+/// Every write the window can make. The host routes each case through the SAME
+/// code path the status-bar menu uses, so side effects (hotkey re-registration,
+/// sharing-type, status icon, analytics, cache invalidation) fire identically.
+enum SettingsIntent {
+    case setTargetLanguage(TranslationLanguage)
+    case setDraftTargetLanguage(TranslationLanguage)
+    case setFloatingDefaultMode(FloatingButtonDefaultMode)
+    case setSelectionDisplayMode(SelectionDisplayMode)
+    case setReplacementMode(ReplacementMode)
+    case setCleanupLevel(CleanupLevel)
+    case setWritingStyle(WritingStyle, AppCategory)
+    case setThinkingLevel(ThinkingLevel, ModelUseScope)
+    case chooseModel(String, ModelUseScope)
+    case toggleInvisibility
+    case recordShortcut(GlobalShortcutAction)
+    case resetShortcuts
+    case signInCloud(CloudProvider)
+    case checkForUpdates
+    case contactSupport
+    case openPermissionsHelp
+    case openSetup
+    case resetSettings
+    case quit
+}
+
+// MARK: - Host
+
+/// Implemented by `NugumiApp` (in App.swift, where the private settings live).
+@MainActor
+protocol SettingsHost: AnyObject {
+    func makeSettingsSnapshot() -> SettingsSnapshot
+    func performSettingsIntent(_ intent: SettingsIntent)
+    var usageStats: UsageStatsStore { get }
+    var snippets: SnippetsStore { get }
+    var history: TranslationHistoryStore { get }
+    func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
+    var appVersionString: String { get }
+    var isAppBundle: Bool { get }
+}
+
+// MARK: - Bridge (ObservableObject the SwiftUI tree binds to)
+
+@MainActor
+final class NugumiSettingsBridge: ObservableObject {
+    weak var host: (any SettingsHost)?
+    let usageStats: UsageStatsStore
+    let snippets: SnippetsStore
+    let history: TranslationHistoryStore
+
+    @Published var section: MainWindowSection = .home
+    @Published private(set) var settings: SettingsSnapshot
+
+    init(host: any SettingsHost) {
+        self.host = host
+        self.usageStats = host.usageStats
+        self.snippets = host.snippets
+        self.history = host.history
+        self.settings = host.makeSettingsSnapshot()
+    }
+
+    /// Re-read from the host. Called after every `perform`, and externally by the
+    /// host when settings change from elsewhere (async credential save, reset,
+    /// bootstrap readiness).
+    func refreshFromHost() {
+        guard let host else { return }
+        settings = host.makeSettingsSnapshot()
+    }
+
+    func perform(_ intent: SettingsIntent) {
+        host?.performSettingsIntent(intent)
+        refreshFromHost()
+    }
+
+    // Convenience bindings -----------------------------------------------------
+
+    func binding<T: Equatable>(
+        _ keyPath: KeyPath<SettingsSnapshot, T>,
+        _ intent: @escaping (T) -> SettingsIntent
+    ) -> Binding<T> {
+        Binding(
+            get: { self.settings[keyPath: keyPath] },
+            set: { newValue in
+                guard newValue != self.settings[keyPath: keyPath] else { return }
+                self.perform(intent(newValue))
+            }
+        )
+    }
+
+    func writingStyleBinding(_ category: AppCategory) -> Binding<WritingStyle> {
+        Binding(
+            get: { self.settings.writingStyle(for: category) },
+            set: { self.perform(.setWritingStyle($0, category)) }
+        )
+    }
+
+    func thinkingBinding(_ scope: ModelUseScope) -> Binding<ThinkingLevel> {
+        Binding(
+            get: { self.settings.thinkingLevel(for: scope) },
+            set: { self.perform(.setThinkingLevel($0, scope)) }
+        )
+    }
+
+    func hasCredentials(_ provider: CloudProvider) -> Bool {
+        host?.cloudProviderHasCredentials(provider) ?? false
+    }
+    var appVersion: String { host?.appVersionString ?? "" }
+    var isAppBundle: Bool { host?.isAppBundle ?? false }
+}
+
+// MARK: - Sections
+
+enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
+    case home, insights, dictionary, snippets, style, languages, aiEngine, shortcuts
+    case settings, help
+
+    var id: String { rawValue }
+
+    static var primary: [MainWindowSection] {
+        [.home, .insights, .dictionary, .snippets, .style, .languages, .aiEngine, .shortcuts]
+    }
+    static var secondary: [MainWindowSection] { [.settings, .help] }
+
+    var title: String {
+        switch self {
+        case .home: return "Home"
+        case .insights: return "Insights"
+        case .dictionary: return "Dictionary"
+        case .snippets: return "Snippets"
+        case .style: return "Style"
+        case .languages: return "Languages"
+        case .aiEngine: return "AI Engine"
+        case .shortcuts: return "Shortcuts"
+        case .settings: return "Settings"
+        case .help: return "Help"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .home: return "house"
+        case .insights: return "chart.bar"
+        case .dictionary: return "character.book.closed"
+        case .snippets: return "text.badge.plus"
+        case .style: return "textformat"
+        case .languages: return "globe"
+        case .aiEngine: return "cpu"
+        case .shortcuts: return "command"
+        case .settings: return "gearshape"
+        case .help: return "questionmark.circle"
+        }
+    }
+}
+
+// MARK: - Window
+
+@MainActor
+final class MainWindow: NSWindow {
+    // Transparent-titlebar windows swallow Cmd+A/C/V/X before SwiftUI TextFields
+    // see them. Re-dispatch to the first responder, mirroring SnippetsWindow.
+    override func sendEvent(_ event: NSEvent) {
+        guard event.type == .keyDown else {
+            super.sendEvent(event)
+            return
+        }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == .command,
+              let key = event.charactersIgnoringModifiers?.lowercased()
+        else {
+            super.sendEvent(event)
+            return
+        }
+        let selector: Selector?
+        switch key {
+        case "a": selector = #selector(NSText.selectAll(_:))
+        case "c": selector = #selector(NSText.copy(_:))
+        case "v": selector = #selector(NSText.paste(_:))
+        case "x": selector = #selector(NSText.cut(_:))
+        default: selector = nil
+        }
+        guard let selector else {
+            super.sendEvent(event)
+            return
+        }
+        if let responder = firstResponder, responder.responds(to: selector) {
+            responder.perform(selector, with: self)
+            return
+        }
+        super.sendEvent(event)
+    }
+}
+
+@MainActor
+final class MainWindowController: NSWindowController, NSWindowDelegate {
+    let bridge: NugumiSettingsBridge
+    private let onClose: () -> Void
+
+    init(host: any SettingsHost, onClose: @escaping () -> Void) {
+        self.bridge = NugumiSettingsBridge(host: host)
+        self.onClose = onClose
+
+        let window = MainWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 940, height: 620)
+        window.setFrameAutosaveName("NugumiMainWindow")
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.center()
+
+        super.init(window: window)
+        window.delegate = self
+
+        // Liquid-glass backdrop: everything that isn't the black settings card
+        // shows this translucent material (the same look as the status-bar menu).
+        let root = MainWindowRootView().environmentObject(bridge)
+        let hosting = NSHostingView(rootView: root)
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+
+        let backdrop = NSVisualEffectView()
+        backdrop.material = .hudWindow
+        backdrop.blendingMode = .behindWindow
+        backdrop.state = .active
+        backdrop.appearance = NSAppearance(named: .darkAqua)
+        backdrop.addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: backdrop.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor),
+        ])
+        window.contentView = backdrop
+
+        // Respect invisibility mode before the window is ever shown.
+        InvisibilityState.apply(to: window)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func presentAndFocus(section: MainWindowSection? = nil) {
+        if let section { bridge.section = section }
+        bridge.refreshFromHost()
+        bridge.usageStats.refresh()
+        showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        // Pick up changes made elsewhere (e.g. the status-bar menu) while away.
+        bridge.refreshFromHost()
+    }
+
+    nonisolated func windowWillClose(_ notification: Notification) {
+        Task { @MainActor in self.onClose() }
+    }
+}
+
+// MARK: - Root view
+
+struct MainWindowRootView: View {
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SidebarView()
+                .frame(width: 256)
+                .frame(maxHeight: .infinity)
+            DetailRouter(section: bridge.section)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Sidebar
+
+struct SidebarView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            brandHeader
+                .padding(.horizontal, 6)
+                .padding(.bottom, 20)
+
+            ForEach(MainWindowSection.primary) { NavItem(section: $0) }
+
+            Spacer(minLength: 16)
+
+            Divider().background(FlowTheme.hairline).padding(.vertical, 6)
+            ForEach(MainWindowSection.secondary) { NavItem(section: $0) }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 30)   // clear the traffic lights
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var brandHeader: some View {
+        HStack(alignment: .center, spacing: 9) {
+            Image(nsImage: Self.brandIcon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 24, height: 24)
+            Text("Nugumi")
+                .font(.nugumiPixel(18))
+                .foregroundStyle(.white)
+                .fixedSize()
+            Text("Beta")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(FlowTheme.accent))
+                .fixedSize()
+            Spacer(minLength: 0)
+        }
+        .frame(height: 26)
+    }
+
+    /// The app icon, loaded from bundled resources so it shows in `swift run`
+    /// too (where `NSApp.applicationIconImage` is the generic placeholder).
+    private static let brandIcon: NSImage = {
+        if let url = Bundle.module.url(forResource: "logo", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        return NSApp.applicationIconImage
+    }()
+}
+
+struct NavItem: View {
+    let section: MainWindowSection
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+
+    var body: some View {
+        let isSelected = bridge.section == section
+        Button {
+            bridge.section = section
+        } label: {
+            HStack(spacing: 11) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: 14))
+                    .frame(width: 20)
+                Text(section.title)
+                    .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(isSelected ? Color.white : Color(white: 0.82))
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(isSelected ? Color.white.opacity(0.13) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Reusable building blocks
+
+/// The floating rounded card (dark menu material) that every section sits in.
+/// No scroll of its own — sections decide what scrolls.
+struct DetailCard<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(VisualEffectBackground(material: .menu))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(FlowTheme.hairline, lineWidth: 1)
+            )
+            .padding(EdgeInsets(top: 28, leading: 10, bottom: 16, trailing: 16))
+    }
+}
+
+/// A scrolling "page": serif title + content, all scrolling together. Sections
+/// that need a pinned header use `DetailCard` directly instead.
+struct DetailContainer<Content: View>: View {
+    let title: String
+    var subtitle: String?
+    @ViewBuilder var content: () -> Content
+
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content
+    }
+
+    var body: some View {
+        DetailCard {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(FlowTheme.serif(30))
+                            .foregroundStyle(FlowTheme.ink)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 14))
+                                .foregroundStyle(FlowTheme.inkSecondary)
+                        }
+                    }
+                    content()
+                }
+                .padding(38)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ScrollerConfigurator())
+            }
+        }
+    }
+}
+
+/// A bordered sub-panel inside a page.
+struct SubCard<Content: View>: View {
+    var padding: CGFloat = 20
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        content()
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(FlowTheme.subtleFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(FlowTheme.hairline, lineWidth: 1)
+            )
+    }
+}
+
+/// The dark promo strip Flow shows at the top of each page.
+struct PageBanner: View {
+    let title: String
+    let message: String
+    var symbol: String = "sparkles"
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(FlowTheme.serif(22))
+                    .foregroundStyle(.white)
+                Text(message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: symbol)
+                .font(.system(size: 30))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [FlowTheme.accent.opacity(0.32), FlowTheme.accent.opacity(0.12)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+        )
+    }
+}
+
+/// Custom Flow-style segmented control (capsule pills).
+struct PillPicker<Option: Hashable>: View {
+    let options: [Option]
+    @Binding var selection: Option
+    let label: (Option) -> String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = option == selection
+                Button {
+                    selection = option
+                } label: {
+                    Text(label(option))
+                        .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 13)
+                        .background(
+                            Capsule().fill(isSelected ? FlowTheme.accent : Color.clear)
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+    }
+}
+
+struct StatTile: View {
+    let value: String
+    let label: String
+    var accent: Bool = false
+    var compact: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
+            Text(value)
+                .font(FlowTheme.serif(compact ? 22 : 28, weight: .medium))
+                .foregroundStyle(accent ? FlowTheme.accent : FlowTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(label)
+                .font(.system(size: compact ? 11 : 12))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(compact ? 13 : 18)
+        .background(
+            RoundedRectangle(cornerRadius: compact ? 12 : 14, style: .continuous)
+                .fill(FlowTheme.subtleFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: compact ? 12 : 14, style: .continuous)
+                .stroke(FlowTheme.hairline, lineWidth: 1)
+        )
+    }
+}
+
+/// A label + trailing control row.
+struct SettingRow<Trailing: View>: View {
+    let title: String
+    var subtitle: String?
+    @ViewBuilder var trailing: () -> Trailing
+
+    init(_ title: String, subtitle: String? = nil, @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(FlowTheme.ink)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 12)
+            trailing()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Square-ish heatmap grid reused by Home (compact) and Insights (full).
+struct ActivityHeatmap: View {
+    let weeks: [[UsageStatsDayBucket]]
+    var cell: CGFloat = 13
+    var spacing: CGFloat = 3
+
+    private var maxWords: Int {
+        max(1, weeks.flatMap { $0 }.map(\.wordCount).max() ?? 1)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: spacing) {
+            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
+                VStack(spacing: spacing) {
+                    ForEach(week) { bucket in
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(fill(for: bucket))
+                            .frame(width: cell, height: cell)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .stroke(bucket.isToday ? FlowTheme.accent : .clear, lineWidth: 1.5)
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    private func fill(for bucket: UsageStatsDayBucket) -> Color {
+        guard bucket.wordCount > 0 else { return Color.white.opacity(0.06) }
+        let intensity = min(1.0, 0.2 + 0.8 * Double(bucket.wordCount) / Double(maxWords))
+        return FlowTheme.accent.opacity(intensity)
+    }
+}

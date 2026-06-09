@@ -36,6 +36,7 @@ private enum MenuItemTag: Int {
     case invisibilityMode = 124
     case contactSupport = 125
     case permissionsOnboarding = 126
+    case mainWindow = 127
 }
 
 enum InvisibilityState {
@@ -230,16 +231,6 @@ enum ModelUseScope: String, CaseIterable {
     }
 }
 
-private final class ModelMenuSelection: NSObject {
-    let scope: ModelUseScope
-    let modelID: String
-
-    init(scope: ModelUseScope, modelID: String) {
-        self.scope = scope
-        self.modelID = modelID
-    }
-}
-
 typealias OllamaModelOption = LLMModel
 
 enum ThinkingLevel: String, CaseIterable {
@@ -291,17 +282,7 @@ extension ModelUseScope {
     }
 }
 
-private final class ThinkingMenuSelection: NSObject {
-    let scope: ModelUseScope
-    let level: ThinkingLevel
-
-    init(scope: ModelUseScope, level: ThinkingLevel) {
-        self.scope = scope
-        self.level = level
-    }
-}
-
-private enum FloatingButtonDefaultMode: String {
+enum FloatingButtonDefaultMode: String {
     case translate
     case smartReply
 
@@ -328,7 +309,7 @@ private enum FloatingButtonDefaultMode: String {
     }
 }
 
-private enum SelectionDisplayMode: String, CaseIterable {
+enum SelectionDisplayMode: String, CaseIterable {
     case floatingBar
     case pet
     case off
@@ -350,7 +331,7 @@ private enum SelectionDisplayMode: String, CaseIterable {
     }
 }
 
-private enum ReplacementMode: String, CaseIterable {
+enum ReplacementMode: String, CaseIterable {
     case instantInsert
     case showPanel
 
@@ -855,14 +836,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var translationCache = TranslationCache()
     private let usageStatsStore = UsageStatsStore()
     private let analyticsClient = AnalyticsClient()
-    private var shouldReopenStatusMenuAfterClose = false
     private let snippetsStore = SnippetsStore()
+    private let translationHistoryStore = TranslationHistoryStore()
     private lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
         baseURL: ollamaBaseURL,
         models: LLMModel.ollamaModels
     )
     private var onboardingWindowController: OnboardingWindowController?
     private var snippetsWindowController: SnippetsWindowController?
+    private var mainWindowController: MainWindowController?
     private var accessibilityTrustTimer: Timer?
     private var screenRecordingTrustTimer: Timer?
 
@@ -1077,6 +1059,25 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             accessibilityTrusted: AXIsProcessTrusted(),
             screenRecordingTrusted: CGPreflightScreenCaptureAccess()
         ))
+        showMainWindowOnFirstRunIfNeeded()
+    }
+
+    /// First launch after settings moved into the window: open it once so existing
+    /// users discover where their settings went. Skipped while the onboarding or
+    /// permissions windows are up, so we never stack on top of a fresh-install flow.
+    @MainActor
+    private func showMainWindowOnFirstRunIfNeeded() {
+        let key = "mainWindowAutoShownV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let self,
+                  self.onboardingWindowController == nil,
+                  self.permissionsWindowController == nil
+            else { return }
+            self.openMainWindow()
+        }
     }
 
     private func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
@@ -1508,6 +1509,18 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         guard !trimmedQuestion.isEmpty, !trimmedAnswer.isEmpty else { return }
         let turn = AskNugumiTurn(question: trimmedQuestion, answer: trimmedAnswer)
         askHistory = AskNugumiPromptBuilder.appending(turn, to: askHistory)
+        translationHistoryStore.recordAsk(question: trimmedQuestion, answer: trimmedAnswer)
+    }
+
+    @MainActor
+    private func recordTranslation(
+        source: String,
+        result: String,
+        kind: UsageStatsEventKind,
+        targetLanguage: TranslationLanguage
+    ) {
+        usageStatsStore.recordUse(sourceText: source, resultText: result, kind: kind, targetLanguage: targetLanguage)
+        translationHistoryStore.record(sourceText: source, resultText: result, kind: kind, targetLanguage: targetLanguage)
     }
 
     private static func hideAppWindowsFromScreenCapture() -> [WindowSharingSnapshot] {
@@ -1615,6 +1628,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             postTranslatorReadyNotification()
         }
         updateMenuState()
+        mainWindowController?.bridge.refreshFromHost()
     }
 
     @MainActor
@@ -1713,254 +1727,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleNone
             button.toolTip = "Nugumi"
+            button.target = self
+            button.action = #selector(openMainWindow)
         }
 
-        let menu = NSMenu()
-        menu.delegate = self
-
-        menu.addItem(makeMenuItem(
-            title: "Accessibility permission required",
-            tag: .permissionNotice,
-            symbolName: "exclamationmark.triangle",
-            isEnabled: false
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Open accessibility settings...",
-            tag: .accessibilitySettings,
-            symbolName: "gearshape",
-            action: #selector(openAccessibilitySettings),
-            keyEquivalent: ""
-        ))
-
-        let permissionSeparator = NSMenuItem.separator()
-        permissionSeparator.tag = MenuItemTag.permissionSeparator.rawValue
-        menu.addItem(permissionSeparator)
-
-        let usageSummaryItem = UsageStatsMenuItem(store: usageStatsStore) { [weak self] in
-            self?.shouldReopenStatusMenuAfterClose = true
-        }
-        usageSummaryItem.tag = MenuItemTag.usageStatsSummary.rawValue
-        menu.addItem(usageSummaryItem)
-
-        menu.addItem(makeMenuItem(
-            title: "Model setup needed",
-            tag: .bootstrapNotice,
-            symbolName: "bolt.badge.clock",
-            isEnabled: false
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Open setup...",
-            tag: .bootstrapAction,
-            symbolName: "wrench.and.screwdriver",
-            action: #selector(openOnboardingWindow),
-            keyEquivalent: ""
-        ))
-
-        let bootstrapSeparator = NSMenuItem.separator()
-        bootstrapSeparator.tag = MenuItemTag.bootstrapSeparator.rawValue
-        menu.addItem(bootstrapSeparator)
-
-        menu.addItem(makeSectionHeader("Main settings"))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .floatingDefaultMode,
-            symbolName: "bolt.circle",
-            submenu: makeFloatingDefaultModeMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .selectionDisplayMode,
-            symbolName: "pawprint.fill",
-            submenu: makeSelectionDisplayModeMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .replacementMode,
-            symbolName: "return",
-            submenu: makeReplacementModeMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Invisibility mode",
-            tag: .invisibilityMode,
-            symbolName: "eye.slash",
-            action: #selector(toggleInvisibilityMode),
-            keyEquivalent: shortcut(for: .toggleInvisibility).menuKeyEquivalent,
-            keyEquivalentModifierMask: shortcut(for: .toggleInvisibility).keyEquivalentModifierMask
-        ))
-        menu.addItem(makeMenuItem(
-            title: "How to use Nugumi...",
-            tag: .permissionsOnboarding,
-            symbolName: "questionmark.circle",
-            action: #selector(openPermissionsOnboardingWindow),
-            keyEquivalent: ""
-        ))
-
-        menu.addItem(makeSectionHeader("Shortcuts"))
-        menu.addItem(makeMenuItem(
-            title: "Translate selected text...",
-            tag: .translateOrReplySelection,
-            symbolName: "text.viewfinder",
-            action: #selector(translateOrReplySelectionFromMenu),
-            keyEquivalent: shortcut(for: .translateOrReply).menuKeyEquivalent,
-            keyEquivalentModifierMask: shortcut(for: .translateOrReply).keyEquivalentModifierMask
-        ))
-
-        menu.addItem(makeMenuItem(
-            title: "Rewrite my text...",
-            tag: .translateSelection,
-            symbolName: "text.insert",
-            action: #selector(translateSelectedTextFromMenu),
-            keyEquivalent: shortcut(for: .translateSelection).menuKeyEquivalent,
-            keyEquivalentModifierMask: shortcut(for: .translateSelection).keyEquivalentModifierMask
-        ))
-
-        menu.addItem(makeMenuItem(
-            title: "Translate screen area...",
-            tag: .screenshotArea,
-            symbolName: "viewfinder",
-            action: #selector(translateScreenshotAreaFromMenu),
-            keyEquivalent: shortcut(for: .screenshotArea).menuKeyEquivalent,
-            keyEquivalentModifierMask: shortcut(for: .screenshotArea).keyEquivalentModifierMask
-        ))
-
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .keyboardShortcuts,
-            symbolName: "keyboard",
-            submenu: makeKeyboardShortcutsMenu()
-        ))
-
-        menu.addItem(NSMenuItem.separator())
-
-        menu.addItem(makeSectionHeader("Languages"))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .targetLanguage,
-            symbolName: "globe",
-            submenu: makeTargetLanguageMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .draftTargetLanguage,
-            symbolName: "text.bubble",
-            submenu: makeDraftTargetLanguageMenu()
-        ))
-
-        menu.addItem(makeSectionHeader("Output"))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .writingStyle,
-            symbolName: "textformat",
-            submenu: makeWritingStyleMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .cleanupLevel,
-            symbolName: "sparkles",
-            submenu: makeCleanupLevelMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Snippets & dictionary…",
-            tag: .snippets,
-            symbolName: "text.append",
-            action: #selector(openSnippetsWindow),
-            keyEquivalent: ""
-        ))
-
-        menu.addItem(makeSectionHeader("AI engine"))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .selectedModel,
-            symbolName: "cpu",
-            submenu: makeModelSelectionMenu()
-        ))
-        menu.addItem(makeMenuItem(
-            title: "",
-            tag: .thinkingLevel,
-            symbolName: "brain.head.profile",
-            submenu: makeThinkingLevelMenu()
-        ))
-
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(makeMenuItem(
-            title: "DM us for bug or request...",
-            tag: .contactSupport,
-            symbolName: "envelope",
-            action: #selector(contactSupport),
-            keyEquivalent: ""
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Reset settings...",
-            tag: .resetSettings,
-            symbolName: "arrow.counterclockwise",
-            action: #selector(resetSettings),
-            keyEquivalent: ""
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Check for updates...",
-            tag: .checkForUpdates,
-            symbolName: "arrow.down.circle",
-            action: #selector(checkForUpdates),
-            keyEquivalent: ""
-        ))
-        menu.addItem(makeMenuItem(
-            title: "Quit",
-            tag: .quit,
-            symbolName: "power",
-            action: #selector(quit),
-            keyEquivalent: "q"
-        ))
-
-        statusItem.menu = menu
         self.statusItem = statusItem
-        updateMenuState()
-    }
-
-    private func makeMenuItem(
-        title: String,
-        tag: MenuItemTag,
-        symbolName: String? = nil,
-        action: Selector? = nil,
-        keyEquivalent: String = "",
-        keyEquivalentModifierMask: NSEvent.ModifierFlags = .command,
-        isEnabled: Bool = true,
-        submenu: NSMenu? = nil
-    ) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
-        item.tag = tag.rawValue
-        item.isEnabled = isEnabled
-        item.keyEquivalentModifierMask = keyEquivalentModifierMask
-        item.submenu = submenu
-        if action != nil {
-            item.target = self
-        }
-        if let symbolName {
-            item.image = menuSymbol(symbolName)
-        }
-        return item
-    }
-
-    private func menuSymbol(_ name: String) -> NSImage? {
-        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else {
-            return nil
-        }
-
-        image.isTemplate = true
-        return image
-    }
-
-    private func makeSectionHeader(_ title: String) -> NSMenuItem {
-        if #available(macOS 14.0, *) {
-            return NSMenuItem.sectionHeader(title: title)
-        }
-        let item = NSMenuItem(title: title.uppercased(), action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        let attributed = NSAttributedString(string: title.uppercased(), attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: NSColor.secondaryLabelColor
-        ])
-        item.attributedTitle = attributed
-        return item
     }
 
     private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
@@ -2015,246 +1786,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     private func refreshStatusBarIcon() {
         statusItem?.button?.image = makeStatusBarIcon(for: floatingDefaultMode)
-    }
-
-    private func makeTargetLanguageMenu() -> NSMenu {
-        let menu = NSMenu()
-        for language in TranslationLanguage.all {
-            let item = NSMenuItem(
-                title: language.displayName,
-                action: #selector(selectTargetLanguage(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = language.id
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeDraftTargetLanguageMenu() -> NSMenu {
-        let menu = NSMenu()
-        for language in TranslationLanguage.all {
-            let item = NSMenuItem(
-                title: language.displayName,
-                action: #selector(selectDraftTargetLanguage(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = language.id
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeSelectionDisplayModeMenu() -> NSMenu {
-        let menu = NSMenu()
-        for mode in SelectionDisplayMode.allCases {
-            let item = NSMenuItem(
-                title: mode.menuTitle,
-                action: #selector(selectSelectionDisplayMode(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = mode.rawValue
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeFloatingDefaultModeMenu() -> NSMenu {
-        let menu = NSMenu()
-        let translateItem = NSMenuItem(
-            title: "Translate",
-            action: #selector(selectFloatingDefaultMode(_:)),
-            keyEquivalent: ""
-        )
-        translateItem.target = self
-        translateItem.representedObject = FloatingButtonDefaultMode.translate.rawValue
-        menu.addItem(translateItem)
-
-        let replyItem = NSMenuItem(
-            title: "Reply",
-            action: #selector(selectFloatingDefaultMode(_:)),
-            keyEquivalent: ""
-        )
-        replyItem.target = self
-        replyItem.representedObject = FloatingButtonDefaultMode.smartReply.rawValue
-        menu.addItem(replyItem)
-        return menu
-    }
-
-    private func makeThinkingLevelMenu() -> NSMenu {
-        let menu = NSMenu()
-        for scope in ModelUseScope.allCases {
-            let level = thinkingLevel(for: scope)
-            let item = NSMenuItem(
-                title: scope.thinkingMenuTitle(for: level),
-                action: nil,
-                keyEquivalent: ""
-            )
-            item.representedObject = scope.rawValue
-            item.submenu = makeScopedThinkingLevelMenu(for: scope)
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeScopedThinkingLevelMenu(for scope: ModelUseScope) -> NSMenu {
-        let menu = NSMenu()
-        for level in ThinkingLevel.allCases {
-            let item = NSMenuItem(
-                title: level.menuTitle,
-                action: #selector(selectThinkingLevel(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = ThinkingMenuSelection(scope: scope, level: level)
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeModelSelectionMenu() -> NSMenu {
-        let menu = NSMenu()
-        for scope in ModelUseScope.allCases {
-            let model = LLMModel.option(id: modelID(for: scope))
-            let item = NSMenuItem(
-                title: scope.menuTitle(for: model),
-                action: nil,
-                keyEquivalent: ""
-            )
-            item.representedObject = scope.rawValue
-            item.submenu = makeScopedModelSelectionMenu(for: scope)
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeScopedModelSelectionMenu(for scope: ModelUseScope) -> NSMenu {
-        let menu = NSMenu()
-        for entry in LLMModel.modeMenuEntries {
-            switch entry {
-            case .model(let option):
-                // For askNugumi, hide single non-vision entries (Ollama)
-                // rather than showing them disabled — keeps the menu tight.
-                let filtered = scope.availableModels(from: [option])
-                guard !filtered.isEmpty else { continue }
-                menu.addItem(makeModelMenuItem(option, scope: scope))
-            case .apiKeyModels(let title, let models):
-                let filtered = scope.availableModels(from: models)
-                guard !filtered.isEmpty else { continue }
-                menu.addItem(.separator())
-                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-                item.submenu = makeAPIKeyModelMenu(models: filtered, scope: scope)
-                menu.addItem(item)
-            }
-        }
-        return menu
-    }
-
-    private func makeAPIKeyModelMenu(models: [LLMModel], scope: ModelUseScope) -> NSMenu {
-        let menu = NSMenu()
-        for provider in CloudProvider.allCases {
-            let providerModels = models.filter { $0.cloudProvider == provider }
-            guard !providerModels.isEmpty else { continue }
-            if !menu.items.isEmpty {
-                menu.addItem(.separator())
-            }
-            for option in providerModels {
-                menu.addItem(makeModelMenuItem(option, scope: scope))
-            }
-        }
-        return menu
-    }
-
-    private func makeModelMenuItem(_ option: LLMModel, scope: ModelUseScope) -> NSMenuItem {
-        let item = NSMenuItem(
-            title: option.displayName,
-            action: #selector(selectModel(_:)),
-            keyEquivalent: ""
-        )
-        item.target = self
-        item.representedObject = ModelMenuSelection(scope: scope, modelID: option.id)
-        return item
-    }
-
-    private func makeWritingStyleMenu() -> NSMenu {
-        let menu = NSMenu()
-        for category in AppCategory.allCases {
-            let categoryItem = NSMenuItem(title: category.displayName, action: nil, keyEquivalent: "")
-            categoryItem.representedObject = category.rawValue
-            let submenu = NSMenu()
-            for style in WritingStyle.allCases {
-                let item = NSMenuItem(
-                    title: style.displayName,
-                    action: #selector(selectWritingStyle(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.representedObject = "\(category.rawValue):\(style.rawValue)"
-                submenu.addItem(item)
-            }
-            categoryItem.submenu = submenu
-            menu.addItem(categoryItem)
-        }
-        return menu
-    }
-
-    private func makeCleanupLevelMenu() -> NSMenu {
-        let menu = NSMenu()
-        for level in CleanupLevel.allCases {
-            let item = NSMenuItem(
-                title: level.displayName,
-                action: #selector(selectCleanupLevel(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = level.rawValue
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeReplacementModeMenu() -> NSMenu {
-        let menu = NSMenu()
-        for mode in ReplacementMode.allCases {
-            let item = NSMenuItem(
-                title: mode.menuTitle,
-                action: #selector(selectReplacementMode(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = mode.rawValue
-            menu.addItem(item)
-        }
-        return menu
-    }
-
-    private func makeKeyboardShortcutsMenu() -> NSMenu {
-        let menu = NSMenu()
-        for action in GlobalShortcutAction.allCases {
-            let shortcut = shortcut(for: action)
-            let item = NSMenuItem(
-                title: "\(action.menuTitle): \(shortcut.displayString)",
-                action: #selector(recordKeyboardShortcut(_:)),
-                keyEquivalent: ""
-            )
-            item.target = self
-            item.representedObject = action.rawValue
-            menu.addItem(item)
-        }
-
-        menu.addItem(.separator())
-
-        let resetItem = NSMenuItem(
-            title: "Reset to defaults",
-            action: #selector(resetKeyboardShortcuts),
-            keyEquivalent: ""
-        )
-        resetItem.target = self
-        menu.addItem(resetItem)
-        return menu
     }
 
     private func startMouseMonitor() {
@@ -2918,12 +2449,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         if useCache, let cachedTranslation = translationCache.translation(for: text, targetLanguage: language, thinkingLevel: thinkingLevel) {
-            usageStatsStore.recordUse(
-                sourceText: text,
-                resultText: cachedTranslation,
-                kind: usageKind,
-                targetLanguage: language
-            )
+            recordTranslation(source: text, result: cachedTranslation, kind: usageKind, targetLanguage: language)
             analyticsClient.trackCompletedUsage(
                 kind: usageKind,
                 targetLanguageID: language.id,
@@ -2953,12 +2479,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     if useCache {
                         self.translationCache.store(translated, for: text, targetLanguage: language, thinkingLevel: thinkingLevel)
                     }
-                    self.usageStatsStore.recordUse(
-                        sourceText: text,
-                        resultText: translated,
-                        kind: usageKind,
-                        targetLanguage: language
-                    )
+                    self.recordTranslation(source: text, result: translated, kind: usageKind, targetLanguage: language)
                     self.analyticsClient.trackCompletedUsage(
                         kind: usageKind,
                         targetLanguageID: language.id,
@@ -3230,12 +2751,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             ? "Setup..."
             : "Open setup..."
         menu.item(withTag: MenuItemTag.bootstrapSeparator.rawValue)?.isHidden = bootstrapReady
-        menu.item(withTag: MenuItemTag.targetLanguage.rawValue)?.title = "Translate selected text to: \(targetLanguage.displayName)"
-        menu.item(withTag: MenuItemTag.draftTargetLanguage.rawValue)?.title = "Write / rewrite my text in: \(draftTargetLanguage.displayName)"
-        menu.item(withTag: MenuItemTag.selectionDisplayMode.rawValue)?.title = selectionDisplayMode.settingsTitle
-        menu.item(withTag: MenuItemTag.floatingDefaultMode.rawValue)?.title = floatingDefaultMode.menuTitle
-        menu.item(withTag: MenuItemTag.thinkingLevel.rawValue)?.title = "Thinking"
-        menu.item(withTag: MenuItemTag.selectedModel.rawValue)?.title = "Models"
         menu.item(withTag: MenuItemTag.checkForUpdates.rawValue)?.isHidden = !isRunningFromAppBundle
         if let translateSelectionItem = menu.item(withTag: MenuItemTag.translateSelection.rawValue) {
             translateSelectionItem.title = "Rewrite my text in \(draftTargetLanguage.displayName)..."
@@ -3267,87 +2782,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             selectionItem.isEnabled = trusted
         }
 
-        if let languageMenu = menu.item(withTag: MenuItemTag.targetLanguage.rawValue)?.submenu {
-            for item in languageMenu.items {
-                guard let languageID = item.representedObject as? String else { continue }
-                item.state = languageID == targetLanguage.id ? .on : .off
-            }
-        }
-
-        if let draftLanguageMenu = menu.item(withTag: MenuItemTag.draftTargetLanguage.rawValue)?.submenu {
-            for item in draftLanguageMenu.items {
-                guard let languageID = item.representedObject as? String else { continue }
-                item.state = languageID == draftTargetLanguage.id ? .on : .off
-            }
-        }
-
-        if let displayModeMenu = menu.item(withTag: MenuItemTag.selectionDisplayMode.rawValue)?.submenu {
-            let activeMode = selectionDisplayMode.rawValue
-            for item in displayModeMenu.items {
-                guard let raw = item.representedObject as? String else { continue }
-                item.state = raw == activeMode ? .on : .off
-            }
-        }
-
-        if let defaultModeMenu = menu.item(withTag: MenuItemTag.floatingDefaultMode.rawValue)?.submenu {
-            let activeMode = floatingDefaultMode.rawValue
-            for item in defaultModeMenu.items {
-                guard let raw = item.representedObject as? String else { continue }
-                item.state = raw == activeMode ? .on : .off
-            }
-        }
-
-        if let thinkingMenu = menu.item(withTag: MenuItemTag.thinkingLevel.rawValue)?.submenu {
-            updateThinkingScopeTitles(in: thinkingMenu)
-            updateThinkingSelectionState(in: thinkingMenu)
-        }
-
-        if let modelMenu = menu.item(withTag: MenuItemTag.selectedModel.rawValue)?.submenu {
-            updateModelScopeTitles(in: modelMenu)
-            updateModelSelectionState(in: modelMenu)
-        }
-
-        menu.item(withTag: MenuItemTag.writingStyle.rawValue)?.title = "Writing style"
-        menu.item(withTag: MenuItemTag.cleanupLevel.rawValue)?.title = "Auto cleanup: \(cleanupLevel.displayName.lowercased())"
-        menu.item(withTag: MenuItemTag.keyboardShortcuts.rawValue)?.title = "Edit keyboard shortcuts..."
-        if let shortcutsMenu = menu.item(withTag: MenuItemTag.keyboardShortcuts.rawValue)?.submenu {
-            updateKeyboardShortcutsMenu(shortcutsMenu)
-        }
-
-        if let styleMenu = menu.item(withTag: MenuItemTag.writingStyle.rawValue)?.submenu {
-            for categoryItem in styleMenu.items {
-                guard let categoryRaw = categoryItem.representedObject as? String,
-                      let category = AppCategory(rawValue: categoryRaw),
-                      let submenu = categoryItem.submenu
-                else { continue }
-                let activeStyle = writingStyle(for: category)
-                categoryItem.title = "\(category.displayName) — \(activeStyle.displayName)"
-                for item in submenu.items {
-                    guard let raw = item.representedObject as? String else { continue }
-                    let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
-                    guard parts.count == 2 else { continue }
-                    item.state = parts[1] == activeStyle.rawValue ? .on : .off
-                }
-            }
-        }
-
-        if let cleanupMenu = menu.item(withTag: MenuItemTag.cleanupLevel.rawValue)?.submenu {
-            let activeLevel = cleanupLevel.rawValue
-            for item in cleanupMenu.items {
-                guard let raw = item.representedObject as? String else { continue }
-                item.state = raw == activeLevel ? .on : .off
-            }
-        }
-
-        menu.item(withTag: MenuItemTag.replacementMode.rawValue)?.title = replacementMode.settingsTitle
-        if let replacementMenu = menu.item(withTag: MenuItemTag.replacementMode.rawValue)?.submenu {
-            let activeMode = replacementMode.rawValue
-            for item in replacementMenu.items {
-                guard let raw = item.representedObject as? String else { continue }
-                item.state = raw == activeMode ? .on : .off
-            }
-        }
-
         if let invisibilityItem = menu.item(withTag: MenuItemTag.invisibilityMode.rawValue) {
             invisibilityItem.state = invisibilityModeEnabled ? .on : .off
             let chord = shortcut(for: .toggleInvisibility)
@@ -3356,86 +2790,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateThinkingScopeTitles(in menu: NSMenu) {
-        for item in menu.items {
-            if let raw = item.representedObject as? String,
-               let scope = ModelUseScope(rawValue: raw) {
-                item.title = scope.thinkingMenuTitle(for: thinkingLevel(for: scope))
-            }
-            if let submenu = item.submenu {
-                updateThinkingScopeTitles(in: submenu)
-            }
-        }
-    }
-
-    @discardableResult
-    private func updateThinkingSelectionState(in menu: NSMenu) -> Bool {
-        var containsActiveLevel = false
-        for item in menu.items {
-            if let submenu = item.submenu {
-                let submenuContainsActiveLevel = updateThinkingSelectionState(in: submenu)
-                item.state = submenuContainsActiveLevel ? .on : .off
-                containsActiveLevel = containsActiveLevel || submenuContainsActiveLevel
-                continue
-            }
-
-            guard let selection = item.representedObject as? ThinkingMenuSelection else { continue }
-            let isActiveLevel = selection.level == thinkingLevel(for: selection.scope)
-            item.state = isActiveLevel ? .on : .off
-            containsActiveLevel = containsActiveLevel || isActiveLevel
-        }
-        return containsActiveLevel
-    }
-
-    private func updateModelScopeTitles(in menu: NSMenu) {
-        for item in menu.items {
-            if let raw = item.representedObject as? String,
-               let scope = ModelUseScope(rawValue: raw) {
-                item.title = scope.menuTitle(for: LLMModel.option(id: modelID(for: scope)))
-            }
-            if let submenu = item.submenu {
-                updateModelScopeTitles(in: submenu)
-            }
-        }
-    }
-
-    @discardableResult
-    private func updateModelSelectionState(in menu: NSMenu) -> Bool {
-        var containsActiveModel = false
-        for item in menu.items {
-            if let submenu = item.submenu {
-                let submenuContainsActiveModel = updateModelSelectionState(in: submenu)
-                item.state = submenuContainsActiveModel ? .on : .off
-                containsActiveModel = containsActiveModel || submenuContainsActiveModel
-                continue
-            }
-
-            guard let selection = item.representedObject as? ModelMenuSelection else { continue }
-            let isActiveModel = selection.modelID == modelID(for: selection.scope)
-            item.state = isActiveModel ? .on : .off
-            containsActiveModel = containsActiveModel || isActiveModel
-        }
-        return containsActiveModel
-    }
-
     private func applyShortcut(for action: GlobalShortcutAction, to item: NSMenuItem) {
         let shortcut = shortcut(for: action)
         item.keyEquivalent = shortcut.menuKeyEquivalent
         item.keyEquivalentModifierMask = shortcut.keyEquivalentModifierMask
-    }
-
-    private func updateKeyboardShortcutsMenu(_ menu: NSMenu) {
-        for item in menu.items {
-            if let raw = item.representedObject as? String,
-               let action = GlobalShortcutAction(rawValue: raw) {
-                let shortcut = shortcut(for: action)
-                item.title = "\(action.menuTitle): \(shortcut.displayString)"
-            } else if item.action == #selector(resetKeyboardShortcuts) {
-                item.isEnabled = GlobalShortcutAction.allCases.contains {
-                    shortcut(for: $0) != $0.defaultShortcut
-                }
-            }
-        }
     }
 
     @objc private func openAccessibilitySettings() {
@@ -3463,6 +2821,19 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             self?.snippetsWindowController = nil
         }
         snippetsWindowController = controller
+        controller.presentAndFocus()
+    }
+
+    @MainActor
+    @objc private func openMainWindow() {
+        if let mainWindowController {
+            mainWindowController.presentAndFocus()
+            return
+        }
+        let controller = MainWindowController(host: self) { [weak self] in
+            self?.mainWindowController = nil
+        }
+        mainWindowController = controller
         controller.presentAndFocus()
     }
 
@@ -3696,12 +3067,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 ) { _ in }
                 await MainActor.run {
                     guard let self else { return }
-                    self.usageStatsStore.recordUse(
-                        sourceText: text,
-                        resultText: translated,
-                        kind: .draftMessage,
-                        targetLanguage: language
-                    )
+                    self.recordTranslation(source: text, result: translated, kind: .draftMessage, targetLanguage: language)
                     self.analyticsClient.trackCompletedUsage(
                         kind: .draftMessage,
                         targetLanguageID: language.id,
@@ -3926,94 +3292,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    @objc private func selectTargetLanguage(_ sender: NSMenuItem) {
-        guard let languageID = sender.representedObject as? String else {
-            return
-        }
-
-        targetLanguage = TranslationLanguage.language(id: languageID)
-        translationPanelController?.close()
-        translationPanelController = nil
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func selectDraftTargetLanguage(_ sender: NSMenuItem) {
-        guard let languageID = sender.representedObject as? String else {
-            return
-        }
-
-        draftTargetLanguage = TranslationLanguage.language(id: languageID)
-        translationPanelController?.close()
-        translationPanelController = nil
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func selectFloatingDefaultMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let mode = FloatingButtonDefaultMode(rawValue: raw)
-        else {
-            return
-        }
-
-        floatingDefaultMode = mode
-        petController?.setActionMode(mode.translationMode)
-        refreshStatusBarIcon()
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func selectSelectionDisplayMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let mode = SelectionDisplayMode(rawValue: raw)
-        else {
-            return
-        }
-
-        selectionDisplayMode = mode
-        applySelectionDisplayMode()
-    }
-
-    @MainActor
-    @objc private func selectThinkingLevel(_ sender: NSMenuItem) {
-        guard let selection = sender.representedObject as? ThinkingMenuSelection else {
-            return
-        }
-
-        guard selection.level != thinkingLevel(for: selection.scope) else {
-            return
-        }
-
-        setThinkingLevel(selection.level, for: selection.scope)
-        if selection.scope == .textActions {
-        }
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func selectModel(_ sender: NSMenuItem) {
-        guard let selection = sender.representedObject as? ModelMenuSelection else {
-            return
-        }
-
-        let option = LLMModel.option(id: selection.modelID)
-        guard option.id != modelID(for: selection.scope) else {
-            return
-        }
-
-        if let provider = option.cloudProvider, !provider.hasCredentials {
-            presentCredentialPrompt(for: provider) { [weak self] saved in
-                guard let self, saved else { return }
-                self.applyModelSelection(option.id, for: selection.scope)
-            }
-            return
-        }
-
-        applyModelSelection(option.id, for: selection.scope)
-    }
-
-    @MainActor
     private func presentCredentialPrompt(for provider: CloudProvider, onSave: @escaping (Bool) -> Void) {
         if provider == .openAICodex {
             Task { @MainActor in
@@ -4088,6 +3366,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         translationCache = TranslationCache()
         onModelSelectionChanged(for: scope)
         updateMenuState()
+        mainWindowController?.bridge.refreshFromHost()
     }
 
     @MainActor
@@ -4137,41 +3416,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    @objc private func selectWritingStyle(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String else { return }
-        let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
-        guard parts.count == 2,
-              let category = AppCategory(rawValue: parts[0]),
-              let style = WritingStyle(rawValue: parts[1])
-        else { return }
-        setWritingStyle(style, for: category)
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func selectCleanupLevel(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let level = CleanupLevel(rawValue: raw)
-        else { return }
-        cleanupLevel = level
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func selectReplacementMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let mode = ReplacementMode(rawValue: raw)
-        else { return }
-        replacementMode = mode
-        updateMenuState()
-    }
-
-    @MainActor
-    @objc private func recordKeyboardShortcut(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let action = GlobalShortcutAction(rawValue: raw)
-        else { return }
-
+    private func presentShortcutRecorder(for action: GlobalShortcutAction) {
         // Suspend every double-tap detector so the recorder owns flagsChanged
         // events while the panel is up; otherwise the very modifier the user
         // is trying to bind would also fire its currently-bound action.
@@ -4181,7 +3426,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             action: action,
             currentShortcut: shortcut(for: action),
             onShortcut: { [weak self] shortcut in
-                self?.setKeyboardShortcut(shortcut, for: action) ?? false
+                let didSet = self?.setKeyboardShortcut(shortcut, for: action) ?? false
+                self?.mainWindowController?.bridge.refreshFromHost()
+                return didSet
             },
             onClose: { [weak self] in
                 self?.modifierDetectors.forEach { $0.isEnabled = true }
@@ -4275,6 +3522,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         updateMenuState()
+        mainWindowController?.bridge.refreshFromHost()
     }
 
     @objc private func quit() {
@@ -6000,7 +5248,7 @@ private final class PetPanel: NSPanel {
     }
 }
 
-private enum NugumiFont {
+enum NugumiFont {
     private static let didRegisterPixelifySans: Bool = {
         guard let url = Bundle.module.url(
             forResource: "PixelifySans",
@@ -12883,20 +12131,113 @@ final class CodexLoginAlert: NSObject {
     }
 }
 
-extension NugumiApp: NSMenuDelegate {
-    func menuWillOpen(_ menu: NSMenu) {
-        usageStatsStore.refresh()
-        updateMenuState()
-        if let usageItem = menu.item(withTag: MenuItemTag.usageStatsSummary.rawValue) as? UsageStatsMenuItem {
-            usageItem.refitFrame()
-        }
+// MARK: - Main window bridge
+
+extension NugumiApp: SettingsHost {
+    var usageStats: UsageStatsStore { usageStatsStore }
+    var snippets: SnippetsStore { snippetsStore }
+    var history: TranslationHistoryStore { translationHistoryStore }
+    var isAppBundle: Bool { isRunningFromAppBundle }
+    var appVersionString: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0"
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        guard shouldReopenStatusMenuAfterClose else { return }
-        shouldReopenStatusMenuAfterClose = false
-        DispatchQueue.main.async { [weak self] in
-            self?.statusItem?.button?.performClick(nil)
+    func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool {
+        provider.hasCredentials
+    }
+
+    func makeSettingsSnapshot() -> SettingsSnapshot {
+        var styles: [AppCategory: WritingStyle] = [:]
+        for category in AppCategory.allCases {
+            styles[category] = writingStyle(for: category)
+        }
+        var shortcuts: [GlobalShortcutAction: GlobalShortcut] = [:]
+        for action in GlobalShortcutAction.allCases {
+            shortcuts[action] = shortcut(for: action)
+        }
+        return SettingsSnapshot(
+            targetLanguage: targetLanguage,
+            draftTargetLanguage: draftTargetLanguage,
+            floatingDefaultMode: floatingDefaultMode,
+            selectionDisplayMode: selectionDisplayMode,
+            replacementMode: replacementMode,
+            cleanupLevel: cleanupLevel,
+            invisibilityEnabled: invisibilityModeEnabled,
+            writingStyles: styles,
+            textModelID: textModelID,
+            askNugumiModelID: askNugumiModelID,
+            textThinkingLevel: textThinkingLevel,
+            askNugumiThinkingLevel: askNugumiThinkingLevel,
+            shortcuts: shortcuts
+        )
+    }
+
+    func performSettingsIntent(_ intent: SettingsIntent) {
+        switch intent {
+        case .setTargetLanguage(let language):
+            targetLanguage = language
+            translationPanelController?.close()
+            translationPanelController = nil
+            updateMenuState()
+        case .setDraftTargetLanguage(let language):
+            draftTargetLanguage = language
+            translationPanelController?.close()
+            translationPanelController = nil
+            updateMenuState()
+        case .setFloatingDefaultMode(let mode):
+            floatingDefaultMode = mode
+            petController?.setActionMode(mode.translationMode)
+            refreshStatusBarIcon()
+            updateMenuState()
+        case .setSelectionDisplayMode(let mode):
+            selectionDisplayMode = mode
+            applySelectionDisplayMode()
+        case .setReplacementMode(let mode):
+            replacementMode = mode
+            updateMenuState()
+        case .setCleanupLevel(let level):
+            cleanupLevel = level
+            updateMenuState()
+        case .setWritingStyle(let style, let category):
+            setWritingStyle(style, for: category)
+            updateMenuState()
+        case .setThinkingLevel(let level, let scope):
+            guard level != thinkingLevel(for: scope) else { return }
+            setThinkingLevel(level, for: scope)
+            updateMenuState()
+        case .chooseModel(let modelID, let scope):
+            let option = LLMModel.option(id: modelID)
+            guard option.id != self.modelID(for: scope) else { return }
+            if let provider = option.cloudProvider, !provider.hasCredentials {
+                presentCredentialPrompt(for: provider) { [weak self] saved in
+                    guard let self, saved else { return }
+                    self.applyModelSelection(option.id, for: scope)
+                }
+                return
+            }
+            applyModelSelection(option.id, for: scope)
+        case .toggleInvisibility:
+            toggleInvisibilityMode()
+        case .recordShortcut(let action):
+            presentShortcutRecorder(for: action)
+        case .resetShortcuts:
+            resetKeyboardShortcuts()
+        case .signInCloud(let provider):
+            presentCredentialPrompt(for: provider) { [weak self] _ in
+                self?.mainWindowController?.bridge.refreshFromHost()
+            }
+        case .checkForUpdates:
+            checkForUpdates()
+        case .contactSupport:
+            contactSupport()
+        case .openPermissionsHelp:
+            presentPermissionsWindow(force: true)
+        case .openSetup:
+            presentOnboardingWindow()
+        case .resetSettings:
+            resetSettings()
+        case .quit:
+            quit()
         }
     }
 }

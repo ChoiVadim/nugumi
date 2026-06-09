@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 
 enum SnippetKind: String, Codable, CaseIterable {
@@ -73,8 +74,8 @@ struct Snippet: Codable, Identifiable, Equatable {
 }
 
 @MainActor
-final class SnippetsStore {
-    private(set) var snippets: [Snippet] = []
+final class SnippetsStore: ObservableObject {
+    @Published private(set) var snippets: [Snippet] = []
     var onChange: (() -> Void)?
 
     private static let defaultsKey = "snippets"
