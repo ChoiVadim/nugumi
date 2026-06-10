@@ -141,6 +141,53 @@ struct LLMModel: Equatable {
         apiKeyModels.filter { $0.cloudProvider == provider }
     }
 
+    /// Picker list for one API-key provider: curated entries (with their
+    /// hand-written names and tier hints) confirmed by the last successful
+    /// /models fetch, followed by fetched chat models we don't curate yet.
+    /// Never fetched → curated list unchanged.
+    static func cloudModels(for provider: CloudProvider) -> [LLMModel] {
+        mergedCloudModels(
+            provider: provider,
+            curated: models(for: provider),
+            discovered: CloudModelCache.discovered(for: provider)
+        )
+    }
+
+    /// Pure merge (testable without UserDefaults). Matching is canonical-id
+    /// based so Anthropic's dated/undated aliases compare equal. Fresh models
+    /// sort descending by id — within one provider's naming scheme that puts
+    /// newer versions first — and default to supportsImages like Codex
+    /// discovery does (backend rejects images for text-only models; hiding
+    /// usable models is worse).
+    static func mergedCloudModels(
+        provider: CloudProvider,
+        curated: [LLMModel],
+        discovered: [CloudModelDiscovery.DiscoveredModel]?
+    ) -> [LLMModel] {
+        guard let discovered, !discovered.isEmpty else { return curated }
+        let fetchedIDs = Set(discovered.map { CloudModelDiscovery.canonicalID($0.id) })
+        let curatedIDs = Set(curated.map { CloudModelDiscovery.canonicalID($0.apiModelID) })
+
+        var out = curated.filter {
+            fetchedIDs.contains(CloudModelDiscovery.canonicalID($0.apiModelID))
+        }
+        let fresh = discovered
+            .filter { !curatedIDs.contains(CloudModelDiscovery.canonicalID($0.id)) }
+            .sorted { $0.id > $1.id }
+        out += fresh.map { model in
+            let name = model.displayName
+                ?? CloudModelDiscovery.prettyName(provider: provider, id: model.id)
+            return LLMModel(
+                id: model.id,
+                shortName: name,
+                displayName: name,
+                backend: .cloud(provider),
+                supportsImages: true
+            )
+        }
+        return out
+    }
+
     /// All Ollama models to offer: the curated Online/Offline defaults, then
     /// whatever the running server reported via `/api/tags` (see
     /// OllamaModelCache). When signed in, the server already lists the cloud
@@ -215,8 +262,13 @@ struct LLMModel: Equatable {
             return codexModels.first { $0.id == id } ?? makeCodexModel(slug: slug)
         }
         if let curated = all.first(where: { $0.id == id }) { return curated }
-        // Discovered Ollama models live outside `all`; resolve them so the
-        // backend dispatch and the menu label can find them.
+        // Discovered cloud models live outside `all`; resolve them so backend
+        // dispatch and the menu label can find them (mirrors Ollama below).
+        for provider in [CloudProvider.openAI, .anthropic, .gemini] {
+            if let cloud = cloudModels(for: provider).first(where: { $0.id == id }) {
+                return cloud
+            }
+        }
         if let ollama = ollamaModels.first(where: { $0.id == id }) { return ollama }
         return defaultModel
     }
