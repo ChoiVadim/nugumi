@@ -919,6 +919,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var askNugumiTask: Task<Void, Never>?
     private var askNugumiRequestID: UUID?
     private var askHistory: [AskNugumiTurn] = []
+    /// Screen capture taken the moment Ask Nugumi is summoned, before the
+    /// prompt steals focus. Activating Nugumi deactivates the frontmost app,
+    /// which instantly closes its open menus/popovers, so a submit-time
+    /// capture can never see them. Consumed by `submitAskNugumiPrompt`.
+    private var pendingAskNugumiCapture: AskNugumiScreenCapture?
     private var isScreenshotTranslationRunning = false
     private var isAskNugumiRunning = false
     private var screenshotDragStartLocation: NSPoint?
@@ -1353,7 +1358,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // in-flight request) is already up, the shortcut dismisses it instead
         // of opening another one.
         let askUIOpen = isAskNugumiRunning
-            || askPromptController?.isVisible == true
+            || askPromptController != nil
             || petController?.isPromptVisible == true
         if askUIOpen {
             dismissAskNugumi()
@@ -1368,7 +1373,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         translationPanelController = nil
 
         if selectionDisplayMode == .pet {
-            presentPetAskPrompt()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.pendingAskNugumiCapture = await self.captureScreenBeforeAskPromptTakesFocus()
+                self.presentPetAskPrompt()
+            }
             return
         }
 
@@ -1380,13 +1389,32 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             onClose: { [weak self] in
                 guard let self else { return }
                 self.askPromptController = nil
+                self.pendingAskNugumiCapture = nil
                 if self.isAskNugumiRunning {
                     self.cancelAskNugumiRequest()
                 }
             }
         )
         askPromptController = controller
-        controller.show()
+        // Capture before `show()`: activating Nugumi closes any menu the
+        // user is asking about. The prompt appears one capture (~100 ms)
+        // later, with the dropdown already safely in the pending shot.
+        Task { @MainActor [weak self] in
+            guard let self, self.askPromptController === controller else { return }
+            self.pendingAskNugumiCapture = await self.captureScreenBeforeAskPromptTakesFocus()
+            guard self.askPromptController === controller else { return }
+            controller.show()
+        }
+    }
+
+    /// Best-effort screen capture for `pendingAskNugumiCapture`. Returns nil
+    /// on failure (e.g. missing screen-recording permission) so the submit
+    /// path falls back to its own capture with full error reporting.
+    @MainActor
+    private func captureScreenBeforeAskPromptTakesFocus() async -> AskNugumiScreenCapture? {
+        let sharingSnapshot = Self.hideAppWindowsFromScreenCapture()
+        defer { Self.restoreAppWindowSharing(sharingSnapshot) }
+        return try? await ScreenshotCapture.captureActiveScreen(containing: NSEvent.mouseLocation)
     }
 
     @MainActor
@@ -1433,22 +1461,31 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         let cursorLocation = NSEvent.mouseLocation
         let backend = askBackend
+        // Prefer the capture taken when the prompt was summoned — it still
+        // shows transient UI (open menus, popovers) that closed as soon as
+        // the prompt took focus. Submit-time capture is the fallback.
+        let preparedCapture = pendingAskNugumiCapture
+        pendingAskNugumiCapture = nil
         askNugumiTask = Task { [weak self] in
             do {
-                let sharingSnapshot = await MainActor.run {
-                    Self.hideAppWindowsFromScreenCapture()
-                }
                 let capture: AskNugumiScreenCapture
-                do {
-                    capture = try await ScreenshotCapture.captureActiveScreen(containing: cursorLocation)
-                } catch {
+                if let preparedCapture {
+                    capture = preparedCapture
+                } else {
+                    let sharingSnapshot = await MainActor.run {
+                        Self.hideAppWindowsFromScreenCapture()
+                    }
+                    do {
+                        capture = try await ScreenshotCapture.captureActiveScreen(containing: cursorLocation)
+                    } catch {
+                        await MainActor.run {
+                            Self.restoreAppWindowSharing(sharingSnapshot)
+                        }
+                        throw error
+                    }
                     await MainActor.run {
                         Self.restoreAppWindowSharing(sharingSnapshot)
                     }
-                    throw error
-                }
-                await MainActor.run {
-                    Self.restoreAppWindowSharing(sharingSnapshot)
                 }
                 try Task.checkCancellation()
 
@@ -1700,6 +1737,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             },
             onClose: { [weak self] in
                 guard let self else { return }
+                self.pendingAskNugumiCapture = nil
                 if self.isAskNugumiRunning {
                     self.cancelAskNugumiRequest()
                 }
@@ -1712,7 +1750,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @MainActor
     private func continueAskNugumiDialog() {
         guard !isAskNugumiRunning else { return }
-        presentPetAskPrompt()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.pendingAskNugumiCapture = await self.captureScreenBeforeAskPromptTakesFocus()
+            self.presentPetAskPrompt()
+        }
     }
 
     /// Tears down every Ask Nugumi surface (pet prompt/answer, standalone
@@ -1722,6 +1764,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         if isAskNugumiRunning {
             cancelAskNugumiRequest()
         }
+        pendingAskNugumiCapture = nil
         askPromptController?.close()
         askPromptController = nil
         petController?.clearPrompt()
@@ -5795,6 +5838,11 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var isPromptOpen = false
     private var isPromptLoading = false
     private var isAnswerOpen = false
+    /// Catches Esc while the answer bubble (or the loading state) is up.
+    /// The prompt text field handles Esc itself while typing, but it is
+    /// hidden/disabled in those two states, so without this monitor Esc
+    /// has no responder and the bubble can only be closed with the mouse.
+    private var escapeKeyMonitor: Any?
     private var promptBuffer = ""
     private var currentPromptInputLayout = AskNugumiPromptInputMetrics.layout(forContentHeight: 0)
     private var currentAnswerLayout = AskNugumiAnswerBubbleMetrics.layout(forContentHeight: 0)
@@ -6034,6 +6082,28 @@ final class PetController: NSObject, NSTextFieldDelegate {
 
         refreshStyleBadge()
         subscribeToFrontmostAppChanges()
+        installEscapeKeyMonitor()
+    }
+
+    private func installEscapeKeyMonitor() {
+        guard escapeKeyMonitor == nil else { return }
+        escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.keyCode == UInt16(kVK_Escape),
+                  self.isAnswerOpen || self.isPromptLoading
+            else {
+                return event
+            }
+            self.closePromptFromUser()
+            return nil
+        }
+    }
+
+    private func removeEscapeKeyMonitor() {
+        if let escapeKeyMonitor {
+            NSEvent.removeMonitor(escapeKeyMonitor)
+            self.escapeKeyMonitor = nil
+        }
     }
 
     private func subscribeToFrontmostAppChanges() {
@@ -6075,6 +6145,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
             self.workspaceObserver = nil
         }
+        removeEscapeKeyMonitor()
         clearPrompt(animate: false)
         clearReady()
         trackingTimer?.invalidate()
@@ -8660,6 +8731,9 @@ final class TranslationPanelController {
     private var activeRequestID = UUID()
     private var globalOutsideClickMonitor: Any?
     private var localOutsideClickMonitor: Any?
+    /// Esc closes the panel whenever Nugumi receives the keystroke (e.g.
+    /// right after an Ask Nugumi answer, when the prompt left Nugumi active).
+    private var localEscapeKeyMonitor: Any?
     private var commandCopyInterceptor: CommandCopyInterceptor?
     private var returnKeyInterceptor: ReturnKeyInterceptor?
     private var didClose = false
@@ -8801,6 +8875,18 @@ final class TranslationPanelController {
             self?.closeIfClickIsOutside(event)
             return event
         }
+
+        localEscapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.keyCode == UInt16(kVK_Escape),
+                  self.panel.isVisible,
+                  !self.contentView.isTargetLanguageMenuOpen
+            else {
+                return event
+            }
+            self.close()
+            return nil
+        }
     }
 
     private func removeOutsideClickMonitors() {
@@ -8812,6 +8898,11 @@ final class TranslationPanelController {
         if let localOutsideClickMonitor {
             NSEvent.removeMonitor(localOutsideClickMonitor)
             self.localOutsideClickMonitor = nil
+        }
+
+        if let localEscapeKeyMonitor {
+            NSEvent.removeMonitor(localEscapeKeyMonitor)
+            self.localEscapeKeyMonitor = nil
         }
     }
 
