@@ -927,6 +927,27 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(newValue.id, forKey: "draftTargetLanguageID")
         }
     }
+    /// The two languages the "Toggle writing language" shortcut flips between.
+    private var writingToggleLanguageA: TranslationLanguage {
+        get {
+            TranslationLanguage.language(
+                id: UserDefaults.standard.string(forKey: "writingToggleLanguageAID") ?? TranslationLanguage.defaultDraftLanguage.id
+            )
+        }
+        set {
+            UserDefaults.standard.set(newValue.id, forKey: "writingToggleLanguageAID")
+        }
+    }
+    private var writingToggleLanguageB: TranslationLanguage {
+        get {
+            TranslationLanguage.language(
+                id: UserDefaults.standard.string(forKey: "writingToggleLanguageBID") ?? TranslationLanguage.defaultLanguage.id
+            )
+        }
+        set {
+            UserDefaults.standard.set(newValue.id, forKey: "writingToggleLanguageBID")
+        }
+    }
     private var floatingDefaultMode: FloatingButtonDefaultMode {
         get {
             FloatingButtonDefaultMode.storedMode(
@@ -1239,7 +1260,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             (.translateSelection, { [weak self] in self?.startSelectedTextTranslationForReplacement() }),
             (.translateOrReply, { [weak self] in self?.startSelectionTranslateOrReply() }),
             (.toggleInvisibility, { [weak self] in self?.toggleInvisibilityMode() }),
-            (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() })
+            (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() }),
+            (.toggleWritingLanguage, { [weak self] in self?.toggleWritingLanguageAction() })
         ]
 
         for (action, handler) in bindings {
@@ -1727,6 +1749,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             message: "Nugumi is now hidden from screenshots and screen sharing, and the menu-bar icon is gone. Press \(chord) anywhere to bring it back.",
             primaryButtonTitle: "Got it"
         ).showModal()
+    }
+
+    /// Flips the writing (draft) language between the configured pair. If the
+    /// current language is neither of the two, snaps to the first.
+    @objc private func toggleWritingLanguageAction() {
+        let next = draftTargetLanguage.id == writingToggleLanguageA.id
+            ? writingToggleLanguageB
+            : writingToggleLanguageA
+        draftTargetLanguage = next
+        translationPanelController?.close()
+        translationPanelController = nil
+        updateMenuState()
+        mainWindowController?.bridge.refreshFromHost()
+        LanguageToggleHUD.shared.show(text: "Writing in \(next.displayName)")
     }
 
     private func setupBootstrap() {
@@ -7994,6 +8030,16 @@ final class FloatingTranslateButtonController {
     }
 }
 
+/// The Ask Nugumi capsule's glass body. Any click inside it focuses the text
+/// field instead of starting a window drag, so the whole pill is clickable.
+private final class AskPromptGlassView: NSVisualEffectView {
+    var onClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onClick?()
+    }
+}
+
 private final class AskPromptTextField: NSTextField {
     var onEscape: (() -> Void)?
 
@@ -8034,57 +8080,6 @@ private final class AskPromptPanel: NSPanel {
             }
         }
         return super.performKeyEquivalent(with: event)
-    }
-}
-
-private final class AskPromptChromeView: NSView {
-    var cornerRadius: CGFloat = 16
-
-    override var isOpaque: Bool { false }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let rect = bounds.insetBy(dx: 1, dy: 1)
-        let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        NSGraphicsContext.saveGraphicsState()
-        path.addClip()
-
-        if let leftGlow = NSGradient(colors: [
-            NSColor(srgbRed: 0.08, green: 0.32, blue: 1.0, alpha: 0.22),
-            NSColor(srgbRed: 0.08, green: 0.32, blue: 1.0, alpha: 0.08),
-            NSColor.clear
-        ]) {
-            let glowRect = NSRect(x: rect.minX, y: rect.minY, width: 150, height: rect.height)
-            leftGlow.draw(in: glowRect, angle: 0)
-        }
-
-        if let topSheen = NSGradient(colors: [
-            NSColor(calibratedWhite: 1.0, alpha: 0.22),
-            NSColor(calibratedWhite: 1.0, alpha: 0.04),
-            NSColor.clear
-        ]) {
-            let sheenRect = NSRect(x: rect.minX, y: rect.midY, width: rect.width, height: rect.height / 2)
-            topSheen.draw(in: sheenRect, angle: 90)
-        }
-
-        NSGraphicsContext.restoreGraphicsState()
-
-        NSColor(calibratedWhite: 1.0, alpha: 0.28).setStroke()
-        path.lineWidth = 0.9
-        path.stroke()
-
-        let innerRect = bounds.insetBy(dx: 2.5, dy: 2.5)
-        let innerPath = NSBezierPath(
-            roundedRect: innerRect,
-            xRadius: max(0, cornerRadius - 2),
-            yRadius: max(0, cornerRadius - 2)
-        )
-        NSColor(calibratedWhite: 1.0, alpha: 0.08).setStroke()
-        innerPath.lineWidth = 0.8
-        innerPath.stroke()
     }
 }
 
@@ -8137,7 +8132,7 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true
 
@@ -8218,31 +8213,25 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         rootView.layer?.backgroundColor = NSColor.clear.cgColor
         rootView.layer?.masksToBounds = false
 
-        let glass = GlassHostView(
-            frame: layout.pillFrame,
-            cornerRadius: layout.cornerRadius,
-            tintColor: nil,
-            style: .regular
-        )
+        // Same liquid-glass capsule as the main window and the language HUD —
+        // no glow gradients, just the hud material with a hairline border.
+        let glass = AskPromptGlassView(frame: layout.pillFrame)
+        glass.onClick = { [weak self] in
+            guard let self else { return }
+            self.panel.makeKeyAndOrderFront(nil)
+            self.panel.makeFirstResponder(self.textField)
+        }
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.appearance = NSAppearance(named: .darkAqua)
         glass.autoresizingMask = [.width, .height]
         glass.wantsLayer = true
-        glass.layer?.masksToBounds = false
-        glass.layer?.shadowColor = NSColor.black.cgColor
-        glass.layer?.shadowOpacity = 0.16
-        glass.layer?.shadowRadius = 10
-        glass.layer?.shadowOffset = CGSize(width: 0, height: -2)
-        glass.layer?.shadowPath = CGPath(
-            roundedRect: NSRect(origin: .zero, size: layout.pillFrame.size),
-            cornerWidth: layout.cornerRadius,
-            cornerHeight: layout.cornerRadius,
-            transform: nil
-        )
+        glass.layer?.cornerRadius = layout.cornerRadius
+        glass.layer?.masksToBounds = true
+        glass.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        glass.layer?.borderWidth = 1
         rootView.addSubview(glass)
-
-        let chrome = AskPromptChromeView(frame: glass.contentView.bounds)
-        chrome.cornerRadius = layout.cornerRadius
-        chrome.autoresizingMask = [.width, .height]
-        glass.contentView.addSubview(chrome)
 
         textField.delegate = self
         textField.onEscape = { [weak self] in
@@ -8262,19 +8251,20 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         textField.cell?.isScrollable = true
         textField.cell?.lineBreakMode = .byTruncatingTail
         textField.translatesAutoresizingMaskIntoConstraints = false
-        glass.contentView.addSubview(textField)
+        glass.addSubview(textField)
 
         NSLayoutConstraint.activate([
             textField.leadingAnchor.constraint(
-                equalTo: glass.contentView.leadingAnchor,
+                equalTo: glass.leadingAnchor,
                 constant: layout.textFrame.minX - layout.pillFrame.minX
             ),
             textField.trailingAnchor.constraint(
-                equalTo: glass.contentView.trailingAnchor,
+                equalTo: glass.trailingAnchor,
                 constant: -(layout.pillFrame.maxX - layout.textFrame.maxX)
             ),
-            textField.centerYAnchor.constraint(equalTo: glass.contentView.centerYAnchor),
-            textField.heightAnchor.constraint(equalToConstant: layout.textFrame.height)
+            // Intrinsic height + centerY keeps the text optically centered in
+            // the capsule (a fixed-height cell draws its baseline high).
+            textField.centerYAnchor.constraint(equalTo: glass.centerYAnchor)
         ])
 
         panel.contentView = rootView
@@ -12732,6 +12722,8 @@ extension NugumiApp: SettingsHost {
         return SettingsSnapshot(
             targetLanguage: targetLanguage,
             draftTargetLanguage: draftTargetLanguage,
+            writingToggleLanguageA: writingToggleLanguageA,
+            writingToggleLanguageB: writingToggleLanguageB,
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
             replacementMode: replacementMode,
@@ -12845,6 +12837,10 @@ extension NugumiApp: SettingsHost {
             translationPanelController?.close()
             translationPanelController = nil
             updateMenuState()
+        case .setWritingToggleLanguageA(let language):
+            writingToggleLanguageA = language
+        case .setWritingToggleLanguageB(let language):
+            writingToggleLanguageB = language
         case .setFloatingDefaultMode(let mode):
             floatingDefaultMode = mode
             petController?.setActionMode(mode.translationMode)
@@ -12918,12 +12914,116 @@ extension NugumiApp: SettingsHost {
             contactSupport()
         case .openPermissionsHelp:
             presentPermissionsWindow(force: true)
-        case .openSetup:
-            presentMainWindow(section: .aiEngine)
         case .resetSettings:
             resetSettings()
         case .quit:
             quit()
         }
+    }
+}
+
+// MARK: - Language toggle HUD
+
+/// Small auto-fading toast shown when the writing language flips via the
+/// global shortcut — without it the toggle is invisible to the user. One
+/// shared instance so rapid toggles replace the text instead of stacking.
+@MainActor
+final class LanguageToggleHUD {
+    static let shared = LanguageToggleHUD()
+
+    private var panel: NSPanel?
+    private var label: NSTextField?
+    private var dismissTask: Task<Void, Never>?
+
+    private init() {}
+
+    func show(text: String) {
+        dismissTask?.cancel()
+
+        let panel = panel ?? makePanel()
+        guard let label else { return }
+        label.stringValue = text
+        label.sizeToFit()
+
+        let padding = NSSize(width: 22, height: 12)
+        let size = NSSize(
+            width: label.frame.width + padding.width * 2,
+            height: label.frame.height + padding.height * 2
+        )
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
+            ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        panel.setFrame(
+            NSRect(
+                x: visible.midX - size.width / 2,
+                y: visible.maxY - size.height - 60,
+                width: size.width,
+                height: size.height
+            ),
+            display: true
+        )
+        label.frame.origin = NSPoint(x: padding.width, y: padding.height)
+        (panel.contentView?.layer)?.cornerRadius = size.height / 2
+
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            panel.animator().alphaValue = 1
+        }
+
+        dismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled, let panel = self?.panel else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.3
+                panel.animator().alphaValue = 0
+            }, completionHandler: {
+                Task { @MainActor [weak self] in
+                    if self?.dismissTask?.isCancelled == false {
+                        self?.panel?.orderOut(nil)
+                    }
+                }
+            })
+        }
+    }
+
+    private func makePanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 44),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .statusBar
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.ignoresMouseEvents = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isReleasedWhenClosed = false
+
+        // Same liquid-glass material as the main window, so the toast reads
+        // as part of the same family.
+        let content = NSVisualEffectView()
+        content.material = .hudWindow
+        content.blendingMode = .behindWindow
+        content.state = .active
+        content.appearance = NSAppearance(named: .darkAqua)
+        content.wantsLayer = true
+        content.layer?.masksToBounds = true
+        content.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        content.layer?.borderWidth = 1
+
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        label.textColor = .white
+        content.addSubview(label)
+
+        panel.contentView = content
+        InvisibilityState.apply(to: panel)
+        self.panel = panel
+        self.label = label
+        return panel
     }
 }

@@ -797,6 +797,23 @@ struct LanguagesSection: View {
                     }
                 }
             }
+
+            SubCard {
+                SettingRow("Quick switch",
+                           subtitle: "Press \(bridge.settings.shortcut(for: .toggleWritingLanguage).displayString) anywhere to flip the writing language between these two.") {
+                    HStack(spacing: 10) {
+                        LanguageMenu(current: bridge.settings.writingToggleLanguageA) {
+                            bridge.perform(.setWritingToggleLanguageA($0))
+                        }
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                        LanguageMenu(current: bridge.settings.writingToggleLanguageB) {
+                            bridge.perform(.setWritingToggleLanguageB($0))
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1466,12 +1483,6 @@ struct HelpSection: View {
                             subtitle: "Permission setup and a quick feature tour.",
                             button: "Open") {
                         bridge.perform(.openPermissionsHelp)
-                    }
-                    Divider().background(FlowTheme.hairline)
-                    HelpRow(title: "Set up local models",
-                            subtitle: "Install or download Ollama models for offline use.",
-                            button: "Open") {
-                        bridge.perform(.openSetup)
                     }
                     Divider().background(FlowTheme.hairline)
                     HelpRow(title: "Contact support",

@@ -32,8 +32,16 @@ struct FeatureTourStep {
 
         return [
             FeatureTourStep(
+                title: "Ask Nugumi anything",
+                body: "A confusing screen, an error, or just a question — Nugumi looks at what's in front of you and answers on the spot.",
+                actionTitle: "Open the prompt near your cursor",
+                actionDetail: askActionDetail(for: askShortcut),
+                symbolName: "cursorarrow.click.2",
+                videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")!
+            ),
+            FeatureTourStep(
                 title: "Read any language without leaving work",
-                body: "Use Nugumi where the text already is: Slack, Gmail, Notion, PDFs, websites, or any Mac app with selectable text.",
+                body: "Slack, Gmail, Notion, PDFs, websites — wherever the text is. And if it can't be selected, just capture that part of the screen.",
                 actionTitle: "Select text, then left-click",
                 actionDetail: "Highlight the text and left-click the Nugumi button that appears near the selection.",
                 symbolName: "text.viewfinder",
@@ -41,27 +49,19 @@ struct FeatureTourStep {
             ),
             FeatureTourStep(
                 title: "Write naturally. Send like a native",
-                body: "Draft in the language that feels natural, then let Nugumi polish it into your target language with better grammar, tone, and phrasing.",
+                body: "Type in the language you think in. Nugumi turns it into your writing language — natural grammar, tone, and phrasing.",
                 actionTitle: "Select your draft, then right-click",
-                actionDetail: "Highlight your draft and right-click the Nugumi button to rewrite it into the target language.",
+                actionDetail: "Highlight what you wrote and right-click the Nugumi button — it comes back in your writing language.",
                 symbolName: "text.insert",
                 videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")!
             ),
             FeatureTourStep(
-                title: "Reply across languages",
-                body: "When you need an answer instead of a translation, Nugumi can draft a reply from the incoming message.",
+                title: "Replies that know the answer",
+                body: "This one reads their message and writes the response for you — even when it takes knowledge, like a question asked in the chat.",
                 actionTitle: "Draft a reply",
                 actionDetail: "Select an incoming message. Press Tab on the Nugumi button to switch to reply, then click.",
                 symbolName: "bubble.left.and.text.bubble.right",
                 videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")!
-            ),
-            FeatureTourStep(
-                title: "Ask what to click",
-                body: "Nugumi can look at the current screen when you ask, explain what is happening, and point you to the next button or field.",
-                actionTitle: "Open the prompt near your cursor",
-                actionDetail: askActionDetail(for: askShortcut),
-                symbolName: "cursorarrow.click.2",
-                videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")!
             )
         ]
     }
@@ -546,7 +546,7 @@ private struct PermissionCard: View {
         HStack(spacing: 5) {
             if state == .granted {
                 Circle()
-                    .fill(Color.green)
+                    .fill(FlowTheme.accent)
                     .frame(width: 7, height: 7)
             }
             Text(statusText)
@@ -605,7 +605,7 @@ private struct PermissionCard: View {
         switch state {
         case .active: return OnboardingPalette.mint
         case .waiting: return Color.white.opacity(0.48)
-        case .granted: return .green
+        case .granted: return FlowTheme.accent
         }
     }
 }

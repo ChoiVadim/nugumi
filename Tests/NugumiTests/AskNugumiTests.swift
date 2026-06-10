@@ -412,9 +412,9 @@ final class AskNugumiTests: XCTestCase {
     func testFloatingPromptLayoutHasTallerPillAndCenteredInput() {
         let layout = AskNugumiFloatingPromptMetrics.layout
 
-        XCTAssertEqual(layout.pillFrame.size.height, 38, accuracy: 0.001)
-        XCTAssertEqual(layout.panelSize.height, 66, accuracy: 0.001)
-        XCTAssertEqual(layout.cornerRadius, 19, accuracy: 0.001)
+        XCTAssertEqual(layout.pillFrame.size.height, 46, accuracy: 0.001)
+        XCTAssertEqual(layout.panelSize.height, 74, accuracy: 0.001)
+        XCTAssertEqual(layout.cornerRadius, 23, accuracy: 0.001)
         XCTAssertEqual(layout.textFrame.height, 24, accuracy: 0.001)
         XCTAssertEqual(layout.textFrame.midY, layout.pillFrame.midY, accuracy: 0.001)
     }

@@ -8,6 +8,7 @@ enum GlobalShortcutAction: String, CaseIterable {
     case screenshotArea
     case toggleInvisibility
     case askNugumi
+    case toggleWritingLanguage
 
     var id: UInt32 {
         switch self {
@@ -16,6 +17,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .screenshotArea: return 3
         case .toggleInvisibility: return 4
         case .askNugumi: return 5
+        case .toggleWritingLanguage: return 6
         }
     }
 
@@ -30,6 +32,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .screenshotArea: return "Translate screen area"
         case .toggleInvisibility: return "Toggle invisibility mode"
         case .askNugumi: return "Ask Nugumi"
+        case .toggleWritingLanguage: return "Toggle writing language"
         }
     }
 
@@ -71,6 +74,13 @@ enum GlobalShortcutAction: String, CaseIterable {
             // Preserves the historical "double-tap Control" gesture; user can
             // rebind to any combo or another double-tap modifier from the menu.
             return GlobalShortcut(doubleTapModifier: .control)
+        case .toggleWritingLanguage:
+            return GlobalShortcut(
+                keyCode: UInt32(kVK_ANSI_4),
+                modifiers: [.control],
+                keyEquivalent: "4",
+                keyDisplay: "4"
+            )
         }
     }
 }

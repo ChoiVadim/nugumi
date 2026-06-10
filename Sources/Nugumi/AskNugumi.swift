@@ -221,7 +221,7 @@ struct AskNugumiPetBubblePresentation: Equatable {
 }
 
 enum AskNugumiFloatingPromptMetrics {
-    static let pillSize = CGSize(width: 220, height: 38)
+    static let pillSize = CGSize(width: 260, height: 46)
     static let shadowMargin: CGFloat = 14
     static let edgeMargin: CGFloat = 12
     static let textHorizontalInset: CGFloat = 22
