@@ -24,7 +24,7 @@ final class CloudModelDiscoveryTests: XCTestCase {
 
         let parsed = CloudModelDiscovery.parse(provider: .openAI, data: json)
 
-        // gpt-4o dropped: prefix guard only admits gpt-5+
+        // gpt-4o dropped: prefix guard only admits gpt-5/gpt-6 families
         XCTAssertEqual(parsed.map(\.id), ["gpt-5.5", "gpt-5.4-mini", "gpt-5.6"])
     }
 
@@ -173,6 +173,7 @@ final class CloudModelDiscoveryTests: XCTestCase {
             .init(id: "claude-sonnet-4-6", displayName: nil),
             .init(id: "claude-opus-4-7", displayName: nil),
             .init(id: "claude-opus-4-8", displayName: "Claude Opus 4.8 (API)"),
+            .init(id: "claude-opus-4-10", displayName: nil),
             .init(id: "claude-magnum-5-0", displayName: nil),
         ]
         let merged = LLMModel.mergedCloudModels(
@@ -181,10 +182,11 @@ final class CloudModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(Array(merged.prefix(3)), curatedAnthropic)
 
         let fresh = Array(merged.dropFirst(3))
-        XCTAssertEqual(fresh.map(\.id), ["claude-opus-4-8", "claude-magnum-5-0"])
+        XCTAssertEqual(fresh.map(\.id), ["claude-opus-4-10", "claude-opus-4-8", "claude-magnum-5-0"])
         // API display_name wins when present; generated otherwise.
-        XCTAssertEqual(fresh[0].displayName, "Claude Opus 4.8 (API)")
-        XCTAssertEqual(fresh[1].displayName, "Claude Magnum 5.0")
+        XCTAssertEqual(fresh[0].displayName, "Claude Opus 4.10")
+        XCTAssertEqual(fresh[1].displayName, "Claude Opus 4.8 (API)")
+        XCTAssertEqual(fresh[2].displayName, "Claude Magnum 5.0")
         XCTAssertTrue(fresh.allSatisfy(\.supportsImages))
         XCTAssertTrue(fresh.allSatisfy { $0.cloudProvider == .anthropic })
     }

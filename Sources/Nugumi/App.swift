@@ -155,7 +155,8 @@ struct LLMModel: Equatable {
 
     /// Pure merge (testable without UserDefaults). Matching is canonical-id
     /// based so Anthropic's dated/undated aliases compare equal. Fresh models
-    /// sort descending by id — within one provider's naming scheme that puts
+    /// sort descending by id (numeric-aware, so 4-10 outranks 4-9) — within
+    /// one provider's naming scheme that puts
     /// newer versions first — and default to supportsImages like Codex
     /// discovery does (backend rejects images for text-only models; hiding
     /// usable models is worse).
@@ -173,7 +174,7 @@ struct LLMModel: Equatable {
         }
         let fresh = discovered
             .filter { !curatedIDs.contains(CloudModelDiscovery.canonicalID($0.id)) }
-            .sorted { $0.id > $1.id }
+            .sorted { $0.id.compare($1.id, options: .numeric) == .orderedDescending }
         out += fresh.map { model in
             let name = model.displayName
                 ?? CloudModelDiscovery.prettyName(provider: provider, id: model.id)
