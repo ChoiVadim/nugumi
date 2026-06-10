@@ -80,6 +80,8 @@ final class CloudModelDiscoveryTests: XCTestCase {
         )
         XCTAssertEqual(CloudModelDiscovery.canonicalID("claude-opus-4-8"), "claude-opus-4-8")
         XCTAssertEqual(CloudModelDiscovery.canonicalID("gpt-5.5"), "gpt-5.5")
+        // 7 digits is not a date stamp — must pass through untouched.
+        XCTAssertEqual(CloudModelDiscovery.canonicalID("claude-haiku-4-5-2025101"), "claude-haiku-4-5-2025101")
     }
 
     // MARK: Generated names
@@ -97,6 +99,10 @@ final class CloudModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(
             CloudModelDiscovery.prettyName(provider: .anthropic, id: "claude-haiku-4-5-20251001"),
             "Claude Haiku 4.5"
+        )
+        XCTAssertEqual(
+            CloudModelDiscovery.prettyName(provider: .anthropic, id: "claude-3-5-sonnet"),
+            "Claude 3.5 Sonnet"
         )
     }
 

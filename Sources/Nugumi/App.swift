@@ -12040,7 +12040,7 @@ enum CloudModelDiscovery {
     /// API's undated alias (or vice versa) compare equal.
     static func canonicalID(_ id: String) -> String {
         let parts = id.split(separator: "-")
-        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) {
+        if let last = parts.last, last.count == 8, last.allSatisfy({ $0.isASCII && $0.isNumber }) {
             return parts.dropLast().joined(separator: "-")
         }
         return id
@@ -12063,8 +12063,8 @@ enum CloudModelDiscovery {
             let parts = canonicalID(id).split(separator: "-").map(String.init)
             var words: [String] = []
             for part in parts {
-                if part.allSatisfy(\.isNumber), let last = words.last,
-                   last.allSatisfy({ $0.isNumber || $0 == "." }) {
+                if part.allSatisfy({ $0.isASCII && $0.isNumber }), let last = words.last,
+                   last.allSatisfy({ ($0.isASCII && $0.isNumber) || $0 == "." }) {
                     words[words.count - 1] = last + "." + part
                 } else {
                     words.append(part.capitalized)
