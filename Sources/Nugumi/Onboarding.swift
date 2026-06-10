@@ -20,11 +20,18 @@ enum PermissionKind {
 // MARK: - Feature tour data
 
 struct FeatureTourStep {
+    /// What the instruction badge shows — the actual gesture, not a generic icon.
+    enum Badge {
+        case mouseLeft
+        case mouseRight
+        case keys(String)
+    }
+
     let title: String
     let body: String
     let actionTitle: String
     let actionDetail: String
-    let symbolName: String
+    let badge: Badge
     let videoURL: URL
 
     static var all: [FeatureTourStep] {
@@ -36,34 +43,44 @@ struct FeatureTourStep {
                 body: "A confusing screen, an error, or just a question — Nugumi looks at what's in front of you and answers on the spot.",
                 actionTitle: "Open the prompt near your cursor",
                 actionDetail: askActionDetail(for: askShortcut),
-                symbolName: "cursorarrow.click.2",
-                videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")!
+                badge: .keys(askShortcut.displayString),
+                videoURL: videoURL(named: "ask", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")
             ),
             FeatureTourStep(
                 title: "Read any language without leaving work",
                 body: "Slack, Gmail, Notion, PDFs, websites — wherever the text is. And if it can't be selected, just capture that part of the screen.",
                 actionTitle: "Select text, then left-click",
                 actionDetail: "Highlight the text and left-click the Nugumi button that appears near the selection.",
-                symbolName: "text.viewfinder",
-                videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4")!
+                badge: .mouseLeft,
+                videoURL: videoURL(named: "understand", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4")
             ),
             FeatureTourStep(
                 title: "Write naturally. Send like a native",
                 body: "Type in the language you think in. Nugumi turns it into your writing language — natural grammar, tone, and phrasing.",
                 actionTitle: "Select your draft, then right-click",
                 actionDetail: "Highlight what you wrote and right-click the Nugumi button — it comes back in your writing language.",
-                symbolName: "text.insert",
-                videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")!
+                badge: .mouseRight,
+                videoURL: videoURL(named: "fix", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")
             ),
             FeatureTourStep(
                 title: "Replies that know the answer",
                 body: "This one reads their message and writes the response for you — even when it takes knowledge, like a question asked in the chat.",
                 actionTitle: "Draft a reply",
                 actionDetail: "Select an incoming message. Press Tab on the Nugumi button to switch to reply, then click.",
-                symbolName: "bubble.left.and.text.bubble.right",
-                videoURL: URL(string: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")!
+                badge: .keys("⇥"),
+                videoURL: videoURL(named: "reply", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")
             )
         ]
+    }
+
+    /// Bundled clip first (works offline); CloudFront only as a safety net if
+    /// the resource is somehow missing from the bundle.
+    private static func videoURL(named name: String, remote: String) -> URL {
+        if let url = Bundle.module.url(forResource: name, withExtension: "MOV", subdirectory: "Onboarding")
+            ?? Bundle.module.url(forResource: name, withExtension: "MOV") {
+            return url
+        }
+        return URL(string: remote)!
     }
 
     private static func askActionDetail(for shortcut: GlobalShortcut) -> String {
@@ -389,9 +406,26 @@ private struct OnboardingRootView: View {
 
     private var leftColumn: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(model.stageText)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(OnboardingPalette.mint)
+            if case .feature(let index) = model.page {
+                HStack(spacing: 10) {
+                    HStack(spacing: 5) {
+                        ForEach(0..<model.steps.count, id: \.self) { segment in
+                            Capsule()
+                                .fill(segment <= index ? FlowTheme.accent : Color.white.opacity(0.14))
+                                .frame(width: 26, height: 4)
+                        }
+                    }
+                    Text("\(index + 1) / \(model.steps.count)")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                }
+                .frame(height: 16)
+            } else {
+                Text(model.stageText)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(OnboardingPalette.mint)
+                    .frame(height: 16)
+            }
 
             Text(model.titleText)
                 .font(FlowTheme.serif(29))
@@ -408,7 +442,7 @@ private struct OnboardingRootView: View {
             Group {
                 switch model.page {
                 case .permissions:
-                    VStack(spacing: 12) {
+                    VStack(spacing: 26) {
                         PermissionCard(
                             symbol: "keyboard.badge.eye",
                             fallbackSymbol: "keyboard",
@@ -428,8 +462,10 @@ private struct OnboardingRootView: View {
                                 : (model.nextPermission == .screenRecording ? .active : .waiting)
                         )
                     }
+                    .frame(maxHeight: .infinity, alignment: .center)
                 case .feature(let index):
                     FeatureInstructionCard(step: model.steps[index])
+                        .frame(maxHeight: .infinity, alignment: .center)
                 }
             }
             .padding(.top, 24)
@@ -526,16 +562,7 @@ private struct PermissionCard: View {
 
             statusChip
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(fillColor)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(borderColor, lineWidth: 1)
-        )
     }
 
     private var resolvedSymbol: String {
@@ -560,20 +587,6 @@ private struct PermissionCard: View {
         case .active: return "Next"
         case .waiting: return "Later"
         case .granted: return "Done"
-        }
-    }
-
-    private var fillColor: Color {
-        switch state {
-        case .active: return Color.white.opacity(0.105)
-        case .waiting, .granted: return Color.white.opacity(0.045)
-        }
-    }
-
-    private var borderColor: Color {
-        switch state {
-        case .active: return FlowTheme.accent.opacity(0.92)
-        case .waiting, .granted: return Color.white.opacity(0.095)
         }
     }
 
@@ -616,40 +629,72 @@ private struct FeatureInstructionCard: View {
     let step: FeatureTourStep
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: resolvedSymbol)
-                .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(OnboardingPalette.mint)
-                .frame(width: 30, height: 30)
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text(step.actionTitle)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(step.actionDetail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.62))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 10)
+        VStack(spacing: 0) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.07))
+                Circle()
+                    .strokeBorder(FlowTheme.hairline, lineWidth: 1)
+                badgeContent
             }
+            .frame(width: 64, height: 64)
+
+            Text("HOW TO")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(FlowTheme.inkTertiary)
+                .padding(.top, 20)
+            Text(step.actionTitle)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(FlowTheme.ink)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+            Text(step.actionDetail)
+                .font(.system(size: 12.5))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(FlowTheme.subtleFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(FlowTheme.hairline, lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity)
     }
 
-    private var resolvedSymbol: String {
-        NSImage(systemSymbolName: step.symbolName, accessibilityDescription: nil) != nil
-            ? step.symbolName
-            : "sparkle.magnifyingglass"
+    @ViewBuilder
+    private var badgeContent: some View {
+        switch step.badge {
+        case .mouseLeft:
+            MouseClickIcon(rightSide: false)
+        case .mouseRight:
+            MouseClickIcon(rightSide: true)
+        case .keys(let glyphs):
+            Text(glyphs)
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(OnboardingPalette.mint)
+        }
+    }
+}
+
+/// Tiny mouse glyph with the pressed button highlighted — communicates
+/// left-click vs right-click at a glance.
+private struct MouseClickIcon: View {
+    let rightSide: Bool
+
+    var body: some View {
+        ZStack {
+            Capsule(style: .continuous)
+                .strokeBorder(OnboardingPalette.mint, lineWidth: 1.8)
+            // Divider between the two buttons (top half only).
+            Rectangle()
+                .fill(OnboardingPalette.mint.opacity(0.8))
+                .frame(width: 1.5, height: 12)
+                .offset(y: -10)
+            // The pressed button.
+            Capsule(style: .continuous)
+                .fill(OnboardingPalette.mint)
+                .frame(width: 8, height: 12)
+                .offset(x: rightSide ? 6 : -6, y: -9)
+        }
+        .frame(width: 25, height: 37)
     }
 }
 
@@ -674,39 +719,51 @@ private struct PermissionPreviewPanel: View {
     private static let settingsImage = loadOnboardingImage(named: "screen-recording-settings")
 
     var body: some View {
-        VStack(spacing: 20) {
-            if active == .screenRecording,
-               let prompt = Self.promptImage,
-               let settings = Self.settingsImage {
-                Image(nsImage: prompt)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                Image(nsImage: settings)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            } else {
-                FauxSystemDialog(active: active)
-                FauxSettingsList(
-                    active: active,
-                    nugumiEnabled: active == .accessibility ? axTrusted : scrTrusted
-                )
+        VStack(alignment: .leading, spacing: 24) {
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 9) {
+                stepCaption(1, "macOS will ask first — click “Open System Settings”.")
+                if active == .screenRecording, let prompt = Self.promptImage {
+                    Image(nsImage: prompt)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                } else {
+                    FauxSystemDialog(active: active)
+                }
+            }
+            VStack(alignment: .leading, spacing: 9) {
+                stepCaption(2, "Then turn Nugumi on in the list.")
+                if active == .screenRecording, let settings = Self.settingsImage {
+                    Image(nsImage: settings)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                } else {
+                    FauxSettingsList(
+                        active: active,
+                        nugumiEnabled: active == .accessibility ? axTrusted : scrTrusted
+                    )
+                }
             }
             Spacer(minLength: 0)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.black.opacity(0.24))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(FlowTheme.hairline, lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func stepCaption(_ number: Int, _ text: String) -> some View {
+        HStack(spacing: 8) {
+            Text("\(number)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(FlowTheme.accent))
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(FlowTheme.inkSecondary)
+        }
     }
 }
 
@@ -865,22 +922,28 @@ private struct FauxSettingsRow: View {
 private struct FeatureVideoPanel: View {
     let step: FeatureTourStep
 
+    /// The clip's real aspect ratio (width / height), loaded from the asset so
+    /// portrait recordings get their full height instead of being cropped
+    /// into a landscape frame. Portrait-ish fallback until the asset loads.
+    @State private var videoAspect: CGFloat = 0.62
+
     var body: some View {
-        // Just the video — no captions, no framing panel. resizeAspectFill in
-        // the player (rather than letterboxing) keeps the edges clean.
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            LoopingVideoPlayer(url: step.videoURL)
-                .aspectRatio(16.0 / 10.0, contentMode: .fit)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(FlowTheme.hairline, lineWidth: 1)
-                )
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        LoopingVideoPlayer(url: step.videoURL)
+            .aspectRatio(videoAspect, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(FlowTheme.hairline, lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .task(id: step.videoURL) {
+                let asset = AVURLAsset(url: step.videoURL)
+                guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+                      let size = try? await track.load(.naturalSize),
+                      size.height > 0
+                else { return }
+                videoAspect = size.width / size.height
+            }
     }
 }
 
