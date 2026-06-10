@@ -201,6 +201,9 @@ final class NugumiSettingsBridge: ObservableObject {
     let history: TranslationHistoryStore
 
     @Published var section: MainWindowSection = .home
+    /// Active tab inside the AI Engine section (0 = Models, 1 = Providers).
+    /// Programmatic "go set up a provider" deep links set this to 1.
+    @Published var aiEngineTab: Int = 0
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
 

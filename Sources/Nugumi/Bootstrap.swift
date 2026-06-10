@@ -222,13 +222,20 @@ final class OllamaBootstrap {
             return
         }
 
-        let anyCloudPresent = models.contains { $0.isCloud && presentIDs.contains($0.id) }
-        if anyCloudPresent {
+        switch await probeSignIn() {
+        case .signedIn:
             update(\.ollamaSignedIn, .ok)
-        } else {
+        case .signedOut:
             update(\.ollamaSignedIn, requiresOllamaAccount
                 ? .needsAction("Open Ollama and sign in (free).")
                 : .ok)
+        case .unsupported:
+            // Older server without /api/me — fall back to the tags heuristic
+            // (a cloud model listed implies the account worked at some point).
+            let anyCloudPresent = models.contains { $0.isCloud && presentIDs.contains($0.id) }
+            update(\.ollamaSignedIn, anyCloudPresent || !requiresOllamaAccount
+                ? .ok
+                : .needsAction("Open Ollama and sign in (free)."))
         }
 
         for model in models where pullTasks[model.id] == nil {
@@ -251,6 +258,30 @@ final class OllamaBootstrap {
             keys[provider] = provider.hasCredentials ? .ok : .needsAction(needsAction)
         }
         update(\.cloudKeys, keys)
+    }
+
+    private enum SignInProbe {
+        case signedIn
+        case signedOut
+        case unsupported
+    }
+
+    /// Asks the local server who is signed in. `POST /api/me` returns the
+    /// account (200) when signed in and an auth error when not — unlike
+    /// `/api/tags`, which keeps listing cloud models even after sign-out.
+    private func probeSignIn() async -> SignInProbe {
+        let url = baseURL.appending(path: "api/me")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return .unsupported }
+        switch http.statusCode {
+        case 200..<300: return .signedIn
+        case 401, 403: return .signedOut
+        default: return .unsupported  // 404/405: server predates /api/me
+        }
     }
 
     private func pingServer() async -> Bool {

@@ -121,6 +121,8 @@ final class OnboardingModel: ObservableObject {
     enum Page: Equatable {
         case permissions
         case feature(Int)
+        /// Closing page: what's left to do (pick an AI engine) and the choices.
+        case finale
     }
 
     static let featureTourCompletedKey = "permissionsOnboarding.featureTourCompleted"
@@ -179,6 +181,9 @@ final class OnboardingModel: ObservableObject {
 
     func primaryAction() {
         switch page {
+        case .finale:
+            markTourComplete()
+            requestClose?()
         case .feature(let index):
             advanceFeature(from: index)
         case .permissions:
@@ -199,8 +204,11 @@ final class OnboardingModel: ObservableObject {
     }
 
     func skipAction() {
-        if case .feature = page {
+        switch page {
+        case .feature, .finale:
             markTourComplete()
+        case .permissions:
+            break
         }
         requestClose?()
     }
@@ -220,8 +228,7 @@ final class OnboardingModel: ObservableObject {
             page = .feature(nextIndex)
             return
         }
-        markTourComplete()
-        requestClose?()
+        page = .finale
     }
 
     private func openAccessibilitySettings() {
@@ -231,14 +238,19 @@ final class OnboardingModel: ObservableObject {
     }
 
     private func openScreenRecordingSettings() {
-        // First click registers Nugumi in TCC so it appears in the Screen
-        // Recording list. Apple's stock dialog is unavoidable, but Nugumi's
-        // own onboarding window must be gone before that modal appears.
+        // macOS shows the stock "would like to record" dialog only ONCE per
+        // app: after that, CGRequestScreenCaptureAccess() is a silent no-op
+        // and the user would be left staring at nothing. So request the
+        // system prompt only the first time; afterwards open the Privacy &
+        // Security pane directly so there's always visible next UI.
+        let requestedOnceKey = "permissionsOnboarding.screenCaptureRequested"
         let needsSystemPrompt = !CGPreflightScreenCaptureAccess()
+            && !UserDefaults.standard.bool(forKey: requestedOnceKey)
         closeBeforeSystemDialog?()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             if needsSystemPrompt {
+                UserDefaults.standard.set(true, forKey: requestedOnceKey)
                 _ = CGRequestScreenCaptureAccess()
             } else {
                 let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
@@ -259,6 +271,8 @@ final class OnboardingModel: ObservableObject {
             }
         case .feature(let index):
             return "Feature \(index + 1) of \(steps.count)"
+        case .finale:
+            return "One last thing"
         }
     }
 
@@ -268,6 +282,8 @@ final class OnboardingModel: ObservableObject {
             return "Give Nugumi the access it needs"
         case .feature(let index):
             return steps[index].title
+        case .finale:
+            return "Pick your AI engine"
         }
     }
 
@@ -277,6 +293,8 @@ final class OnboardingModel: ObservableObject {
             return "Nugumi only reads what you explicitly select or capture."
         case .feature(let index):
             return steps[index].body
+        case .finale:
+            return "Nugumi needs a model to think with. Pick one of three options — you can switch anytime."
         }
     }
 
@@ -288,8 +306,10 @@ final class OnboardingModel: ObservableObject {
             case .screenRecording: return "Allow Screen Capture"
             case nil: return "Continue"
             }
-        case .feature(let index):
-            return index == steps.count - 1 ? "Done" : "Next"
+        case .feature:
+            return "Next"
+        case .finale:
+            return "Finish setup"
         }
     }
 
@@ -303,6 +323,11 @@ final class OnboardingModel: ObservableObject {
 @MainActor
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static var hasCompletedFeatureTour: Bool { OnboardingModel.hasCompletedFeatureTour }
+
+    /// True when the window closed only to make room for a macOS permission
+    /// dialog (it will be re-presented by the trust watchers) — distinguishes
+    /// that from the user actually finishing or dismissing onboarding.
+    private(set) var closedForSystemDialog = false
 
     private let model: OnboardingModel
     private let onClose: () -> Void
@@ -358,6 +383,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             self?.close()
         }
         model.closeBeforeSystemDialog = { [weak self] in
+            self?.closedForSystemDialog = true
             self?.window?.orderOut(nil)
             self?.close()
         }
@@ -375,8 +401,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
-            if case .feature = self.model.page {
+            switch self.model.page {
+            case .feature, .finale:
                 self.model.markTourComplete()
+            case .permissions:
+                break
             }
             self.onClose()
         }
@@ -466,6 +495,12 @@ private struct OnboardingRootView: View {
                 case .feature(let index):
                     FeatureInstructionCard(step: model.steps[index])
                         .frame(maxHeight: .infinity, alignment: .center)
+                case .finale:
+                    Text("Pick one on the right — the setup screen opens right after this.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
             }
             .padding(.top, 24)
@@ -486,14 +521,18 @@ private struct OnboardingRootView: View {
             }
             .buttonStyle(.plain)
 
-            Button(action: { model.skipAction() }) {
-                Text(model.skipTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.56))
+            if model.page != .finale {
+                Button(action: { model.skipAction() }) {
+                    Text(model.skipTitle)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.56))
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 12)
+            } else {
+                Spacer().frame(height: 29)
             }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 12)
         }
         .padding(.leading, 36)
         .padding(.trailing, 26)
@@ -513,6 +552,8 @@ private struct OnboardingRootView: View {
                 )
             case .feature(let index):
                 FeatureVideoPanel(step: model.steps[index])
+            case .finale:
+                FinaleChoicesPanel()
             }
         }
         .padding(EdgeInsets(top: 44, leading: 24, bottom: 32, trailing: 26))
@@ -671,6 +712,56 @@ private struct FeatureInstructionCard: View {
                 .font(.system(size: 21, weight: .semibold))
                 .foregroundStyle(OnboardingPalette.mint)
         }
+    }
+}
+
+/// Closing page: the three ways to power Nugumi, brief and scannable. The
+/// actual setup happens in AI Engine → Providers, which opens right after.
+private struct FinaleChoicesPanel: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            choice(
+                symbol: "desktopcomputer",
+                title: "Local — Ollama",
+                detail: "Free and private. Runs entirely on your Mac, works offline."
+            )
+            choice(
+                symbol: "person.crop.circle.badge.checkmark",
+                title: "ChatGPT subscription",
+                detail: "Already pay for ChatGPT? Just sign in — no extra cost."
+            )
+            choice(
+                symbol: "key.fill",
+                title: "API keys",
+                detail: "OpenAI, Anthropic, or Google. Pay as you go with your own key."
+            )
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func choice(symbol: String, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.07))
+                Circle().strokeBorder(FlowTheme.hairline, lineWidth: 1)
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(OnboardingPalette.mint)
+            }
+            .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FlowTheme.ink)
+                Text(detail)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

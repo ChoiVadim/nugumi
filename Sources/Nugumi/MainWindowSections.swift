@@ -346,7 +346,7 @@ private struct InsightsContent: View {
 
     @ViewBuilder
     private func breakdownColumn(title: String, rows: [(String, String, Double)]) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(FlowTheme.ink)
@@ -355,8 +355,27 @@ private struct InsightsContent: View {
                     .font(.system(size: 12))
                     .foregroundStyle(FlowTheme.inkSecondary)
             } else {
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    BreakdownBar(label: row.0, value: row.1, fraction: row.2)
+                DistributionBar(fractions: rows.map(\.2))
+                VStack(spacing: 8) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        HStack(spacing: 9) {
+                            Circle()
+                                .fill(BreakdownPalette.shade(index))
+                                .frame(width: 7, height: 7)
+                            Text(row.0)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(FlowTheme.ink)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text("\(Int((row.2 * 100).rounded()))%")
+                                .font(.system(size: 11))
+                                .foregroundStyle(FlowTheme.inkTertiary)
+                            Text(row.1)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(FlowTheme.inkSecondary)
+                                .frame(minWidth: 34, alignment: .trailing)
+                        }
+                    }
                 }
             }
         }
@@ -364,27 +383,35 @@ private struct InsightsContent: View {
     }
 }
 
-private struct BreakdownBar: View {
-    let label: String
-    let value: String
-    let fraction: Double
+/// Quiet monochrome shades for distribution segments — the accent green stays
+/// reserved for the activity heatmap next door.
+private enum BreakdownPalette {
+    static func shade(_ index: Int) -> Color {
+        let opacities: [Double] = [0.85, 0.55, 0.34, 0.20, 0.12]
+        return Color.white.opacity(opacities[min(index, opacities.count - 1)])
+    }
+}
+
+/// One horizontal bar split proportionally into shaded segments.
+private struct DistributionBar: View {
+    let fractions: [Double]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(label).font(.system(size: 13)).foregroundStyle(FlowTheme.ink).lineLimit(1)
-                Spacer()
-                Text(value).font(.system(size: 13, weight: .medium)).foregroundStyle(FlowTheme.inkSecondary)
-            }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.08))
-                    Capsule().fill(FlowTheme.accent)
-                        .frame(width: max(6, geo.size.width * fraction))
+        GeometryReader { geo in
+            let gap: CGFloat = 2
+            let available = geo.size.width - CGFloat(max(0, fractions.count - 1)) * gap
+            HStack(spacing: gap) {
+                ForEach(fractions.indices, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(BreakdownPalette.shade(index))
+                        .frame(width: max(3, available * fractions[index]))
                 }
+                Spacer(minLength: 0)
             }
-            .frame(height: 8)
         }
+        .frame(height: 10)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .clipShape(Capsule())
     }
 }
 
@@ -467,8 +494,25 @@ private struct StyleCard: View {
                 HStack(alignment: .top, spacing: 22) {
                     VStack(alignment: .leading, spacing: 10) {
                         fieldLabel("Preview")
-                        ChatBubble(text: sample(for: selection))
-                        ChatBubble(text: koreanSample(for: selection), accent: true)
+                        VStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("English")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(FlowTheme.inkTertiary)
+                                    .padding(.leading, 6)
+                                ChatBubble(text: sample(for: selection))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Korean")
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(FlowTheme.inkTertiary)
+                                    .padding(.leading, 6)
+                                ChatBubble(text: koreanSample(for: selection))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -529,21 +573,29 @@ private struct ChatBubble: View {
     let text: String
     /// Accent-tinted bubble for the "Nugumi's rewrite" side of the preview.
     var accent: Bool = false
+    /// Right-aligned (outgoing) bubble — the "tail" corner flattens bottom-right.
+    var trailing: Bool = false
+
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 15,
+            bottomLeadingRadius: trailing ? 15 : 4,
+            bottomTrailingRadius: trailing ? 4 : 15,
+            topTrailingRadius: 15,
+            style: .continuous
+        )
+    }
+
     var body: some View {
         Text(text)
             .font(.system(size: 13.5))
             .foregroundStyle(FlowTheme.ink)
-            .padding(.vertical, 11)
+            .padding(.vertical, 10)
             .padding(.horizontal, 14)
-            .frame(maxWidth: 360, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(accent ? FlowTheme.accent.opacity(0.22) : FlowTheme.subtleFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .strokeBorder(accent ? FlowTheme.accent.opacity(0.35) : FlowTheme.hairline, lineWidth: 1)
-            )
+            .frame(maxWidth: 320, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .background(shape.fill(accent ? FlowTheme.accent.opacity(0.30) : Color.white.opacity(0.09)))
+            .overlay(shape.strokeBorder(accent ? FlowTheme.accent.opacity(0.35) : FlowTheme.hairline, lineWidth: 1))
     }
 }
 
@@ -850,31 +902,90 @@ struct AIEngineSection: View {
 
     var body: some View {
         DetailContainer("AI Engine", subtitle: "Which model does the thinking — and how hard.") {
-            ModelScopeCard(scope: .textActions,
-                           title: "Everyday text",
-                           subtitle: "Translate, rewrite, and smart replies.")
-            ModelScopeCard(scope: .askNugumi,
-                           title: "Ask Nugumi",
-                           subtitle: "Screenshot questions. Vision-capable models only.")
+            FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
 
-            SubCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Cloud access")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(FlowTheme.ink)
-                    Text("Sign in once to use hosted models. Keys are stored locally on this Mac.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                    ForEach(CloudProvider.allCases, id: \.self) { provider in
-                        ProviderRow(provider: provider)
-                        if provider != CloudProvider.allCases.last {
-                            Divider().background(FlowTheme.hairline)
-                        }
+            if bridge.aiEngineTab == 0 {
+                ModelScopeCard(scope: .textActions,
+                               title: "Everyday text",
+                               subtitle: "Translate, rewrite, and smart replies.")
+                ModelScopeCard(scope: .askNugumi,
+                               title: "Ask Nugumi",
+                               subtitle: "Screenshot questions. Vision-capable models only.")
+            } else {
+                OllamaSetupCard()
+
+                ProviderGroupCard(
+                    title: "Subscriptions",
+                    subtitle: "Use a plan you already pay for — sign in with your account.",
+                    providers: CloudProvider.allCases.filter { $0.usesOAuth }
+                )
+
+                ProviderGroupCard(
+                    title: "API keys",
+                    subtitle: "Pay-as-you-go with your own keys. Stored locally on this Mac.",
+                    providers: CloudProvider.allCases.filter { !$0.usesOAuth }
+                )
+            }
+        }
+    }
+}
+
+/// Flow-style underlined text tabs: quiet labels on a hairline baseline, the
+/// active one bright with a 2pt indicator.
+private struct FlowTabBar: View {
+    let tabs: [String]
+    @Binding var selection: Int
+
+    var body: some View {
+        HStack(spacing: 24) {
+            ForEach(tabs.indices, id: \.self) { index in
+                Button {
+                    selection = index
+                } label: {
+                    VStack(spacing: 8) {
+                        Text(tabs[index])
+                            .font(.system(size: 13.5, weight: selection == index ? .semibold : .regular))
+                            .foregroundStyle(selection == index ? FlowTheme.ink : FlowTheme.inkSecondary)
+                        Rectangle()
+                            .fill(selection == index ? Color.white : Color.clear)
+                            .frame(height: 2)
+                    }
+                    .fixedSize()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(FlowTheme.hairline)
+                .frame(height: 1)
+        }
+    }
+}
+
+private struct ProviderGroupCard: View {
+    let title: String
+    let subtitle: String
+    let providers: [CloudProvider]
+
+    var body: some View {
+        SubCard {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FlowTheme.ink)
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                ForEach(providers, id: \.self) { provider in
+                    ProviderRow(provider: provider)
+                    if provider != providers.last {
+                        Divider().background(FlowTheme.hairline)
                     }
                 }
             }
-
-            OllamaSetupCard()
         }
     }
 }

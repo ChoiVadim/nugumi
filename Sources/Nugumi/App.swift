@@ -1287,20 +1287,23 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         showMainWindowOnFirstRunIfNeeded()
     }
 
-    /// First launch after settings moved into the window: open it once so existing
-    /// users discover where their settings went. Skipped while the permissions
-    /// window is up, so we never stack on top of a fresh-install flow.
+    /// Opens the main window once after install so users discover it. While the
+    /// onboarding window is up this defers WITHOUT consuming the flag — the
+    /// onboarding close handler calls it again, so the main window appears only
+    /// after the tour, never side by side with it.
     @MainActor
     private func showMainWindowOnFirstRunIfNeeded() {
         let key = "mainWindowAutoShownV1"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard let self,
                   self.onboardingWindowController == nil
             else { return }
-            self.openMainWindow()
+            UserDefaults.standard.set(true, forKey: key)
+            // Fresh installs have no model ready yet — land on setup directly.
+            let section: MainWindowSection? = self.bootstrap.isReady(for: self.textModelID) ? nil : .aiEngine
+            self.presentMainWindow(section: section)
         }
     }
 
@@ -1829,6 +1832,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let self else { return }
+            // While onboarding is up, don't stack the main window on top of
+            // it — the onboarding close handler opens it (on AI Engine when
+            // no model is ready) via showMainWindowOnFirstRunIfNeeded.
+            guard self.onboardingWindowController == nil else { return }
             if !self.bootstrap.isReady(for: self.textModelID) {
                 self.presentMainWindow(section: .aiEngine)
             }
@@ -2916,7 +2923,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             if !hadCompletedFeatureTour && OnboardingWindowController.hasCompletedFeatureTour {
                 self.analyticsClient.track(.onboardingCompleted)
             }
+            let closedForSystemDialog = self.onboardingWindowController?.closedForSystemDialog ?? false
             self.onboardingWindowController = nil
+            // Onboarding is really over (not just hidden for a macOS
+            // permission dialog) — now the main window may take the stage.
+            if !closedForSystemDialog {
+                self.showMainWindowOnFirstRunIfNeeded()
+            }
         }
         onboardingWindowController = controller
         controller.presentAndActivate()
@@ -3042,14 +3055,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// full backend setup flow that used to live in a standalone window.
     @MainActor
     private func presentMainWindow(section: MainWindowSection? = nil) {
+        let controller: MainWindowController
         if let mainWindowController {
-            mainWindowController.presentAndFocus(section: section)
-            return
+            controller = mainWindowController
+        } else {
+            controller = MainWindowController(host: self) { [weak self] in
+                self?.mainWindowController = nil
+            }
+            mainWindowController = controller
         }
-        let controller = MainWindowController(host: self) { [weak self] in
-            self?.mainWindowController = nil
+        // Programmatic jumps to AI Engine always mean "set up a provider" —
+        // land on the Providers tab. Sidebar clicks keep the Models tab.
+        if section == .aiEngine {
+            controller.bridge.aiEngineTab = 1
         }
-        mainWindowController = controller
         controller.presentAndFocus(section: section)
     }
 
