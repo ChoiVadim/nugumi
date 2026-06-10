@@ -12145,8 +12145,15 @@ enum CloudModelDiscovery {
     /// any failure (no key, network, non-200, unparseable body) leaves the
     /// cache untouched. Same contract as CodexModelDiscovery.refreshFromAPI.
     static func refreshAll() async {
-        for provider in [CloudProvider.openAI, .anthropic, .gemini] {
-            guard let key = KeychainStore.apiKey(for: provider), !key.isEmpty else { continue }
+        // KeychainStore's in-memory cache is main-actor-confined everywhere
+        // else; read the keys there, then do the network work off-actor.
+        let credentials: [(CloudProvider, String)] = await MainActor.run {
+            [CloudProvider.openAI, .anthropic, .gemini].compactMap { provider in
+                guard let key = KeychainStore.apiKey(for: provider), !key.isEmpty else { return nil }
+                return (provider, key)
+            }
+        }
+        for (provider, key) in credentials {
             var request = URLRequest(url: provider.modelsURL)
             request.httpMethod = "GET"
             switch provider {
