@@ -141,6 +141,54 @@ struct LLMModel: Equatable {
         apiKeyModels.filter { $0.cloudProvider == provider }
     }
 
+    /// Picker list for one API-key provider: curated entries (with their
+    /// hand-written names and tier hints) confirmed by the last successful
+    /// /models fetch, followed by fetched chat models we don't curate yet.
+    /// Never fetched → curated list unchanged.
+    static func cloudModels(for provider: CloudProvider) -> [LLMModel] {
+        mergedCloudModels(
+            provider: provider,
+            curated: models(for: provider),
+            discovered: CloudModelCache.discovered(for: provider)
+        )
+    }
+
+    /// Pure merge (testable without UserDefaults). Matching is canonical-id
+    /// based so Anthropic's dated/undated aliases compare equal. Fresh models
+    /// sort descending by id (numeric-aware, so 4-10 outranks 4-9) — within
+    /// one provider's naming scheme that puts
+    /// newer versions first — and default to supportsImages like Codex
+    /// discovery does (backend rejects images for text-only models; hiding
+    /// usable models is worse).
+    static func mergedCloudModels(
+        provider: CloudProvider,
+        curated: [LLMModel],
+        discovered: [CloudModelDiscovery.DiscoveredModel]?
+    ) -> [LLMModel] {
+        guard let discovered, !discovered.isEmpty else { return curated }
+        let fetchedIDs = Set(discovered.map { CloudModelDiscovery.canonicalID($0.id) })
+        let curatedIDs = Set(curated.map { CloudModelDiscovery.canonicalID($0.apiModelID) })
+
+        var out = curated.filter {
+            fetchedIDs.contains(CloudModelDiscovery.canonicalID($0.apiModelID))
+        }
+        let fresh = discovered
+            .filter { !curatedIDs.contains(CloudModelDiscovery.canonicalID($0.id)) }
+            .sorted { $0.id.compare($1.id, options: .numeric) == .orderedDescending }
+        out += fresh.map { model in
+            let name = model.displayName
+                ?? CloudModelDiscovery.prettyName(provider: provider, id: model.id)
+            return LLMModel(
+                id: model.id,
+                shortName: name,
+                displayName: name,
+                backend: .cloud(provider),
+                supportsImages: true
+            )
+        }
+        return out
+    }
+
     /// All Ollama models to offer: the curated Online/Offline defaults, then
     /// whatever the running server reported via `/api/tags` (see
     /// OllamaModelCache). When signed in, the server already lists the cloud
@@ -215,8 +263,17 @@ struct LLMModel: Equatable {
             return codexModels.first { $0.id == id } ?? makeCodexModel(slug: slug)
         }
         if let curated = all.first(where: { $0.id == id }) { return curated }
-        // Discovered Ollama models live outside `all`; resolve them so the
-        // backend dispatch and the menu label can find them.
+        // Discovered cloud models live outside `all`; resolve them so backend
+        // dispatch and the menu label can find them (mirrors Ollama below).
+        // Resolution depends on the persisted CloudModelCache: if the cache
+        // was lost (e.g. defaults never flushed), a stored discovered id
+        // silently falls back to defaultModel below — unlike curated ids,
+        // which always resolve. Accepted best-effort trade-off.
+        for provider in [CloudProvider.openAI, .anthropic, .gemini] {
+            if let cloud = cloudModels(for: provider).first(where: { $0.id == id }) {
+                return cloud
+            }
+        }
         if let ollama = ollamaModels.first(where: { $0.id == id }) { return ollama }
         return defaultModel
     }
@@ -1219,6 +1276,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         setupGlobalHotKeys()
         syncAppClassifierOverrides()
         setupBootstrap()
+        // Refresh the API-key providers' model catalogs (best-effort, cached).
+        Task.detached { await CloudModelDiscovery.refreshAll() }
         _ = updaterController
         analyticsClient.trackInstallIfNeeded()
         analyticsClient.track(.appLaunched, properties: permissionStatusProperties(
@@ -10568,12 +10627,19 @@ enum APIKeyValidator {
         }
         request.timeoutInterval = 10
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 return .invalid(reason: "Invalid response from \(provider.displayName).")
             }
             switch http.statusCode {
             case 200..<300:
+                // The body is the provider's /models list — feed discovery so
+                // the picker updates the moment a key is added. Free: no
+                // extra request beyond the validation GET itself.
+                CloudModelCache.update(
+                    provider: provider,
+                    models: CloudModelDiscovery.parse(provider: provider, data: data)
+                )
                 return .valid
             case 401, 403:
                 return .invalid(reason: "\(provider.displayName) rejected this key.")
@@ -12030,7 +12096,7 @@ enum CloudModelDiscovery {
     /// API's undated alias (or vice versa) compare equal.
     static func canonicalID(_ id: String) -> String {
         let parts = id.split(separator: "-")
-        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) {
+        if let last = parts.last, last.count == 8, last.allSatisfy({ $0.isASCII && $0.isNumber }) {
             return parts.dropLast().joined(separator: "-")
         }
         return id
@@ -12053,8 +12119,8 @@ enum CloudModelDiscovery {
             let parts = canonicalID(id).split(separator: "-").map(String.init)
             var words: [String] = []
             for part in parts {
-                if part.allSatisfy(\.isNumber), let last = words.last,
-                   last.allSatisfy({ $0.isNumber || $0 == "." }) {
+                if part.allSatisfy({ $0.isASCII && $0.isNumber }), let last = words.last,
+                   last.allSatisfy({ ($0.isASCII && $0.isNumber) || $0 == "." }) {
                     words[words.count - 1] = last + "." + part
                 } else {
                     words.append(part.capitalized)
@@ -12068,11 +12134,99 @@ enum CloudModelDiscovery {
                 .joined(separator: " ")
         }
     }
+
+    /// Launch-time refresh for every provider with a stored key. Best-effort:
+    /// any failure (no key, network, non-200, unparseable body) leaves the
+    /// cache untouched. Same contract as CodexModelDiscovery.refreshFromAPI.
+    static func refreshAll() async {
+        // KeychainStore's in-memory cache is main-actor-confined everywhere
+        // else; read the keys there, then do the network work off-actor.
+        let credentials: [(CloudProvider, String)] = await MainActor.run {
+            [CloudProvider.openAI, .anthropic, .gemini].compactMap { provider in
+                guard let key = KeychainStore.apiKey(for: provider), !key.isEmpty else { return nil }
+                return (provider, key)
+            }
+        }
+        for (provider, key) in credentials {
+            var request = URLRequest(url: provider.modelsURL)
+            request.httpMethod = "GET"
+            switch provider {
+            case .anthropic:
+                request.setValue(key, forHTTPHeaderField: "x-api-key")
+                request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            default:
+                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
+            request.timeoutInterval = 15
+            guard let (data, resp) = try? await URLSession.shared.data(for: request),
+                  let http = resp as? HTTPURLResponse, http.statusCode == 200
+            else { continue }
+            CloudModelCache.update(provider: provider, models: parse(provider: provider, data: data))
+        }
+    }
+}
+
+/// Thread-safe per-provider cache of model ids discovered from the
+/// API-key providers' /models endpoints, persisted to UserDefaults.
+/// nil (never fetched) and "fetched" are distinct states: merge logic
+/// falls back to the curated list only in the former. Lives outside any
+/// actor so LLMModel.cloudModels(for:) can be read from any thread that
+/// builds the menu / dispatches a backend.
+enum CloudModelCache {
+    private static let lock = NSLock()
+    private static var memoIDs: [CloudProvider: [String]] = [:]
+    private static var memoNames: [CloudProvider: [String: String]] = [:]
+
+    private static func idsKey(_ p: CloudProvider) -> String { "cloud.discoveredModels.\(p.rawValue).v1" }
+    private static func namesKey(_ p: CloudProvider) -> String { "cloud.discoveredNames.\(p.rawValue).v1" }
+
+    /// Discovered models for one provider, or nil if discovery has never
+    /// succeeded for it (curated fallback applies).
+    static func discovered(for provider: CloudProvider) -> [CloudModelDiscovery.DiscoveredModel]? {
+        lock.lock()
+        defer { lock.unlock() }
+        let ids: [String]
+        if let memo = memoIDs[provider] {
+            ids = memo
+        } else if let stored = UserDefaults.standard.stringArray(forKey: idsKey(provider)) {
+            memoIDs[provider] = stored
+            ids = stored
+        } else {
+            return nil
+        }
+        let names = memoNames[provider]
+            ?? (UserDefaults.standard.dictionary(forKey: namesKey(provider)) as? [String: String])
+            ?? [:]
+        memoNames[provider] = names
+        return ids.map { .init(id: $0, displayName: names[$0]) }
+    }
+
+    static func update(provider: CloudProvider, models: [CloudModelDiscovery.DiscoveredModel]) {
+        guard provider != .openAICodex, !models.isEmpty else { return }
+        let ids = models.map(\.id)
+        var names: [String: String] = [:]
+        for m in models { names[m.id] = m.displayName }
+        lock.lock()
+        let changed = memoIDs[provider] != ids || memoNames[provider] != names
+        memoIDs[provider] = ids
+        memoNames[provider] = names
+        if changed {
+            // Persist inside the lock so memo and UserDefaults can't diverge
+            // when two providers refresh concurrently. UserDefaults writes are
+            // fast in-process mutations; the daemon sync is asynchronous.
+            UserDefaults.standard.set(ids, forKey: idsKey(provider))
+            UserDefaults.standard.set(names, forKey: namesKey(provider))
+        }
+        lock.unlock()
+        guard changed else { return }
+        NotificationCenter.default.post(name: .cloudModelsUpdated, object: nil)
+    }
 }
 
 extension Notification.Name {
     static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
     static let ollamaModelsUpdated = Notification.Name("com.nugumi.ollama.modelsUpdated")
+    static let cloudModelsUpdated = Notification.Name("com.nugumi.cloud.modelsUpdated")
 }
 
 // MARK: Discovered Ollama models (live /api/tags + cached fallback)

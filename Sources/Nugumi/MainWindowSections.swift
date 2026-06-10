@@ -905,9 +905,9 @@ private struct ModelScopeCard: View {
                     Menu {
                         modelSection("Ollama (local)", LLMModel.ollamaModels.filter { !$0.isCloud })
                         modelSection("Ollama (cloud)", LLMModel.ollamaModels.filter(\.isCloud))
-                        modelSection(CloudProvider.openAI.displayName, LLMModel.models(for: .openAI))
-                        modelSection(CloudProvider.anthropic.displayName, LLMModel.models(for: .anthropic))
-                        modelSection(CloudProvider.gemini.displayName, LLMModel.models(for: .gemini))
+                        modelSection(CloudProvider.openAI.displayName, LLMModel.cloudModels(for: .openAI))
+                        modelSection(CloudProvider.anthropic.displayName, LLMModel.cloudModels(for: .anthropic))
+                        modelSection(CloudProvider.gemini.displayName, LLMModel.cloudModels(for: .gemini))
                         modelSection(CloudProvider.openAICodex.displayName, LLMModel.codexModels)
                     } label: {
                         MenuFieldLabel(text: LLMModel.option(id: currentID).shortName)

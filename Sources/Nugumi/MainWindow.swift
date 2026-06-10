@@ -223,7 +223,7 @@ final class NugumiSettingsBridge: ObservableObject {
         self.requiresOllamaAccount = host.requiresOllamaAccount
 
         // Re-render the model picker when live discovery updates either catalog.
-        for name in [Notification.Name.ollamaModelsUpdated, .codexModelsUpdated] {
+        for name in [Notification.Name.ollamaModelsUpdated, .codexModelsUpdated, .cloudModelsUpdated] {
             let token = NotificationCenter.default.addObserver(
                 forName: name, object: nil, queue: .main
             ) { [weak self] _ in
