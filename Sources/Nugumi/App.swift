@@ -265,6 +265,10 @@ struct LLMModel: Equatable {
         if let curated = all.first(where: { $0.id == id }) { return curated }
         // Discovered cloud models live outside `all`; resolve them so backend
         // dispatch and the menu label can find them (mirrors Ollama below).
+        // Resolution depends on the persisted CloudModelCache: if the cache
+        // was lost (e.g. defaults never flushed), a stored discovered id
+        // silently falls back to defaultModel below — unlike curated ids,
+        // which always resolve. Accepted best-effort trade-off.
         for provider in [CloudProvider.openAI, .anthropic, .gemini] {
             if let cloud = cloudModels(for: provider).first(where: { $0.id == id }) {
                 return cloud
