@@ -24,6 +24,7 @@ final class CloudModelDiscoveryTests: XCTestCase {
 
         let parsed = CloudModelDiscovery.parse(provider: .openAI, data: json)
 
+        // gpt-4o dropped: prefix guard only admits gpt-5+
         XCTAssertEqual(parsed.map(\.id), ["gpt-5.5", "gpt-5.4-mini", "gpt-5.6"])
     }
 
@@ -46,6 +47,7 @@ final class CloudModelDiscoveryTests: XCTestCase {
     func testGeminiParseStripsPrefixAndDropsNonChatVariants() {
         let json = """
         {"object":"list","data":[
+            {"id":"models/gemini-2.5-flash-lite","object":"model"},
             {"id":"models/gemini-2.5-pro","object":"model"},
             {"id":"models/gemini-3.0-flash","object":"model"},
             {"id":"models/gemini-embedding-001","object":"model"},
@@ -58,7 +60,7 @@ final class CloudModelDiscoveryTests: XCTestCase {
 
         let parsed = CloudModelDiscovery.parse(provider: .gemini, data: json)
 
-        XCTAssertEqual(parsed.map(\.id), ["gemini-2.5-pro", "gemini-3.0-flash"])
+        XCTAssertEqual(parsed.map(\.id), ["gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3.0-flash"])
     }
 
     func testParseReturnsEmptyOnGarbageAndOnCodexProvider() {

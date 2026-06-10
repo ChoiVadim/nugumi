@@ -11992,9 +11992,11 @@ enum CloudModelDiscovery {
     private static let openAIDropMarkers = [
         "-audio", "-realtime", "-search", "-tts", "-transcribe", "-image", "-codex"
     ]
-    /// Substrings that mark a Gemini id as non-chat.
+    /// Substrings that mark a Gemini id as non-chat. Dash-anchored so a
+    /// marker can't match inside an unrelated word (e.g. "-live" skips
+    /// "gemini-live-2.5-flash" but not a hypothetical "gemini-alive").
     private static let geminiDropMarkers = [
-        "embedding", "tts", "image", "live", "audio"
+        "-embedding", "-tts", "-image", "-live", "-audio"
     ]
 
     /// Parse a provider's `/models` response body into chat-capable models,
