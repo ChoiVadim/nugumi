@@ -577,11 +577,26 @@ struct DetailCard<Content: View>: View {
 struct DetailContainer<Content: View>: View {
     let title: String
     var subtitle: String?
+    /// Optional control pinned to the header's top-right (e.g. an Add button).
+    var accessory: AnyView?
     @ViewBuilder var content: () -> Content
 
     init(_ title: String, subtitle: String? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
         self.subtitle = subtitle
+        self.accessory = nil
+        self.content = content
+    }
+
+    init<Accessory: View>(
+        _ title: String,
+        subtitle: String? = nil,
+        accessory: Accessory,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.accessory = AnyView(accessory)
         self.content = content
     }
 
@@ -589,14 +604,20 @@ struct DetailContainer<Content: View>: View {
         DetailCard {
             VStack(alignment: .leading, spacing: 0) {
                 // Pinned header — only the content below scrolls.
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(FlowTheme.serif(30))
-                        .foregroundStyle(FlowTheme.ink)
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 14))
-                            .foregroundStyle(FlowTheme.inkSecondary)
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(FlowTheme.serif(30))
+                            .foregroundStyle(FlowTheme.ink)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 14))
+                                .foregroundStyle(FlowTheme.inkSecondary)
+                        }
+                    }
+                    if let accessory {
+                        Spacer(minLength: 12)
+                        accessory.padding(.top, 6)
                     }
                 }
                 .padding(.horizontal, 38)
@@ -691,6 +712,7 @@ struct PillPicker<Option: Hashable>: View {
                         .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
                         .padding(.vertical, 6)
                         .padding(.horizontal, 13)
+                        .frame(minWidth: 78)
                         .background(
                             Capsule().fill(isSelected ? FlowTheme.accent : Color.clear)
                         )

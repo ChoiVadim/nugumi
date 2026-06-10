@@ -894,7 +894,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let window: NSWindow
         let sharingType: NSWindow.SharingType
     }
-    private var permissionsWindowController: PermissionsWindowController?
+    private var onboardingWindowController: OnboardingWindowController?
     private var lastObservedModelReadyState: [String: BootstrapStepStatus] = [:]
     private lazy var updaterController: SPUStandardUpdaterController? = {
         guard isRunningFromAppBundle else { return nil }
@@ -1218,7 +1218,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard let self,
-                  self.permissionsWindowController == nil
+                  self.onboardingWindowController == nil
             else { return }
             self.openMainWindow()
         }
@@ -2726,7 +2726,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // Security → Accessibility (so the TCC entry exists and the user can find
         // the toggle), without surfacing macOS's stock "would like to control this
         // computer using accessibility features" dialog. The friendlier prompt
-        // lives in PermissionsWindowController.
+        // lives in OnboardingWindowController.
         let probe = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
         guard !AXIsProcessTrustedWithOptions(probe) else {
             return
@@ -2761,7 +2761,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func requestScreenRecordingPermissionIfNeeded() {
         // No CGRequestScreenCaptureAccess() at launch — that triggers Apple's
         // stock "would like to record this screen" dialog, which we replace
-        // with our own row in PermissionsWindowController. The actual TCC
+        // with our own row in OnboardingWindowController. The actual TCC
         // registration happens lazily when the user clicks "Open settings" in
         // that window, or on the first screenshot attempt.
         guard !CGPreflightScreenCaptureAccess() else {
@@ -2797,13 +2797,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func presentPermissionsWindow(force: Bool) {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
-        guard force || !(axTrusted && scrTrusted) || !PermissionsWindowController.hasCompletedFeatureTour else { return }
-        if let permissionsWindowController {
-            permissionsWindowController.presentAndActivate()
+        guard force || !(axTrusted && scrTrusted) || !OnboardingWindowController.hasCompletedFeatureTour else { return }
+        if let onboardingWindowController {
+            onboardingWindowController.presentAndActivate()
             return
         }
 
-        let hadCompletedFeatureTour = PermissionsWindowController.hasCompletedFeatureTour
+        let hadCompletedFeatureTour = OnboardingWindowController.hasCompletedFeatureTour
         if !hadCompletedFeatureTour {
             analyticsClient.track(.onboardingStarted, properties: permissionStatusProperties(
                 accessibilityTrusted: axTrusted,
@@ -2816,18 +2816,18 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 screenRecordingTrusted: scrTrusted
             ))
         }
-        let controller = PermissionsWindowController(allowsCompletedReview: force) { [weak self] in
+        let controller = OnboardingWindowController(mode: force ? .review : .firstRun) { [weak self] in
             guard let self else { return }
-            if !hadCompletedFeatureTour && PermissionsWindowController.hasCompletedFeatureTour {
+            if !hadCompletedFeatureTour && OnboardingWindowController.hasCompletedFeatureTour {
                 self.analyticsClient.track(.onboardingCompleted)
             }
-            self.permissionsWindowController = nil
+            self.onboardingWindowController = nil
         }
-        permissionsWindowController = controller
+        onboardingWindowController = controller
         controller.presentAndActivate()
     }
 
-    private func trackPermissionGranted(_ permission: PermissionsWindowController.PermissionKind) {
+    private func trackPermissionGranted(_ permission: PermissionKind) {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
         var properties = permissionStatusProperties(

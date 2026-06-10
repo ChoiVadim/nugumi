@@ -48,6 +48,7 @@ private struct KeyCap: View {
             .foregroundStyle(FlowTheme.ink)
             .padding(.vertical, 5)
             .padding(.horizontal, 10)
+            .frame(minWidth: 56)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.08)))
             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
     }
@@ -56,6 +57,8 @@ private struct KeyCap: View {
 private struct SecondaryButton: View {
     let title: String
     var destructive: Bool = false
+    /// Set to align a column of buttons (e.g. Help rows) to one width.
+    var minWidth: CGFloat?
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -64,6 +67,7 @@ private struct SecondaryButton: View {
                 .foregroundStyle(destructive ? Color(red: 1.0, green: 0.62, blue: 0.62) : Color.white)
                 .padding(.vertical, 7)
                 .padding(.horizontal, 14)
+                .frame(minWidth: minWidth)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(destructive ? Color.red.opacity(0.18) : Color.white.opacity(0.10))
@@ -402,24 +406,41 @@ struct StyleSection: View {
             }
 
             SubCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Auto Cleanup")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(FlowTheme.ink)
-                        Spacer()
+                VStack(alignment: .leading, spacing: 14) {
+                    SettingRow("Auto Cleanup",
+                               subtitle: "How much Nugumi tidies the text it writes.") {
                         PillPicker(
                             options: CleanupLevel.allCases,
                             selection: bridge.binding(\.cleanupLevel) { .setCleanupLevel($0) },
                             label: { $0.displayName }
                         )
                     }
-                    Text(bridge.settings.cleanupLevel.promptDescription)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Divider().background(FlowTheme.hairline)
+                    HStack(spacing: 8) {
+                        Image(systemName: "wand.and.stars")
+                            .font(.system(size: 12))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                        Text(bridge.settings.cleanupLevel.settingsDescription)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(FlowTheme.inkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .animation(.easeInOut(duration: 0.15), value: bridge.settings.cleanupLevel)
                 }
             }
+        }
+    }
+}
+
+/// Friendly settings copy for cleanup levels — `promptDescription` is raw
+/// prompt text and reads poorly in the UI.
+private extension CleanupLevel {
+    var settingsDescription: String {
+        switch self {
+        case .none: return "Keeps your phrasing exactly as written."
+        case .light: return "Fixes typos and obvious grammar slips, nothing more."
+        case .medium: return "Smooths awkward phrasing for clarity and flow."
+        case .high: return "Polishes thoroughly — tight, clear sentences with no filler."
         }
     }
 }
@@ -431,7 +452,7 @@ private struct StyleCard: View {
 
     var body: some View {
         SubCard {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(category.displayName)
                         .font(FlowTheme.serif(19))
@@ -440,18 +461,25 @@ private struct StyleCard: View {
                     PillPicker(options: WritingStyle.allCases, selection: $selection, label: { $0.displayName })
                 }
 
+                Divider().background(FlowTheme.hairline)
+
                 // Left: how messages read in this style. Right: where it applies.
-                HStack(alignment: .top, spacing: 28) {
+                HStack(alignment: .top, spacing: 22) {
                     VStack(alignment: .leading, spacing: 10) {
                         fieldLabel("Preview")
                         ChatBubble(text: sample(for: selection))
-                        ChatBubble(text: koreanSample(for: selection))
+                        ChatBubble(text: koreanSample(for: selection), accent: true)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Rectangle()
+                        .fill(FlowTheme.hairline)
+                        .frame(width: 1)
 
                     if category == .other {
                         // "Other" is the catch-all every unmatched app/site falls
                         // into, so there's nothing to assign — explain instead.
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 10) {
                             fieldLabel("Scope")
                             Text("Apps and sites that don't match the categories above land here automatically — nothing to assign.")
                                 .font(.system(size: 12.5))
@@ -499,6 +527,8 @@ private struct StyleCard: View {
 
 private struct ChatBubble: View {
     let text: String
+    /// Accent-tinted bubble for the "Nugumi's rewrite" side of the preview.
+    var accent: Bool = false
     var body: some View {
         Text(text)
             .font(.system(size: 13.5))
@@ -508,11 +538,11 @@ private struct ChatBubble: View {
             .frame(maxWidth: 360, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(FlowTheme.subtleFill)
+                    .fill(accent ? FlowTheme.accent.opacity(0.22) : FlowTheme.subtleFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .strokeBorder(FlowTheme.hairline, lineWidth: 1)
+                    .strokeBorder(accent ? FlowTheme.accent.opacity(0.35) : FlowTheme.hairline, lineWidth: 1)
             )
     }
 }
@@ -906,9 +936,20 @@ private struct ProviderRow: View {
         let signedIn = bridge.hasCredentials(provider)
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                Circle()
-                    .fill(signedIn ? FlowTheme.accent : Color.white.opacity(0.25))
-                    .frame(width: 8, height: 8)
+                // Same status glyphs as the Ollama setup steps below, so both
+                // cards read in one visual language.
+                Group {
+                    if signedIn {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(FlowTheme.accent)
+                    } else {
+                        Circle()
+                            .strokeBorder(FlowTheme.inkTertiary, lineWidth: 1.5)
+                            .frame(width: 13, height: 13)
+                    }
+                }
+                .frame(width: 16)
                 Text(provider.displayName)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(FlowTheme.ink)
@@ -917,9 +958,9 @@ private struct ProviderRow: View {
                     .font(.system(size: 12))
                     .foregroundStyle(FlowTheme.inkSecondary)
                 if signedIn {
-                    SecondaryButton(title: testing ? "Testing…" : "Test") { runTest() }
+                    SecondaryButton(title: testing ? "Testing…" : "Test", minWidth: 76) { runTest() }
                 }
-                SecondaryButton(title: buttonTitle(signedIn: signedIn)) {
+                SecondaryButton(title: buttonTitle(signedIn: signedIn), minWidth: 96) {
                     bridge.perform(.signInCloud(provider))
                 }
             }
@@ -1079,7 +1120,13 @@ struct ShortcutsSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
-        DetailContainer("Shortcuts", subtitle: "Global hotkeys that work from any app.") {
+        DetailContainer(
+            "Shortcuts",
+            subtitle: "Global hotkeys that work from any app.",
+            accessory: SecondaryButton(title: "Reset to defaults") {
+                bridge.perform(.resetShortcuts)
+            }
+        ) {
             SubCard {
                 VStack(spacing: 0) {
                     ForEach(Array(GlobalShortcutAction.allCases.enumerated()), id: \.element) { index, action in
@@ -1094,12 +1141,6 @@ struct ShortcutsSection: View {
                         }
                         .padding(.vertical, 10)
                     }
-                }
-            }
-            HStack {
-                Spacer()
-                SecondaryButton(title: "Reset to defaults") {
-                    bridge.perform(.resetShortcuts)
                 }
             }
         }
@@ -1170,7 +1211,15 @@ private struct SnippetsListContent: View {
     @ObservedObject var store: SnippetsStore
     let kind: SnippetKind
 
-    private var items: [Snippet] { store.snippets.filter { $0.kind == kind } }
+    @State private var isAddingNew = false
+    @State private var editingID: UUID?
+
+    /// Newest first, so a just-saved entry lands where the add editor was.
+    private var items: [Snippet] {
+        store.snippets
+            .filter { $0.kind == kind }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
 
     private var title: String { kind == .snippet ? "Snippets" : "Dictionary" }
     private var subtitle: String {
@@ -1180,14 +1229,15 @@ private struct SnippetsListContent: View {
     }
 
     var body: some View {
-        DetailContainer(title, subtitle: subtitle) {
-            HStack {
-                Spacer()
-                SecondaryButton(title: kind == .snippet ? "+ Add snippet" : "+ Add word") {
-                    store.add(kind: kind)
-                }
+        DetailContainer(
+            title,
+            subtitle: subtitle,
+            accessory: SecondaryButton(title: kind == .snippet ? "Add snippet" : "Add word") {
+                editingID = nil
+                isAddingNew = true
             }
-            if items.isEmpty {
+        ) {
+            if items.isEmpty && !isAddingNew {
                 SubCard {
                     Text(kind == .snippet
                          ? "No snippets yet. Add one like “omw” → “on my way”."
@@ -1197,64 +1247,209 @@ private struct SnippetsListContent: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-                VStack(spacing: 10) {
-                    ForEach(items) { snippet in
-                        SnippetEditorRow(store: store, snippet: snippet)
+                VStack(spacing: 0) {
+                    if isAddingNew {
+                        SnippetEditorRow(
+                            kind: kind,
+                            initialTrigger: "",
+                            initialValue: "",
+                            onSave: { trigger, value in
+                                let created = store.add(kind: kind)
+                                store.update(created.id, trigger: trigger, value: value)
+                                isAddingNew = false
+                            },
+                            onCancel: { isAddingNew = false }
+                        )
+                        .id("snippet-editor-new")
+                        if !items.isEmpty { Divider().background(FlowTheme.hairline) }
+                    }
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().background(FlowTheme.hairline) }
+                        if editingID == item.id {
+                            SnippetEditorRow(
+                                kind: kind,
+                                initialTrigger: item.trigger,
+                                initialValue: item.value,
+                                onSave: { trigger, value in
+                                    store.update(item.id, trigger: trigger, value: value)
+                                    editingID = nil
+                                },
+                                onCancel: { editingID = nil }
+                            )
+                            .id("snippet-editor-\(item.id)")
+                        } else {
+                            SnippetDisplayRow(
+                                snippet: item,
+                                onEdit: {
+                                    isAddingNew = false
+                                    editingID = item.id
+                                },
+                                onDelete: { store.delete(item.id) }
+                            )
+                        }
                     }
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(FlowTheme.subtleFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(FlowTheme.hairline, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
     }
 }
 
-private struct SnippetEditorRow: View {
-    @ObservedObject var store: SnippetsStore
+/// Flow-style display row: plain text, hover highlights the row and reveals
+/// edit/delete actions. Double-click also opens the editor.
+private struct SnippetDisplayRow: View {
     let snippet: Snippet
+    let onEdit: () -> Void
+    let onDelete: () -> Void
 
-    private var live: Snippet { store.snippets.first { $0.id == snippet.id } ?? snippet }
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 10) {
-            TextField("Trigger", text: Binding(
-                get: { live.trigger },
-                set: { store.update(snippet.id, trigger: $0) }
-            ))
-            .textFieldStyle(.plain)
-            .font(.system(size: 13, weight: .medium))
-            .padding(.vertical, 8).padding(.horizontal, 11)
-            .frame(width: snippet.kind == .snippet ? 150 : nil)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(FlowTheme.hairline, lineWidth: 1))
-
+            Text(snippet.trigger.isEmpty ? "—" : snippet.trigger)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(FlowTheme.ink)
+                .lineLimit(1)
             if snippet.kind == .snippet {
-                Image(systemName: "arrow.right").font(.system(size: 11)).foregroundStyle(FlowTheme.inkTertiary)
-                TextField("Expands to…", text: Binding(
-                    get: { live.value },
-                    set: { store.update(snippet.id, value: $0) }
-                ))
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .padding(.vertical, 8).padding(.horizontal, 11)
-                .frame(maxWidth: .infinity)
-                .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.06)))
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(FlowTheme.hairline, lineWidth: 1))
-            } else {
-                Spacer()
-            }
-
-            Button {
-                store.delete(snippet.id)
-            } label: {
-                Image(systemName: "trash")
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(FlowTheme.inkTertiary)
+                Text(snippet.value)
                     .font(.system(size: 13))
                     .foregroundStyle(FlowTheme.inkSecondary)
-                    .padding(7)
+                    .lineLimit(1)
             }
-            .buttonStyle(.plain)
+            Spacer(minLength: 12)
+            HStack(spacing: 4) {
+                RowIconButton(symbol: "pencil", action: onEdit)
+                RowIconButton(symbol: "trash", action: onDelete)
+            }
+            .opacity(hovering ? 1 : 0)
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(FlowTheme.subtleFill))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+        .padding(.horizontal, 16)
+        .frame(minHeight: 46)
+        .background(hovering ? Color.white.opacity(0.05) : Color.clear)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .onTapGesture(count: 2) { onEdit() }
+    }
+}
+
+private struct RowIconButton: View {
+    let symbol: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkSecondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hovering ? Color.white.opacity(0.10) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// Draft-based inline editor: nothing touches the store until Save / Return.
+/// Esc cancels.
+private struct SnippetEditorRow: View {
+    let kind: SnippetKind
+    let onSave: (String, String) -> Void
+    let onCancel: () -> Void
+
+    @State private var trigger: String
+    @State private var value: String
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case trigger, value }
+
+    init(
+        kind: SnippetKind,
+        initialTrigger: String,
+        initialValue: String,
+        onSave: @escaping (String, String) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.kind = kind
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _trigger = State(initialValue: initialTrigger)
+        _value = State(initialValue: initialValue)
+    }
+
+    private var canSave: Bool {
+        !trigger.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            editorField(
+                kind == .snippet ? "Shortcut" : "Word or name",
+                text: $trigger,
+                weight: .medium
+            )
+            .frame(maxWidth: kind == .snippet ? 170 : .infinity)
+            .focused($focusedField, equals: .trigger)
+            .onSubmit {
+                if kind == .snippet {
+                    focusedField = .value
+                } else {
+                    commit()
+                }
+            }
+
+            if kind == .snippet {
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(FlowTheme.inkTertiary)
+                editorField("Expands to…", text: $value, weight: .regular)
+                    .frame(maxWidth: .infinity)
+                    .focused($focusedField, equals: .value)
+                    .onSubmit { commit() }
+            }
+
+            SecondaryButton(title: "Save", action: commit)
+                .disabled(!canSave)
+                .opacity(canSave ? 1 : 0.45)
+
+            RowIconButton(symbol: "xmark", action: onCancel)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 52)
+        .background(Color.white.opacity(0.05))
+        .onAppear { focusedField = .trigger }
+        .onExitCommand { onCancel() }
+    }
+
+    private func commit() {
+        guard canSave else { return }
+        onSave(
+            trigger.trimmingCharacters(in: .whitespacesAndNewlines),
+            value.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private func editorField(_ placeholder: String, text: Binding<String>, weight: Font.Weight) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: weight))
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
     }
 }
 
@@ -1268,7 +1463,7 @@ struct HelpSection: View {
             SubCard {
                 VStack(spacing: 16) {
                     HelpRow(title: "How to use Nugumi",
-                            subtitle: "Permissions and a quick feature tour.",
+                            subtitle: "Permission setup and a quick feature tour.",
                             button: "Open") {
                         bridge.perform(.openPermissionsHelp)
                     }
@@ -1324,7 +1519,7 @@ private struct HelpRow: View {
 
     var body: some View {
         SettingRow(title, subtitle: subtitle) {
-            SecondaryButton(title: button, destructive: destructive, action: action)
+            SecondaryButton(title: button, destructive: destructive, minWidth: 76, action: action)
         }
     }
 }

@@ -74,7 +74,7 @@ final class ModelRoutingTests: XCTestCase {
     func testScopedMenuTitlesUsePurposeFirstLabels() {
         XCTAssertEqual(
             ModelUseScope.textActions.menuTitle(for: LLMModel.option(id: "gpt-oss:120b-cloud")),
-            "Everyday text: Online"
+            "Everyday text: gpt-oss:120b"
         )
         XCTAssertEqual(
             ModelUseScope.askNugumi.menuTitle(for: LLMModel.option(id: "gpt-5.5")),
