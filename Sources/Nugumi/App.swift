@@ -1251,6 +1251,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         setupGlobalHotKeys()
         syncAppClassifierOverrides()
         setupBootstrap()
+        // Refresh the API-key providers' model catalogs (best-effort, cached).
+        Task.detached { await CloudModelDiscovery.refreshAll() }
         _ = updaterController
         analyticsClient.trackInstallIfNeeded()
         analyticsClient.track(.appLaunched, properties: permissionStatusProperties(
@@ -10631,12 +10633,19 @@ enum APIKeyValidator {
         }
         request.timeoutInterval = 10
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 return .invalid(reason: "Invalid response from \(provider.displayName).")
             }
             switch http.statusCode {
             case 200..<300:
+                // The body is the provider's /models list — feed discovery so
+                // the picker updates the moment a key is added. Free: no
+                // extra request beyond the validation GET itself.
+                CloudModelCache.update(
+                    provider: provider,
+                    models: CloudModelDiscovery.parse(provider: provider, data: data)
+                )
                 return .valid
             case 401, 403:
                 return .invalid(reason: "\(provider.displayName) rejected this key.")
@@ -12129,6 +12138,29 @@ enum CloudModelDiscovery {
             return id.split(separator: "-")
                 .map { $0.first?.isNumber == true ? String($0) : String($0).capitalized }
                 .joined(separator: " ")
+        }
+    }
+
+    /// Launch-time refresh for every provider with a stored key. Best-effort:
+    /// any failure (no key, network, non-200, unparseable body) leaves the
+    /// cache untouched. Same contract as CodexModelDiscovery.refreshFromAPI.
+    static func refreshAll() async {
+        for provider in [CloudProvider.openAI, .anthropic, .gemini] {
+            guard let key = KeychainStore.apiKey(for: provider), !key.isEmpty else { continue }
+            var request = URLRequest(url: provider.modelsURL)
+            request.httpMethod = "GET"
+            switch provider {
+            case .anthropic:
+                request.setValue(key, forHTTPHeaderField: "x-api-key")
+                request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            default:
+                request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            }
+            request.timeoutInterval = 15
+            guard let (data, resp) = try? await URLSession.shared.data(for: request),
+                  let http = resp as? HTTPURLResponse, http.statusCode == 200
+            else { continue }
+            CloudModelCache.update(provider: provider, models: parse(provider: provider, data: data))
         }
     }
 }
