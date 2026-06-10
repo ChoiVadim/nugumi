@@ -3543,7 +3543,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             model = m
             client = OpenAICodexClient(apiModelID: m.apiModelID)
         case .openAI, .anthropic, .gemini:
-            guard let m = LLMModel.all.first(where: { $0.cloudProvider == provider }) else {
+            // Merged list, not the static curated one: if the provider has
+            // retired the first curated model, the picker hides it — the
+            // connectivity test must not keep hitting that dead id.
+            guard let m = LLMModel.cloudModels(for: provider).first else {
                 return .failure("No model registered for \(provider.displayName).")
             }
             guard let apiKey = KeychainStore.apiKey(for: provider), !apiKey.isEmpty else {
