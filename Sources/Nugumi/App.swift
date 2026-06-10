@@ -12080,9 +12080,62 @@ enum CloudModelDiscovery {
     }
 }
 
+/// Thread-safe per-provider cache of model ids discovered from the
+/// API-key providers' /models endpoints, persisted to UserDefaults.
+/// nil (never fetched) and "fetched" are distinct states: merge logic
+/// falls back to the curated list only in the former. Lives outside any
+/// actor so LLMModel.cloudModels(for:) can be read from any thread that
+/// builds the menu / dispatches a backend.
+enum CloudModelCache {
+    private static let lock = NSLock()
+    private static var memoIDs: [CloudProvider: [String]] = [:]
+    private static var memoNames: [CloudProvider: [String: String]] = [:]
+
+    private static func idsKey(_ p: CloudProvider) -> String { "cloud.discoveredModels.\(p.rawValue).v1" }
+    private static func namesKey(_ p: CloudProvider) -> String { "cloud.discoveredNames.\(p.rawValue).v1" }
+
+    /// Discovered models for one provider, or nil if discovery has never
+    /// succeeded for it (curated fallback applies).
+    static func discovered(for provider: CloudProvider) -> [CloudModelDiscovery.DiscoveredModel]? {
+        lock.lock()
+        defer { lock.unlock() }
+        let ids: [String]
+        if let memo = memoIDs[provider] {
+            ids = memo
+        } else if let stored = UserDefaults.standard.stringArray(forKey: idsKey(provider)) {
+            memoIDs[provider] = stored
+            ids = stored
+        } else {
+            return nil
+        }
+        let names = memoNames[provider]
+            ?? (UserDefaults.standard.dictionary(forKey: namesKey(provider)) as? [String: String])
+            ?? [:]
+        memoNames[provider] = names
+        return ids.map { .init(id: $0, displayName: names[$0]) }
+    }
+
+    static func update(provider: CloudProvider, models: [CloudModelDiscovery.DiscoveredModel]) {
+        guard provider != .openAICodex, !models.isEmpty else { return }
+        let ids = models.map(\.id)
+        var names: [String: String] = [:]
+        for m in models { names[m.id] = m.displayName }
+        lock.lock()
+        let changed = memoIDs[provider] != ids || memoNames[provider] != names
+        memoIDs[provider] = ids
+        memoNames[provider] = names
+        lock.unlock()
+        guard changed else { return }
+        UserDefaults.standard.set(ids, forKey: idsKey(provider))
+        UserDefaults.standard.set(names, forKey: namesKey(provider))
+        NotificationCenter.default.post(name: .cloudModelsUpdated, object: nil)
+    }
+}
+
 extension Notification.Name {
     static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
     static let ollamaModelsUpdated = Notification.Name("com.nugumi.ollama.modelsUpdated")
+    static let cloudModelsUpdated = Notification.Name("com.nugumi.cloud.modelsUpdated")
 }
 
 // MARK: Discovered Ollama models (live /api/tags + cached fallback)
