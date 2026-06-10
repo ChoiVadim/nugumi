@@ -12124,10 +12124,15 @@ enum CloudModelCache {
         let changed = memoIDs[provider] != ids || memoNames[provider] != names
         memoIDs[provider] = ids
         memoNames[provider] = names
+        if changed {
+            // Persist inside the lock so memo and UserDefaults can't diverge
+            // when two providers refresh concurrently. UserDefaults writes are
+            // fast in-process mutations; the daemon sync is asynchronous.
+            UserDefaults.standard.set(ids, forKey: idsKey(provider))
+            UserDefaults.standard.set(names, forKey: namesKey(provider))
+        }
         lock.unlock()
         guard changed else { return }
-        UserDefaults.standard.set(ids, forKey: idsKey(provider))
-        UserDefaults.standard.set(names, forKey: namesKey(provider))
         NotificationCenter.default.post(name: .cloudModelsUpdated, object: nil)
     }
 }
