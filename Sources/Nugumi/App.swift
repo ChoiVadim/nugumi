@@ -11975,6 +11975,65 @@ enum CodexModelDiscovery {
     }
 }
 
+// MARK: Discovered API-key cloud models (live /models + cached fallback)
+
+/// Discovery for the three API-key providers (OpenAI, Anthropic, Gemini).
+/// Same contract as CodexModelDiscovery: best-effort, failures never touch
+/// the cache, the curated LLMModel.all entries remain the permanent floor.
+enum CloudModelDiscovery {
+    struct DiscoveredModel: Equatable {
+        let id: String
+        /// Provider-supplied pretty name (Anthropic's `display_name`).
+        /// nil for providers whose list API returns bare ids.
+        let displayName: String?
+    }
+
+    /// Substrings that mark an OpenAI id as non-chat or Codex-only.
+    private static let openAIDropMarkers = [
+        "-audio", "-realtime", "-search", "-tts", "-transcribe", "-image", "-codex"
+    ]
+    /// Substrings that mark a Gemini id as non-chat.
+    private static let geminiDropMarkers = [
+        "embedding", "tts", "image", "live", "audio"
+    ]
+
+    /// Parse a provider's `/models` response body into chat-capable models,
+    /// in response order. All three providers use the OpenAI-style
+    /// `{"data": [{"id": ...}]}` envelope (Anthropic adds `display_name`).
+    /// Unknown payloads and the OAuth-only Codex provider yield [].
+    static func parse(provider: CloudProvider, data: Data) -> [DiscoveredModel] {
+        guard provider != .openAICodex,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = json["data"] as? [[String: Any]]
+        else { return [] }
+
+        var out: [DiscoveredModel] = []
+        for item in entries {
+            guard var id = (item["id"] as? String)?.trimmingCharacters(in: .whitespaces),
+                  !id.isEmpty
+            else { continue }
+            switch provider {
+            case .openAI:
+                // gpt-5 and newer text-chat families only.
+                guard id.hasPrefix("gpt-5") || id.hasPrefix("gpt-6"),
+                      !openAIDropMarkers.contains(where: id.contains)
+                else { continue }
+            case .anthropic:
+                guard id.hasPrefix("claude-") else { continue }
+            case .gemini:
+                if id.hasPrefix("models/") { id = String(id.dropFirst("models/".count)) }
+                guard id.hasPrefix("gemini-"),
+                      !geminiDropMarkers.contains(where: id.contains)
+                else { continue }
+            case .openAICodex:
+                continue
+            }
+            out.append(DiscoveredModel(id: id, displayName: item["display_name"] as? String))
+        }
+        return out
+    }
+}
+
 extension Notification.Name {
     static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
     static let ollamaModelsUpdated = Notification.Name("com.nugumi.ollama.modelsUpdated")
