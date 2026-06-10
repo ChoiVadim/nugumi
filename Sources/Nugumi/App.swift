@@ -10395,8 +10395,8 @@ extension AppCategory {
     /// Default register when the user hasn't picked one for this category.
     var defaultWritingStyle: WritingStyle {
         switch self {
-        case .personalMessages, .other: return .casual
-        case .workMessages: return .polite
+        case .personalMessages: return .casual
+        case .workMessages, .other: return .polite
         case .email: return .formal
         }
     }

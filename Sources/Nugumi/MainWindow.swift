@@ -107,7 +107,7 @@ struct SettingsSnapshot {
     var urlRulesByCategory: [AppCategory: [String]] = [:]
 
     func writingStyle(for category: AppCategory) -> WritingStyle {
-        writingStyles[category] ?? .casual
+        writingStyles[category] ?? category.defaultWritingStyle
     }
     func apps(for category: AppCategory) -> [AppRef] {
         appsByCategory[category] ?? []
