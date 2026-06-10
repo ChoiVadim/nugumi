@@ -70,4 +70,44 @@ final class CloudModelDiscoveryTests: XCTestCase {
         let valid = #"{"data":[{"id":"gpt-5.5"}]}"#.data(using: .utf8)!
         XCTAssertTrue(CloudModelDiscovery.parse(provider: .openAICodex, data: valid).isEmpty)
     }
+
+    // MARK: Canonical ids
+
+    func testCanonicalIDStripsTrailingDateStamp() {
+        XCTAssertEqual(
+            CloudModelDiscovery.canonicalID("claude-haiku-4-5-20251001"),
+            "claude-haiku-4-5"
+        )
+        XCTAssertEqual(CloudModelDiscovery.canonicalID("claude-opus-4-8"), "claude-opus-4-8")
+        XCTAssertEqual(CloudModelDiscovery.canonicalID("gpt-5.5"), "gpt-5.5")
+    }
+
+    // MARK: Generated names
+
+    func testPrettyNameForOpenAIIDs() {
+        XCTAssertEqual(CloudModelDiscovery.prettyName(provider: .openAI, id: "gpt-5.6"), "GPT-5.6")
+        XCTAssertEqual(CloudModelDiscovery.prettyName(provider: .openAI, id: "gpt-5.6-mini"), "GPT-5.6 mini")
+    }
+
+    func testPrettyNameForAnthropicIDs() {
+        XCTAssertEqual(
+            CloudModelDiscovery.prettyName(provider: .anthropic, id: "claude-opus-4-8"),
+            "Claude Opus 4.8"
+        )
+        XCTAssertEqual(
+            CloudModelDiscovery.prettyName(provider: .anthropic, id: "claude-haiku-4-5-20251001"),
+            "Claude Haiku 4.5"
+        )
+    }
+
+    func testPrettyNameForGeminiIDs() {
+        XCTAssertEqual(
+            CloudModelDiscovery.prettyName(provider: .gemini, id: "gemini-3.0-pro"),
+            "Gemini 3.0 Pro"
+        )
+        XCTAssertEqual(
+            CloudModelDiscovery.prettyName(provider: .gemini, id: "gemini-2.5-flash-lite"),
+            "Gemini 2.5 Flash Lite"
+        )
+    }
 }

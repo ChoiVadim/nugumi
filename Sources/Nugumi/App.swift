@@ -12034,6 +12034,50 @@ enum CloudModelDiscovery {
         }
         return out
     }
+
+    /// Anthropic pins releases with a trailing -YYYYMMDD date stamp
+    /// (claude-haiku-4-5-20251001). Strip it so a curated dated id and the
+    /// API's undated alias (or vice versa) compare equal.
+    static func canonicalID(_ id: String) -> String {
+        let parts = id.split(separator: "-")
+        if let last = parts.last, last.count == 8, last.allSatisfy(\.isNumber) {
+            return parts.dropLast().joined(separator: "-")
+        }
+        return id
+    }
+
+    /// Human-readable name for a discovered model with no curated entry.
+    /// Matches the curated naming style per provider: "GPT-5.6 mini",
+    /// "Claude Opus 4.8", "Gemini 3.0 Pro". Tier hints ("fast", "flagship")
+    /// are curated-only — we can't infer them from an id.
+    static func prettyName(provider: CloudProvider, id: String) -> String {
+        switch provider {
+        case .openAI, .openAICodex:
+            // gpt-5.6-mini → GPT-5.6 mini
+            var name = id
+            if name.hasPrefix("gpt-") { name = "GPT-" + name.dropFirst("gpt-".count) }
+            return name.replacingOccurrences(of: "-", with: " ")
+                .replacingOccurrences(of: "GPT ", with: "GPT-")
+        case .anthropic:
+            // claude-opus-4-8 → Claude Opus 4.8 (numeric tail joins with dots)
+            let parts = canonicalID(id).split(separator: "-").map(String.init)
+            var words: [String] = []
+            for part in parts {
+                if part.allSatisfy(\.isNumber), let last = words.last,
+                   last.allSatisfy({ $0.isNumber || $0 == "." }) {
+                    words[words.count - 1] = last + "." + part
+                } else {
+                    words.append(part.capitalized)
+                }
+            }
+            return words.joined(separator: " ")
+        case .gemini:
+            // gemini-2.5-flash-lite → Gemini 2.5 Flash Lite
+            return id.split(separator: "-")
+                .map { $0.first?.isNumber == true ? String($0) : String($0).capitalized }
+                .joined(separator: " ")
+        }
+    }
 }
 
 extension Notification.Name {
