@@ -6,6 +6,7 @@ import CoreText
 import Darwin
 import Foundation
 import Sparkle
+import SwiftUI
 import UserNotifications
 import Vision
 
@@ -12757,6 +12758,13 @@ private struct CodexResponsesStreamError: Decodable {
 ///      in their browser (or until 15-minute timeout / Cancel).
 ///   4. On success, persists CodexCredentials to Keychain and dismisses
 ///      the alert programmatically via NSApp.stopModal.
+/// ChatGPT (Codex) device-flow sign-in, shown as a compact floating panel.
+///
+/// Deliberately NOT an `NSAlert.runModal`: the app-modal alert activated
+/// Nugumi on every click, yanking the main window in front of the browser
+/// page the user was trying to sign in with. A `.nonactivatingPanel` floats
+/// above the browser, takes clicks without activating the app, and needs no
+/// nested modal run loop — completion is a plain continuation.
 @MainActor
 final class CodexLoginAlert: NSObject {
     enum Outcome {
@@ -12765,72 +12773,13 @@ final class CodexLoginAlert: NSObject {
         case failed(String)
     }
 
-    nonisolated private static let successCode = NSApplication.ModalResponse(1729)
-    nonisolated private static let failedCode = NSApplication.ModalResponse(1730)
-
-    /// Programmatically dismiss the active modal session from any thread.
-    /// `NSApp.stopModal` alone often isn't enough to exit `NSAlert.runModal`
-    /// — the alert's nested RunLoop needs an event to wake it up, otherwise
-    /// it sits idle even after stopModal flips the internal flag. Posting a
-    /// synthetic .applicationDefined event guarantees the run loop spins
-    /// once more and notices the stop.
-    /// Strong reference to the active alert so the background task can ask
-    /// the main thread to close its window directly — `NSApp.stopModal`
-    /// alone has proven unreliable on the NSAlert nested run loop in macOS
-    /// 14+.
-    nonisolated(unsafe) private static weak var activeAlert: NSAlert?
-
-    nonisolated static func endModalOnMain(code: NSApplication.ModalResponse) {
-        CodexDebugLog.append("endModalOnMain: scheduling stopModal=\(code.rawValue) on main thread")
-        // CRITICAL: NSAlert.runModal spins the main run loop in
-        // NSModalPanelRunLoopMode, which is NOT what DispatchQueue.main
-        // services (that uses kCFRunLoopDefaultMode). If we DispatchQueue.main.async
-        // a stopModal call, the block sits queued until the modal returns by
-        // user action — exactly what was breaking auto-dismiss. CFRunLoop's
-        // performBlock with an explicit mode array schedules the block to run
-        // in *whichever* of those modes the loop is currently in, including
-        // the modal panel mode, and is thread-safe to call from any thread.
-        let block: () -> Void = {
-            CodexDebugLog.append("endModalOnMain: main-thread block running")
-            // CFRunLoopPerformBlock(CFRunLoopGetMain(), ...) guarantees this
-            // block executes on the main thread, so the MainActor isolation
-            // assertion below will always hold.
-            MainActor.assumeIsolated {
-                NSApp.stopModal(withCode: code)
-                if let win = activeAlert?.window {
-                    CodexDebugLog.append("endModalOnMain: closing alert window")
-                    win.orderOut(nil)
-                }
-                if let wakeEvent = NSEvent.otherEvent(
-                    with: .applicationDefined,
-                    location: .zero,
-                    modifierFlags: [],
-                    timestamp: 0,
-                    windowNumber: 0,
-                    context: nil,
-                    subtype: 0,
-                    data1: 0,
-                    data2: 0
-                ) {
-                    NSApp.postEvent(wakeEvent, atStart: true)
-                }
-            }
-            CodexDebugLog.append("endModalOnMain: done")
-        }
-        let modes: CFArray = [
-            CFRunLoopMode.commonModes.rawValue,
-            CFRunLoopMode.defaultMode.rawValue,
-            "NSModalPanelRunLoopMode" as CFString,
-            "NSEventTrackingRunLoopMode" as CFString
-        ] as CFArray
-        CFRunLoopPerformBlock(CFRunLoopGetMain(), modes, block)
-        CFRunLoopWakeUp(CFRunLoopGetMain())
-    }
-
-    private var failureMessage: String?
+    private var panel: NSPanel?
     private var pollTask: Task<Void, Never>?
     private var verificationURL: URL!
     private var userCode: String!
+    /// Resumes `run()`'s continuation exactly once, whichever finishes first
+    /// (successful poll, poll failure, or Cancel).
+    private var finish: ((Outcome) -> Void)?
 
     static func present() async -> Outcome {
         let controller = CodexLoginAlert()
@@ -12848,158 +12797,213 @@ final class CodexLoginAlert: NSObject {
         verificationURL = start.verificationURL
         userCode = start.userCode
 
-        NSApp.activate(ignoringOtherApps: true)
+        // Open the browser WITHOUT activating Nugumi — the sign-in page must
+        // stay in front; the panel floats above it.
         NSWorkspace.shared.open(start.verificationURL)
 
-        let alert = NSAlert()
-        alert.messageText = "Sign in with ChatGPT"
-        alert.informativeText = "Finish sign-in in your browser. Nugumi will pick up the credentials automatically — no need to paste anything back."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Cancel")
-        alert.accessoryView = makeAccessoryView(start: start)
-        Self.activeAlert = alert
+        let outcome = await withCheckedContinuation { (continuation: CheckedContinuation<Outcome, Never>) in
+            var resumed = false
+            finish = { outcome in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: outcome)
+            }
 
-        CodexDebugLog.append("CodexLoginAlert: launching detached poll task")
-        // Use Task.detached so the polling body runs on the cooperative thread
-        // pool, NOT on the @MainActor executor — otherwise alert.runModal()
-        // (which spins a nested RunLoop on the main thread) starves the
-        // Task and the polling never fires.
-        let deviceAuthID = start.deviceAuthID
-        let userCode = start.userCode
-        let pollInterval = start.pollInterval
-        pollTask = Task.detached { [weak self] in
-            do {
-                let creds = try await CodexOAuthClient.shared.pollForTokens(
-                    deviceAuthID: deviceAuthID,
-                    userCode: userCode,
-                    interval: pollInterval
-                )
-                // Persist creds *before* the main-thread hop so we don't
-                // lose them if the modal dismiss-handoff has timing issues.
-                KeychainStore.setCodexCredentials(creds)
-                CodexDebugLog.append("CodexLoginAlert: tokens persisted, dispatching stopModal")
-                Self.endModalOnMain(code: Self.successCode)
-            } catch is CancellationError {
-                CodexDebugLog.append("CodexLoginAlert: poll cancelled")
-                return
-            } catch {
-                CodexDebugLog.append("CodexLoginAlert: poll failed — \(error)")
-                let message = error.localizedDescription
-                DispatchQueue.main.async { [weak self] in
-                    self?.failureMessage = message
-                    Self.endModalOnMain(code: Self.failedCode)
+            CodexDebugLog.append("CodexLoginAlert: launching poll task")
+            pollTask = Task { [weak self] in
+                do {
+                    let creds = try await CodexOAuthClient.shared.pollForTokens(
+                        deviceAuthID: start.deviceAuthID,
+                        userCode: start.userCode,
+                        interval: start.pollInterval
+                    )
+                    // Persist before resuming so the caller always finds them.
+                    KeychainStore.setCodexCredentials(creds)
+                    CodexDebugLog.append("CodexLoginAlert: tokens persisted")
+                    self?.finish?(.success(creds))
+                } catch is CancellationError {
+                    CodexDebugLog.append("CodexLoginAlert: poll cancelled")
+                } catch {
+                    CodexDebugLog.append("CodexLoginAlert: poll failed — \(error)")
+                    self?.finish?(.failed(error.localizedDescription))
                 }
             }
+
+            presentPanel()
         }
 
-        let response = alert.runModal()
         pollTask?.cancel()
+        finish = nil
+        closePanel()
 
-        if response == Self.successCode, let creds = KeychainStore.codexCredentials() {
+        if case .success = outcome {
             // Fire-and-forget model discovery so the menu reflects this
             // account's catalog (Plus vs Pro see different lineups).
             Task.detached { await CodexModelDiscovery.refreshFromAPI() }
-            return .success(creds)
         }
-        if response == Self.failedCode {
-            return .failed(failureMessage ?? "Sign-in failed.")
-        }
-        return .cancelled
+        return outcome
     }
 
-    private func makeAccessoryView(start: CodexOAuthClient.DeviceCodeStart) -> NSView {
-        let width: CGFloat = 360
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 132))
+    private func presentPanel() {
+        let view = CodexLoginPanelView(
+            code: userCode,
+            openPage: { [weak self] in
+                guard let self else { return }
+                NSWorkspace.shared.open(self.verificationURL)
+            },
+            cancel: { [weak self] in
+                self?.finish?(.cancelled)
+            }
+        )
+        let hosting = NSHostingView(rootView: view)
+        // The titled+fullSizeContentView panel reports the titlebar as a top
+        // safe-area inset, which SwiftUI turns into ~28pt of dead air above
+        // the content. The panel has no visible titlebar — drop the inset.
+        hosting.safeAreaRegions = []
+        hosting.translatesAutoresizingMaskIntoConstraints = false
 
-        let step1 = NSTextField(labelWithString: "1. Open this URL in your browser:")
-        step1.font = .systemFont(ofSize: 12, weight: .medium)
-        step1.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(step1)
+        let panel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Sign in with ChatGPT"
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
 
-        let urlField = NSTextField(labelWithString: start.verificationURL.absoluteString)
-        urlField.font = .systemFont(ofSize: 12)
-        urlField.textColor = .linkColor
-        urlField.isSelectable = true
-        urlField.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(urlField)
-
-        let step2 = NSTextField(labelWithString: "2. Enter this code:")
-        step2.font = .systemFont(ofSize: 12, weight: .medium)
-        step2.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(step2)
-
-        let codeLabel = NSTextField(labelWithString: start.userCode)
-        codeLabel.font = .monospacedSystemFont(ofSize: 20, weight: .bold)
-        codeLabel.textColor = .controlAccentColor
-        codeLabel.isSelectable = true
-        codeLabel.alignment = .center
-        codeLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(codeLabel)
-
-        let openBtn = NSButton(title: "Open URL", target: self, action: #selector(openURL))
-        openBtn.bezelStyle = .rounded
-        openBtn.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(openBtn)
-
-        let copyBtn = NSButton(title: "Copy code", target: self, action: #selector(copyCode))
-        copyBtn.bezelStyle = .rounded
-        copyBtn.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(copyBtn)
-
-        let spinner = NSProgressIndicator()
-        spinner.style = .spinning
-        spinner.controlSize = .small
-        spinner.startAnimation(nil)
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(spinner)
-
-        let waitingLabel = NSTextField(labelWithString: "Waiting for sign-in…")
-        waitingLabel.font = .systemFont(ofSize: 11)
-        waitingLabel.textColor = .secondaryLabelColor
-        waitingLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(waitingLabel)
-
+        let backdrop = NSVisualEffectView()
+        backdrop.material = .hudWindow
+        backdrop.blendingMode = .behindWindow
+        backdrop.state = .active
+        backdrop.appearance = NSAppearance(named: .darkAqua)
+        backdrop.addSubview(hosting)
         NSLayoutConstraint.activate([
-            container.widthAnchor.constraint(equalToConstant: width),
-
-            step1.topAnchor.constraint(equalTo: container.topAnchor),
-            step1.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-
-            urlField.topAnchor.constraint(equalTo: step1.bottomAnchor, constant: 2),
-            urlField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            urlField.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            step2.topAnchor.constraint(equalTo: urlField.bottomAnchor, constant: 10),
-            step2.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-
-            codeLabel.topAnchor.constraint(equalTo: step2.bottomAnchor, constant: 2),
-            codeLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            codeLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            openBtn.topAnchor.constraint(equalTo: codeLabel.bottomAnchor, constant: 10),
-            openBtn.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-
-            copyBtn.topAnchor.constraint(equalTo: openBtn.topAnchor),
-            copyBtn.leadingAnchor.constraint(equalTo: openBtn.trailingAnchor, constant: 8),
-
-            spinner.centerYAnchor.constraint(equalTo: openBtn.centerYAnchor),
-            spinner.trailingAnchor.constraint(equalTo: waitingLabel.leadingAnchor, constant: -4),
-
-            waitingLabel.centerYAnchor.constraint(equalTo: openBtn.centerYAnchor),
-            waitingLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-
-            container.bottomAnchor.constraint(equalTo: openBtn.bottomAnchor, constant: 4)
+            hosting.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: backdrop.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor),
         ])
-        return container
+        panel.contentView = backdrop
+
+        let size = hosting.fittingSize
+        panel.setContentSize(size)
+        // Upper middle of the screen: visible alongside the browser without
+        // covering the code field in the center of the page.
+        if let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(
+                x: frame.midX - size.width / 2,
+                y: frame.maxY - size.height - frame.height * 0.16
+            ))
+        }
+        panel.orderFrontRegardless()
+        self.panel = panel
     }
 
-    @objc private func openURL() {
-        NSWorkspace.shared.open(verificationURL)
+    private func closePanel() {
+        panel?.orderOut(nil)
+        panel = nil
+    }
+}
+
+/// Compact content for the sign-in panel: one-line explanation, the code in a
+/// selectable chip with a copy icon, and a status/cancel row.
+private struct CodexLoginPanelView: View {
+    let code: String
+    let openPage: () -> Void
+    let cancel: () -> Void
+
+    @State private var copied = false
+
+    private static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sign in with ChatGPT")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("Enter this code on the page that just opened — Nugumi finishes sign-in automatically.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.66))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Text(code)
+                    .font(.system(size: 21, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Self.mint)
+                    .textSelection(.enabled)
+                Button(action: copyCode) {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(copied ? Self.mint : Color.white.opacity(0.7))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Copy code")
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+
+            HStack(spacing: 8) {
+                Button(action: openPage) {
+                    Text("Open page again")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Self.mint)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 12)
+
+                ProgressView()
+                    .controlSize(.small)
+                Text("Waiting…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.white.opacity(0.55))
+
+                Button(action: cancel) {
+                    Text("Cancel")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 10)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 4)
+            }
+        }
+        .padding(16)
+        .frame(width: 336)
     }
 
-    @objc private func copyCode() {
+    private func copyCode() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(userCode, forType: .string)
+        NSPasteboard.general.setString(code, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            copied = false
+        }
     }
 }
 
