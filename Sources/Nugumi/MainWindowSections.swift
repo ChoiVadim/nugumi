@@ -912,20 +912,37 @@ struct AIEngineSection: View {
                                title: "Ask Nugumi",
                                subtitle: "Screenshot questions. Vision-capable models only.")
             } else {
-                OllamaSetupCard()
-
-                ProviderGroupCard(
-                    title: "Subscriptions",
-                    subtitle: "Use a plan you already pay for — sign in with your account.",
-                    providers: CloudProvider.allCases.filter { $0.usesOAuth }
-                )
-
-                ProviderGroupCard(
-                    title: "API keys",
-                    subtitle: "Pay-as-you-go with your own keys. Stored locally on this Mac.",
-                    providers: CloudProvider.allCases.filter { !$0.usesOAuth }
-                )
+                ForEach(orderedProviderGroups, id: \.self) { group in
+                    providerGroupCard(for: group)
+                }
             }
+        }
+    }
+
+    /// Default order, except the engine picked during onboarding leads.
+    private var orderedProviderGroups: [EngineSetupFocus] {
+        let base = EngineSetupFocus.allCases
+        guard let focus = bridge.engineSetupFocus else { return base }
+        return [focus] + base.filter { $0 != focus }
+    }
+
+    @ViewBuilder
+    private func providerGroupCard(for group: EngineSetupFocus) -> some View {
+        switch group {
+        case .local:
+            OllamaSetupCard()
+        case .subscription:
+            ProviderGroupCard(
+                title: "Subscriptions",
+                subtitle: "Use a plan you already pay for — sign in with your account.",
+                providers: CloudProvider.allCases.filter { $0.usesOAuth }
+            )
+        case .apiKeys:
+            ProviderGroupCard(
+                title: "API keys",
+                subtitle: "Pay-as-you-go with your own keys. Stored locally on this Mac.",
+                providers: CloudProvider.allCases.filter { !$0.usesOAuth }
+            )
         }
     }
 }

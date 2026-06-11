@@ -204,6 +204,9 @@ final class NugumiSettingsBridge: ObservableObject {
     /// Active tab inside the AI Engine section (0 = Models, 1 = Providers).
     /// Programmatic "go set up a provider" deep links set this to 1.
     @Published var aiEngineTab: Int = 0
+    /// Engine picked on the onboarding finale — that group's card leads the
+    /// Providers tab. `nil` keeps the default order.
+    @Published var engineSetupFocus: EngineSetupFocus?
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
 
@@ -298,6 +301,12 @@ final class NugumiSettingsBridge: ObservableObject {
 }
 
 // MARK: - Sections
+
+/// The three ways to power Nugumi, as offered on the onboarding finale. Used
+/// to float the picked group to the top of the Providers tab.
+enum EngineSetupFocus: String, CaseIterable, Hashable {
+    case local, subscription, apiKeys
+}
 
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     case home, insights, dictionary, snippets, style, languages, aiEngine, shortcuts
@@ -399,7 +408,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 940, height: 620)
+        window.minSize = NSSize(width: 1000, height: 620)
         window.setFrameAutosaveName("NugumiMainWindowV2")
         window.isOpaque = false
         window.backgroundColor = .clear
@@ -716,6 +725,9 @@ struct PillPicker<Option: Hashable>: View {
                     Text(label(option))
                         .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
                         .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
+                        // Pills never wrap — "Floating bar" stays on one line
+                        // even at the window's minimum width.
+                        .fixedSize()
                         .padding(.vertical, 6)
                         .padding(.horizontal, 13)
                         .frame(minWidth: 78)

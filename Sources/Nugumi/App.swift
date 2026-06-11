@@ -1262,6 +1262,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Developer switch: NUGUMI_FIRST_RUN=1 clears the first-run flags so
+        // the full install experience (intro video → permissions → feature
+        // tour → engine choice → main window) replays on this launch. TCC
+        // permissions can't be revoked from here — use `tccutil reset` for
+        // full fidelity.
+        if ProcessInfo.processInfo.environment["NUGUMI_FIRST_RUN"] == "1" {
+            for key in [
+                OnboardingModel.featureTourCompletedKey,
+                OnboardingModel.introPlayedKey,
+                "mainWindowAutoShownV1",
+                "permissionsOnboarding.screenCaptureRequested",
+            ] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
         // AX default messaging timeout is 6s. Parameterized calls (e.g.
         // kAXBoundsForRangeParameterizedAttribute) can stall the main thread
         // when an unsupported app responds slowly. Cap it.
@@ -1956,6 +1971,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
+
+    /// Launching the app again from /Applications while it's already running
+    /// lands here (macOS sends a reopen event to the running instance). With
+    /// the menu bar icon hidden this is the only way back into the app, so
+    /// always surface a window: onboarding if the tour is still up, otherwise
+    /// the main window.
+    @MainActor
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let onboardingWindowController {
+            onboardingWindowController.presentAndActivate()
+        } else {
+            presentMainWindow()
+        }
+        return false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -2942,7 +2972,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func presentPermissionsWindow(force: Bool) {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
-        guard force || !(axTrusted && scrTrusted) || !OnboardingWindowController.hasCompletedFeatureTour else { return }
+        guard force
+            || !(axTrusted && scrTrusted)
+            || !OnboardingWindowController.hasCompletedFeatureTour
+            // Initial setup unfinished (the post-Screen-Recording restart
+            // lands here): reopen onboarding so the engine choice still
+            // happens.
+            || !OnboardingModel.mainWindowEverAutoShown
+            || OnboardingModel.devPageOverride != nil
+        else { return }
         if let onboardingWindowController {
             onboardingWindowController.presentAndActivate()
             return
@@ -2961,7 +2999,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 screenRecordingTrusted: scrTrusted
             ))
         }
-        let controller = OnboardingWindowController(mode: force ? .review : .firstRun) { [weak self] in
+        let controller = OnboardingWindowController(
+            mode: force ? .review : .firstRun,
+            onPickEngine: { [weak self] choice in
+                guard let self else { return }
+                self.presentMainWindow(section: .aiEngine)
+                self.mainWindowController?.bridge.engineSetupFocus = choice
+            }
+        ) { [weak self] in
             guard let self else { return }
             if !hadCompletedFeatureTour && OnboardingWindowController.hasCompletedFeatureTour {
                 self.analyticsClient.track(.onboardingCompleted)

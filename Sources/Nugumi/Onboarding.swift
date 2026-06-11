@@ -106,6 +106,14 @@ struct FeatureTourStep {
     }
 }
 
+// MARK: - Intro video
+
+/// First-run intro clip. Optional so a missing resource simply skips the page.
+enum OnboardingIntroVideo {
+    static let url: URL? = Bundle.module.url(forResource: "intro", withExtension: "mov", subdirectory: "Onboarding")
+        ?? Bundle.module.url(forResource: "intro", withExtension: "mov")
+}
+
 // MARK: - Onboarding state machine
 
 @MainActor
@@ -119,6 +127,8 @@ final class OnboardingModel: ObservableObject {
     }
 
     enum Page: Equatable {
+        /// Full-window intro video, shown once at the very start of first run.
+        case intro
         case permissions
         case feature(Int)
         /// Closing page: what's left to do (pick an AI engine) and the choices.
@@ -126,40 +136,95 @@ final class OnboardingModel: ObservableObject {
     }
 
     static let featureTourCompletedKey = "permissionsOnboarding.featureTourCompleted"
+    static let introPlayedKey = "permissionsOnboarding.introPlayed"
 
     static var hasCompletedFeatureTour: Bool {
         UserDefaults.standard.bool(forKey: featureTourCompletedKey)
     }
 
+    static var hasPlayedIntro: Bool {
+        UserDefaults.standard.bool(forKey: introPlayedKey)
+    }
+
+    /// Proxy for "initial setup finished": the key is consumed by
+    /// `showMainWindowOnFirstRunIfNeeded` in App.swift the first time the main
+    /// window auto-opens, which happens right after onboarding completes.
+    /// While it's still false, completing permissions should land on the
+    /// engine choice, not silently close.
+    static var mainWindowEverAutoShown: Bool {
+        UserDefaults.standard.bool(forKey: "mainWindowAutoShownV1")
+    }
+
     let mode: Mode
     let steps = FeatureTourStep.all
 
-    @Published var page: Page = .permissions
+    @Published var page: Page = .permissions {
+        didSet { pageDidChange?(page) }
+    }
+    /// Set by the window controller — drives the intro ↔ standard window resize.
+    var pageDidChange: ((Page) -> Void)?
     @Published var axTrusted = AXIsProcessTrusted()
     @Published var scrTrusted = CGPreflightScreenCaptureAccess()
 
     /// Set by the window controller.
     var requestClose: (() -> Void)?
     var closeBeforeSystemDialog: (() -> Void)?
+    /// Opens the main window on AI Engine → Providers so the user lands in
+    /// the setup flow for the engine they just picked on the finale page.
+    var openEngineSetup: ((EngineSetupFocus) -> Void)?
 
     init(mode: Mode) {
         self.mode = mode
-        // First run with permissions already granted goes straight to the tour
-        // (nothing to set up). Review mode always starts on the permissions
-        // page so granted status stays visible.
-        if mode == .firstRun, axTrusted, scrTrusted, !Self.hasCompletedFeatureTour {
-            page = .feature(0)
+        // First-run order: intro video → feature tour → permissions (only if
+        // something is missing) → engine choice. Review mode always starts on
+        // the permissions page so granted status stays visible.
+        if mode == .firstRun, !Self.hasCompletedFeatureTour {
+            if !Self.hasPlayedIntro, OnboardingIntroVideo.url != nil {
+                page = .intro
+            } else if Self.hasPlayedIntro, nextPermission != nil {
+                // Resuming mid-flow (e.g. re-presented after granting a
+                // permission in System Settings) — the tour is behind us,
+                // pick up at the permission checklist.
+                page = .permissions
+            } else {
+                page = .feature(0)
+            }
+        } else if mode == .firstRun, !Self.mainWindowEverAutoShown, nextPermission == nil {
+            // Post-restart resume: granting Screen Recording relaunches the
+            // app. Tour watched, permissions done — only the engine choice
+            // is left.
+            page = .finale
         }
+        if let override = Self.devPageOverride {
+            page = override
+        }
+    }
+
+    /// Developer switch: NUGUMI_ONBOARDING_PAGE=intro|permissions|feature|finale
+    /// jumps straight to that page, for iterating on onboarding UI without
+    /// clicking through the whole flow.
+    static var devPageOverride: Page? {
+        switch ProcessInfo.processInfo.environment["NUGUMI_ONBOARDING_PAGE"] {
+        case "intro": return .intro
+        case "permissions": return .permissions
+        case "feature": return .feature(0)
+        case "finale": return .finale
+        default: return nil
+        }
+    }
+
+    func advanceFromIntro() {
+        guard page == .intro else { return }
+        // Remember so a re-presented onboarding (after a System Settings
+        // round-trip) never replays the video.
+        UserDefaults.standard.set(true, forKey: Self.introPlayedKey)
+        page = .feature(0)
     }
 
     var nextPermission: PermissionKind? {
         if !axTrusted { return .accessibility }
         if !scrTrusted { return .screenRecording }
         return nil
-    }
-
-    private var shouldShowFeatureTour: Bool {
-        mode == .review || !Self.hasCompletedFeatureTour
     }
 
     func refreshPermissions() {
@@ -171,8 +236,8 @@ final class OnboardingModel: ObservableObject {
         // First-run auto-advance once both permissions land; review mode stays
         // put so the user can see (and revisit) the granted state.
         if mode == .firstRun, page == .permissions, ax, scr {
-            if !Self.hasCompletedFeatureTour {
-                page = .feature(0)
+            if !Self.mainWindowEverAutoShown {
+                page = .finale
             } else {
                 requestClose?()
             }
@@ -181,6 +246,8 @@ final class OnboardingModel: ObservableObject {
 
     func primaryAction() {
         switch page {
+        case .intro:
+            advanceFromIntro()
         case .finale:
             markTourComplete()
             requestClose?()
@@ -194,8 +261,12 @@ final class OnboardingModel: ObservableObject {
             case .screenRecording:
                 openScreenRecordingSettings()
             case nil:
-                if shouldShowFeatureTour {
+                if mode == .review {
                     page = .feature(0)
+                } else if !Self.mainWindowEverAutoShown {
+                    // Initial setup is still in progress (the main window has
+                    // never been reached) — finish with the engine choice.
+                    page = .finale
                 } else {
                     requestClose?()
                 }
@@ -207,10 +278,17 @@ final class OnboardingModel: ObservableObject {
         switch page {
         case .feature, .finale:
             markTourComplete()
-        case .permissions:
+        case .intro, .permissions:
             break
         }
         requestClose?()
+    }
+
+    /// Finale choice tapped: onboarding is done, go set up that engine.
+    func pickEngine(_ choice: EngineSetupFocus) {
+        markTourComplete()
+        requestClose?()
+        openEngineSetup?(choice)
     }
 
     func markTourComplete() {
@@ -228,10 +306,24 @@ final class OnboardingModel: ObservableObject {
             page = .feature(nextIndex)
             return
         }
-        page = .finale
+        // Tour done — persist that NOW, not at window close: granting Screen
+        // Recording force-restarts the app from the permissions page, and the
+        // tour must not replay after that restart.
+        markTourComplete()
+        // Collect missing permissions before the engine choice, now that the
+        // user has seen what they unlock.
+        if mode == .firstRun, nextPermission != nil {
+            page = .permissions
+        } else {
+            page = .finale
+        }
     }
 
     private func openAccessibilitySettings() {
+        // Re-probe (prompt: false) so the Nugumi row exists in the list even
+        // if permissions were reset (tccutil) while the app is running.
+        let probe = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(probe)
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         closeBeforeSystemDialog?()
         NSWorkspace.shared.open(url)
@@ -249,10 +341,14 @@ final class OnboardingModel: ObservableObject {
         closeBeforeSystemDialog?()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            if needsSystemPrompt {
-                UserDefaults.standard.set(true, forKey: requestedOnceKey)
-                _ = CGRequestScreenCaptureAccess()
-            } else {
+            UserDefaults.standard.set(true, forKey: requestedOnceKey)
+            // Always request: beyond the one-time stock dialog, this call is
+            // what REGISTERS Nugumi in the Screen Recording list. After a TCC
+            // reset the UserDefaults flag still says "already asked" — without
+            // re-requesting, the user opens Settings and there is no Nugumi
+            // row to toggle at all.
+            _ = CGRequestScreenCaptureAccess()
+            if !needsSystemPrompt {
                 let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
                 NSWorkspace.shared.open(url)
             }
@@ -263,6 +359,8 @@ final class OnboardingModel: ObservableObject {
 
     var stageText: String {
         switch page {
+        case .intro:
+            return ""
         case .permissions:
             switch nextPermission {
             case .accessibility: return "Step 1 of 2"
@@ -278,6 +376,8 @@ final class OnboardingModel: ObservableObject {
 
     var titleText: String {
         switch page {
+        case .intro:
+            return ""
         case .permissions:
             return "Give Nugumi the access it needs"
         case .feature(let index):
@@ -289,6 +389,8 @@ final class OnboardingModel: ObservableObject {
 
     var subtitleText: String {
         switch page {
+        case .intro:
+            return ""
         case .permissions:
             return "Nugumi only reads what you explicitly select or capture."
         case .feature(let index):
@@ -300,6 +402,8 @@ final class OnboardingModel: ObservableObject {
 
     var primaryTitle: String {
         switch page {
+        case .intro:
+            return ""
         case .permissions:
             switch nextPermission {
             case .accessibility: return "Open Accessibility Settings"
@@ -329,15 +433,26 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     /// that from the user actually finishing or dismissing onboarding.
     private(set) var closedForSystemDialog = false
 
+    /// 16:9 so the 1920×1080 intro clip fills the window edge to edge.
+    private static let introContentSize = NSSize(width: 960, height: 540)
+    private static let standardContentSize = NSSize(width: 900, height: 640)
+
     private let model: OnboardingModel
     private let onClose: () -> Void
 
-    init(mode: OnboardingModel.Mode, onClose: @escaping () -> Void) {
-        self.model = OnboardingModel(mode: mode)
+    init(
+        mode: OnboardingModel.Mode,
+        onPickEngine: @escaping (EngineSetupFocus) -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        let model = OnboardingModel(mode: mode)
+        self.model = model
         self.onClose = onClose
+        model.openEngineSetup = onPickEngine
 
+        let contentSize = model.page == .intro ? Self.introContentSize : Self.standardContentSize
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 640),
+            contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -362,7 +477,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         let hosting = NSHostingView(rootView: OnboardingRootView(model: model))
         // Don't let SwiftUI's ideal size drive the window frame — the layout
         // stretches to .infinity, which would balloon the window. The window
-        // stays a fixed 900×640 and SwiftUI fills it.
+        // size is controlled here (960×540 for the intro, 900×640 after)
+        // and SwiftUI fills it.
         hosting.sizingOptions = []
         hosting.translatesAutoresizingMaskIntoConstraints = false
         let backdrop = NSVisualEffectView()
@@ -387,6 +503,22 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             self?.window?.orderOut(nil)
             self?.close()
         }
+        model.pageDidChange = { [weak self] page in
+            self?.resizeWindow(for: page)
+        }
+    }
+
+    /// Grows the window from the widescreen intro frame to the standard
+    /// two-column frame (and back, in theory), keeping it centered in place.
+    private func resizeWindow(for page: OnboardingModel.Page) {
+        guard let window else { return }
+        let target = page == .intro ? Self.introContentSize : Self.standardContentSize
+        let current = window.contentRect(forFrameRect: window.frame).size
+        guard abs(current.width - target.width) > 0.5 || abs(current.height - target.height) > 0.5 else { return }
+        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: target))
+        frame.origin.x = window.frame.midX - frame.width / 2
+        frame.origin.y = window.frame.midY - frame.height / 2
+        window.setFrame(frame, display: true, animate: true)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -404,7 +536,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             switch self.model.page {
             case .feature, .finale:
                 self.model.markTourComplete()
-            case .permissions:
+            case .intro, .permissions:
                 break
             }
             self.onClose()
@@ -420,17 +552,78 @@ private struct OnboardingRootView: View {
     private let poll = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        HStack(spacing: 0) {
-            leftColumn
-                .frame(width: 360)
-            Rectangle()
-                .fill(FlowTheme.hairline)
-                .frame(width: 1)
-            rightColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            switch model.page {
+            case .intro:
+                IntroVideoPage(onFinish: { model.advanceFromIntro() })
+            case .finale:
+                finaleColumn
+            case .permissions, .feature:
+                HStack(spacing: 0) {
+                    leftColumn
+                        .frame(width: 360)
+                    Rectangle()
+                        .fill(FlowTheme.hairline)
+                        .frame(width: 1)
+                    rightColumn
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.18), value: model.page)
         .onReceive(poll) { _ in model.refreshPermissions() }
+    }
+
+    /// Closing page: a single centered column — eyebrow, title, subtitle, and
+    /// the three engine choices side by side. Each choice IS the action:
+    /// clicking it closes onboarding and opens that engine's setup.
+    private var finaleColumn: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+
+            Text(model.stageText)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(OnboardingPalette.mint)
+            Text(model.titleText)
+                .font(FlowTheme.serif(29))
+                .foregroundStyle(FlowTheme.ink)
+                .padding(.top, 12)
+            Text(model.subtitleText)
+                .font(.system(size: 13))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 460)
+                .padding(.top, 10)
+
+            HStack(alignment: .top, spacing: 24) {
+                FinaleChoiceButton(
+                    symbol: "desktopcomputer",
+                    title: "Local — Ollama",
+                    detail: "Free and private. Runs entirely on your Mac, works offline.",
+                    action: { model.pickEngine(.local) }
+                )
+                FinaleChoiceButton(
+                    symbol: "person.crop.circle.badge.checkmark",
+                    title: "ChatGPT subscription",
+                    detail: "Already pay for ChatGPT? Just sign in — no extra cost.",
+                    action: { model.pickEngine(.subscription) }
+                )
+                FinaleChoiceButton(
+                    symbol: "key.fill",
+                    title: "API keys",
+                    detail: "OpenAI, Anthropic, or Google. Pay as you go with your own key.",
+                    action: { model.pickEngine(.apiKeys) }
+                )
+            }
+            .padding(.top, 44)
+
+            Spacer(minLength: 24)
+        }
+        .padding(.horizontal, 56)
+        .padding(.vertical, 36)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var leftColumn: some View {
@@ -495,12 +688,9 @@ private struct OnboardingRootView: View {
                 case .feature(let index):
                     FeatureInstructionCard(step: model.steps[index])
                         .frame(maxHeight: .infinity, alignment: .center)
-                case .finale:
-                    Text("Pick one on the right — the setup screen opens right after this.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                case .intro, .finale:
+                    // Rendered by dedicated full-window layouts, never here.
+                    EmptyView()
                 }
             }
             .padding(.top, 24)
@@ -552,8 +742,8 @@ private struct OnboardingRootView: View {
                 )
             case .feature(let index):
                 FeatureVideoPanel(step: model.steps[index])
-            case .finale:
-                FinaleChoicesPanel()
+            case .intro, .finale:
+                EmptyView()
             }
         }
         .padding(EdgeInsets(top: 44, leading: 24, bottom: 32, trailing: 26))
@@ -564,6 +754,63 @@ private struct OnboardingRootView: View {
 private enum OnboardingPalette {
     /// Light mint used for stage labels and eyebrows, matching the accent.
     static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
+}
+
+// MARK: - Finale choice button
+
+/// One engine choice on the finale page. The whole tile is clickable and
+/// lights up on hover so it reads as a button, not a feature list.
+private struct FinaleChoiceButton: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle().fill(Color.white.opacity(hovered ? 0.14 : 0.07))
+                    Circle().strokeBorder(
+                        hovered ? FlowTheme.accent.opacity(0.8) : FlowTheme.hairline,
+                        lineWidth: 1
+                    )
+                    Image(systemName: symbol)
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(OnboardingPalette.mint)
+                }
+                .frame(width: 56, height: 56)
+                .scaleEffect(hovered ? 1.06 : 1.0)
+
+                Text(title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(hovered ? .white : FlowTheme.ink)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 14)
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            }
+            .frame(maxWidth: 220)
+            .padding(.vertical, 18)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(hovered ? 0.06 : 0))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.14)) { hovered = inside }
+        }
+        .animation(.easeOut(duration: 0.14), value: hovered)
+    }
 }
 
 // MARK: - Permission card
@@ -715,53 +962,75 @@ private struct FeatureInstructionCard: View {
     }
 }
 
-/// Closing page: the three ways to power Nugumi, brief and scannable. The
-/// actual setup happens in AI Engine → Providers, which opens right after.
-private struct FinaleChoicesPanel: View {
+// MARK: - Intro video page
+
+/// First-run intro: just the clip, edge to edge with the window's rounded
+/// corners — no chrome, no container. Auto-advances when the video ends;
+/// a quiet Skip pill is the only control.
+private struct IntroVideoPage: View {
+    let onFinish: () -> Void
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            choice(
-                symbol: "desktopcomputer",
-                title: "Local — Ollama",
-                detail: "Free and private. Runs entirely on your Mac, works offline."
-            )
-            choice(
-                symbol: "person.crop.circle.badge.checkmark",
-                title: "ChatGPT subscription",
-                detail: "Already pay for ChatGPT? Just sign in — no extra cost."
-            )
-            choice(
-                symbol: "key.fill",
-                title: "API keys",
-                detail: "OpenAI, Anthropic, or Google. Pay as you go with your own key."
-            )
+        IntroPlayerView(onFinish: onFinish)
+            // Extend under the (transparent) titlebar — the window itself
+            // rounds the corners, so the clip fills every pixel of the frame.
+            .ignoresSafeArea()
+            .overlay(alignment: .bottomTrailing) {
+                Button(action: onFinish) {
+                    Text("Skip")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 14)
+                        .background(Capsule().fill(Color.black.opacity(0.35)))
+                }
+                .buttonStyle(.plain)
+                .padding(16)
+            }
+    }
+}
+
+/// Plays the intro once (no looping) and reports when it reaches the end.
+private struct IntroPlayerView: NSViewRepresentable {
+    let onFinish: () -> Void
+
+    final class Coordinator {
+        var player: AVPlayer?
+        var endObserver: NSObjectProtocol?
+
+        deinit {
+            if let endObserver {
+                NotificationCenter.default.removeObserver(endObserver)
+            }
         }
-        .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func choice(symbol: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 16) {
-            ZStack {
-                Circle().fill(Color.white.opacity(0.07))
-                Circle().strokeBorder(FlowTheme.hairline, lineWidth: 1)
-                Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(OnboardingPalette.mint)
-            }
-            .frame(width: 48, height: 48)
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                Text(detail)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .none
+        view.videoGravity = .resizeAspectFill
+        guard let url = OnboardingIntroVideo.url else { return view }
+        let player = AVPlayer(url: url)
+        let onFinish = onFinish
+        context.coordinator.player = player
+        context.coordinator.endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { _ in onFinish() }
+        view.player = player
+        player.play()
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {}
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: Coordinator) {
+        coordinator.player?.pause()
+        coordinator.player = nil
+        view.player = nil
     }
 }
 
@@ -812,36 +1081,59 @@ private struct PermissionPreviewPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 9) {
-                stepCaption(1, "macOS will ask first — click “Open System Settings”.")
-                if active == .screenRecording, let prompt = Self.promptImage {
-                    Image(nsImage: prompt)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                } else {
-                    FauxSystemDialog(active: active)
+            if active == .accessibility {
+                // No stock macOS dialog for Accessibility — Nugumi registers
+                // itself silently at launch and the button opens System
+                // Settings directly. One step only.
+                VStack(alignment: .leading, spacing: 9) {
+                    plainCaption("The button opens System Settings — turn Nugumi on in the list.")
+                    settingsListPreview
                 }
-            }
-            VStack(alignment: .leading, spacing: 9) {
-                stepCaption(2, "Then turn Nugumi on in the list.")
-                if active == .screenRecording, let settings = Self.settingsImage {
-                    Image(nsImage: settings)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                } else {
-                    FauxSettingsList(
-                        active: active,
-                        nugumiEnabled: active == .accessibility ? axTrusted : scrTrusted
-                    )
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    stepCaption(1, "macOS will ask first — click “Open System Settings”.")
+                    if let prompt = Self.promptImage {
+                        Image(nsImage: prompt)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    } else {
+                        FauxSystemDialog(active: active)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 9) {
+                    stepCaption(2, "Then turn Nugumi on in the list.")
+                    settingsListPreview
                 }
             }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The real System Settings screenshot (shared by both permissions — the
+    /// list UI is identical), with the faux list as a fallback.
+    @ViewBuilder
+    private var settingsListPreview: some View {
+        if let settings = Self.settingsImage {
+            Image(nsImage: settings)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        } else {
+            FauxSettingsList(
+                active: active,
+                nugumiEnabled: active == .accessibility ? axTrusted : scrTrusted
+            )
+        }
+    }
+
+    private func plainCaption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(FlowTheme.inkSecondary)
     }
 
     private func stepCaption(_ number: Int, _ text: String) -> some View {
