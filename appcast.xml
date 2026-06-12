@@ -269,14 +269,14 @@
         </item>
         <item>
             <title>Version 0.8.5</title>
-            <pubDate>Fri, 12 Jun 2026 05:14:50 +0000</pubDate>
-            <sparkle:version>26</sparkle:version>
+            <pubDate>Fri, 12 Jun 2026 06:22:31 +0000</pubDate>
+            <sparkle:version>27</sparkle:version>
             <sparkle:shortVersionString>0.8.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure
                 url="https://github.com/ChoiVadim/nugumi/releases/download/v0.8.5/Nugumi-0.8.5.dmg"
                 type="application/octet-stream"
-                sparkle:edSignature="lYDH21wV9YuhJv9oTsty/5qN1VXSxZnpWl4m+5hpmIIxMHc56nd37ehDq7q/5HBzuJFUgV6m7knAIdzSXJ4EAQ==" length="29125634" />
+                sparkle:edSignature="R/2MwTGpMr/4fx70IlMxdUX1+cSAUBvvPsyeBwnLGc+o1LNVV5BSzySA0NbTe/cZ074baCqqIZueIOKh4UhhCg==" length="29191481" />
         </item>
     </channel>
 </rss>
