@@ -10768,8 +10768,10 @@ enum AppCategoryClassifier {
         "ru.keepcoder.Telegram": .personalMessages,
         "org.telegram.desktop": .personalMessages,
         "net.whatsapp.WhatsApp": .personalMessages,
-        "com.kakao.KakaoTalk": .personalMessages,
-        "com.kakao.KakaoTalkMac": .personalMessages,
+        // KakaoTalk is deliberately NOT mapped: in Korea it is as much a work
+        // channel as a personal one, and personalMessages defaults to casual
+        // (반말) — too risky to assume. Unmapped → .other → polite (해요체),
+        // safe in both directions. Users can assign it via custom app rules.
         "com.hnc.Discord": .personalMessages,
     ]
 
