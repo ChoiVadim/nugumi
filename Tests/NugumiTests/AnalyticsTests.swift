@@ -70,6 +70,42 @@ final class AnalyticsTests: XCTestCase {
         XCTAssertTrue(names.contains("error_occurred"))
     }
 
+    @MainActor
+    func testOneShotEventsDoNotBurnFlagWhenClientUnconfigured() {
+        let suiteName = "AnalyticsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        // No API key configured — the one-shot must stay available so it can
+        // still fire after the app is updated to a configured build.
+        let client = AnalyticsClient(defaults: defaults)
+        client.trackInstallIfNeeded()
+
+        XCTAssertFalse(defaults.bool(forKey: "analytics.appInstalledTracked.v1"))
+    }
+
+    @MainActor
+    func testOneShotEventsConsumeFlagOnceWhenConfigured() {
+        let suiteName = "AnalyticsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("phc_test", forKey: "analytics.posthog.apiKey")
+        defaults.set("http://127.0.0.1:9/batch/", forKey: "analytics.posthog.endpoint")
+
+        let client = AnalyticsClient(defaults: defaults)
+        client.trackInstallIfNeeded()
+        client.trackPermissionGrantedIfNeeded(permission: "accessibility")
+        client.trackPermissionGrantedIfNeeded(permission: "screen_recording")
+        client.trackPermissionsCompletedIfNeeded()
+        client.trackOnboardingCompletedIfNeeded(skipped: false)
+
+        XCTAssertTrue(defaults.bool(forKey: "analytics.appInstalledTracked.v1"))
+        XCTAssertTrue(defaults.bool(forKey: "analytics.permissionGrantedTracked.accessibility.v1"))
+        XCTAssertTrue(defaults.bool(forKey: "analytics.permissionGrantedTracked.screen_recording.v1"))
+        XCTAssertTrue(defaults.bool(forKey: "analytics.permissionsCompletedTracked.v1"))
+        XCTAssertTrue(defaults.bool(forKey: "analytics.onboardingCompletedTracked.v1"))
+    }
+
     func testPostHogBatchRequestShape() throws {
         let payload = PrivacySafeAnalytics.makePayload(
             event: .appLaunched,

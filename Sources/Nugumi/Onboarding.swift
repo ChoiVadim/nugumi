@@ -169,6 +169,12 @@ final class OnboardingModel: ObservableObject {
     /// Set by the window controller.
     var requestClose: (() -> Void)?
     var closeBeforeSystemDialog: (() -> Void)?
+    /// Fired when the user hits a terminal point of the tour. `skipped` is
+    /// true when they bailed from a feature page (Skip button, closed the
+    /// window mid-tour) rather than reaching the finale. Distinct from
+    /// `markTourComplete`, which also runs mid-flow purely to persist the
+    /// don't-replay flag across the Screen Recording restart.
+    var onTourFinished: ((_ skipped: Bool) -> Void)?
     /// Opens the main window on AI Engine → Providers so the user lands in
     /// the setup flow for the engine they just picked on the finale page.
     var openEngineSetup: ((EngineSetupFocus) -> Void)?
@@ -249,7 +255,7 @@ final class OnboardingModel: ObservableObject {
         case .intro:
             advanceFromIntro()
         case .finale:
-            markTourComplete()
+            finishTour(skipped: false)
             requestClose?()
         case .feature(let index):
             advanceFeature(from: index)
@@ -276,8 +282,10 @@ final class OnboardingModel: ObservableObject {
 
     func skipAction() {
         switch page {
-        case .feature, .finale:
-            markTourComplete()
+        case .feature:
+            finishTour(skipped: true)
+        case .finale:
+            finishTour(skipped: false)
         case .intro, .permissions:
             break
         }
@@ -286,13 +294,19 @@ final class OnboardingModel: ObservableObject {
 
     /// Finale choice tapped: onboarding is done, go set up that engine.
     func pickEngine(_ choice: EngineSetupFocus) {
-        markTourComplete()
+        finishTour(skipped: false)
         requestClose?()
         openEngineSetup?(choice)
     }
 
     func markTourComplete() {
         UserDefaults.standard.set(true, forKey: Self.featureTourCompletedKey)
+    }
+
+    /// Terminal point of the tour: persist the flag and report how it ended.
+    func finishTour(skipped: Bool) {
+        markTourComplete()
+        onTourFinished?(skipped)
     }
 
     private func refreshTrustFlags() {
@@ -443,12 +457,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     init(
         mode: OnboardingModel.Mode,
         onPickEngine: @escaping (EngineSetupFocus) -> Void,
+        onTourFinished: ((_ skipped: Bool) -> Void)? = nil,
         onClose: @escaping () -> Void
     ) {
         let model = OnboardingModel(mode: mode)
         self.model = model
         self.onClose = onClose
         model.openEngineSetup = onPickEngine
+        model.onTourFinished = onTourFinished
 
         let contentSize = model.page == .intro ? Self.introContentSize : Self.standardContentSize
         let window = NSWindow(
@@ -534,8 +550,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     nonisolated func windowWillClose(_ notification: Notification) {
         Task { @MainActor in
             switch self.model.page {
-            case .feature, .finale:
-                self.model.markTourComplete()
+            case .feature:
+                self.model.finishTour(skipped: true)
+            case .finale:
+                self.model.finishTour(skipped: false)
             case .intro, .permissions:
                 break
             }

@@ -1305,6 +1305,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             accessibilityTrusted: AXIsProcessTrusted(),
             screenRecordingTrusted: CGPreflightScreenCaptureAccess()
         ))
+        reconcilePermissionAnalyticsAtLaunch()
         showMainWindowOnFirstRunIfNeeded()
     }
 
@@ -2987,15 +2988,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        let hadCompletedFeatureTour = OnboardingWindowController.hasCompletedFeatureTour
-        if !hadCompletedFeatureTour {
-            analyticsClient.track(.onboardingStarted, properties: permissionStatusProperties(
+        if !OnboardingWindowController.hasCompletedFeatureTour {
+            analyticsClient.trackOnboardingStartedIfNeeded(properties: permissionStatusProperties(
                 accessibilityTrusted: axTrusted,
                 screenRecordingTrusted: scrTrusted
             ))
         }
         if !(axTrusted && scrTrusted) {
-            analyticsClient.track(.permissionsPrompted, properties: permissionStatusProperties(
+            analyticsClient.trackPermissionsPromptedIfNeeded(properties: permissionStatusProperties(
                 accessibilityTrusted: axTrusted,
                 screenRecordingTrusted: scrTrusted
             ))
@@ -3006,12 +3006,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.presentMainWindow(section: .aiEngine)
                 self.mainWindowController?.bridge.engineSetupFocus = choice
+            },
+            onTourFinished: { [weak self] skipped in
+                self?.analyticsClient.trackOnboardingCompletedIfNeeded(skipped: skipped)
             }
         ) { [weak self] in
             guard let self else { return }
-            if !hadCompletedFeatureTour && OnboardingWindowController.hasCompletedFeatureTour {
-                self.analyticsClient.track(.onboardingCompleted)
-            }
             let closedForSystemDialog = self.onboardingWindowController?.closedForSystemDialog ?? false
             self.onboardingWindowController = nil
             // Onboarding is really over (not just hidden for a macOS
@@ -3024,7 +3024,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         controller.presentAndActivate()
     }
 
-    private func trackPermissionGranted(_ permission: PermissionKind) {
+    private func trackPermissionGranted(_ permission: PermissionKind, source: String = "watcher") {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
         var properties = permissionStatusProperties(
@@ -3032,9 +3032,25 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             screenRecordingTrusted: scrTrusted
         )
         properties["permission"] = permission.analyticsValue
-        analyticsClient.track(.permissionGranted, properties: properties)
+        properties["source"] = source
+        analyticsClient.trackPermissionGrantedIfNeeded(
+            permission: permission.analyticsValue,
+            properties: properties
+        )
         if axTrusted && scrTrusted {
-            analyticsClient.track(.permissionsCompleted, properties: properties)
+            analyticsClient.trackPermissionsCompletedIfNeeded(properties: properties)
+        }
+    }
+
+    /// Granting Screen Recording force-relaunches the app, killing the trust
+    /// watchers before they can report. Recover at launch: any permission
+    /// that is granted but was never tracked gets its one-shot event here.
+    private func reconcilePermissionAnalyticsAtLaunch() {
+        if AXIsProcessTrusted() {
+            trackPermissionGranted(.accessibility, source: "launch")
+        }
+        if CGPreflightScreenCaptureAccess() {
+            trackPermissionGranted(.screenRecording, source: "launch")
         }
     }
 

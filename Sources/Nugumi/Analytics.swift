@@ -88,6 +88,8 @@ enum PrivacySafeAnalytics {
         "accessibility_status",
         "screen_recording_status",
         "source_event",
+        "source",
+        "skipped",
         "error_type",
         "error_context"
     ]
@@ -141,6 +143,14 @@ final class AnalyticsClient {
     private static let apiKeyDefaultsKey = "analytics.posthog.apiKey"
     private static let appInstalledTrackedKey = "analytics.appInstalledTracked.v1"
     private static let firstUsefulActionTrackedKey = "analytics.firstUsefulActionTracked.v1"
+    private static let onboardingStartedTrackedKey = "analytics.onboardingStartedTracked.v1"
+    private static let permissionsPromptedTrackedKey = "analytics.permissionsPromptedTracked.v1"
+    private static let onboardingCompletedTrackedKey = "analytics.onboardingCompletedTracked.v1"
+    private static let permissionsCompletedTrackedKey = "analytics.permissionsCompletedTracked.v1"
+
+    private static func permissionGrantedTrackedKey(_ permission: String) -> String {
+        "analytics.permissionGrantedTracked.\(permission).v1"
+    }
 
     private let defaults: UserDefaults
     private let session: URLSession
@@ -163,17 +173,50 @@ final class AnalyticsClient {
     }
 
     func trackInstallIfNeeded() {
-        guard !defaults.bool(forKey: Self.appInstalledTrackedKey) else { return }
-        defaults.set(true, forKey: Self.appInstalledTrackedKey)
-        track(.appInstalled)
+        trackOnce(.appInstalled, flagKey: Self.appInstalledTrackedKey)
     }
 
     func trackFirstUsefulActionIfNeeded(sourceEvent: AnalyticsEventName, properties: [String: String] = [:]) {
-        guard !defaults.bool(forKey: Self.firstUsefulActionTrackedKey) else { return }
-        defaults.set(true, forKey: Self.firstUsefulActionTrackedKey)
         var enrichedProperties = properties
         enrichedProperties["source_event"] = sourceEvent.rawValue
-        track(.firstUsefulActionCompleted, properties: enrichedProperties)
+        trackOnce(.firstUsefulActionCompleted, flagKey: Self.firstUsefulActionTrackedKey, properties: enrichedProperties)
+    }
+
+    func trackOnboardingStartedIfNeeded(properties: [String: String] = [:]) {
+        trackOnce(.onboardingStarted, flagKey: Self.onboardingStartedTrackedKey, properties: properties)
+    }
+
+    func trackPermissionsPromptedIfNeeded(properties: [String: String] = [:]) {
+        trackOnce(.permissionsPrompted, flagKey: Self.permissionsPromptedTrackedKey, properties: properties)
+    }
+
+    func trackOnboardingCompletedIfNeeded(skipped: Bool) {
+        trackOnce(
+            .onboardingCompleted,
+            flagKey: Self.onboardingCompletedTrackedKey,
+            properties: ["skipped": skipped ? "true" : "false"]
+        )
+    }
+
+    func trackPermissionGrantedIfNeeded(permission: String, properties: [String: String] = [:]) {
+        trackOnce(.permissionGranted, flagKey: Self.permissionGrantedTrackedKey(permission), properties: properties)
+    }
+
+    func trackPermissionsCompletedIfNeeded(properties: [String: String] = [:]) {
+        trackOnce(.permissionsCompleted, flagKey: Self.permissionsCompletedTrackedKey, properties: properties)
+    }
+
+    /// One event per install: the flag is only consumed when the client is
+    /// actually configured, so an unconfigured build doesn't burn the
+    /// one-shot without ever delivering it.
+    private func trackOnce(_ event: AnalyticsEventName, flagKey: String, properties: [String: String] = [:]) {
+        guard isConfigured, !defaults.bool(forKey: flagKey) else { return }
+        defaults.set(true, forKey: flagKey)
+        track(event, properties: properties)
+    }
+
+    private var isConfigured: Bool {
+        endpoint != nil && !(apiKey ?? "").isEmpty
     }
 
     func track(_ event: AnalyticsEventName, properties: [String: String] = [:]) {
