@@ -7520,13 +7520,17 @@ final class PetMascotView: NSView {
                 occupied.insert(MascotCell(col: columnIndex, row: rowIndex))
             }
         }
-        for cell in accessory { occupied.insert(MascotCell(col: cell.col, row: cell.row)) }
+        for cell in accessory.behind + accessory.front {
+            occupied.insert(MascotCell(col: cell.col, row: cell.row))
+        }
 
         drawPixelShadow(origin: origin)
         drawSpriteOutline(occupied, origin: origin, cellSize: cellSize, rowCount: rows.count)
+        // z-order, back to front: tail, cap crown, body (ears), visor.
         drawPixelTail(origin: origin, cellSize: cellSize)
+        drawAccessoryCells(accessory.behind, origin: origin, cellSize: cellSize, rowCount: rows.count)
         drawPixelRows(rows, origin: origin, cellSize: cellSize)
-        drawAccessoryCells(accessory, origin: origin, cellSize: cellSize, rowCount: rows.count)
+        drawAccessoryCells(accessory.front, origin: origin, cellSize: cellSize, rowCount: rows.count)
         if state == .ready {
             drawPixelActionBadge()
         }
@@ -7564,37 +7568,50 @@ final class PetMascotView: NSView {
         }
     }
 
-    /// Pixel cells for the current register's accessory. `row` is measured from the
-    /// sprite top (row 0); negative rows sit just above the head.
-    private func styleAccessoryCells(rowCount: Int, faceOffset: Int) -> [(col: Int, row: Int, color: NSColor)] {
+    /// Pixel cells for the current register's accessory, split by z-order.
+    /// `behind` paints under the body sprite (so the ears stay in front of the
+    /// cap's crown), `front` paints over it. `row` is measured from the sprite
+    /// top (row 0); negative rows sit just above the head.
+    private func styleAccessoryCells(
+        rowCount: Int,
+        faceOffset: Int
+    ) -> (behind: [(col: Int, row: Int, color: NSColor)], front: [(col: Int, row: Int, color: NSColor)]) {
         switch writingStyle {
         case .polite:
-            return []
+            return ([], [])
         case .formal:
             let hat = NSColor(srgbRed: 0.16, green: 0.17, blue: 0.21, alpha: 1)
             let band = NSColor(srgbRed: 0.55, green: 0.16, blue: 0.20, alpha: 1)
             var cells: [(col: Int, row: Int, color: NSColor)] = []
             // Top hat: wide brim, red hatband, narrow crown above. The hat is
             // fixed to the head; only the mustache tracks the face's idle drift.
-            for c in 4...11 { cells.append((c, 1, hat)) }      // brim
-            for c in 5...10 { cells.append((c, 0, band)) }     // hatband
-            for c in 5...10 { cells.append((c, -1, hat)) }     // crown
-            for c in 5...10 { cells.append((c, -2, hat)) }     // crown top
+            // The brim overlaps the head's top row so the hat sits flush — one
+            // row higher leaves a 1px gap of background between hat and head.
+            for c in 4...11 { cells.append((c, 2, hat)) }      // brim
+            for c in 5...10 { cells.append((c, 1, band)) }     // hatband
+            for c in 5...10 { cells.append((c, 0, hat)) }      // crown
+            for c in 5...10 { cells.append((c, -1, hat)) }     // crown top
             // Tidy mustache centered under the nose, shifted with the face.
             for c in [5, 6, 8, 9] { cells.append((c + faceOffset, 8, hat)) }
-            return cells
+            return ([], cells)
         case .casual:
             let cap = NSColor(srgbRed: 0.20, green: 0.52, blue: 0.50, alpha: 1)
             let capDark = NSColor(srgbRed: 0.13, green: 0.40, blue: 0.39, alpha: 1)
-            var cells: [(col: Int, row: Int, color: NSColor)] = []
-            // Baseball cap: rounded crown sitting up-right, a flat visor jutting left.
-            for c in 6...10 { cells.append((c, -1, cap)) }     // crown top
-            for c in 5...11 { cells.append((c, 0, cap)) }      // crown
-            for c in 5...12 { cells.append((c, 1, cap)) }      // crown base (right side)
-            for c in 1...4 { cells.append((c, 1, capDark)) }   // visor jutting left
-            cells.append((1, 2, capDark))                       // visor tip droop
-            cells.append((2, 2, capDark))
-            return cells
+            // Baseball cap: rounded crown sitting up-right, a flat visor
+            // jutting left. The crown goes BEHIND the body so the ears poke
+            // out in front of it; the visor stays on top, sticking out over
+            // the left ear.
+            var crown: [(col: Int, row: Int, color: NSColor)] = []
+            for c in 6...10 { crown.append((c, 0, cap)) }      // crown top
+            for c in 5...11 { crown.append((c, 1, cap)) }      // crown
+            for c in 5...12 { crown.append((c, 2, cap)) }      // crown base (right side)
+            // Two-row visor angled down-left: light top surface continuous
+            // with the crown, dark underside shifted one cell out — reads as
+            // a proper peak instead of a dark blob.
+            var visor: [(col: Int, row: Int, color: NSColor)] = []
+            for c in 1...4 { visor.append((c, 2, cap)) }       // top surface
+            for c in 0...3 { visor.append((c, 3, capDark)) }   // underside / tip
+            return (crown, visor)
         }
     }
 
