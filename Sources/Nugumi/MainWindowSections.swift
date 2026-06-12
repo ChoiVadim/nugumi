@@ -1108,6 +1108,11 @@ private struct ProviderRow: View {
                 SecondaryButton(title: buttonTitle(signedIn: signedIn), minWidth: 96) {
                     bridge.perform(.signInCloud(provider))
                 }
+                if signedIn {
+                    SecondaryButton(title: provider.usesOAuth ? "Sign out" : "Remove", minWidth: 76) {
+                        bridge.perform(.signOutCloud(provider))
+                    }
+                }
             }
             if let testResult {
                 Text(testResult)

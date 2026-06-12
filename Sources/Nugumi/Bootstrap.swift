@@ -314,7 +314,10 @@ final class OllamaBootstrap {
         for entry in payload.models {
             let candidates = [entry.name, entry.model].compactMap { $0 }
             if let name = candidates.first { allNames.append(name) }
-            for model in models where candidates.contains(model.id) {
+            // "gemma4" is listed as "gemma4:latest" — match canonically so
+            // bare-tag curated entries register as installed.
+            let canonicalCandidates = Set(candidates.map(LLMModel.canonicalOllamaID))
+            for model in models where canonicalCandidates.contains(LLMModel.canonicalOllamaID(model.id)) {
                 found.insert(model.id)
             }
         }

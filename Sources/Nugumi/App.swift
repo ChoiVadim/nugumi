@@ -117,6 +117,11 @@ struct LLMModel: Equatable {
         // whatever `/api/tags` discovers (see makeOllamaModel).
         .init(id: "gpt-oss:120b-cloud", shortName: "gpt-oss:120b", displayName: "gpt-oss:120b", backend: .ollama(requiresAccount: true),  supportsImages: false),
         .init(id: "gpt-oss:20b",        shortName: "gpt-oss:20b",  displayName: "gpt-oss:20b",  backend: .ollama(requiresAccount: false), supportsImages: false),
+        // The one curated local vision model, so Ask Nugumi works on a
+        // pure-Ollama setup (gpt-oss has no vision). Bare tag on purpose:
+        // `ollama pull gemma4` registers as "gemma4:latest", and the two
+        // spellings are unified via canonicalOllamaID.
+        .init(id: "gemma4",             shortName: "Gemma 4",      displayName: "Gemma 4 (vision)", backend: .ollama(requiresAccount: false), supportsImages: true),
         // OpenAI (GPT-5 family, all vision-capable)
         .init(id: "gpt-5.4-mini", shortName: "GPT-5.4 mini", displayName: "GPT-5.4 mini (fast)",  backend: .cloud(.openAI), supportsImages: true),
         .init(id: "gpt-5.4",      shortName: "GPT-5.4",      displayName: "GPT-5.4 (affordable)", backend: .cloud(.openAI), supportsImages: true),
@@ -199,11 +204,18 @@ struct LLMModel: Equatable {
         var seen = Set<String>()
         var out: [LLMModel] = []
         func add(_ model: LLMModel) {
-            if seen.insert(model.id).inserted { out.append(model) }
+            if seen.insert(canonicalOllamaID(model.id)).inserted { out.append(model) }
         }
         curatedOllamaModels.forEach(add)
         OllamaModelCache.discovered.map(makeOllamaModel).forEach(add)
         return out
+    }
+
+    /// Ollama treats a bare tag and ":latest" as the same model — "gemma4"
+    /// pulls and lists as "gemma4:latest". Compare ids in this canonical form
+    /// so curated entries match what `/api/tags` reports.
+    static func canonicalOllamaID(_ id: String) -> String {
+        id.hasSuffix(":latest") ? String(id.dropLast(":latest".count)) : id
     }
 
     /// Build an LLMModel for a raw Ollama model name (as it appears in
@@ -276,6 +288,10 @@ struct LLMModel: Equatable {
             }
         }
         if let ollama = ollamaModels.first(where: { $0.id == id }) { return ollama }
+        // A stored ":latest" id must keep resolving after dedup collapses it
+        // into the bare-tag curated entry (and vice versa).
+        let canonical = canonicalOllamaID(id)
+        if let ollama = ollamaModels.first(where: { canonicalOllamaID($0.id) == canonical }) { return ollama }
         return defaultModel
     }
 }
@@ -324,6 +340,41 @@ enum ModelUseScope: String, CaseIterable {
             return models
         case .askNugumi:
             return models.filter(\.supportsImages)
+        }
+    }
+}
+
+/// Per-engine model presets applied when an engine connects (key validated,
+/// ChatGPT signed in, Ollama model installed) — see `applyEnginePreset`.
+/// Everyday text gets the fast/cheap tier, Ask Nugumi the vision flagship.
+enum EngineModelPreset {
+    case ollama
+    case cloud(CloudProvider)
+
+    /// Preset model id per scope; nil when the engine has no candidate for
+    /// that scope.
+    func modelID(for scope: ModelUseScope) -> String? {
+        switch self {
+        case .ollama:
+            return scope == .textActions ? "gpt-oss:20b" : "gemma4"
+        case .cloud(.openAI):
+            return scope == .textActions ? "gpt-5.4-mini" : "gpt-5.5"
+        case .cloud(.anthropic):
+            return scope == .textActions ? "claude-sonnet-4-6" : "claude-opus-4-7"
+        case .cloud(.gemini):
+            return scope == .textActions ? "gemini-2.5-flash" : "gemini-2.5-pro"
+        case .cloud(.openAICodex):
+            // Codex slugs are discovered per account — resolve against the
+            // live catalog instead of hardcoding ids.
+            let slugs = CodexModelCache.slugs
+            let slug: String?
+            switch scope {
+            case .textActions:
+                slug = slugs.first { $0.hasSuffix("-mini") && !$0.contains("codex") } ?? slugs.first
+            case .askNugumi:
+                slug = slugs.first { !$0.contains("mini") && !$0.contains("codex") } ?? slugs.first
+            }
+            return slug.map { "codex/\($0)" }
         }
     }
 }
@@ -1927,16 +1978,29 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let currentID = textModelID
         let previous = lastObservedModelReadyState[currentID] ?? .unknown
         let current = state.modelReady(for: currentID)
-        lastObservedModelReadyState[currentID] = current
         if case .working = previous, case .ok = current {
             postTranslatorReadyNotification()
         }
+        // Any model that just became ready can satisfy an engine preset —
+        // e.g. a slot stuck on a broken factory default heals the moment
+        // gpt-oss:20b / Gemma finishes installing (or is discovered already
+        // installed on first refresh).
+        let anyBecameReady = state.modelReady.contains { id, status in
+            status.isTerminalOK && !(lastObservedModelReadyState[id]?.isTerminalOK ?? false)
+        }
+        for (id, status) in state.modelReady {
+            lastObservedModelReadyState[id] = status
+        }
         // A pull the user started from the AI Engine setup card just finished —
-        // promote it to the everyday-text default, once.
+        // promote it to the everyday-text default, once. Runs before the
+        // preset so an explicit pull wins the text slot.
         if let pendingID = pendingOllamaAutoSelectID,
            case .ok = state.modelReady(for: pendingID) {
             pendingOllamaAutoSelectID = nil
             applyModelSelection(pendingID, for: .textActions)
+        }
+        if anyBecameReady {
+            applyEnginePreset(.ollama)
         }
         updateMenuState()
         mainWindowController?.bridge.refreshFromHost()
@@ -3639,6 +3703,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 switch outcome {
                 case .success:
                     self.bootstrap.refresh()
+                    self.applyEnginePreset(.cloud(.openAICodex))
                     onSave(true)
                 case .cancelled:
                     onSave(false)
@@ -3649,6 +3714,47 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             }
         } else {
             presentAPIKeySheet(for: provider, onSave: onSave)
+        }
+    }
+
+    /// "Sign out" / "Remove key" on a provider card. Confirms, wipes the
+    /// credentials, then re-points any model slot that just went dead at a
+    /// still-connected engine so the app never sits on a broken selection.
+    @MainActor
+    private func disconnectCloudProvider(_ provider: CloudProvider) {
+        NSApp.activate(ignoringOtherApps: true)
+        let isOAuth = provider.usesOAuth
+        let response = NugumiAlertController(
+            title: isOAuth ? "Sign out of \(provider.displayName)?" : "Remove \(provider.displayName) API key?",
+            message: isOAuth
+                ? "Nugumi will forget this account. Models from \(provider.displayName) stop working until you sign in again."
+                : "The key is deleted from this Mac. Models from \(provider.displayName) stop working until you add a key again.",
+            primaryButtonTitle: isOAuth ? "Sign out" : "Remove key",
+            secondaryButtonTitle: "Cancel"
+        ).showModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        if provider == .openAICodex {
+            KeychainStore.setCodexCredentials(nil)
+        } else {
+            KeychainStore.setAPIKey(nil, for: provider)
+        }
+        bootstrap.refresh()
+        healModelSlots()
+        updateMenuState()
+        mainWindowController?.bridge.refreshFromHost()
+    }
+
+    /// Walks the engines in rough popularity order and lets each one's preset
+    /// claim any broken slot (`applyEnginePreset` never touches a working
+    /// selection, so the first still-connected engine wins).
+    @MainActor
+    private func healModelSlots() {
+        let engines: [EngineModelPreset] = [
+            .cloud(.openAICodex), .ollama, .cloud(.openAI), .cloud(.anthropic), .cloud(.gemini)
+        ]
+        for engine in engines {
+            applyEnginePreset(engine)
         }
     }
 
@@ -3704,12 +3810,53 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         setModelID(modelID, for: scope)
         analyticsClient.track(.modelChanged, properties: [
             "model_id": modelID,
-            "model_scope": scope.rawValue
+            "model_scope": scope.rawValue,
+            "source": "user"
         ])
         translationCache = TranslationCache()
         onModelSelectionChanged(for: scope)
         updateMenuState()
         mainWindowController?.bridge.refreshFromHost()
+    }
+
+    /// An engine just connected: point each scope at the engine's preset
+    /// model. A slot is only touched when its current model is broken (its
+    /// provider has no credentials / the local model isn't installed) or is
+    /// still the untouched factory default — a working user choice is never
+    /// replaced. The preset itself must be usable right now, so a half-set-up
+    /// engine never grabs a slot.
+    @MainActor
+    private func applyEnginePreset(_ engine: EngineModelPreset) {
+        var applied = false
+        for scope in ModelUseScope.allCases {
+            guard let presetID = engine.modelID(for: scope),
+                  presetID != modelID(for: scope),
+                  isModelUsableNow(presetID)
+            else { continue }
+            let untouchedDefault = UserDefaults.standard.string(forKey: scope.defaultsKey) == nil
+            guard untouchedDefault || !isModelUsableNow(modelID(for: scope)) else { continue }
+            setModelID(presetID, for: scope)
+            analyticsClient.track(.modelChanged, properties: [
+                "model_id": presetID,
+                "model_scope": scope.rawValue,
+                "source": "preset"
+            ])
+            applied = true
+        }
+        guard applied else { return }
+        translationCache = TranslationCache()
+        updateMenuState()
+        mainWindowController?.bridge.refreshFromHost()
+    }
+
+    /// True when the model can serve a request right now: its cloud provider
+    /// has credentials, or the local model is installed and the server runs.
+    private func isModelUsableNow(_ modelID: String) -> Bool {
+        let model = LLMModel.option(id: modelID)
+        if let provider = model.cloudProvider {
+            return provider.hasCredentials
+        }
+        return bootstrap.isReady(for: modelID)
     }
 
     @MainActor
@@ -3739,6 +3886,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 case .valid:
                     KeychainStore.setAPIKey(result.text, for: provider)
                     self.bootstrap.refresh()
+                    self.applyEnginePreset(.cloud(provider))
                     onSave(true)
                 case .invalid(let reason):
                     self.presentAPIKeySheet(for: provider, errorMessage: reason, onSave: onSave)
@@ -3746,6 +3894,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     // Network problem — save anyway so user isn't stuck offline.
                     KeychainStore.setAPIKey(result.text, for: provider)
                     self.bootstrap.refresh()
+                    self.applyEnginePreset(.cloud(provider))
                     self.presentSelectionTranslationError("Couldn't reach \(provider.displayName) to verify the key (\(detail)). Saved it locally.", title: "Key saved without verification")
                     onSave(true)
                 }
@@ -6681,7 +6830,10 @@ final class PetController: NSObject, NSTextFieldDelegate {
         // Floor the bubble height at the placeholder's measured height so the
         // dialog never shrinks below the "empty state" size when a single
         // short word is typed. Lets the bubble still grow for longer input.
-        let rawHeight = text.isEmpty ? measure(Self.promptPlaceholder) : max(measure(text), measure(Self.promptPlaceholder))
+        // Measure the placeholder actually on screen, not the default one —
+        // showPromptError swaps in the (often longer) error message.
+        let placeholder = promptTextField.placeholderString ?? Self.promptPlaceholder
+        let rawHeight = text.isEmpty ? measure(placeholder) : max(measure(text), measure(placeholder))
         return ceil(rawHeight) + AskNugumiPromptInputMetrics.textMeasurementBottomInset
     }
 
@@ -13240,6 +13392,8 @@ extension NugumiApp: SettingsHost {
             presentCredentialPrompt(for: provider) { [weak self] _ in
                 self?.mainWindowController?.bridge.refreshFromHost()
             }
+        case .signOutCloud(let provider):
+            disconnectCloudProvider(provider)
         case .openOllamaInstall:
             bootstrap.openInstallPage()
         case .launchOllama:

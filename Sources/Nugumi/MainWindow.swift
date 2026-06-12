@@ -159,6 +159,7 @@ enum SettingsIntent {
     case recordShortcut(GlobalShortcutAction)
     case resetShortcuts
     case signInCloud(CloudProvider)
+    case signOutCloud(CloudProvider)
     case openOllamaInstall
     case launchOllama
     case openOllamaSignIn
