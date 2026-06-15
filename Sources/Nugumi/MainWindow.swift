@@ -90,12 +90,15 @@ struct VisualEffectBackground: NSViewRepresentable {
 struct SettingsSnapshot {
     var targetLanguage: TranslationLanguage
     var draftTargetLanguage: TranslationLanguage
-    var writingToggleLanguageA: TranslationLanguage
-    var writingToggleLanguageB: TranslationLanguage
+    var writingToggleAlternate: TranslationLanguage
     var floatingDefaultMode: FloatingButtonDefaultMode
     var selectionDisplayMode: SelectionDisplayMode
     var replacementMode: ReplacementMode
     var cleanupLevel: CleanupLevel
+    var genZMode: Bool = false
+    /// The user's saved email voice sample (style reference for the email
+    /// category). Empty when unset.
+    var emailVoiceSample: String = ""
     var invisibilityEnabled: Bool
     var writingStyles: [AppCategory: WritingStyle]
     var textModelID: String
@@ -104,16 +107,12 @@ struct SettingsSnapshot {
     var askNugumiThinkingLevel: ThinkingLevel
     var shortcuts: [GlobalShortcutAction: GlobalShortcut]
     var appsByCategory: [AppCategory: [AppRef]] = [:]
-    var urlRulesByCategory: [AppCategory: [String]] = [:]
 
     func writingStyle(for category: AppCategory) -> WritingStyle {
         writingStyles[category] ?? category.defaultWritingStyle
     }
     func apps(for category: AppCategory) -> [AppRef] {
         appsByCategory[category] ?? []
-    }
-    func urlRules(for category: AppCategory) -> [String] {
-        urlRulesByCategory[category] ?? []
     }
     func modelID(for scope: ModelUseScope) -> String {
         scope == .textActions ? textModelID : askNugumiModelID
@@ -142,17 +141,16 @@ struct AppRef: Equatable, Hashable {
 enum SettingsIntent {
     case setTargetLanguage(TranslationLanguage)
     case setDraftTargetLanguage(TranslationLanguage)
-    case setWritingToggleLanguageA(TranslationLanguage)
-    case setWritingToggleLanguageB(TranslationLanguage)
+    case setWritingToggleAlternate(TranslationLanguage)
     case setFloatingDefaultMode(FloatingButtonDefaultMode)
     case setSelectionDisplayMode(SelectionDisplayMode)
     case setReplacementMode(ReplacementMode)
     case setCleanupLevel(CleanupLevel)
+    case setGenZMode(Bool)
+    case setEmailVoiceSample(String)
     case setWritingStyle(WritingStyle, AppCategory)
     case addAppToCategory(AppCategory)
     case removeApp(String)
-    case addURLRule(String, AppCategory)
-    case removeURLRule(String, AppCategory)
     case setThinkingLevel(ThinkingLevel, ModelUseScope)
     case chooseModel(String, ModelUseScope)
     case toggleInvisibility

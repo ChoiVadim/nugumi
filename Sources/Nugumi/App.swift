@@ -869,6 +869,13 @@ struct CompositionSettings: Equatable {
     let style: WritingStyle
     let cleanup: CleanupLevel
     let snippets: [Snippet]
+    /// When true, the compose prompt gets a language-specific Gen Z styling
+    /// overlay (see `GenZStyle`). Global toggle, orthogonal to `style`.
+    let genZ: Bool
+    /// The user's saved email voice sample — a representative email whose
+    /// greeting, rhythm, and sign-off the model mirrors. Only populated for the
+    /// `email` category; `nil`/empty elsewhere, so the prompt section vanishes.
+    let voiceSample: String?
 }
 
 private final class TranslationCache {
@@ -1041,25 +1048,30 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(newValue.id, forKey: "draftTargetLanguageID")
         }
     }
-    /// The two languages the "Toggle writing language" shortcut flips between.
-    private var writingToggleLanguageA: TranslationLanguage {
+    /// The single "other" language the "Toggle writing language" shortcut flips
+    /// to. The toggle swaps this with `draftTargetLanguage`, so the configured
+    /// pair is always {writing language, alternate} — the writing language side
+    /// is the live target, only this one is user-selectable.
+    private var writingToggleAlternate: TranslationLanguage {
         get {
-            TranslationLanguage.language(
-                id: UserDefaults.standard.string(forKey: "writingToggleLanguageAID") ?? TranslationLanguage.defaultDraftLanguage.id
-            )
+            if let id = UserDefaults.standard.string(forKey: "writingToggleAlternateID") {
+                return TranslationLanguage.language(id: id)
+            }
+            // Migrate from the legacy A/B pair: carry over whichever language
+            // isn't the active writing language so existing setups are preserved.
+            let current = draftTargetLanguage
+            let legacyA = UserDefaults.standard.string(forKey: "writingToggleLanguageAID")
+                .map { TranslationLanguage.language(id: $0) }
+            let legacyB = UserDefaults.standard.string(forKey: "writingToggleLanguageBID")
+                .map { TranslationLanguage.language(id: $0) }
+            if let a = legacyA, a.id != current.id { return a }
+            if let b = legacyB, b.id != current.id { return b }
+            return TranslationLanguage.defaultLanguage.id == current.id
+                ? TranslationLanguage.defaultDraftLanguage
+                : TranslationLanguage.defaultLanguage
         }
         set {
-            UserDefaults.standard.set(newValue.id, forKey: "writingToggleLanguageAID")
-        }
-    }
-    private var writingToggleLanguageB: TranslationLanguage {
-        get {
-            TranslationLanguage.language(
-                id: UserDefaults.standard.string(forKey: "writingToggleLanguageBID") ?? TranslationLanguage.defaultLanguage.id
-            )
-        }
-        set {
-            UserDefaults.standard.set(newValue.id, forKey: "writingToggleLanguageBID")
+            UserDefaults.standard.set(newValue.id, forKey: "writingToggleAlternateID")
         }
     }
     private var floatingDefaultMode: FloatingButtonDefaultMode {
@@ -1167,6 +1179,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Global Gen Z styling toggle. Off by default; injected into compose
+    /// prompts via `CompositionSettings.genZ`.
+    private var genZModeEnabled: Bool {
+        get { GenZStyle.isEnabled }
+        set { UserDefaults.standard.set(newValue, forKey: GenZStyle.defaultsKey) }
+    }
+
+    /// The user's email voice sample — a typical email they write, used as a
+    /// style reference for the `email` category only. Empty by default. Treated
+    /// as personal content (like Snippets), so it survives a settings reset.
+    private var emailVoiceSample: String {
+        get { UserDefaults.standard.string(forKey: "voiceSample.email") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "voiceSample.email") }
+    }
+
     private var replacementMode: ReplacementMode {
         get {
             let raw = UserDefaults.standard.string(forKey: "replacementMode") ?? ReplacementMode.instantInsert.rawValue
@@ -1236,48 +1263,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
         AppCategoryClassifier.userOverrides = overrides
         AppCategoryClassifier.suppressedBuiltIns = suppressedBuiltInApps()
-        AppCategoryClassifier.urlRules = urlRules().map { ($0.pattern, $0.category) }
-    }
-
-    // MARK: - URL → category rules
-
-    private static let urlRulesKey = "urlCategoryRulesV1"
-
-    func urlRules() -> [URLCategoryRule] {
-        guard let data = UserDefaults.standard.data(forKey: Self.urlRulesKey),
-              let list = try? JSONDecoder().decode([URLCategoryRule].self, from: data)
-        else { return [] }
-        return list
-    }
-
-    private func saveURLRules(_ list: [URLCategoryRule]) {
-        if let data = try? JSONEncoder().encode(list) {
-            UserDefaults.standard.set(data, forKey: Self.urlRulesKey)
-        }
-        syncAppClassifierOverrides()
-    }
-
-    func addURLRule(pattern: String, category: AppCategory) {
-        let cleaned = Self.normalizeURLPattern(pattern)
-        guard !cleaned.isEmpty else { return }
-        var list = urlRules().filter { $0.pattern.caseInsensitiveCompare(cleaned) != .orderedSame }
-        list.append(URLCategoryRule(pattern: cleaned, category: category))
-        saveURLRules(list)
-        AppCategoryClassifier.promptAutomationForLikelyBrowsers()
-    }
-
-    func removeURLRule(pattern: String, category: AppCategory) {
-        saveURLRules(urlRules().filter {
-            !($0.pattern == pattern && $0.category == category)
-        })
-    }
-
-    /// Trims a typed pattern down to a host-ish substring (drops scheme, path, spaces).
-    private static func normalizeURLPattern(_ raw: String) -> String {
-        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if let range = s.range(of: "://") { s = String(s[range.upperBound...]) }
-        if let slash = s.firstIndex(of: "/") { s = String(s[..<slash]) }
-        return s
     }
 
     func addCustomApp(bundleID: String, name: String, category: AppCategory) {
@@ -1334,6 +1319,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // when an unsupported app responds slowly. Cap it.
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.5)
         setupStatusItem()
+        installMainMenu()
         statusItem?.isVisible = !invisibilityModeEnabled
         InvisibilityState.applyToAllOpenWindows()
         requestAccessibilityPermissionIfNeeded()
@@ -1924,13 +1910,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         ).showModal()
     }
 
-    /// Flips the writing (draft) language between the configured pair. If the
-    /// current language is neither of the two, snaps to the first.
+    /// Flips the writing (draft) language with the configured alternate, swapping
+    /// the two so the pair {writing language, alternate} is preserved each toggle.
     @objc private func toggleWritingLanguageAction() {
-        let next = draftTargetLanguage.id == writingToggleLanguageA.id
-            ? writingToggleLanguageB
-            : writingToggleLanguageA
+        let previous = draftTargetLanguage
+        let next = writingToggleAlternate
         draftTargetLanguage = next
+        writingToggleAlternate = previous
         translationPanelController?.close()
         translationPanelController = nil
         updateMenuState()
@@ -2649,6 +2635,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         translate(
             text,
             near: screenPoint,
+            targetLanguage: draftTargetLanguage,
             mode: .smartReply,
             useCache: false,
             usageKind: .smartReply,
@@ -2679,7 +2666,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         let language = explicitTargetLanguage ?? targetLanguage
         let currentThinkingLevel = textThinkingLevel
-        let (_, currentAppCategory) = AppCategoryClassifier.detectFrontmost()
+        let currentAppCategory = AppCategoryClassifier.frontmostCategory()
         let currentComposition = compositionSettings(for: mode, appCategory: currentAppCategory)
         let anchor: TranslationPanelController.Anchor =
             selectionRect.map(TranslationPanelController.Anchor.selection)
@@ -2731,13 +2718,25 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func compositionSettings(for mode: TranslationMode, appCategory: AppCategory) -> CompositionSettings? {
+        // TEMP DIAGNOSTIC (voice-sample issue) — remove once resolved.
+        CodexDebugLog.append("[voice-debug] mode=\(mode) category=\(appCategory) frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil") savedSampleChars=\(emailVoiceSample.count)")
         guard mode.usesCompositionSettings else {
-            return nil
+            // Translate/selection ignores writing style, cleanup, snippets, and
+            // voice sample. The only composition input it honors is the global
+            // Gen Z toggle, so synthesize a minimal carrier — and only when that
+            // toggle is on, so default (off) behavior stays exactly as before.
+            guard genZModeEnabled else { return nil }
+            return CompositionSettings(style: .casual, cleanup: .none, snippets: [], genZ: true, voiceSample: nil)
         }
+        let voiceSample = appCategory == .email
+            ? emailVoiceSample.trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
         return CompositionSettings(
             style: writingStyle(for: appCategory),
             cleanup: cleanupLevel,
-            snippets: snippetsStore.usableSnippets()
+            snippets: snippetsStore.usableSnippets(),
+            genZ: genZModeEnabled,
+            voiceSample: voiceSample.isEmpty ? nil : voiceSample
         )
     }
 
@@ -3153,7 +3152,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             case .translate:
                 idleTitle = "Translate screen area to \(targetLanguage.displayName)..."
             case .smartReply:
-                idleTitle = "Reply to screen area..."
+                idleTitle = "Reply to screen area in \(draftTargetLanguage.displayName)..."
             }
             screenshotItem.title = isScreenshotTranslationRunning
                 ? "Selecting screen area..."
@@ -3166,7 +3165,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             case .translate:
                 selectionItem.title = "Translate selected text to \(targetLanguage.displayName)..."
             case .smartReply:
-                selectionItem.title = "Reply to selected text..."
+                selectionItem.title = "Reply to selected text in \(draftTargetLanguage.displayName)..."
             }
             applyShortcut(for: .translateOrReply, to: selectionItem)
             selectionItem.isEnabled = trusted
@@ -3452,7 +3451,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         let currentThinkingLevel = textThinkingLevel
-        let (_, currentAppCategory) = AppCategoryClassifier.detectFrontmost()
+        let currentAppCategory = AppCategoryClassifier.frontmostCategory()
         let currentComposition = compositionSettings(for: .draftMessage, appCategory: currentAppCategory)
 
         let loadingBar = showInstantTranslationLoading(near: screenPoint)
@@ -3620,13 +3619,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     let panelSide = self.panelSideForScreenshotEnding(at: mouseLocation)
                     self.resetScreenshotDragTracking()
                     let mode = self.floatingDefaultMode.translationMode
-                    let language = self.targetLanguage
                     let usageKind: UsageStatsEventKind
+                    let language: TranslationLanguage
                     switch mode {
                     case .smartReply:
                         usageKind = .smartReply
+                        language = self.draftTargetLanguage
                     case .selection, .draftMessage:
                         usageKind = .screenArea
+                        language = self.targetLanguage
                     }
                     self.translate(
                         sourceText,
@@ -3956,7 +3957,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @objc private func resetSettings() {
         let response = NugumiAlertController(
             title: "Reset settings?",
-            message: "This restores languages, main mode, display, output, AI mode, and keyboard shortcuts. Snippets, dictionary, and usage stats stay unchanged.",
+            message: "This restores languages, main mode, display, output, AI mode, and keyboard shortcuts. Snippets, dictionary, your email voice sample, and usage stats stay unchanged.",
             primaryButtonTitle: "Reset",
             secondaryButtonTitle: "Cancel"
         ).showModal()
@@ -3984,6 +3985,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             "selectedOllamaModel",
             "thinkingLevel",
             "cleanupLevel",
+            "genZMode",
             "replacementMode",
             InvisibilityState.defaultsKey,
             InvisibilityState.firstRunShownKey,
@@ -4019,6 +4021,52 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         NSApplication.shared.terminate(nil)
+    }
+
+    /// Builds the application's main menu. An accessory (LSUIElement) app gets no
+    /// menu bar by default, so the standard text-editing key equivalents
+    /// (⌘C / ⌘V / ⌘X / ⌘A / ⌘Z) never reach the focused text field — they are
+    /// delivered through the Edit menu. The menu surfaces only while Nugumi is the
+    /// active app. ⌘Q is deliberately bound to "Close Window" rather than Quit:
+    /// Nugumi lives in the menu bar, so closing the window must not kill it — users
+    /// quit via the status-bar "Quit Nugumi" item.
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+
+        // The first submenu is always treated as the application menu; the system
+        // substitutes the app name for its title.
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appItem.submenu = appMenu
+        appMenu.addItem(withTitle: "Hide Nugumi",
+                        action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: "Hide Others",
+                        action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(.separator())
+        // ⌘Q closes the front window (routed through the responder chain) instead
+        // of terminating — the accessory app keeps running in the menu bar.
+        appMenu.addItem(withTitle: "Close Window",
+                        action: #selector(NSWindow.performClose(_:)), keyEquivalent: "q")
+
+        // Edit menu — actions target nil so they dispatch down the responder chain
+        // to the first-responder text view, enabling copy/paste/etc. everywhere.
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editItem.submenu = editMenu
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: "")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        NSApp.mainMenu = mainMenu
     }
 
     @MainActor
@@ -10548,13 +10596,15 @@ enum TranslationMode {
 
             Render any foreign-language parts into \(targetLanguage.promptName), then simplify the whole result: break long sentences into shorter ones, replace jargon and rare or technical vocabulary with plain everyday words, unwind passive voice and nested clauses, and prefer concrete wording over abstract phrasing. Where a concept stays abstract after a plain-word swap, anchor it inline with a short concrete example or everyday analogy in parentheses or em-dashes — e.g. "a queue (like the line at a coffee shop — first in, first served)".
 
-            Match output complexity to source complexity. If the source is already a casual, simple message — a chat line, a greeting, a short sentence with no jargon, a menu item, a button label — translate it plainly and stop. Do not force analogies, examples, or expansions onto content that is already simple. The simplification rules are for when there is something genuinely complex to make accessible; short, plain inputs get short, plain outputs.
+            Match output complexity to source complexity. If the source is already a casual, simple message — a chat line, a greeting, a short sentence with no jargon, a menu item, a button label — translate it plainly and stop. Do not force analogies, examples, or expansions onto content that is already simple. The simplification rules are for when there is something genuinely complex to make accessible; short, plain inputs get short, plain outputs. (A single standalone word or term that the user is looking up is the exception — see the Lookup case below.)
+
+            Lookup case — if the source is a single word or a short standalone term (not a sentence, greeting, or casual phrase) and rendering it into \(targetLanguage.promptName) would leave it essentially unchanged — because it is already in \(targetLanguage.promptName), or is a borrowed or technical term with no distinct \(targetLanguage.promptName) translation — then the user has selected it to understand what it means, not to translate it. Do not echo the word back unchanged. Instead, explain it in 1–2 short, plain \(targetLanguage.promptName) sentences: what it means in everyday words, and a quick concrete example if it helps. Keep it simple enough for a curious ~12-year-old. If the word has several common meanings, give the most everyday one first and you may note a field-specific sense in a few words. Do not add a dictionary header, the word itself as a title, pronunciation, or part-of-speech labels — just the plain explanation.
 
             Treat a single `\\n` as a wrapped line inside one paragraph — join it silently. Treat a blank line (`\\n\\n`) as a deliberate paragraph break that the user wants to keep — render it as a blank line in the output. Clean repeated spaces, OCR artifacts, and hyphenated line wraps. If the source has no paragraph breaks but is long or dense, split the output into readable paragraphs instead of returning one wall of text.
 
             Keep every fact, name, date, number, quotation, URL, proper noun, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your output differs from a literal translation only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms.
 
-            Context — the source text is from \(appCategory.promptHint)
+            Context — the source text is from \(appCategory.promptHint)\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))
 
             Return only the \(targetLanguage.promptName) output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
             """
@@ -10569,7 +10619,7 @@ enum TranslationMode {
 
                 Context — the user is composing this message in \(appCategory.promptHint)
 
-                Writing style — \(composition?.style.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
+                Writing style — \(composition?.style.promptDescription(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
 
                 Return only the final \(targetLanguage.promptName) message, with no commentary, labels, alternatives, quotes, or explanations.
                 """
@@ -10583,7 +10633,7 @@ enum TranslationMode {
 
                 Context — the user is composing this message in \(appCategory.promptHint)
 
-                Writing style — \(composition?.style.promptDescription ?? "")
+                Writing style — \(composition?.style.promptDescription(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
 
                 Cleanup — \(composition?.cleanup.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
 
@@ -10592,7 +10642,7 @@ enum TranslationMode {
             }
         case .smartReply:
             """
-            The user has selected text in another app. The text is either (a) a message they received — email, chat message, DM, comment, support ticket, or similar; or (b) a question they need to answer — a quiz item, exam question, multiple-choice question, or open question. Decide which it is from the text itself, then respond appropriately. Always respond in the SAME language as the source text. Never translate.
+            The user has selected text in another app. The text is either (a) a message they received — email, chat message, DM, comment, support ticket, or similar; or (b) a question they need to answer — a quiz item, exam question, multiple-choice question, or open question. Decide which it is from the text itself, then respond appropriately. Write your reply or answer in \(targetLanguage.promptName), regardless of what language the source text is in.
 
             If it is a received message: write a natural, ready-to-send reply as if the user is sending it now. Match the intent, emotional signal, and approximate length of the original, but use the selected Writing style below for register and formality. Be concise. Don't restate or quote the original. Don't add greetings or sign-offs unless the original suggests them. Don't address the user — produce only the message body they would paste into the reply field.
 
@@ -10602,7 +10652,7 @@ enum TranslationMode {
 
             Context — the user is replying inside \(appCategory.promptHint)
 
-            Writing style — \(composition?.style.promptDescription ?? "")
+            Writing style — \(composition?.style.promptDescription(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
 
             Cleanup — \(composition?.cleanup.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
 
@@ -10637,6 +10687,31 @@ enum TranslationMode {
         }
 
         return "\n\n" + sections.joined(separator: "\n\n")
+    }
+
+    /// Language-specific Gen Z styling block, appended to compose prompts when
+    /// the Gen Z toggle is on. Empty string when off (so callsites stay inline).
+    private static func genZSection(for languageID: String, enabled: Bool) -> String {
+        guard enabled else { return "" }
+        return "\n\n" + GenZStyle.promptSection(for: languageID)
+    }
+
+    /// The user's email voice sample as a template block. Empty string when
+    /// there's no sample (so callsites stay inline). `compositionSettings` only
+    /// populates `voiceSample` for the email category, so this is a no-op
+    /// everywhere else.
+    ///
+    /// Division of authority (resolves the sample-vs-Writing-style conflict):
+    /// the sample owns STRUCTURE (that there's a greeting, a sign-off carrying the
+    /// name, the rhythm) and overrides the draft prompt's chat-style brevity; the
+    /// Writing style pill owns REGISTER (formality), overriding the sample's own
+    /// formality line by line — so a casual register yields a casual greeting and
+    /// sign-off even when the sample is written formally.
+    private static func voiceSampleSection(for sample: String?) -> String {
+        let trimmed = sample?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return "" }
+        let instruction = "Voice sample — the example below is the user's own email template. Take its STRUCTURE from it: that the email opens with a greeting, closes with a sign-off carrying the user's name, plus its general rhythm and layout. This structure OVERRIDES any length-matching or brevity guidance above — always produce the full greeting + body + sign-off, even when the user's draft is a single short line or fragment; expand a terse draft into a complete email. The selected Writing style register, however, controls the FORMALITY of every line: render the greeting, body, and sign-off at that register even if the template itself is written more or less formally — e.g. if the register is casual, the greeting and sign-off become casual too, not the formal wording shown in the template. Write the body to convey the current draft's meaning; do not reuse the template's body text. Render everything in the target language. Reproduce the user's name in the signature exactly as written:"
+        return "\n\n" + instruction + "\n" + trimmed
     }
 
     private static func promptLine(_ text: String) -> String {
@@ -10690,15 +10765,64 @@ enum WritingStyle: String, CaseIterable, Codable {
         }
     }
 
-    var promptDescription: String {
+    /// Language-neutral description of the register. The per-language
+    /// grammatical realization is appended by `promptDescription(for:)`.
+    private var registerSummary: String {
         switch self {
         case .formal:
-            return "highest formal register — the way you'd write to a senior client, superior, or in a business letter. In English: full sentences, no contractions, deferential tone. In Korean: use 합쇼체 (-습니다 / -십시오), never 해요체 and never 반말. In Japanese: use です/ます with deferential phrasing. In Russian: use Вы with full formal constructions. No exclamation marks unless the source had them. This register overrides any informality implied by the app context."
+            return "highest formal register — the way you'd write to a senior client, superior, or in a business letter. No exclamation marks unless the source had them. This register overrides any informality implied by the app context."
         case .polite:
-            return "polite, friendly register — the way you'd write to a colleague, acquaintance, or in a warm but professional message. In English: complete sentences, contractions OK, warm but professional. In Korean: use 해요체 (-아요 / -어요 / -해요), not 합쇼체 and not 반말. In Japanese: use です/ます in their everyday softer form. In Russian: use Вы with conversational warmth. This register overrides any informality implied by the app context."
+            return "polite, friendly register — the way you'd write to a colleague, acquaintance, or in a warm but professional message. This register overrides any informality implied by the app context."
         case .casual:
-            return "casual register — the way you'd write to a close friend. In English: natural casual capitalization (still capitalize names and sentence starts). In Korean: use 반말 (-해, -야, -지), never 해요체 and never 합쇼체. In Japanese: use plain form (だ/する). In Russian: use ты-forms. Lighter punctuation — periods optional at the ends of short messages. Conversational rhythm."
+            return "casual register — the way you'd write to a close friend. Lighter punctuation — periods optional at the ends of short messages. Conversational rhythm."
         }
+    }
+
+    /// Per-language grammatical realization of each register, keyed by
+    /// `TranslationLanguage.id`. The output language is always known at
+    /// prompt-build time, so only the matching language's rule is injected —
+    /// keeping the prompt lean. Add a language = add one line per style; a
+    /// language absent here falls back to `registerSummary` alone.
+    private static let languageRules: [WritingStyle: [String: String]] = [
+        .formal: [
+            "en": "In English: full sentences, no contractions, deferential tone.",
+            "ko": "In Korean: use 합쇼체 (-습니다 / -십시오), never 해요체 and never 반말.",
+            "ja": "In Japanese: use です/ます with deferential phrasing.",
+            "ru": "In Russian: use Вы with full formal constructions.",
+            "de": "In German: use Siezen (Sie/Ihnen) with formal salutations and closings; full sentences, no slangy contractions.",
+            "fr": "In French: use vouvoiement (vous) with formal phrasing and closings (e.g. « Je vous prie d'agréer »).",
+            "es": "In Spanish: use usted with deferential phrasing and complete sentences.",
+            "zh-Hans": "In Chinese: use 您 with respectful set phrases (请, 麻烦您, 敬请) and no slang.",
+        ],
+        .polite: [
+            "en": "In English: complete sentences, contractions OK, warm but professional.",
+            "ko": "In Korean: use 해요체 (-아요 / -어요 / -해요), not 합쇼체 and not 반말.",
+            "ja": "In Japanese: use です/ます in their everyday softer form.",
+            "ru": "In Russian: use Вы with conversational warmth.",
+            "de": "In German: use Sie in a warm, friendly tone — still Siezen, but conversational, not stiff.",
+            "fr": "In French: use vous in a warm, friendly tone — polite but approachable.",
+            "es": "In Spanish: use usted in a warm, friendly tone (or tú where the context is clearly informal).",
+            "zh-Hans": "In Chinese: use 您 or 你 with a warm, polite tone and 请 where natural.",
+        ],
+        .casual: [
+            "en": "In English: natural casual capitalization (still capitalize names and sentence starts).",
+            "ko": "In Korean: use 반말 (-해, -야, -지), never 해요체 and never 합쇼체.",
+            "ja": "In Japanese: use plain form (だ/する).",
+            "ru": "In Russian: use ты-forms.",
+            "de": "In German: use Duzen (du/dir) with relaxed phrasing and everyday contractions (geht's, hab's).",
+            "fr": "In French: use tutoiement (tu) with relaxed everyday phrasing and common contractions (t'as, j'sais).",
+            "es": "In Spanish: use tú (or vos where regionally natural), relaxed and conversational.",
+            "zh-Hans": "In Chinese: use 你 with relaxed, conversational phrasing and everyday particles (啊, 吧, 呢).",
+        ],
+    ]
+
+    /// Register description tailored to one target language: the neutral
+    /// summary plus that language's specific rule when one exists.
+    func promptDescription(for languageID: String) -> String {
+        guard let rule = WritingStyle.languageRules[self]?[languageID] else {
+            return registerSummary
+        }
+        return "\(registerSummary) \(rule)"
     }
 
     /// The style currently in effect for `category`, honoring the user's saved
@@ -10753,6 +10877,112 @@ enum CleanupLevel: String, CaseIterable, Codable {
     }
 }
 
+/// Gen Z styling overlay for compose prompts. Activated by the global Gen Z
+/// toggle (`CompositionSettings.genZ`). The language-neutral `coreGuidance`
+/// always leads — its load-bearing instruction is RESTRAINT (1–2 slang markers
+/// max) — followed by one target language's native-youth-slang block.
+///
+/// Synthesized from 2024–2026 per-language research. Slang churns fast, so each
+/// block favors the durable signal (lowercase, dropped end-period, 💀/😭 over 😂,
+/// tone) over fleeting vocabulary, and flags terms that already read as cringe.
+enum GenZStyle {
+    /// UserDefaults key for the global Gen Z toggle — single source of truth.
+    static let defaultsKey = "genZMode"
+    /// Current state of the global Gen Z toggle. Read wherever the prompt is
+    /// assembled (delegate-owned compose path and the Ask client classes alike).
+    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
+
+    static let coreGuidance = """
+        Gen Z mode is ON. Rewrite the message the way a Gen Z native (born ~1997–2012) would actually text it to a friend — casual digital register, not formal writing.
+        CRITICAL — preserve the user's real meaning, intent, and information exactly. Change only the voice and styling, never what they are saying, and never invent new content.
+        The #1 rule is restraint: real Gen Z texts are mostly plain language with at most 1–2 slang markers. Piling on slang is the single biggest tell of an adult faking it, so under-dose rather than over-dose; when unsure, drop the slang and keep only the styling.
+        Default to all-lowercase. Drop the period at the end of a message (a trailing period reads cold or passive-aggressive). Keep it short.
+        Tone skews ironic, understated, deadpan, hyperbolic-for-jokes, and lightly self-deprecating — never earnest, peppy, or corporate.
+        Use the target language's OWN native youth slang below — never translate English slang word-for-word into the target language.
+        Still respect the selected register/honorific level (e.g. politeness or formality) while adding the Gen Z flavor.
+        """
+
+    static let languageGuidance: [String: String] = [
+        "en": enGuide, "ru": ruGuide, "ko": koGuide, "ja": jaGuide,
+        "zh-Hans": zhGuide, "es": esGuide, "fr": frGuide, "de": deGuide,
+    ]
+
+    /// Core rules plus the target language's specifics (core alone if the
+    /// language has no dedicated block).
+    static func promptSection(for languageID: String) -> String {
+        guard let lang = languageGuidance[languageID] else { return coreGuidance }
+        return "\(coreGuidance)\n\n\(lang)"
+    }
+
+    private static let enGuide = """
+        English (US / global internet). All-lowercase; abbreviate freely: fr (for real), ngl, istg, idk, rn, tbh, lowkey/highkey, ong, deadass, iykyk, atp. Laughter is 💀 or 😭 or 'lmao' — never 😂 (a millennial tell).
+        Current vocab: rizz (charm), no cap (no lie), it's giving X (gives off X), ate / understood the assignment (nailed it), cooked (doomed), mid (mediocre), crash out (lose it), delulu (delusional), bet (ok/deal), fire/bussin (great), 'that's so real' (agreement), aura (cool points).
+        Cringe — avoid: skibidi, gyatt, sigma, Ohio, rizzler (Gen-Alpha brainrot); and millennial fossils: slay (overused), bae, on fleek, adulting, yas.
+        Examples:
+        - 'I'm really excited, this is going to be great' → 'ngl im so hyped this is gonna be fire'
+        - 'Sorry, I can't make it tonight, I'm exhausted' → 'cant make it tn im so cooked sorry'
+        """
+
+    private static let ruGuide = """
+        Russian. All-lowercase, no end-period, short fragments; heavy transliterated anglicisms. Laughter: ор / ору / орнул, ахах, пхпх — not 😂. Emoji sparse and ironic: 💀 🥲 🗿.
+        Current vocab: база (facts/agreed), вайб (vibe), имба (op/awesome), рофл / рофлить (joke), окак (ironic 'oh wow'), чел (dude), го (let's go), жиза (relatable, postironic), делулу (delusional), скуф (unkempt older guy), слэй (nailed it).
+        Tone: deadpan, postironic, understated. Don't overdo краш / кринж / чилить / флексить (now read slightly dated / adult).
+        Examples:
+        - 'Фильм очень понравился, советую посмотреть' → 'фильм имба реально советую'
+        - 'Согласен, ты абсолютно прав' → 'база'
+        """
+
+    private static let koGuide = """
+        Korean. Lean on 초성체: ㅋㅋㅋ (laugh; more ㅋ = funnier), ㅎㅎ (soft), ㅇㅇ (yes), ㄴㄴ (no), ㅇㅋ (ok), ㄱㄱ (go), ㄱㅅ (thanks), ㅈㅅ (sorry), ㄹㅇ (for real), ㅇㅈ (agreed), ㅁㅊ (omg). Cry with ㅠㅠ / ㅜㅜ. Clip words, drop spacing, use 음슴체 endings (먹음, 웃김, 가는중). Intensify with 개- / 존- / 핵- (개웃김, 존좋).
+        Current vocab: 갓생 (grind-life), 찐 (genuine), 폼 미쳤다 (killing it), 현타 (reality crash), 꾸안꾸 (effortless style). Avoid dated: 어쩔티비, 존맛탱/JMT.
+        Honorifics: if the input is 해요체, soften with ㅎㅎ / ~용 rather than dropping fully to 반말.
+        Examples:
+        - '오늘 정말 피곤해, 집에 가서 쉬고 싶어' → '오늘 진짜 개피곤 ㅠㅠ 집가서 눕고싶음'
+        - '미안한데 약속에 좀 늦을 것 같아' → 'ㅈㅅㅈㅅ 나 좀 늦을듯 ㅠㅠ'
+        """
+
+    private static let jaGuide = """
+        Japanese. Short fragments, タメ口, no 「。」 (reads cold). Drop particles (これヤバい). Laughter: 草 / w / wwww (more w = harder). 語尾: clip and stretch (しんど〜, きまず〜), nominalize with 〜み (つらみ, やばみ), 〜すぎ / 〜すぎる. Truncate: りょ→り (ok), とりま (anyway).
+        Current vocab: それな (totally), ガチ / ガチで (for real), えぐい (insane), エモい (moving), ワンチャン (maybe), 知らんけど (…idk though — deadpan hedge), 神 (awesome), 推し. Avoid dead slang: ぴえん / ぱおん, マジ卍, あざまる, なう, タピる. Minimal emoji.
+        Examples:
+        - '今日は疲れたので早く寝ます' → '今日まじ疲れたわ〜もう寝る'
+        - 'すごく助かりました、ありがとう' → 'まじ助かった〜ありがと🙏'
+        """
+
+    private static let zhGuide = """
+        Simplified Chinese (Mainland). Lowercase pinyin-acronyms mixed with characters; repeat for emphasis. Laughter: 哈哈哈哈, 2333, xswl, 笑死 — not 😂.
+        Current vocab: 那咋了 (so what / unbothered), emo了 (feeling down), 麻了 (numb / over it), 破防 (defenses broken / moved), 红温 (flushed with anger or embarrassment), 偷感 (acting low-key), 班味 (worn-down work vibe), 邪修 (unorthodox hack), 显眼包 (goofball), city不city (fancy?). Acronyms: yyds (GOAT), xswl (lmao), nbcs (nobody cares), awsl (so cute), u1s1 (real talk), dbq (sorry). Numbers: 666 (sick), 886 (bye), 555 (sob).
+        Self-mocking 躺平 / 摆烂 tone. Avoid now-cringe: 绝绝子, 栓Q, overused yyds.
+        Examples:
+        - '这家餐厅真好吃，我很喜欢' → '这家真的绝了我爱住了哈哈哈哈'
+        - '今天工作太累了，想休息' → '今天班味太重直接麻了 只想躺平'
+        """
+
+    private static let esGuide = """
+        Spanish. Lowercase, drop opening ¿ ¡, no end-period, stretch vowels (siii, holaaa). Laughter: jajaja / jsjs / 💀 / 😭 — not 😂 or xD.
+        Prefer PAN-HISPANIC terms (the user's region is usually unknown): cringe, random, crush, shippear, stalkear, mood, literal (intensifier), real / x2 (= same), mid, NPC, POV, red/green flag, modo X; peak term aura / farmear aura (clout). Regional — use only if signaled. Spain: tío/tía, en plan (filler), flipar, rayarse, mazo (= very). Mexico: neta, no manches, qué pedo, equis (= meh), alv. Argentina: che, boludo, re + adj, posta, de una (voseo: sos/tenés). Never mix regions — it reads instantly fake.
+        Examples:
+        - '¿Viste el video que te mandé? Es muy gracioso' → 'viste el video q te mande?? me morí 💀'
+        - 'No quiero salir hoy, estoy muy cansado' → 'nah hoy no tengo ganas de salir estoy muerto'
+        """
+
+    private static let frGuide = """
+        French. Default tu, never vous with peers (vous + slang = instant fake). All-lowercase; drop accents, apostrophes and the 'ne' (jai pas, jsp). Phonetic: c'est→c, j'ai→g, quoi→koi, t'inquiète→tkt, je sais pas→jsp, j'en peux plus→jpp, beaucoup→bcp. Laughter: mdr / ptdr / mdrrr and 💀 / 😭 — not 😂.
+        Current vocab: wesh (yo), frérot / frr (bro), askip (apparently), c'est ouf / de ouf (insane), chelou (sketchy), relou (annoying), seum (bitter), bg (hot), validé (approved), banger, c'est carré (sorted), sah / wallah (i swear), jpp. Hyperbole for funny: 'je suis mort', 'ça m'a tué'. Avoid dated: swag, quoicoubeh, lol.
+        Examples:
+        - 'Tu es libre ce soir pour qu'on se voie ?' → 'wesh ça dit quoi tas dispo ce soir'
+        - 'Je n'en peux plus, ce cours était trop long' → 'jpp ce cours ct giga long 💀'
+        """
+
+    private static let deGuide = """
+        German. All-lowercase — drop even noun capitals (correct caps read old / try-hard). Default du. Drop the end-period (a lone 'Ok.' reads annoyed; 'ok' / 'kk' is fine). Laughter: 💀 / 😭, 'ich lieg', 'ich kann nicht' — not 😂.
+        Current vocab: digga / diggah (bro, the #1 word), alter, bruda, wallah / ich schwör (i swear), lowkey, safe (definitely), mid, no cap, W / L (großes W, nimm das L), krass / geil (still live), 'das crazy', lost, cringe, random, aura. English verbs take German endings: gelikt, gecancelt, geghostet. Avoid corny / Jugendwort-bait: slay, lit, swag, yolo, smash, 'gönn dir', Ehrenmann. Do NOT generate Talahon or amk (slur / obscene).
+        Examples:
+        - 'Kannst du mir später beim Umzug helfen?' → 'digga hilfst du mir später beim umzug 🙏'
+        - 'Der neue Film ist ziemlich mittelmäßig' → 'ngl der neue film war lowkey mid'
+        """
+}
+
 enum AppCategoryClassifier {
     static let bundleIDMap: [String: AppCategory] = [
         "com.apple.mail": .email,
@@ -10780,21 +11010,6 @@ enum AppCategoryClassifier {
     static var userOverrides: [String: AppCategory] = [:]
     /// Built-in `bundleIDMap` apps the user removed — treated as unclassified.
     static var suppressedBuiltIns: Set<String> = []
-    /// URL substring → category rules, applied when the frontmost app is a browser.
-    static var urlRules: [(pattern: String, category: AppCategory)] = []
-
-    /// Browsers whose active-tab URL can be read via AppleScript, keyed by bundle ID.
-    static let browserScriptNames: [String: String] = [
-        "com.apple.Safari": "Safari",
-        "com.apple.SafariTechnologyPreview": "Safari Technology Preview",
-        "com.google.Chrome": "Google Chrome",
-        "com.google.Chrome.canary": "Google Chrome Canary",
-        "com.microsoft.edgemac": "Microsoft Edge",
-        "com.brave.Browser": "Brave Browser",
-        "company.thebrowser.Browser": "Arc",
-        "com.operasoftware.Opera": "Opera",
-        "com.vivaldi.Vivaldi": "Vivaldi",
-    ]
 
     static func category(for bundleID: String?) -> AppCategory {
         guard let id = bundleID else { return .other }
@@ -10807,83 +11022,9 @@ enum AppCategoryClassifier {
         return .other
     }
 
-    static func detectFrontmost() -> (bundleID: String?, category: AppCategory) {
-        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        // URL rules win when the user has any AND the frontmost app is a browser
-        // whose tab URL we can read. Skipping the AppleScript call when there are
-        // no rules means non-users never trigger an Automation permission prompt.
-        if !urlRules.isEmpty,
-           let bundleID,
-           let scriptName = browserScriptNames[bundleID],
-           let url = BrowserURLReader.currentURL(appName: scriptName,
-                                                 isSafari: bundleID.hasPrefix("com.apple.Safari")) {
-            let lower = url.lowercased()
-            if let match = urlRules.first(where: { lower.contains($0.pattern.lowercased()) }) {
-                return (bundleID, match.category)
-            }
-        }
-        return (bundleID, category(for: bundleID))
-    }
-
-    /// Best-effort bundle ID of the app that opens https URLs (the default browser).
-    static func defaultBrowserBundleID() -> String? {
-        guard let url = URL(string: "https://example.com"),
-              let appURL = NSWorkspace.shared.urlForApplication(toOpen: url)
-        else { return nil }
-        return Bundle(url: appURL)?.bundleIdentifier
-    }
-
-    /// Triggers the system Automation (Apple Events) prompt for one browser by
-    /// probing permission. No real event is sent. Blocks on the dialog, so call
-    /// this off the main thread.
-    static func requestAutomationPermission(forBrowser bundleID: String) {
-        let target = NSAppleEventDescriptor(bundleIdentifier: bundleID)
-        guard let desc = target.aeDesc else { return }
-        _ = AEDeterminePermissionToAutomateTarget(desc, typeWildCard, typeWildCard, true)
-    }
-
-    /// URL rules read a browser's active-tab URL via AppleScript, which needs
-    /// Automation permission. Proactively surface the system prompt for the
-    /// default browser (and the frontmost one, if it's a different scriptable
-    /// browser) so a freshly added rule works right away instead of silently
-    /// failing until permission is granted. macOS only re-prompts when the
-    /// decision is still undetermined, so calling this repeatedly is harmless.
-    static func promptAutomationForLikelyBrowsers() {
-        var targets: [String] = []
-        if let def = defaultBrowserBundleID(), browserScriptNames[def] != nil {
-            targets.append(def)
-        }
-        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-           browserScriptNames[front] != nil, !targets.contains(front) {
-            targets.append(front)
-        }
-        guard !targets.isEmpty else { return }
-        DispatchQueue.global(qos: .userInitiated).async {
-            for bundleID in targets {
-                requestAutomationPermission(forBrowser: bundleID)
-            }
-        }
-    }
-}
-
-/// A user-defined "URL contains X → category" rule, persisted in UserDefaults.
-struct URLCategoryRule: Codable, Equatable {
-    let pattern: String
-    let category: AppCategory
-}
-
-/// Reads the active tab URL of a scriptable browser via AppleScript. Returns nil
-/// if the browser isn't running, has no window, or Automation permission is denied.
-enum BrowserURLReader {
-    static func currentURL(appName: String, isSafari: Bool) -> String? {
-        let source = isSafari
-            ? "tell application \"\(appName)\" to get URL of front document"
-            : "tell application \"\(appName)\" to get URL of active tab of front window"
-        guard let script = NSAppleScript(source: source) else { return nil }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        return result.stringValue
+    /// Category of the current frontmost app, by bundle ID.
+    static func frontmostCategory() -> AppCategory {
+        category(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
     }
 }
 
@@ -11110,7 +11251,7 @@ struct OllamaClient: LLMBackend {
         }
 
         var messages: [ChatMessage] = [
-            ChatMessage(role: "system", content: AskNugumiPromptBuilder.systemPrompt)
+            ChatMessage(role: "system", content: AskNugumiPromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled))
         ]
         for turn in history {
             messages.append(ChatMessage(role: "user", content: turn.question))
@@ -11342,7 +11483,7 @@ struct OpenAIChatClient: LLMBackend {
         }
 
         var messages: [OpenAIMessage] = [
-            OpenAIMessage(role: "system", content: .string(AskNugumiPromptBuilder.systemPrompt))
+            OpenAIMessage(role: "system", content: .string(AskNugumiPromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled)))
         ]
         for turn in history {
             messages.append(OpenAIMessage(role: "user", content: .string(turn.question)))
@@ -12694,6 +12835,8 @@ struct OpenAICodexClient: LLMBackend {
             appCategory: appCategory,
             composition: composition
         )
+        // TEMP DIAGNOSTIC (voice-sample issue) — remove once resolved.
+        CodexDebugLog.append("[voice-debug] codex mode=\(mode) promptHasVoice=\(systemPrompt.contains("Voice sample —")) promptChars=\(systemPrompt.count)")
         let userContent: [CodexInputContent] = {
             var parts: [CodexInputContent] = [.text(sourceText, role: "user")]
             parts.append(contentsOf: images.map { .image($0.openAIDataURI) })
@@ -12746,7 +12889,7 @@ struct OpenAICodexClient: LLMBackend {
 
         let body = CodexResponsesRequest(
             model: apiModelID,
-            instructions: AskNugumiPromptBuilder.systemPrompt,
+            instructions: AskNugumiPromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled),
             input: items,
             stream: true,
             store: false,
@@ -13225,12 +13368,13 @@ extension NugumiApp: SettingsHost {
         return SettingsSnapshot(
             targetLanguage: targetLanguage,
             draftTargetLanguage: draftTargetLanguage,
-            writingToggleLanguageA: writingToggleLanguageA,
-            writingToggleLanguageB: writingToggleLanguageB,
+            writingToggleAlternate: writingToggleAlternate,
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
             replacementMode: replacementMode,
             cleanupLevel: cleanupLevel,
+            genZMode: genZModeEnabled,
+            emailVoiceSample: emailVoiceSample,
             invisibilityEnabled: invisibilityModeEnabled,
             writingStyles: styles,
             textModelID: textModelID,
@@ -13238,18 +13382,8 @@ extension NugumiApp: SettingsHost {
             textThinkingLevel: textThinkingLevel,
             askNugumiThinkingLevel: askNugumiThinkingLevel,
             shortcuts: shortcuts,
-            appsByCategory: appsByCategory(),
-            urlRulesByCategory: urlRulesByCategory()
+            appsByCategory: appsByCategory()
         )
-    }
-
-    private func urlRulesByCategory() -> [AppCategory: [String]] {
-        var result: [AppCategory: [String]] = [:]
-        for category in AppCategory.allCases { result[category] = [] }
-        for rule in urlRules() {
-            result[rule.category, default: []].append(rule.pattern)
-        }
-        return result
     }
 
     private static let appsMigratedKey = "appCategoryDefaultsMigratedV1"
@@ -13340,10 +13474,8 @@ extension NugumiApp: SettingsHost {
             translationPanelController?.close()
             translationPanelController = nil
             updateMenuState()
-        case .setWritingToggleLanguageA(let language):
-            writingToggleLanguageA = language
-        case .setWritingToggleLanguageB(let language):
-            writingToggleLanguageB = language
+        case .setWritingToggleAlternate(let language):
+            writingToggleAlternate = language
         case .setFloatingDefaultMode(let mode):
             floatingDefaultMode = mode
             petController?.setActionMode(mode.translationMode)
@@ -13358,6 +13490,11 @@ extension NugumiApp: SettingsHost {
         case .setCleanupLevel(let level):
             cleanupLevel = level
             updateMenuState()
+        case .setGenZMode(let enabled):
+            genZModeEnabled = enabled
+            updateMenuState()
+        case .setEmailVoiceSample(let sample):
+            emailVoiceSample = sample
         case .setWritingStyle(let style, let category):
             setWritingStyle(style, for: category)
             updateMenuState()
@@ -13365,10 +13502,6 @@ extension NugumiApp: SettingsHost {
             presentAppPicker(for: category)
         case .removeApp(let bundleID):
             removeApp(bundleID: bundleID)
-        case .addURLRule(let pattern, let category):
-            addURLRule(pattern: pattern, category: category)
-        case .removeURLRule(let pattern, let category):
-            removeURLRule(pattern: pattern, category: category)
         case .setThinkingLevel(let level, let scope):
             guard level != thinkingLevel(for: scope) else { return }
             setThinkingLevel(level, for: scope)

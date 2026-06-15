@@ -40,6 +40,22 @@ private struct MenuFieldLabel: View {
     }
 }
 
+/// A read-only language field that mirrors `MenuFieldLabel`'s shape but with no
+/// disclosure chevron and dimmed ink, signalling a fixed value rather than a picker.
+private struct ReadOnlyField: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(FlowTheme.inkSecondary)
+            .lineLimit(1)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.03)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+    }
+}
+
 private struct KeyCap: View {
     let text: String
     var body: some View {
@@ -230,13 +246,13 @@ private struct HistoryRow: View {
                     Text(entry.sourceText)
                         .font(.system(size: 13))
                         .foregroundStyle(FlowTheme.inkSecondary)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if !entry.resultText.isEmpty {
                     Text(entry.resultText)
                         .font(.system(size: 14))
                         .foregroundStyle(FlowTheme.ink)
-                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
             }
@@ -443,16 +459,24 @@ struct StyleSection: View {
                         )
                     }
                     Divider().background(FlowTheme.hairline)
-                    HStack(spacing: 8) {
-                        Image(systemName: "wand.and.stars")
-                            .font(.system(size: 12))
-                            .foregroundStyle(FlowTheme.inkTertiary)
+                    VStack(alignment: .leading, spacing: 12) {
                         Text(bridge.settings.cleanupLevel.settingsDescription)
                             .font(.system(size: 12.5))
                             .foregroundStyle(FlowTheme.inkSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        CleanupExample(level: bridge.settings.cleanupLevel)
                     }
                     .animation(.easeInOut(duration: 0.15), value: bridge.settings.cleanupLevel)
+                }
+            }
+
+            SubCard {
+                SettingRow("Gen Z mode",
+                           subtitle: "works both ways 💀 your texts come out in gen z AND nugumi explains everything back to you in it too, zero unc energy anywhere") {
+                    Toggle("", isOn: bridge.binding(\.genZMode) { .setGenZMode($0) })
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(FlowTheme.accent)
                 }
             }
         }
@@ -468,6 +492,62 @@ private extension CleanupLevel {
         case .light: return "Fixes typos and obvious grammar slips, nothing more."
         case .medium: return "Smooths awkward phrasing for clarity and flow."
         case .high: return "Polishes thoroughly — tight, clear sentences with no filler."
+        }
+    }
+
+    /// One shared raw input across every level so switching the picker changes
+    /// only the output — the clearest way to show what each level actually does.
+    var example: (before: String, after: String) {
+        let before = "i think we shoud meet tommorow if thats ok with u"
+        switch self {
+        case .none:   return (before, "i think we shoud meet tommorow if thats ok with u")
+        case .light:  return (before, "I think we should meet tomorrow if that's ok with you.")
+        case .medium: return (before, "I think we should meet tomorrow, if that works for you.")
+        case .high:   return (before, "Let's meet tomorrow — does that work for you?")
+        }
+    }
+}
+
+/// Before → after demonstration for the selected Auto Cleanup level. The "after"
+/// bubble is accent-tinted to read as Nugumi's output, mirroring the rewrite side
+/// of the Style previews.
+private struct CleanupExample: View {
+    let level: CleanupLevel
+
+    var body: some View {
+        // Two columns split by a hairline, mirroring the Style cards' Preview | Apps layout.
+        HStack(alignment: .top, spacing: 22) {
+            row(label: "You typed", text: level.example.before, accent: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Rectangle()
+                .fill(FlowTheme.hairline)
+                .frame(width: 1)
+            row(label: "Nugumi writes", text: level.example.after, accent: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func row(label: String, text: String, accent: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(FlowTheme.inkTertiary)
+                .padding(.leading, 2)
+            Text(text)
+                .font(.system(size: 12.5))
+                .foregroundStyle(accent ? FlowTheme.ink : FlowTheme.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(accent ? FlowTheme.accent.opacity(0.18) : Color.white.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(accent ? FlowTheme.accent.opacity(0.30) : FlowTheme.hairline, lineWidth: 1)
+                )
         }
     }
 }
@@ -494,25 +574,7 @@ private struct StyleCard: View {
                 HStack(alignment: .top, spacing: 22) {
                     VStack(alignment: .leading, spacing: 10) {
                         fieldLabel("Preview")
-                        VStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("English")
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundStyle(FlowTheme.inkTertiary)
-                                    .padding(.leading, 6)
-                                ChatBubble(text: sample(for: selection))
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("Korean")
-                                    .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundStyle(FlowTheme.inkTertiary)
-                                    .padding(.leading, 6)
-                                ChatBubble(text: koreanSample(for: selection))
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        ChatBubble(text: sample(for: selection))
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -532,15 +594,17 @@ private struct StyleCard: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        VStack(alignment: .leading, spacing: 16) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                fieldLabel("Apps")
-                                AppIconStrip(category: category, apps: bridge.settings.apps(for: category))
-                            }
-                            URLRuleEditor(category: category, patterns: bridge.settings.urlRules(for: category))
+                        VStack(alignment: .leading, spacing: 10) {
+                            fieldLabel("Apps")
+                            AppIconStrip(category: category, apps: bridge.settings.apps(for: category))
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                }
+
+                if category == .email {
+                    Divider().background(FlowTheme.hairline)
+                    EmailVoiceSampleEditor(sample: bridge.settings.emailVoiceSample)
                 }
             }
         }
@@ -552,19 +616,34 @@ private struct StyleCard: View {
             .foregroundStyle(FlowTheme.inkSecondary)
     }
 
+    /// Preview text per category × style, so each card reads in its own context
+    /// (a friend lunch ping vs a work sync vs an email) instead of one shared line.
     private func sample(for style: WritingStyle) -> String {
-        switch style {
-        case .formal: return "Hello, are you available for lunch tomorrow? Twelve o'clock would suit me well."
-        case .polite: return "Hi! Are you free for lunch tomorrow? Let's do 12 if that works for you."
-        case .casual: return "hey are you free for lunch tmrw? let's do 12 if that works"
-        }
-    }
-
-    private func koreanSample(for style: WritingStyle) -> String {
-        switch style {
-        case .formal: return "안녕하세요, 혹시 내일 점심 식사 가능하신가요? 12시 정도면 괜찮을 것 같습니다."
-        case .polite: return "안녕하세요! 내일 점심 같이 하실래요? 괜찮으시면 12시에 봐요."
-        case .casual: return "야 내일 점심 시간 돼? 괜찮으면 12시에 보자"
+        switch category {
+        case .personalMessages:
+            switch style {
+            case .formal: return "Hello! Are you free for lunch tomorrow? Noon works well for me."
+            case .polite: return "Hi! Are you free for lunch tomorrow? Let's do 12 if that works for you."
+            case .casual: return "hey are you free for lunch tmrw? let's do 12 if that works"
+            }
+        case .workMessages:
+            switch style {
+            case .formal: return "Could we find time tomorrow to review the Q3 report? Noon would work on my end."
+            case .polite: return "Hey, do you have time tomorrow to go over the Q3 report? Does noon work?"
+            case .casual: return "yo can we sync tmrw on the q3 report? noon good?"
+            }
+        case .email:
+            switch style {
+            case .formal: return "Dear Alex, would you be available for a call next week to discuss the proposal? Best, Sam"
+            case .polite: return "Hi Alex! Any time next week for a quick call about the proposal? Thanks, Sam"
+            case .casual: return "hey alex! free next week for a quick call about the proposal?"
+            }
+        case .other:
+            switch style {
+            case .formal: return "Hello, could you let me know the best time to reach you?"
+            case .polite: return "Hi! When's a good time to reach you?"
+            case .casual: return "hey whats a good time to reach you?"
+            }
         }
     }
 }
@@ -721,67 +800,53 @@ enum AppIconProvider {
     }
 }
 
-/// "Websites" sub-section: lets the user route a browser tab to this category by
-/// URL substring (e.g. `web.whatsapp.com`). Matching happens at rewrite time when
-/// a scriptable browser is frontmost.
-private struct URLRuleEditor: View {
+/// Multi-line editor for the email voice sample (email category only). Edits a
+/// local draft and persists every change through the settings intent, mirroring
+/// how the rest of the Style section saves immediately. The `TextEditor` binds
+/// to local `@State` rather than the republished snapshot, so the cursor stays
+/// put while the bridge refreshes after each write.
+private struct EmailVoiceSampleEditor: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
-    let category: AppCategory
-    let patterns: [String]
-    @State private var draft = ""
+    @State private var draft: String
+
+    init(sample: String) {
+        _draft = State(initialValue: sample)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Websites")
+            Text("Voice sample")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(FlowTheme.inkSecondary)
+            Text("Paste an email you typically send. Nugumi mirrors its greeting, rhythm, and sign-off when it writes email replies.")
+                .font(.system(size: 12))
+                .foregroundStyle(FlowTheme.inkTertiary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if !patterns.isEmpty {
-                FlowWrap(spacing: 6) {
-                    ForEach(patterns, id: \.self) { pattern in
-                        HStack(spacing: 5) {
-                            Text(pattern)
-                                .font(.system(size: 12))
-                                .foregroundStyle(FlowTheme.ink)
-                            Button {
-                                bridge.perform(.removeURLRule(pattern, category))
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(FlowTheme.inkSecondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 9)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
-                        .overlay(Capsule().strokeBorder(FlowTheme.hairline, lineWidth: 1))
+            TextEditor(text: $draft)
+                .scrollContentBackground(.hidden)
+                .font(.system(size: 13))
+                .foregroundStyle(FlowTheme.ink)
+                .frame(minHeight: 104)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 11)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+                .overlay(alignment: .topLeading) {
+                    if draft.isEmpty {
+                        Text("Hello,\n\n…\n\nBest regards,\nYour name")
+                            .font(.system(size: 13))
+                            .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .allowsHitTesting(false)
                     }
                 }
-            }
-
-            HStack(spacing: 8) {
-                TextField("e.g. web.whatsapp.com", text: $draft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(FlowTheme.ink)
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 11)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-                    .frame(maxWidth: 260)
-                    .onSubmit(add)
-                SecondaryButton(title: "Add") { add() }
-            }
+                .onChange(of: draft) { _, newValue in
+                    bridge.perform(.setEmailVoiceSample(newValue))
+                }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func add() {
-        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        bridge.perform(.addURLRule(trimmed, category))
-        draft = ""
     }
 }
 
@@ -852,17 +917,17 @@ struct LanguagesSection: View {
 
             SubCard {
                 SettingRow("Quick switch",
-                           subtitle: "Press \(bridge.settings.shortcut(for: .toggleWritingLanguage).displayString) anywhere to flip the writing language between these two.") {
+                           subtitle: "Press \(bridge.settings.shortcut(for: .toggleWritingLanguage).displayString) anywhere to flip the writing language with this one.") {
                     HStack(spacing: 10) {
-                        LanguageMenu(current: bridge.settings.writingToggleLanguageA) {
-                            bridge.perform(.setWritingToggleLanguageA($0))
+                        LanguageMenu(current: bridge.settings.writingToggleAlternate) {
+                            bridge.perform(.setWritingToggleAlternate($0))
                         }
                         Image(systemName: "arrow.left.arrow.right")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(FlowTheme.inkTertiary)
-                        LanguageMenu(current: bridge.settings.writingToggleLanguageB) {
-                            bridge.perform(.setWritingToggleLanguageB($0))
-                        }
+                        // The other side is fixed to the live writing language —
+                        // read-only target, no picker.
+                        ReadOnlyField(text: bridge.settings.draftTargetLanguage.displayName)
                     }
                 }
             }
