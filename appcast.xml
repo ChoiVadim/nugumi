@@ -300,5 +300,16 @@
                 type="application/octet-stream"
                 sparkle:edSignature="surTjYJPJhAiIEIJCvY5FbpvyrVky+xD1H/rYVIfpWykX5t9xDbhLLgj1wBYqhMLuK8YFyZrWigbCyazjzgeDQ==" length="29204367" />
         </item>
+        <item>
+            <title>Version 0.8.8</title>
+            <pubDate>Mon, 15 Jun 2026 10:18:16 +0000</pubDate>
+            <sparkle:version>30</sparkle:version>
+            <sparkle:shortVersionString>0.8.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/ChoiVadim/nugumi/releases/download/v0.8.8/Nugumi-0.8.8.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="1sNKTC3MTDOXRVe4ohC/bKHbNpLMw7XEOduHHaeZRf2ORfeqySB/DggnvDVNlOUAU1X4sJ1WwMogaoPkaBnOCA==" length="29220932" />
+        </item>
     </channel>
 </rss>
