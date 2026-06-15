@@ -11879,8 +11879,20 @@ private struct OpenAIStreamError: Decodable {
 struct ChatRequest: Encodable {
     let model: String
     let stream: Bool
+    // NOTE: send the effort level string ("low"/"medium"/"high"), never a bool.
+    // gpt-oss is a level-based reasoning model: `think: false` is ignored and
+    // falls back to default effort, which still reasons and is ~2x SLOWER than
+    // "low" (measured on gpt-oss:20b and :120b-cloud). "low" is the fast path.
     let think: String
     let messages: [ChatMessage]
+    /// Keep the model resident in (V)RAM between requests so intermittent use
+    /// doesn't pay a cold model-load each time. Ollama-only concept.
+    var keepAlive: String = "30m"
+
+    private enum CodingKeys: String, CodingKey {
+        case model, stream, think, messages
+        case keepAlive = "keep_alive"
+    }
 }
 
 struct ChatMessage: Codable {

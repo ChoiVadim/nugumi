@@ -362,6 +362,7 @@ private struct InsightsContent: View {
 
     @ViewBuilder
     private func breakdownColumn(title: String, rows: [(String, String, Double)]) -> some View {
+        let rows = rows.sorted { $0.2 > $1.2 }
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
@@ -371,27 +372,33 @@ private struct InsightsContent: View {
                     .font(.system(size: 12))
                     .foregroundStyle(FlowTheme.inkSecondary)
             } else {
-                DistributionBar(fractions: rows.map(\.2))
-                VStack(spacing: 8) {
-                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
-                        HStack(spacing: 9) {
-                            Circle()
-                                .fill(BreakdownPalette.shade(index))
-                                .frame(width: 7, height: 7)
-                            Text(row.0)
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(FlowTheme.ink)
-                                .lineLimit(1)
-                            Spacer(minLength: 8)
-                            Text("\(Int((row.2 * 100).rounded()))%")
-                                .font(.system(size: 11))
-                                .foregroundStyle(FlowTheme.inkTertiary)
-                            Text(row.1)
-                                .font(.system(size: 12.5, weight: .medium))
-                                .foregroundStyle(FlowTheme.inkSecondary)
-                                .frame(minWidth: 34, alignment: .trailing)
+                HStack(alignment: .center, spacing: 18) {
+                    DonutChart(
+                        fractions: rows.map(\.2),
+                        centerText: "\(Int((rows[0].2 * 100).rounded()))%"
+                    )
+                    VStack(spacing: 10) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                            HStack(spacing: 9) {
+                                Circle()
+                                    .fill(BreakdownPalette.color(index))
+                                    .frame(width: 7, height: 7)
+                                Text(row.0)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(FlowTheme.ink)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text("\(Int((row.2 * 100).rounded()))%")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(FlowTheme.inkTertiary)
+                                Text(row.1)
+                                    .font(.system(size: 12.5, weight: .medium))
+                                    .foregroundStyle(FlowTheme.inkSecondary)
+                                    .frame(minWidth: 34, alignment: .trailing)
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -399,35 +406,71 @@ private struct InsightsContent: View {
     }
 }
 
-/// Quiet monochrome shades for distribution segments — the accent green stays
-/// reserved for the activity heatmap next door.
+/// Slice colors for the breakdown donuts: the leading (largest) share wears the
+/// Nugumi green, everything behind it falls back to quiet monochrome whites.
 private enum BreakdownPalette {
+    static func color(_ index: Int) -> Color {
+        index == 0 ? FlowTheme.accent : shade(index - 1)
+    }
+
     static func shade(_ index: Int) -> Color {
         let opacities: [Double] = [0.85, 0.55, 0.34, 0.20, 0.12]
         return Color.white.opacity(opacities[min(index, opacities.count - 1)])
     }
 }
 
-/// One horizontal bar split proportionally into shaded segments.
-private struct DistributionBar: View {
+/// A hand-rolled donut chart for the breakdown columns. Each slice is a trimmed
+/// circle stroked thickly into a ring segment; the leading slice is green (via
+/// `BreakdownPalette`). The center holds the dominant share. Tiny angular gaps
+/// separate slices without an overlay.
+private struct DonutChart: View {
     let fractions: [Double]
+    let centerText: String
+    var size: CGFloat = 104
+
+    private var thickness: CGFloat { size * 0.19 }
+    private var ringSide: CGFloat { size - thickness }
+
+    /// Cumulative (start, end) in turns per slice, with a small leading gap so
+    /// adjacent slices don't touch. The gap is clamped so it never inverts a
+    /// thin slice.
+    private var slices: [(start: CGFloat, end: CGFloat, index: Int)] {
+        let gap: CGFloat = fractions.count > 1 ? 0.006 : 0
+        var result: [(CGFloat, CGFloat, Int)] = []
+        var cursor: CGFloat = 0
+        for (index, fraction) in fractions.enumerated() {
+            let end = cursor + CGFloat(fraction)
+            result.append((min(cursor + gap, end), end, index))
+            cursor = end
+        }
+        return result
+    }
 
     var body: some View {
-        GeometryReader { geo in
-            let gap: CGFloat = 2
-            let available = geo.size.width - CGFloat(max(0, fractions.count - 1)) * gap
-            HStack(spacing: gap) {
-                ForEach(fractions.indices, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(BreakdownPalette.shade(index))
-                        .frame(width: max(3, available * fractions[index]))
-                }
-                Spacer(minLength: 0)
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.06), lineWidth: thickness)
+                .frame(width: ringSide, height: ringSide)
+
+            ForEach(slices.indices, id: \.self) { i in
+                Circle()
+                    .trim(from: slices[i].start, to: slices[i].end)
+                    .stroke(
+                        BreakdownPalette.color(slices[i].index),
+                        style: StrokeStyle(lineWidth: thickness, lineCap: .butt)
+                    )
+                    .frame(width: ringSide, height: ringSide)
+                    .rotationEffect(.degrees(-90))
             }
+
+            Text(centerText)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+                .foregroundStyle(FlowTheme.ink)
         }
-        .frame(height: 10)
-        .background(Capsule().fill(Color.white.opacity(0.06)))
-        .clipShape(Capsule())
+        .frame(width: size, height: size)
     }
 }
 
