@@ -683,8 +683,12 @@ private enum TextNormalizer {
         return cleanedStructuredSource(cleaned)
     }
 
-    static func cleanedTranslation(_ text: String) -> String {
+    static func cleanedTranslation(_ text: String, stripEmDash: Bool = false) -> String {
         var cleaned = normalizedBaseText(text)
+
+        if stripEmDash {
+            cleaned = removingEmDashes(cleaned)
+        }
 
         cleaned = cleaned.replacingOccurrences(
             of: #"[ \t]+\n"#,
@@ -772,6 +776,37 @@ private enum TextNormalizer {
             .replacingOccurrences(of: "\r", with: "\n")
             .replacingOccurrences(of: "\u{00A0}", with: " ")
             .replacingOccurrences(of: "\u{200B}", with: "")
+    }
+
+    /// Deterministic backstop for the casual/polite em-dash ban. Replaces the em
+    /// dash (—) / horizontal bar (―), and a space-padded en dash (–) used as a
+    /// clause separator, with a comma. An unspaced en dash inside a numeric range
+    /// (2020–2021) is left untouched. Only the compose path passes
+    /// `stripEmDash: true` for casual/polite — formal and translate never do.
+    private static func removingEmDashes(_ text: String) -> String {
+        var result = text.replacingOccurrences(
+            of: #"\s*[\x{2014}\x{2015}]\s*"#,
+            with: ", ",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"\s\x{2013}\s"#,
+            with: ", ",
+            options: .regularExpression
+        )
+        // Heal artifacts: a comma the source already had adjacent to the dash,
+        // and a dash that sat at the end of a line or the whole message.
+        result = result.replacingOccurrences(
+            of: #",\s*,"#,
+            with: ",",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #",(\s*(?:\n|$))"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        return result
     }
 
     private static func cleanedStructuredSource(_ text: String) -> String {
@@ -876,6 +911,15 @@ struct CompositionSettings: Equatable {
     /// greeting, rhythm, and sign-off the model mirrors. Only populated for the
     /// `email` category; `nil`/empty elsewhere, so the prompt section vanishes.
     let voiceSample: String?
+
+    /// Casual and polite registers must never contain the em dash (—); it reads
+    /// as AI writing and clashes with conversational tone. Formal keeps it. The
+    /// prompt asks the model to avoid it, but local models routinely ignore that
+    /// negative instruction, so the output is also stripped deterministically
+    /// (see `TextNormalizer.cleanedTranslation(_:stripEmDash:)`).
+    var bansEmDash: Bool {
+        style == .casual || style == .polite
+    }
 }
 
 private final class TranslationCache {
@@ -11345,6 +11389,7 @@ struct OllamaClient: LLMBackend {
             throw TranslationError.ollama("Selected Ollama model doesn't support images.")
         }
 
+        let stripEmDash = mode.usesCompositionSettings && (composition?.bansEmDash ?? false)
         let imageStrings = images.isEmpty ? nil : images.map(\.base64String)
         let body = ChatRequest(
             model: model,
@@ -11404,7 +11449,7 @@ struct OllamaClient: LLMBackend {
             let decoded = try decoder.decode(ChatResponse.self, from: data)
             translated += decoded.message.content
 
-            let partial = TextNormalizer.cleanedTranslation(translated)
+            let partial = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
             if !partial.isEmpty {
                 onPartial(partial)
             }
@@ -11414,7 +11459,7 @@ struct OllamaClient: LLMBackend {
             }
         }
 
-        let finalTranslation = TextNormalizer.cleanedTranslation(translated)
+        let finalTranslation = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
         guard !finalTranslation.isEmpty else {
             throw TranslationError.emptyResponse
         }
@@ -11599,6 +11644,7 @@ struct OpenAIChatClient: LLMBackend {
             appCategory: appCategory,
             composition: composition
         )
+        let stripEmDash = mode.usesCompositionSettings && (composition?.bansEmDash ?? false)
         let userContent: OpenAIContent = images.isEmpty
             ? .string(sourceText)
             : .parts([.text(sourceText)] + images.map { .imageURL($0.openAIDataURI) })
@@ -11668,7 +11714,7 @@ struct OpenAIChatClient: LLMBackend {
             }
             if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
                 translated += delta
-                let partial = TextNormalizer.cleanedTranslation(translated)
+                let partial = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
                 if !partial.isEmpty {
                     onPartial(partial)
                 }
@@ -11676,7 +11722,7 @@ struct OpenAIChatClient: LLMBackend {
             if chunk.choices.first?.finishReason != nil { break }
         }
 
-        let finalTranslation = TextNormalizer.cleanedTranslation(translated)
+        let finalTranslation = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
         guard !finalTranslation.isEmpty else {
             throw TranslationError.emptyResponse
         }
@@ -12863,13 +12909,14 @@ struct OpenAICodexClient: LLMBackend {
             reasoning: CodexReasoningConfig(effort: thinkingLevel.cloudReasoningEffort)
         )
 
+        let stripEmDash = mode.usesCompositionSettings && (composition?.bansEmDash ?? false)
         var streamed = ""
         try await runStreaming(body: body, timeoutInterval: 25) { delta in
             streamed += delta
-            let partial = TextNormalizer.cleanedTranslation(streamed)
+            let partial = TextNormalizer.cleanedTranslation(streamed, stripEmDash: stripEmDash)
             if !partial.isEmpty { onPartial(partial) }
         }
-        let final = TextNormalizer.cleanedTranslation(streamed)
+        let final = TextNormalizer.cleanedTranslation(streamed, stripEmDash: stripEmDash)
         guard !final.isEmpty else { throw TranslationError.emptyResponse }
         return final
     }
