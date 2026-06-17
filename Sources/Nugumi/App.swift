@@ -10772,9 +10772,9 @@ enum WritingStyle: String, CaseIterable, Codable {
         case .formal:
             return "highest formal register — the way you'd write to a senior client, superior, or in a business letter. No exclamation marks unless the source had them. This register overrides any informality implied by the app context."
         case .polite:
-            return "polite, friendly register — the way you'd write to a colleague, acquaintance, or in a warm but professional message. This register overrides any informality implied by the app context."
+            return "polite, friendly register, the way you'd write to a colleague, acquaintance, or in a warm but professional message. This register overrides any informality implied by the app context. Never use the em dash (—), and don't substitute an en dash in its place; the long dash reads as AI writing and is out of place in a warm, conversational message. Use a comma, a period and a new sentence, or parentheses instead."
         case .casual:
-            return "casual register — the way you'd write to a close friend. Lighter punctuation — periods optional at the ends of short messages. Conversational rhythm."
+            return "casual register, the way you'd write to a close friend. Lighter punctuation; periods optional at the ends of short messages. Conversational rhythm. Never use the em dash (—), and don't substitute an en dash in its place; the long dash reads as AI writing and clashes with a casual message. Use a comma, a period and a new sentence, or parentheses instead."
         }
     }
 
