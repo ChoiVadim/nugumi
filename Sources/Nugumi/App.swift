@@ -1105,9 +1105,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         return SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: self,
-            userDriverDelegate: nil
+            userDriverDelegate: self
         )
     }()
+    /// Set by Sparkle's gentle-reminder path when a *scheduled* background check
+    /// finds an update. Drives the sidebar badge + menu-bar item instead of the
+    /// modal. nil = no pending update. Cleared once the user acts on it.
+    private var availableUpdate: SUAppcastItem?
     private var isRunningFromAppBundle: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
     }
@@ -2172,7 +2176,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func makeStatusBarMenu() -> NSMenu {
         let menu = NSMenu()
         if isRunningFromAppBundle {
-            let updates = NSMenuItem(title: "Check for updates...", action: #selector(checkForUpdates), keyEquivalent: "")
+            let updates: NSMenuItem
+            if let version = availableUpdate?.displayVersionString {
+                updates = NSMenuItem(title: "Install update \(version)...", action: #selector(checkForUpdates), keyEquivalent: "")
+                updates.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: "Update available")
+            } else {
+                updates = NSMenuItem(title: "Check for updates...", action: #selector(checkForUpdates), keyEquivalent: "")
+            }
             updates.target = self
             menu.addItem(updates)
         }
@@ -4197,11 +4207,47 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         updaterController?.checkForUpdates(nil)
     }
+
+    /// Record (or clear) a pending update and refresh every surface that shows
+    /// it — the sidebar badge (via notification) and the next menu rebuild.
+    @MainActor
+    private func setAvailableUpdate(_ update: SUAppcastItem?) {
+        availableUpdate = update
+        NotificationCenter.default.post(name: .updateAvailabilityChanged, object: nil)
+    }
 }
 
 extension NugumiApp: SPUUpdaterDelegate {
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
         "https://raw.githubusercontent.com/ChoiVadim/nugumi/main/appcast.xml"
+    }
+}
+
+extension NugumiApp: SPUStandardUserDriverDelegate {
+    // Opt into gentle reminders: scheduled checks surface our own badge instead
+    // of Sparkle's modal. User-initiated "Check for updates..." is unaffected.
+    nonisolated var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    nonisolated func standardUserDriverShouldHandleShowingScheduledUpdate(
+        _ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool
+    ) -> Bool {
+        false
+    }
+
+    nonisolated func standardUserDriverWillHandleShowingUpdate(
+        _ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState
+    ) {
+        // Sparkle is *not* showing it (gentle path) → light up our own badge.
+        guard !handleShowingUpdate else { return }
+        MainActor.assumeIsolated { setAvailableUpdate(update) }
+    }
+
+    nonisolated func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) {
+        MainActor.assumeIsolated { setAvailableUpdate(nil) }
+    }
+
+    nonisolated func standardUserDriverWillFinishUpdateSession() {
+        MainActor.assumeIsolated { setAvailableUpdate(nil) }
     }
 }
 
@@ -8599,7 +8645,12 @@ private final class AskPromptTextField: NSTextField {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        // NSCell.init(textCell:) yields a label-style cell (isEditable/isSelectable
+        // default to false), so re-enable both or the field can't take focus —
+        // no caret, clicks do nothing.
         cell = AskPromptTextFieldCell(textCell: "")
+        isEditable = true
+        isSelectable = true
     }
 
     required init?(coder: NSCoder) {
@@ -13436,6 +13487,7 @@ extension Notification.Name {
     static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
     static let ollamaModelsUpdated = Notification.Name("com.nugumi.ollama.modelsUpdated")
     static let cloudModelsUpdated = Notification.Name("com.nugumi.cloud.modelsUpdated")
+    static let updateAvailabilityChanged = Notification.Name("com.nugumi.updateAvailabilityChanged")
 }
 
 // MARK: Discovered Ollama models (live /api/tags + cached fallback)
@@ -14585,6 +14637,10 @@ extension NugumiApp: SettingsHost {
     var appVersionString: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0"
     }
+    var availableUpdateVersion: String? { availableUpdate?.displayVersionString }
+    /// Resume the pending update session — Sparkle re-focuses the found update
+    /// and shows its standard install dialog (release notes + Install).
+    func installAvailableUpdate() { checkForUpdates() }
 
     func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool {
         provider.hasCredentials

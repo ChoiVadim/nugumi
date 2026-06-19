@@ -192,6 +192,10 @@ protocol SettingsHost: AnyObject {
     var ollamaModels: [OllamaModelOption] { get }
     var appVersionString: String { get }
     var isAppBundle: Bool { get }
+    /// Display version of a pending update found by a background check, or nil.
+    var availableUpdateVersion: String? { get }
+    /// Bring up the install dialog for the pending update.
+    func installAvailableUpdate()
 }
 
 // MARK: - Bridge (ObservableObject the SwiftUI tree binds to)
@@ -212,6 +216,9 @@ final class NugumiSettingsBridge: ObservableObject {
     @Published var engineSetupFocus: EngineSetupFocus?
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
+    /// True when a background check has found an update — drives the sidebar
+    /// download badge. Mirrors `host.availableUpdateVersion != nil`.
+    @Published private(set) var updateAvailable: Bool
 
     let ollamaModels: [OllamaModelOption]
 
@@ -225,6 +232,7 @@ final class NugumiSettingsBridge: ObservableObject {
         self.settings = host.makeSettingsSnapshot()
         self.bootstrap = host.bootstrapState
         self.ollamaModels = host.ollamaModels
+        self.updateAvailable = host.availableUpdateVersion != nil
 
         // Re-render the model picker when live discovery updates either catalog.
         for name in [Notification.Name.ollamaModelsUpdated, .codexModelsUpdated, .cloudModelsUpdated] {
@@ -235,6 +243,17 @@ final class NugumiSettingsBridge: ObservableObject {
             }
             modelListObservers.append(token)
         }
+
+        let updateToken = NotificationCenter.default.addObserver(
+            forName: .updateAvailabilityChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Posted on the main queue, so we're already on the main actor.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.updateAvailable = self.host?.availableUpdateVersion != nil
+            }
+        }
+        modelListObservers.append(updateToken)
     }
 
     deinit {
@@ -296,6 +315,7 @@ final class NugumiSettingsBridge: ObservableObject {
     }
     var appVersion: String { host?.appVersionString ?? "" }
     var isAppBundle: Bool { host?.isAppBundle ?? false }
+    func installUpdate() { host?.installAvailableUpdate() }
 }
 
 // MARK: - Sections
@@ -485,6 +505,8 @@ struct MainWindowRootView: View {
 // MARK: - Sidebar
 
 struct SidebarView: View {
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             brandHeader
@@ -522,6 +544,15 @@ struct SidebarView: View {
                     .offset(y: -2)
             }
             Spacer(minLength: 0)
+            if bridge.updateAvailable {
+                Button(action: { bridge.installUpdate() }) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(FlowTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .help("Update available — click to install")
+            }
         }
         .frame(height: 26)
     }
