@@ -11781,23 +11781,18 @@ struct CloudThinkingOptions: Encodable, Equatable {
     let outputConfig: AnthropicOutputConfig?
 
     init(provider: CloudProvider, model: String, thinkingLevel: ThinkingLevel) {
+        // All four providers POST to OpenAI-compatible /chat/completions
+        // endpoints. Anthropic's compat endpoint rejects native thinking params
+        // — `thinking: {type:"adaptive"}` returns HTTP 400 "Adaptive thinking is
+        // not available via the OpenAI compatibility endpoint" — but accepts the
+        // OpenAI-style `reasoning_effort` knob (verified against the live API),
+        // so every compat provider routes through it. Do NOT send native
+        // `thinking`/`output_config` here.
         switch provider {
-        case .openAI, .gemini, .openAICodex:
+        case .openAI, .gemini, .openAICodex, .anthropic:
             reasoningEffort = thinkingLevel.cloudReasoningEffort
             thinking = nil
             outputConfig = nil
-        case .anthropic:
-            reasoningEffort = nil
-            if Self.usesAdaptiveClaudeThinking(model: model) {
-                thinking = AnthropicThinkingConfig(type: "adaptive")
-                outputConfig = AnthropicOutputConfig(effort: thinkingLevel.cloudReasoningEffort)
-            } else {
-                thinking = AnthropicThinkingConfig(
-                    type: "enabled",
-                    budgetTokens: thinkingLevel.claudeThinkingBudgetTokens
-                )
-                outputConfig = nil
-            }
         }
     }
 
@@ -11812,14 +11807,6 @@ struct CloudThinkingOptions: Encodable, Equatable {
         try container.encodeIfPresent(reasoningEffort, forKey: .reasoningEffort)
         try container.encodeIfPresent(thinking, forKey: .thinking)
         try container.encodeIfPresent(outputConfig, forKey: .outputConfig)
-    }
-
-    private static func usesAdaptiveClaudeThinking(model: String) -> Bool {
-        let normalized = model.lowercased()
-        return normalized.contains("claude-opus-4-7")
-            || normalized.contains("claude-opus-4-6")
-            || normalized.contains("claude-sonnet-4-6")
-            || normalized.contains("claude-mythos")
     }
 }
 
@@ -11844,14 +11831,6 @@ struct AnthropicOutputConfig: Encodable, Equatable {
 
 private extension ThinkingLevel {
     var cloudReasoningEffort: String { rawValue }
-
-    var claudeThinkingBudgetTokens: Int {
-        switch self {
-        case .low: return 1_024
-        case .medium: return 2_048
-        case .high: return 4_096
-        }
-    }
 }
 
 private struct OpenAIRequest: Encodable {
