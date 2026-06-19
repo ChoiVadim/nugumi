@@ -1029,6 +1029,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var pendingAskNugumiCapture: AskNugumiScreenCapture?
     private var isScreenshotTranslationRunning = false
     private var isAskNugumiRunning = false
+    /// True while the ChatGPT (Codex) sign-in flow is on screen. Suspends the
+    /// mouse/Cmd+A selection auto-readers so they don't fire synthetic ⌘+C at
+    /// the sign-in page on every click — which makes macOS beep when there's
+    /// nothing to copy. Set around `CodexLoginAlert.present()`.
+    private var isCodexSignInActive = false
     private var screenshotDragStartLocation: NSPoint?
     private var screenshotDragEndLocation: NSPoint?
     private var screenshotPanelSide: TranslationPanelController.Side?
@@ -2220,6 +2225,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func handleSelectAll() {
         guard selectionDisplayMode != .off else { return }
         guard accessibilityIsTrusted() else { return }
+        guard !isCodexSignInActive else { return }
 
         // Cmd+A inside Nugumi's own panels means "select the prompt input",
         // not "translate everything" — drop those events.
@@ -2309,6 +2315,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     private func handleMouseUp(_ event: NSEvent) {
         guard accessibilityIsTrusted() else {
+            return
+        }
+
+        // The ChatGPT sign-in panel is up. Clicking around its page would
+        // otherwise post a synthetic ⌘+C on every mouse-up (clipboard fallback)
+        // and beep when there's no selection. Skip until sign-in finishes.
+        if isCodexSignInActive {
             return
         }
 
@@ -3744,7 +3757,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func presentCredentialPrompt(for provider: CloudProvider, onSave: @escaping (Bool) -> Void) {
         if provider == .openAICodex {
             Task { @MainActor in
+                self.isCodexSignInActive = true
                 let outcome = await CodexLoginAlert.present()
+                self.isCodexSignInActive = false
                 switch outcome {
                 case .success:
                     self.bootstrap.refresh()
@@ -13155,6 +13170,22 @@ final class CodexLoginAlert: NSObject {
     }
 
     private func run() async -> Outcome {
+        // Step 1: one-time prerequisite. The device-code flow only works once
+        // the user has enabled "device code authorization for Codex" in ChatGPT
+        // settings, so walk them through it (with a screenshot of the toggle)
+        // and gate the code step on a Done click.
+        let proceed = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            var resumed = false
+            let resolve: (Bool) -> Void = { value in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume(returning: value)
+            }
+            presentPrereqPanel(done: { resolve(true) }, cancel: { resolve(false) })
+        }
+        closePanel()
+        guard proceed else { return .cancelled }
+
         let start: CodexOAuthClient.DeviceCodeStart
         do {
             start = try await CodexOAuthClient.shared.startDeviceCode()
@@ -13213,7 +13244,7 @@ final class CodexLoginAlert: NSObject {
     }
 
     private func presentPanel() {
-        let view = CodexLoginPanelView(
+        presentHosting(NSHostingView(rootView: CodexLoginPanelView(
             code: userCode,
             openPage: { [weak self] in
                 guard let self else { return }
@@ -13222,8 +13253,17 @@ final class CodexLoginAlert: NSObject {
             cancel: { [weak self] in
                 self?.finish?(.cancelled)
             }
-        )
-        let hosting = NSHostingView(rootView: view)
+        )))
+    }
+
+    private func presentPrereqPanel(done: @escaping () -> Void, cancel: @escaping () -> Void) {
+        presentHosting(NSHostingView(rootView: CodexEnableDeviceCodeView(done: done, cancel: cancel)))
+    }
+
+    /// Shared chrome for the sign-in panels — a borderless dark HUD that floats
+    /// above the browser without stealing focus. Used for both the prerequisite
+    /// step and the device-code step.
+    private func presentHosting<Content: View>(_ hosting: NSHostingView<Content>) {
         // The titled+fullSizeContentView panel reports the titlebar as a top
         // safe-area inset, which SwiftUI turns into ~28pt of dead air above
         // the content. The panel has no visible titlebar — drop the inset.
@@ -13285,6 +13325,70 @@ final class CodexLoginAlert: NSObject {
     private func closePanel() {
         panel?.orderOut(nil)
         panel = nil
+    }
+}
+
+/// First step of ChatGPT sign-in: the device-code flow only works once the user
+/// has enabled it in ChatGPT settings, so walk them through it — with a
+/// screenshot of the exact toggle — and gate the code step on a Done click.
+private struct CodexEnableDeviceCodeView: View {
+    let done: () -> Void
+    let cancel: () -> Void
+
+    private static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
+
+    private var settingImage: NSImage? {
+        Bundle.module.url(forResource: "codex-device-code-setting", withExtension: "png")
+            .flatMap { NSImage(contentsOf: $0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Enable device-code sign-in in ChatGPT")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("Nugumi signs in with a device code. Turn it on once: open ChatGPT → Settings → Security and login, scroll down, and enable “Enable device code authorization for Codex.”")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.66))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let image = settingImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            }
+
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                Button(action: cancel) {
+                    Text("Cancel")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 12)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+                Button(action: done) {
+                    Text("Done")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.82))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 16)
+                        .background(Capsule().fill(Self.mint))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 2)
+        }
+        .padding(16)
+        .frame(width: 340)
     }
 }
 
