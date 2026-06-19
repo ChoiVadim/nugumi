@@ -13172,8 +13172,9 @@ final class CodexLoginAlert: NSObject {
     private func run() async -> Outcome {
         // Step 1: one-time prerequisite. The device-code flow only works once
         // the user has enabled "device code authorization for Codex" in ChatGPT
-        // settings, so walk them through it (with a screenshot of the toggle)
-        // and gate the code step on a Done click.
+        // settings. Open that page for them and gate the code step on Done.
+        let settingsURL = URL(string: "https://chatgpt.com/#settings/Security")!
+        NSWorkspace.shared.open(settingsURL)
         let proceed = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             var resumed = false
             let resolve: (Bool) -> Void = { value in
@@ -13181,7 +13182,11 @@ final class CodexLoginAlert: NSObject {
                 resumed = true
                 continuation.resume(returning: value)
             }
-            presentPrereqPanel(done: { resolve(true) }, cancel: { resolve(false) })
+            presentPrereqPanel(
+                openSettings: { NSWorkspace.shared.open(settingsURL) },
+                done: { resolve(true) },
+                cancel: { resolve(false) }
+            )
         }
         closePanel()
         guard proceed else { return .cancelled }
@@ -13256,8 +13261,16 @@ final class CodexLoginAlert: NSObject {
         )))
     }
 
-    private func presentPrereqPanel(done: @escaping () -> Void, cancel: @escaping () -> Void) {
-        presentHosting(NSHostingView(rootView: CodexEnableDeviceCodeView(done: done, cancel: cancel)))
+    private func presentPrereqPanel(
+        openSettings: @escaping () -> Void,
+        done: @escaping () -> Void,
+        cancel: @escaping () -> Void
+    ) {
+        presentHosting(NSHostingView(rootView: CodexEnableDeviceCodeView(
+            openSettings: openSettings,
+            done: done,
+            cancel: cancel
+        )))
     }
 
     /// Shared chrome for the sign-in panels — a borderless dark HUD that floats
@@ -13332,6 +13345,7 @@ final class CodexLoginAlert: NSObject {
 /// has enabled it in ChatGPT settings, so walk them through it — with a
 /// screenshot of the exact toggle — and gate the code step on a Done click.
 private struct CodexEnableDeviceCodeView: View {
+    let openSettings: () -> Void
     let done: () -> Void
     let cancel: () -> Void
 
@@ -13343,52 +13357,68 @@ private struct CodexEnableDeviceCodeView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Enable device-code sign-in in ChatGPT")
-                .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(.white)
-            Text("Nugumi signs in with a device code. Turn it on once: open ChatGPT → Settings → Security and login, scroll down, and enable “Enable device code authorization for Codex.”")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Color.white.opacity(0.66))
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("One quick step in ChatGPT")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text("We opened ChatGPT's Security settings. Scroll down, turn on the toggle below, then come back and press Done.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2)
+            }
 
             if let image = settingImage {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(Color.white.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
                     )
             }
 
             HStack(spacing: 10) {
-                Spacer(minLength: 0)
-                Button(action: cancel) {
-                    Text("Cancel")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.85))
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 12)
-                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                Button(action: openSettings) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Open settings")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Self.mint)
                 }
                 .buttonStyle(.plain)
+
+                Spacer(minLength: 12)
+
+                Button(action: cancel) {
+                    Text("Cancel")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.8))
+                        .frame(height: 28)
+                        .padding(.horizontal, 16)
+                        .background(Capsule().fill(Color.white.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
+
                 Button(action: done) {
                     Text("Done")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(Color.black.opacity(0.82))
-                        .padding(.vertical, 5)
-                        .padding(.horizontal, 16)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .frame(height: 28)
+                        .padding(.horizontal, 20)
                         .background(Capsule().fill(Self.mint))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.top, 2)
         }
-        .padding(16)
-        .frame(width: 340)
+        .padding(20)
+        .frame(width: 380)
     }
 }
 
