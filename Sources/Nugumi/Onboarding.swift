@@ -286,7 +286,17 @@ final class OnboardingModel: ObservableObject {
             finishTour(skipped: true)
         case .finale:
             finishTour(skipped: false)
-        case .intro, .permissions:
+        case .permissions:
+            // Permissions are optional: translate/reply work without Screen
+            // Recording, and the clipboard path covers a missing Accessibility
+            // grant. Declining one must not strand the user here — on first run
+            // fall through to the engine choice (the actually-required setup
+            // step) instead of closing onboarding outright.
+            if mode == .firstRun, !Self.mainWindowEverAutoShown {
+                page = .finale
+                return
+            }
+        case .intro:
             break
         }
         requestClose?()
