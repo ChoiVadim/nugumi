@@ -109,7 +109,7 @@ final class AskNugumiTests: XCTestCase {
     }
 
     func testSystemPromptDescribesGeneralAgentWithOptionalScreenshot() {
-        let prompt = AskNugumiPromptBuilder.systemPrompt
+        let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
 
         XCTAssertTrue(prompt.contains("desktop assistant"))
         XCTAssertTrue(prompt.contains("When the user attaches a screenshot"))

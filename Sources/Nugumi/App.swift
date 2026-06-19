@@ -3,6 +3,7 @@ import ApplicationServices
 import Carbon.HIToolbox
 import CoreServices
 import CoreText
+import CryptoKit
 import Darwin
 import Foundation
 import Sparkle
@@ -122,18 +123,21 @@ struct LLMModel: Equatable {
         // `ollama pull gemma4` registers as "gemma4:latest", and the two
         // spellings are unified via canonicalOllamaID.
         .init(id: "gemma4",             shortName: "Gemma 4",      displayName: "Gemma 4 (vision)", backend: .ollama(requiresAccount: false), supportsImages: true),
-        // OpenAI (GPT-5 family, all vision-capable)
-        .init(id: "gpt-5.4-mini", shortName: "GPT-5.4 mini", displayName: "GPT-5.4 mini (fast)",  backend: .cloud(.openAI), supportsImages: true),
-        .init(id: "gpt-5.4",      shortName: "GPT-5.4",      displayName: "GPT-5.4 (affordable)", backend: .cloud(.openAI), supportsImages: true),
-        .init(id: "gpt-5.5",      shortName: "GPT-5.5",      displayName: "GPT-5.5 (flagship)",   backend: .cloud(.openAI), supportsImages: true),
-        // Anthropic
-        .init(id: "claude-haiku-4-5-20251001", shortName: "Claude Haiku 4.5",  displayName: "Claude Haiku 4.5 (fast)",  backend: .cloud(.anthropic), supportsImages: true),
-        .init(id: "claude-sonnet-4-6",         shortName: "Claude Sonnet 4.6", displayName: "Claude Sonnet 4.6",        backend: .cloud(.anthropic), supportsImages: true),
-        .init(id: "claude-opus-4-7",           shortName: "Claude Opus 4.7",   displayName: "Claude Opus 4.7 (top)",    backend: .cloud(.anthropic), supportsImages: true),
-        // Gemini
-        .init(id: "gemini-2.5-flash-lite", shortName: "Gemini 2.5 Flash Lite", displayName: "Gemini 2.5 Flash Lite (fastest)", backend: .cloud(.gemini), supportsImages: true),
-        .init(id: "gemini-2.5-flash",      shortName: "Gemini 2.5 Flash",      displayName: "Gemini 2.5 Flash",                backend: .cloud(.gemini), supportsImages: true),
-        .init(id: "gemini-2.5-pro",        shortName: "Gemini 2.5 Pro",        displayName: "Gemini 2.5 Pro (top)",            backend: .cloud(.gemini), supportsImages: true),
+        // Cloud API-key providers (OpenAI, Anthropic, Gemini, OpenRouter) carry
+        // NO hardcoded models — their catalogs come entirely from each provider's
+        // /models call (see cloudModels(for:) / CloudModelCache). Until a key is
+        // added and discovery runs, these picker sections are simply empty.
+        // Subscription engines with no /models endpoint keep curated entries:
+        // Claude Code below, and ChatGPT via CodexModelCache.fallbackSlugs.
+        // Claude Code (Pro/Max subscription via OAuth — native /v1/messages).
+        // Curated only: the OAuth scope is inference-only, so /models isn't
+        // fetched for this provider (excluded from discovery).
+        // Distinct ids (mirrors the codex/ prefix) so these never collide with
+        // the .anthropic API-key Claude entries above — same model, different
+        // backend. apiModelID keeps the real name sent to /v1/messages.
+        .init(id: "claude-code/claude-haiku-4-5-20251001", apiModelID: "claude-haiku-4-5-20251001", shortName: "Claude Haiku 4.5",  displayName: "Claude Haiku 4.5 (fast)", backend: .cloud(.anthropicClaudeCode), supportsImages: true),
+        .init(id: "claude-code/claude-sonnet-4-6",         apiModelID: "claude-sonnet-4-6",         shortName: "Claude Sonnet 4.6", displayName: "Claude Sonnet 4.6",       backend: .cloud(.anthropicClaudeCode), supportsImages: true),
+        .init(id: "claude-code/claude-opus-4-8",           apiModelID: "claude-opus-4-8",           shortName: "Claude Opus 4.8",   displayName: "Claude Opus 4.8 (top)",   backend: .cloud(.anthropicClaudeCode), supportsImages: true),
     ]
 
     /// Curated Ollama defaults (gpt-oss cloud + local). Always shown, even
@@ -211,6 +215,28 @@ struct LLMModel: Equatable {
         return out
     }
 
+    static var localOllamaModels: [LLMModel] {
+        ollamaModels.filter { !$0.isCloud }
+    }
+
+    static var ollamaCloudModels: [LLMModel] {
+        ollamaModels.filter(\.isCloud)
+    }
+
+    /// Ollama cloud models served on the free tier (with usage limits), keyed by
+    /// `shortName` so it matches both the curated entry and a discovered
+    /// `-cloud`/`:cloud` tag (the suffix is stripped from shortName). Every other
+    /// Ollama cloud model needs a paid Ollama plan.
+    /// ponytail: hardcoded allowlist of one; widen if Ollama frees more models.
+    static let freeOllamaCloudShortNames: Set<String> = ["gpt-oss:120b"]
+
+    /// True for an Ollama cloud model that needs a *paid* Ollama plan — a free
+    /// account isn't enough. Local models and free-tier cloud models are false.
+    var requiresPaidOllamaPlan: Bool {
+        guard isOllama, isCloud else { return false }
+        return !LLMModel.freeOllamaCloudShortNames.contains(shortName)
+    }
+
     /// Ollama treats a bare tag and ":latest" as the same model — "gemma4"
     /// pulls and lists as "gemma4:latest". Compare ids in this canonical form
     /// so curated entries match what `/api/tags` reports.
@@ -282,7 +308,7 @@ struct LLMModel: Equatable {
         // was lost (e.g. defaults never flushed), a stored discovered id
         // silently falls back to defaultModel below — unlike curated ids,
         // which always resolve. Accepted best-effort trade-off.
-        for provider in [CloudProvider.openAI, .anthropic, .gemini] {
+        for provider in [CloudProvider.openAI, .anthropic, .gemini, .openRouter] {
             if let cloud = cloudModels(for: provider).first(where: { $0.id == id }) {
                 return cloud
             }
@@ -318,9 +344,9 @@ enum ModelUseScope: String, CaseIterable {
             }
             return LLMModel.defaultModel.id
         case .askNugumi:
-            if let flagship = LLMModel.all.first(where: { $0.id == "gpt-5.5" && $0.supportsImages }) {
-                return flagship.id
-            }
+            // No hardcoded cloud flagship anymore — the first vision-capable
+            // model in `all` (Gemma 4 locally, or a curated Claude Code model)
+            // is the safe default until the user picks one.
             return LLMModel.all.first(where: \.supportsImages)?.id ?? LLMModel.defaultModel.id
         }
     }
@@ -357,12 +383,8 @@ enum EngineModelPreset {
         switch self {
         case .ollama:
             return scope == .textActions ? "gpt-oss:20b" : "gemma4"
-        case .cloud(.openAI):
-            return scope == .textActions ? "gpt-5.4-mini" : "gpt-5.5"
-        case .cloud(.anthropic):
-            return scope == .textActions ? "claude-sonnet-4-6" : "claude-opus-4-7"
-        case .cloud(.gemini):
-            return scope == .textActions ? "gemini-2.5-flash" : "gemini-2.5-pro"
+        case .cloud(.anthropicClaudeCode):
+            return scope == .textActions ? "claude-code/claude-sonnet-4-6" : "claude-code/claude-opus-4-8"
         case .cloud(.openAICodex):
             // Codex slugs are discovered per account — resolve against the
             // live catalog instead of hardcoding ids.
@@ -375,6 +397,16 @@ enum EngineModelPreset {
                 slug = slugs.first { !$0.contains("mini") && !$0.contains("codex") } ?? slugs.first
             }
             return slug.map { "codex/\($0)" }
+        case .cloud(let provider):
+            // Discovery-only providers (OpenAI, Anthropic API key, Gemini,
+            // OpenRouter): no hardcoded default — point at the first model the
+            // API actually returned. nil until discovery lands, so applyEngine-
+            // Preset leaves the slot put instead of jumping to a missing model.
+            let models = LLMModel.cloudModels(for: provider)
+            switch scope {
+            case .textActions: return models.first?.id
+            case .askNugumi:   return (models.first(where: \.supportsImages) ?? models.first)?.id
+            }
         }
     }
 }
@@ -1002,7 +1034,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             switch provider {
             case .openAICodex:
                 return OpenAICodexClient(apiModelID: model.apiModelID)
-            case .openAI, .anthropic, .gemini:
+            case .anthropicClaudeCode:
+                return ClaudeCodeClient(model: model.apiModelID)
+            case .openAI, .anthropic, .gemini, .openRouter:
                 let key = KeychainStore.apiKey(for: provider) ?? ""
                 return OpenAIChatClient(provider: provider, apiKey: key, model: model.apiModelID)
             }
@@ -1029,11 +1063,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var pendingAskNugumiCapture: AskNugumiScreenCapture?
     private var isScreenshotTranslationRunning = false
     private var isAskNugumiRunning = false
-    /// True while the ChatGPT (Codex) sign-in flow is on screen. Suspends the
-    /// mouse/Cmd+A selection auto-readers so they don't fire synthetic ⌘+C at
-    /// the sign-in page on every click — which makes macOS beep when there's
-    /// nothing to copy. Set around `CodexLoginAlert.present()`.
-    private var isCodexSignInActive = false
+    /// True while a cloud sign-in flow (ChatGPT or Claude) is on screen.
+    /// Suspends the mouse/Cmd+A selection auto-readers so they don't fire
+    /// synthetic ⌘+C at the sign-in page on every click — which makes macOS beep
+    /// when there's nothing to copy. Set around the login alerts' `present()`.
+    private var isCloudSignInActive = false
     private var screenshotDragStartLocation: NSPoint?
     private var screenshotDragEndLocation: NSPoint?
     private var screenshotPanelSide: TranslationPanelController.Side?
@@ -2020,12 +2054,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // e.g. a slot stuck on a broken factory default heals the moment
         // gpt-oss:20b / Gemma finishes installing (or is discovered already
         // installed on first refresh).
-        let anyBecameReady = state.modelReady.contains { id, status in
-            status.isTerminalOK && !(lastObservedModelReadyState[id]?.isTerminalOK ?? false)
-        }
-        for (id, status) in state.modelReady {
-            lastObservedModelReadyState[id] = status
-        }
+        let anyBecameReady = ModelReadyTransition.anyBecameReady(
+            previous: lastObservedModelReadyState, current: state.modelReady)
+        lastObservedModelReadyState = ModelReadyTransition.merge(
+            into: lastObservedModelReadyState, current: state.modelReady)
         // A pull the user started from the AI Engine setup card just finished —
         // promote it to the everyday-text default, once. Runs before the
         // preset so an explicit pull wins the text slot.
@@ -2225,7 +2257,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func handleSelectAll() {
         guard selectionDisplayMode != .off else { return }
         guard accessibilityIsTrusted() else { return }
-        guard !isCodexSignInActive else { return }
+        guard !isCloudSignInActive else { return }
 
         // Cmd+A inside Nugumi's own panels means "select the prompt input",
         // not "translate everything" — drop those events.
@@ -2318,10 +2350,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        // The ChatGPT sign-in panel is up. Clicking around its page would
-        // otherwise post a synthetic ⌘+C on every mouse-up (clipboard fallback)
-        // and beep when there's no selection. Skip until sign-in finishes.
-        if isCodexSignInActive {
+        // A cloud sign-in panel (ChatGPT/Claude) is up. Clicking around its page
+        // would otherwise post a synthetic ⌘+C on every mouse-up (clipboard
+        // fallback) and beep when there's no selection. Skip until sign-in ends.
+        if isCloudSignInActive {
             return
         }
 
@@ -2924,15 +2956,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return true
         case .invalidAPIKey(let provider):
             controller?.close()
-            if provider == .openAICodex {
-                KeychainStore.setCodexCredentials(nil)
-            } else {
-                KeychainStore.setAPIKey(nil, for: provider)
+            switch provider {
+            case .openAICodex: KeychainStore.setCodexCredentials(nil)
+            case .anthropicClaudeCode: KeychainStore.setClaudeCodeCredentials(nil)
+            default: KeychainStore.setAPIKey(nil, for: provider)
             }
             bootstrap.refresh()
             presentCredentialPrompt(for: provider) { _ in }
             return true
-        case .ollama, .emptyResponse, .modelDownloading, .rateLimited, .cloudError:
+        case .ollama, .emptyResponse, .modelDownloading, .rateLimited, .outOfCredits, .cloudError:
             return false
         }
     }
@@ -2948,6 +2980,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             case .signInRequired: return "sign_in_required"
             case .invalidAPIKey: return "invalid_api_key"
             case .rateLimited: return "rate_limited"
+            case .outOfCredits: return "out_of_credits"
             case .cloudError: return "cloud_error"
             }
         }
@@ -2976,6 +3009,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return "\(provider.displayName) rejected the API key."
         case .rateLimited(let provider):
             return "\(provider.displayName) rate limit reached. Try again in a minute."
+        case .outOfCredits(let provider):
+            return "\(provider.displayName) is out of credits. Add funds, or switch to a free model."
         case .cloudError(let provider, let detail):
             return "\(provider.displayName): \(detail)"
         }
@@ -3755,11 +3790,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func presentCredentialPrompt(for provider: CloudProvider, onSave: @escaping (Bool) -> Void) {
-        if provider == .openAICodex {
+        switch provider {
+        case .openAICodex:
             Task { @MainActor in
-                self.isCodexSignInActive = true
+                self.isCloudSignInActive = true
                 let outcome = await CodexLoginAlert.present()
-                self.isCodexSignInActive = false
+                self.isCloudSignInActive = false
                 switch outcome {
                 case .success:
                     self.bootstrap.refresh()
@@ -3772,7 +3808,24 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     onSave(false)
                 }
             }
-        } else {
+        case .anthropicClaudeCode:
+            Task { @MainActor in
+                self.isCloudSignInActive = true
+                let outcome = await ClaudeCodeLoginAlert.present()
+                self.isCloudSignInActive = false
+                switch outcome {
+                case .success:
+                    self.bootstrap.refresh()
+                    self.applyEnginePreset(.cloud(.anthropicClaudeCode))
+                    onSave(true)
+                case .cancelled:
+                    onSave(false)
+                case .failed(let message):
+                    self.presentSelectionTranslationError(message, title: "Claude sign-in failed")
+                    onSave(false)
+                }
+            }
+        default:
             presentAPIKeySheet(for: provider, onSave: onSave)
         }
     }
@@ -3794,10 +3847,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         ).showModal()
         guard response == .alertFirstButtonReturn else { return }
 
-        if provider == .openAICodex {
-            KeychainStore.setCodexCredentials(nil)
-        } else {
-            KeychainStore.setAPIKey(nil, for: provider)
+        switch provider {
+        case .openAICodex: KeychainStore.setCodexCredentials(nil)
+        case .anthropicClaudeCode: KeychainStore.setClaudeCodeCredentials(nil)
+        default: KeychainStore.setAPIKey(nil, for: provider)
         }
         bootstrap.refresh()
         healModelSlots()
@@ -3811,7 +3864,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @MainActor
     private func healModelSlots() {
         let engines: [EngineModelPreset] = [
-            .cloud(.openAICodex), .ollama, .cloud(.openAI), .cloud(.anthropic), .cloud(.gemini)
+            .cloud(.openAICodex), .cloud(.anthropicClaudeCode), .ollama,
+            .cloud(.openAI), .cloud(.anthropic), .cloud(.gemini)
         ]
         for engine in engines {
             applyEnginePreset(engine)
@@ -3832,11 +3886,27 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             }
             model = m
             client = OpenAICodexClient(apiModelID: m.apiModelID)
-        case .openAI, .anthropic, .gemini:
+        case .anthropicClaudeCode:
+            guard let m = LLMModel.cloudModels(for: provider).first else {
+                return .failure("No model registered for \(provider.displayName).")
+            }
+            guard provider.hasCredentials else {
+                return .failure("Not signed in to Claude.")
+            }
+            model = m
+            client = ClaudeCodeClient(model: m.apiModelID)
+        case .openAI, .anthropic, .gemini, .openRouter:
             // Merged list, not the static curated one: if the provider has
             // retired the first curated model, the picker hides it — the
             // connectivity test must not keep hitting that dead id.
-            guard let m = LLMModel.cloudModels(for: provider).first else {
+            let models = LLMModel.cloudModels(for: provider)
+            // OpenRouter: prefer a `:free` model so the test verifies the key on
+            // a credit-less account — paid models 402 ("Payment Required") with
+            // no balance, which looks like a broken key but isn't.
+            let chosen = provider == .openRouter
+                ? (models.first(where: { $0.id.hasSuffix(":free") }) ?? models.first)
+                : models.first
+            guard let m = chosen else {
                 return .failure("No model registered for \(provider.displayName).")
             }
             guard let apiKey = KeychainStore.apiKey(for: provider), !apiKey.isEmpty else {
@@ -3858,6 +3928,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             )
             let preview = String(translated.prefix(160))
             return .success(preview: "Model: \(model.shortName)\n\n\(preview)")
+        } catch let error as TranslationError where error.provesCredentialsValid {
+            // 402 / 429 mean the key authenticated — the provider is connected,
+            // the request just can't run right now. Report "key valid", not a
+            // broken-key ✕.
+            let reason: String
+            switch error {
+            case .outOfCredits:
+                reason = "you're out of credits. Add funds to run paid models (free models are rate-limited)."
+            case .rateLimited:
+                reason = "the model is rate-limited right now. Wait a minute, or add credits for a paid model."
+            default:
+                reason = "the request couldn't run, but the key authenticated."
+            }
+            return .info("Key is valid — \(reason)")
         } catch let error as TranslationError {
             return .failure(error.errorDescription ?? "Unknown error.")
         } catch {
@@ -3920,50 +4004,30 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func presentAPIKeySheet(for provider: CloudProvider, errorMessage: String? = nil, onSave: @escaping (Bool) -> Void) {
-        NSApp.activate(ignoringOtherApps: true)
-        let baseMessage = "Your key is stored locally on this Mac. Nugumi sends your selected text to \(provider.displayName) for translation."
-        let fullMessage = errorMessage.map { "⚠️ \($0)\n\n\(baseMessage)" } ?? baseMessage
-        let controller = NugumiInputAlertController(
-            title: "Enter your \(provider.displayName) API key",
-            message: fullMessage,
-            placeholder: "sk-...",
-            initialValue: KeychainStore.apiKey(for: provider),
-            primaryButtonTitle: "Save",
-            secondaryButtonTitle: "Get a key…",
-            tertiaryButtonTitle: "Cancel"
-        )
-        let result = controller.showModal()
-        switch result.response {
-        case .alertFirstButtonReturn:
-            guard !result.text.isEmpty else {
+    private func presentAPIKeySheet(for provider: CloudProvider, onSave: @escaping (Bool) -> Void) {
+        Task { @MainActor in
+            // Suppress the selection auto-readers while the panel is up and the
+            // user is on the provider's site copying their key (same beep fix as
+            // the sign-in flows).
+            self.isCloudSignInActive = true
+            let outcome = await CloudAPIKeyAlert.present(provider: provider)
+            self.isCloudSignInActive = false
+            switch outcome {
+            case .saved:
+                self.bootstrap.refresh()
+                self.applyEnginePreset(.cloud(provider))
+                onSave(true)
+            case .savedUnverified(let detail):
+                self.bootstrap.refresh()
+                self.applyEnginePreset(.cloud(provider))
+                self.presentSelectionTranslationError(
+                    "Couldn't reach \(provider.displayName) to verify the key (\(detail)). Saved it locally.",
+                    title: "Key saved without verification"
+                )
+                onSave(true)
+            case .cancelled:
                 onSave(false)
-                return
             }
-            Task { @MainActor in
-                let outcome = await APIKeyValidator.validate(result.text, for: provider)
-                switch outcome {
-                case .valid:
-                    KeychainStore.setAPIKey(result.text, for: provider)
-                    self.bootstrap.refresh()
-                    self.applyEnginePreset(.cloud(provider))
-                    onSave(true)
-                case .invalid(let reason):
-                    self.presentAPIKeySheet(for: provider, errorMessage: reason, onSave: onSave)
-                case .networkUnreachable(let detail):
-                    // Network problem — save anyway so user isn't stuck offline.
-                    KeychainStore.setAPIKey(result.text, for: provider)
-                    self.bootstrap.refresh()
-                    self.applyEnginePreset(.cloud(provider))
-                    self.presentSelectionTranslationError("Couldn't reach \(provider.displayName) to verify the key (\(detail)). Saved it locally.", title: "Key saved without verification")
-                    onSave(true)
-                }
-            }
-        case .alertSecondButtonReturn:
-            NSWorkspace.shared.open(provider.apiKeyHelpURL)
-            onSave(false)
-        default:
-            onSave(false)
         }
     }
 
@@ -11099,13 +11163,18 @@ enum CloudProvider: String, Codable, CaseIterable {
     case openAICodex
     case anthropic
     case gemini
+    case openRouter
+    /// Anthropic Claude subscription (Pro/Max) via Claude Code OAuth. Uses a
+    /// Bearer OAuth token against the *native* /v1/messages API, not the
+    /// OpenAI-compat endpoint `.anthropic` uses. See `ClaudeCodeClient`.
+    case anthropicClaudeCode
 
-    /// `.openAICodex` uses OAuth (ChatGPT subscription) instead of an API key
+    /// OAuth (subscription) providers use a sign-in flow instead of an API key
     /// — branches that present the API-key sheet must consult this flag.
     var usesOAuth: Bool {
         switch self {
-        case .openAICodex: true
-        case .openAI, .anthropic, .gemini: false
+        case .openAICodex, .anthropicClaudeCode: true
+        case .openAI, .anthropic, .gemini, .openRouter: false
         }
     }
 
@@ -11115,6 +11184,8 @@ enum CloudProvider: String, Codable, CaseIterable {
         case .openAICodex: URL(string: "https://chatgpt.com/backend-api/codex/responses")!
         case .anthropic:   URL(string: "https://api.anthropic.com/v1/chat/completions")!
         case .gemini:      URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")!
+        case .openRouter:  URL(string: "https://openrouter.ai/api/v1/chat/completions")!
+        case .anthropicClaudeCode: URL(string: "https://api.anthropic.com/v1/messages")!
         }
     }
 
@@ -11130,6 +11201,8 @@ enum CloudProvider: String, Codable, CaseIterable {
         case .openAICodex: "ChatGPT"
         case .anthropic:   "Anthropic"
         case .gemini:      "Google"
+        case .openRouter:  "OpenRouter"
+        case .anthropicClaudeCode: "Claude Code"
         }
     }
 
@@ -11139,6 +11212,8 @@ enum CloudProvider: String, Codable, CaseIterable {
         case .openAICodex: URL(string: "https://chatgpt.com/")!
         case .anthropic:   URL(string: "https://console.anthropic.com/settings/keys")!
         case .gemini:      URL(string: "https://aistudio.google.com/app/apikey")!
+        case .openRouter:  URL(string: "https://openrouter.ai/keys")!
+        case .anthropicClaudeCode: URL(string: "https://claude.ai")!
         }
     }
 
@@ -11148,6 +11223,8 @@ enum CloudProvider: String, Codable, CaseIterable {
         case .openAICodex: URL(string: "https://chatgpt.com/backend-api/codex/models?client_version=1.0.0")!
         case .anthropic:   URL(string: "https://api.anthropic.com/v1/models")!
         case .gemini:      URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/models")!
+        case .openRouter:  URL(string: "https://openrouter.ai/api/v1/models")!
+        case .anthropicClaudeCode: URL(string: "https://api.anthropic.com/v1/models")!
         }
     }
 }
@@ -11163,7 +11240,7 @@ enum APIKeyValidator {
         var request = URLRequest(url: provider.modelsURL)
         request.httpMethod = "GET"
         switch provider {
-        case .openAI, .gemini, .openAICodex:
+        case .openAI, .gemini, .openAICodex, .openRouter, .anthropicClaudeCode:
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         case .anthropic:
             // Native Anthropic /v1/models requires x-api-key + anthropic-version,
@@ -11192,7 +11269,9 @@ enum APIKeyValidator {
             case 429:
                 return .invalid(reason: "\(provider.displayName) rate-limited the check. Try later.")
             default:
-                return .invalid(reason: "\(provider.displayName) returned HTTP \(http.statusCode).")
+                let reason = CloudHTTPError.extractMessage(from: data)
+                    ?? CloudHTTPError.friendlyMessage(status: http.statusCode)
+                return .invalid(reason: "\(provider.displayName): \(reason)")
             }
         } catch let urlError as URLError where urlError.code == .notConnectedToInternet
             || urlError.code == .cannotConnectToHost
@@ -11592,8 +11671,14 @@ struct OpenAIChatClient: LLMBackend {
             throw TranslationError.invalidAPIKey(provider)
         case 429:
             throw TranslationError.rateLimited(provider)
+        case 402:
+            throw TranslationError.outOfCredits(provider)
         default:
-            throw TranslationError.cloudError(provider, "HTTP \(httpResponse.statusCode)")
+            let body = await CloudHTTPError.readBody(bytes)
+            throw TranslationError.cloudError(
+                provider,
+                CloudHTTPError.detail(status: httpResponse.statusCode, body: body)
+            )
         }
 
         var answer = ""
@@ -11708,8 +11793,14 @@ struct OpenAIChatClient: LLMBackend {
             throw TranslationError.invalidAPIKey(provider)
         case 429:
             throw TranslationError.rateLimited(provider)
+        case 402:
+            throw TranslationError.outOfCredits(provider)
         default:
-            throw TranslationError.cloudError(provider, "HTTP \(httpResponse.statusCode)")
+            let body = await CloudHTTPError.readBody(bytes)
+            throw TranslationError.cloudError(
+                provider,
+                CloudHTTPError.detail(status: httpResponse.statusCode, body: body)
+            )
         }
 
         var translated = ""
@@ -11804,7 +11895,10 @@ struct CloudThinkingOptions: Encodable, Equatable {
         // so every compat provider routes through it. Do NOT send native
         // `thinking`/`output_config` here.
         switch provider {
-        case .openAI, .gemini, .openAICodex, .anthropic:
+        case .openAI, .gemini, .openAICodex, .anthropic, .openRouter, .anthropicClaudeCode:
+            // .anthropicClaudeCode never constructs this type (it builds a
+            // native Messages body via ClaudeCodeClient); the case exists only
+            // for exhaustiveness.
             reasoningEffort = thinkingLevel.cloudReasoningEffort
             thinking = nil
             outputConfig = nil
@@ -11956,6 +12050,59 @@ struct StreamError: Decodable {
     let error: String?
 }
 
+/// Turns a non-2xx cloud HTTP response into a human sentence instead of a bare
+/// "HTTP 402". Prefers the provider's own error message from the JSON body
+/// (OpenAI-compat `{"error":{"message":...}}`), falling back to a friendly
+/// status-code map. Shared by every cloud client so the Test result and the
+/// Ask Nugumi error pill read the same way.
+enum CloudHTTPError {
+    /// The provider's own error message from a JSON error body, if present.
+    static func extractMessage(from data: Data?) -> String? {
+        guard let data, !data.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        if let err = obj["error"] as? [String: Any],
+           let m = err["message"] as? String, !m.isEmpty { return m }
+        if let s = obj["error"] as? String, !s.isEmpty { return s }
+        if let m = obj["message"] as? String, !m.isEmpty { return m }
+        return nil
+    }
+
+    /// Friendly fallback for a status the caller didn't map to a more specific
+    /// TranslationError (401/403 → invalidAPIKey, 429 → rateLimited are handled
+    /// before this). Phrased to read after "Provider: " — cloudError prepends
+    /// the provider name.
+    static func friendlyMessage(status: Int) -> String {
+        switch status {
+        case 400: return "Couldn't process that request. Try shorter text or another model."
+        case 402: return "You're out of credits. Add funds to use paid models — free models still work."
+        case 404: return "That model isn't available right now. Pick another in settings."
+        case 408: return "The request timed out. Try again."
+        case 413: return "The text or image is too large for this model."
+        case 500, 502, 503, 504, 529: return "Their server had a problem. Try again in a moment."
+        default: return "Unexpected error (HTTP \(status))."
+        }
+    }
+
+    /// Best available detail: the provider's own message, else the friendly map.
+    static func detail(status: Int, body: Data?) -> String {
+        extractMessage(from: body) ?? friendlyMessage(status: status)
+    }
+
+    /// Drain a (small) error-response byte stream into Data for `detail`. Capped
+    /// so a misbehaving endpoint can't stream forever into an error message.
+    static func readBody(_ bytes: URLSession.AsyncBytes, cap: Int = 16 * 1024) async -> Data? {
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= cap { break }
+            }
+        } catch { return data.isEmpty ? nil : data }
+        return data.isEmpty ? nil : data
+    }
+}
+
 enum TranslationError: LocalizedError {
     case ollama(String)
     case emptyResponse
@@ -11965,7 +12112,19 @@ enum TranslationError: LocalizedError {
     case modelDownloading(String)
     case invalidAPIKey(CloudProvider)
     case rateLimited(CloudProvider)
+    case outOfCredits(CloudProvider)
     case cloudError(CloudProvider, String)
+
+    /// True for failures that prove the key authenticated (the provider is
+    /// reachable and the credentials are valid) but the request couldn't run —
+    /// out of credits or rate-limited. The connectivity test treats these as
+    /// "connected", not a broken key.
+    var provesCredentialsValid: Bool {
+        switch self {
+        case .rateLimited, .outOfCredits: return true
+        default: return false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -11985,6 +12144,8 @@ enum TranslationError: LocalizedError {
             "\(provider.displayName) rejected the API key. Open settings to update it."
         case .rateLimited(let provider):
             "\(provider.displayName) rate limit reached. Try again in a minute, or switch model."
+        case .outOfCredits(let provider):
+            "\(provider.displayName) is out of credits. Add funds to use paid models — free models still work."
         case .cloudError(let provider, let detail):
             "\(provider.displayName): \(detail)"
         }
@@ -12097,7 +12258,9 @@ extension CloudProvider {
         switch self {
         case .openAICodex:
             return KeychainStore.codexCredentials() != nil
-        case .openAI, .anthropic, .gemini:
+        case .anthropicClaudeCode:
+            return KeychainStore.claudeCodeCredentials() != nil
+        case .openAI, .anthropic, .gemini, .openRouter:
             let key = KeychainStore.apiKey(for: self)
             return !(key?.isEmpty ?? true)
         }
@@ -12108,7 +12271,11 @@ extension CloudProvider {
     /// option for users who already have a ChatGPT account — followed by
     /// the API-key providers in their declaration order.
     static var cloudOnboardingCases: [CloudProvider] {
-        [.openAICodex] + allCases.filter { !$0.usesOAuth }
+        // OAuth/subscription providers first (most-friction-free for users who
+        // already have an account), then the API-key providers in declaration
+        // order. usesOAuth providers must be listed explicitly since the filter
+        // below excludes them.
+        [.openAICodex, .anthropicClaudeCode] + allCases.filter { !$0.usesOAuth }
     }
 
     /// Default model ID to assign to the everyday-text scope when the user
@@ -12120,6 +12287,8 @@ extension CloudProvider {
         case .openAI:      "gpt-5.4-mini"
         case .anthropic:   "claude-haiku-4-5-20251001"
         case .gemini:      "gemini-2.5-flash-lite"
+        case .openRouter:  "openai/gpt-5.4-mini"
+        case .anthropicClaudeCode: "claude-code/claude-haiku-4-5-20251001"
         }
     }
 
@@ -12132,6 +12301,8 @@ extension CloudProvider {
         case .openAI:      "gpt-5.5"
         case .anthropic:   "claude-sonnet-4-6"
         case .gemini:      "gemini-2.5-pro"
+        case .openRouter:  "google/gemini-2.5-pro"
+        case .anthropicClaudeCode: "claude-code/claude-sonnet-4-6"
         }
     }
 }
@@ -12474,6 +12645,471 @@ enum CodexCredentialBroker {
     }
 }
 
+// MARK: - Claude Code (Anthropic subscription) OAuth
+//
+// Lets a user drive Nugumi with their Claude Pro/Max subscription instead of a
+// pay-as-you-go Anthropic API key. Uses the Claude Code OAuth client + PKCE
+// flow and the *native* /v1/messages API (the OpenAI-compat endpoint used by
+// the `.anthropic` API-key provider does not accept OAuth Bearer tokens).
+//
+// NOTE: Anthropic restricts subscription OAuth to its own first-party clients;
+// using it here means presenting as Claude Code (the claude-code beta header +
+// claude-cli user-agent). The maintainer accepted this trade-off deliberately.
+
+/// Sign-in result, mirroring CodexLoginAlert.Outcome's shape.
+enum ClaudeCodeSignInOutcome {
+    case success
+    case cancelled
+    case failed(String)
+}
+
+struct ClaudeCodeCredentials: Codable, Equatable {
+    let accessToken: String
+    let refreshToken: String
+    let expiresAt: Date
+
+    func isExpiring(within seconds: TimeInterval) -> Bool {
+        expiresAt.timeIntervalSinceNow < seconds
+    }
+}
+
+extension KeychainStore {
+    private static var claudeCodeCache: ClaudeCodeCredentials?
+    private static var claudeCodeCacheLoaded = false
+    private static let claudeCodeFileName = "anthropic.claudecode.tokens.json"
+
+    private static var claudeCodeFileURL: URL {
+        storageDirectory.appending(path: claudeCodeFileName, directoryHint: .notDirectory)
+    }
+
+    static func claudeCodeCredentials() -> ClaudeCodeCredentials? {
+        if claudeCodeCacheLoaded { return claudeCodeCache }
+        claudeCodeCacheLoaded = true
+        guard let data = try? Data(contentsOf: claudeCodeFileURL) else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        claudeCodeCache = try? decoder.decode(ClaudeCodeCredentials.self, from: data)
+        return claudeCodeCache
+    }
+
+    static func setClaudeCodeCredentials(_ creds: ClaudeCodeCredentials?) {
+        guard let creds else {
+            try? FileManager.default.removeItem(at: claudeCodeFileURL)
+            claudeCodeCache = nil
+            claudeCodeCacheLoaded = true
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        if let data = try? encoder.encode(creds) {
+            try? data.write(to: claudeCodeFileURL, options: [.atomic])
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: claudeCodeFileURL.path
+            )
+        }
+        claudeCodeCache = creds
+        claudeCodeCacheLoaded = true
+    }
+}
+
+/// PKCE-based OAuth against the Claude Code client. The authorize-URL +
+/// manual-paste-code variant (no local callback server): the user approves in
+/// the browser, Anthropic shows a `code#state` string, they paste it back.
+actor ClaudeCodeOAuthClient {
+    static let shared = ClaudeCodeOAuthClient()
+
+    fileprivate static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    fileprivate static let authorizeEndpoint = "https://claude.ai/oauth/authorize"
+    fileprivate static let tokenEndpoint = "https://console.anthropic.com/v1/oauth/token"
+    fileprivate static let redirectURI = "https://console.anthropic.com/oauth/code/callback"
+    fileprivate static let scope = "org:create_api_key user:profile user:inference"
+
+    private let session: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 30
+        return URLSession(configuration: cfg)
+    }()
+
+    struct PKCE {
+        let verifier: String
+        let challenge: String
+        let state: String
+    }
+
+    enum AuthError: LocalizedError {
+        case network(String)
+        case server(Int, String)
+        case malformedResponse(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .network(let d): "Network error: \(d)"
+            case .server(let code, let d): "Sign-in failed (HTTP \(code)): \(d.prefix(200))"
+            case .malformedResponse(let d): "Unexpected response: \(d)"
+            }
+        }
+    }
+
+    /// Pure/sync — the UI builds the authorize URL on the main actor before any
+    /// network work. Static members of an actor are not actor-isolated.
+    static func makePKCE() -> PKCE {
+        let verifier = randomURLSafe(byteCount: 64)
+        let challenge = base64URLEncode(Data(SHA256.hash(data: Data(verifier.utf8))))
+        let state = randomURLSafe(byteCount: 32)
+        return PKCE(verifier: verifier, challenge: challenge, state: state)
+    }
+
+    static func authorizeURL(pkce: PKCE) -> URL {
+        var comps = URLComponents(string: authorizeEndpoint)!
+        comps.queryItems = [
+            .init(name: "code", value: "true"),
+            .init(name: "client_id", value: clientID),
+            .init(name: "response_type", value: "code"),
+            .init(name: "redirect_uri", value: redirectURI),
+            .init(name: "scope", value: scope),
+            .init(name: "code_challenge", value: pkce.challenge),
+            .init(name: "code_challenge_method", value: "S256"),
+            .init(name: "state", value: pkce.state)
+        ]
+        return comps.url!
+    }
+
+    /// Anthropic shows the user a `code#state` string. Tolerate a bare code too.
+    func exchange(pastedCode: String, pkce: PKCE) async throws -> ClaudeCodeCredentials {
+        let pieces = pastedCode.split(separator: "#", maxSplits: 1).map(String.init)
+        let code = pieces[0]
+        let state = pieces.count > 1 ? pieces[1] : pkce.state
+        return try await postToken(form: [
+            "grant_type": "authorization_code",
+            "code": code,
+            "state": state,
+            "redirect_uri": Self.redirectURI,
+            "client_id": Self.clientID,
+            "code_verifier": pkce.verifier
+        ])
+    }
+
+    func refresh(_ refreshToken: String) async throws -> ClaudeCodeCredentials {
+        try await postToken(form: [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": Self.clientID
+        ])
+    }
+
+    private func postToken(form: [String: String]) async throws -> ClaudeCodeCredentials {
+        var req = URLRequest(url: URL(string: Self.tokenEndpoint)!)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: form)
+
+        let data: Data, resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch let err as URLError {
+            throw AuthError.network(err.localizedDescription)
+        }
+        guard let http = resp as? HTTPURLResponse else {
+            throw AuthError.malformedResponse("not an HTTP response")
+        }
+        guard http.statusCode == 200 else {
+            throw AuthError.server(http.statusCode, String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = json["access_token"] as? String
+        else { throw AuthError.malformedResponse("missing access_token") }
+
+        let refresh = (json["refresh_token"] as? String) ?? form["refresh_token"] ?? ""
+        let expiresIn: TimeInterval = {
+            if let v = json["expires_in"] as? Double { return v }
+            if let v = json["expires_in"] as? Int { return Double(v) }
+            return 3600
+        }()
+        return ClaudeCodeCredentials(
+            accessToken: access,
+            refreshToken: refresh,
+            expiresAt: Date().addingTimeInterval(expiresIn)
+        )
+    }
+
+    static func randomURLSafe(byteCount: Int) -> String {
+        var bytes = [UInt8](repeating: 0, count: byteCount)
+        _ = SecRandomCopyBytes(kSecRandomDefault, byteCount, &bytes)
+        return base64URLEncode(Data(bytes))
+    }
+
+    static func base64URLEncode(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+}
+
+/// Refresh-on-demand token broker for the Claude Code inference path. Mirrors
+/// CodexCredentialBroker: serialized on the shared actor, refreshes ~2 min
+/// before expiry, wipes creds + forces re-login on a revoked refresh token.
+enum ClaudeCodeCredentialBroker {
+    static func resolveAccessToken() async throws -> String {
+        guard let creds = KeychainStore.claudeCodeCredentials() else {
+            throw TranslationError.invalidAPIKey(.anthropicClaudeCode)
+        }
+        if !creds.isExpiring(within: 120) { return creds.accessToken }
+        do {
+            let refreshed = try await ClaudeCodeOAuthClient.shared.refresh(creds.refreshToken)
+            await MainActor.run { KeychainStore.setClaudeCodeCredentials(refreshed) }
+            return refreshed.accessToken
+        } catch let err as ClaudeCodeOAuthClient.AuthError {
+            if case .server(let status, _) = err, status == 400 || status == 401 || status == 403 {
+                await MainActor.run { KeychainStore.setClaudeCodeCredentials(nil) }
+                throw TranslationError.invalidAPIKey(.anthropicClaudeCode)
+            }
+            throw TranslationError.cloudError(.anthropicClaudeCode, err.errorDescription ?? "auth error")
+        }
+    }
+
+    static func forceRefresh() async throws -> String {
+        guard let creds = KeychainStore.claudeCodeCredentials() else {
+            throw TranslationError.invalidAPIKey(.anthropicClaudeCode)
+        }
+        let refreshed = try await ClaudeCodeOAuthClient.shared.refresh(creds.refreshToken)
+        await MainActor.run { KeychainStore.setClaudeCodeCredentials(refreshed) }
+        return refreshed.accessToken
+    }
+}
+
+/// LLM client for the Claude subscription path: native Anthropic /v1/messages
+/// (SSE) authed with the OAuth Bearer token + Claude Code beta headers. Reuses
+/// the same prompt-building helpers as OpenAIChatClient; only the wire format
+/// differs (native content blocks + `content_block_delta` stream events).
+struct ClaudeCodeClient: LLMBackend {
+    let model: String
+    private let provider = CloudProvider.anthropicClaudeCode
+
+    private static let maxImageBytes = 5 * 1024 * 1024
+    /// Identity prefix Claude Code conventionally sends as its first system
+    /// block. Convention, not a hard auth gate for tool-less calls — but cheap.
+    private static let claudeCodeIdentity = "You are Claude Code, Anthropic's official CLI for Claude."
+
+    func translate(
+        _ text: String,
+        images: [ImageInput] = [],
+        to targetLanguage: TranslationLanguage,
+        mode: TranslationMode = .selection,
+        appCategory: AppCategory,
+        composition: CompositionSettings? = nil,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        let sourceText: String
+        switch mode {
+        case .selection, .smartReply:
+            sourceText = TextNormalizer.cleanedSelection(text)
+        case .draftMessage:
+            sourceText = TextNormalizer.cleanedDraftMessage(text)
+        }
+        guard !sourceText.isEmpty || !images.isEmpty else {
+            throw TranslationError.emptyResponse
+        }
+        for image in images where image.data.count > Self.maxImageBytes {
+            throw TranslationError.cloudError(provider, "Image too large (limit 5 MB)")
+        }
+
+        let systemPrompt = mode.systemPrompt(
+            targetLanguage: targetLanguage,
+            appCategory: appCategory,
+            composition: composition
+        )
+        let userContent = Self.contentBlocks(text: sourceText, images: images)
+        return try await stream(
+            systemPrompt: systemPrompt,
+            messages: [["role": "user", "content": userContent]],
+            thinkingLevel: thinkingLevel,
+            onPartial: onPartial
+        )
+    }
+
+    func ask(
+        history: [AskNugumiTurn],
+        question: String,
+        image: ImageInput?,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> AskNugumiResponse {
+        if let image {
+            guard image.data.count <= Self.maxImageBytes else {
+                throw TranslationError.cloudError(provider, "Image too large (limit 5 MB)")
+            }
+        }
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty else {
+            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+        }
+
+        var messages: [[String: Any]] = []
+        for turn in history {
+            messages.append(["role": "user", "content": turn.question])
+            messages.append(["role": "assistant", "content": turn.answer])
+        }
+        let prompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
+        messages.append([
+            "role": "user",
+            "content": Self.contentBlocks(text: prompt, images: image.map { [$0] } ?? [])
+        ])
+
+        let answer = try await stream(
+            systemPrompt: AskNugumiPromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled),
+            messages: messages,
+            thinkingLevel: thinkingLevel,
+            onPartial: onPartial
+        )
+        let parsed = AskNugumiResponse.parse(answer)
+        guard !parsed.message.isEmpty else { throw TranslationError.emptyResponse }
+        return parsed
+    }
+
+    /// Native content array: a text block plus one image block per attachment.
+    private static func contentBlocks(text: String, images: [ImageInput]) -> [[String: Any]] {
+        var blocks: [[String: Any]] = [["type": "text", "text": text]]
+        for image in images {
+            blocks.append([
+                "type": "image",
+                "source": [
+                    "type": "base64",
+                    "media_type": image.mediaType,
+                    "data": image.base64String
+                ]
+            ])
+        }
+        return blocks
+    }
+
+    /// Extended thinking budget per level; nil = no thinking block. Native
+    /// `thinking` replaces the compat `reasoning_effort` knob. max_tokens must
+    /// stay above the budget (it does — see `maxTokens`).
+    private static func thinkingBlock(for level: ThinkingLevel) -> [String: Any]? {
+        switch level {
+        case .low:    return nil
+        case .medium: return ["type": "enabled", "budget_tokens": 4096]
+        case .high:   return ["type": "enabled", "budget_tokens": 8192]
+        }
+    }
+    private static let maxTokens = 16384
+
+    private func stream(
+        systemPrompt: String,
+        messages: [[String: Any]],
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        // One transparent refresh-and-retry on a 401 (token revoked mid-flight),
+        // matching the Codex client's resilience.
+        do {
+            return try await send(systemPrompt: systemPrompt, messages: messages,
+                                  thinkingLevel: thinkingLevel, onPartial: onPartial)
+        } catch TranslationError.invalidAPIKey {
+            _ = try? await ClaudeCodeCredentialBroker.forceRefresh()
+            return try await send(systemPrompt: systemPrompt, messages: messages,
+                                  thinkingLevel: thinkingLevel, onPartial: onPartial)
+        }
+    }
+
+    private func send(
+        systemPrompt: String,
+        messages: [[String: Any]],
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        let token = try await ClaudeCodeCredentialBroker.resolveAccessToken()
+
+        var body: [String: Any] = [
+            "model": model,
+            "max_tokens": Self.maxTokens,
+            "stream": true,
+            "system": [
+                ["type": "text", "text": Self.claudeCodeIdentity],
+                ["type": "text", "text": systemPrompt]
+            ],
+            "messages": messages
+        ]
+        if let thinking = Self.thinkingBlock(for: thinkingLevel) {
+            body["thinking"] = thinking
+        }
+
+        var request = URLRequest(url: provider.baseURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue(
+            "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+            forHTTPHeaderField: "anthropic-beta"
+        )
+        request.setValue("cli", forHTTPHeaderField: "x-app")
+        request.setValue("claude-cli/2.0.0 (external, cli)", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await URLSession.shared.bytes(for: request)
+        } catch let urlError as URLError where urlError.code == .cannotConnectToHost
+            || urlError.code == .cannotFindHost
+            || urlError.code == .networkConnectionLost
+            || urlError.code == .notConnectedToInternet
+            || urlError.code == .timedOut {
+            throw TranslationError.cloudError(provider, urlError.localizedDescription)
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw TranslationError.cloudError(provider, "invalid response")
+        }
+        switch httpResponse.statusCode {
+        case 200..<300: break
+        case 401, 403: throw TranslationError.invalidAPIKey(provider)
+        case 429:      throw TranslationError.rateLimited(provider)
+        case 402:      throw TranslationError.outOfCredits(provider)
+        default:
+            let body = await CloudHTTPError.readBody(bytes)
+            throw TranslationError.cloudError(
+                provider,
+                CloudHTTPError.detail(status: httpResponse.statusCode, body: body)
+            )
+        }
+
+        // Native SSE: lines like `event: content_block_delta` / `data: {…}`.
+        // Only `text_delta` deltas carry visible output; thinking deltas and
+        // lifecycle events are ignored.
+        var answer = ""
+        for try await rawLine in bytes.lines {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            switch json["type"] as? String {
+            case "content_block_delta":
+                if let delta = json["delta"] as? [String: Any],
+                   delta["type"] as? String == "text_delta",
+                   let text = delta["text"] as? String, !text.isEmpty {
+                    answer += text
+                    onPartial(answer)
+                }
+            case "message_stop":
+                return answer
+            case "error":
+                let message = (json["error"] as? [String: Any])?["message"] as? String
+                throw TranslationError.cloudError(provider, message ?? "stream error")
+            default:
+                continue
+            }
+        }
+        return answer
+    }
+}
+
 // MARK: Discovered Codex models (live API + cached fallback)
 
 /// Thread-safe cache of Codex model slugs discovered from
@@ -12583,15 +13219,29 @@ enum CloudModelDiscovery {
         let displayName: String?
     }
 
-    /// Substrings that mark an OpenAI id as non-chat or Codex-only.
+    /// Substrings that mark an OpenAI id as non-chat or Codex-only. `-pro`
+    /// models (gpt-5-pro, gpt-5.2-pro, …) are Responses-API-only and reject
+    /// /v1/chat/completions with "not a chat model" — our client only speaks
+    /// chat/completions, so drop them.
     private static let openAIDropMarkers = [
-        "-audio", "-realtime", "-search", "-tts", "-transcribe", "-image", "-codex"
+        "-audio", "-realtime", "-search", "-tts", "-transcribe", "-image", "-codex", "-pro"
     ]
     /// Substrings that mark a Gemini id as non-chat. Dash-anchored so a
     /// marker can't match inside an unrelated word (e.g. "-live" skips
     /// "gemini-live-2.5-flash" but not a hypothetical "gemini-alive").
     private static let geminiDropMarkers = [
         "-embedding", "-tts", "-image", "-live", "-audio"
+    ]
+    /// OpenRouter lists 300+ models. Keep recognizable chat vendors plus ANY
+    /// `:free` model (free-ness is its own reason to surface it), and drop
+    /// non-chat variants so the picker isn't flooded.
+    private static let openRouterVendorAllowlist = [
+        "openai/", "anthropic/", "google/", "x-ai/", "meta-llama/",
+        "mistralai/", "deepseek/", "qwen/"
+    ]
+    private static let openRouterDropMarkers = [
+        "-image", "-tts", "-audio", "-embedding",
+        "-search", "-realtime", "-transcribe", "-codex"
     ]
 
     /// Parse a provider's `/models` response body into chat-capable models,
@@ -12622,10 +13272,25 @@ enum CloudModelDiscovery {
                 guard id.hasPrefix("gemini-"),
                       !geminiDropMarkers.contains(where: id.contains)
                 else { continue }
-            case .openAICodex:
+            case .openRouter:
+                let isFree = id.hasSuffix(":free")
+                guard isFree || openRouterVendorAllowlist.contains(where: id.hasPrefix),
+                      !openRouterDropMarkers.contains(where: id.contains)
+                else { continue }
+            case .openAICodex, .anthropicClaudeCode:
+                // OAuth providers: inference-only scope, curated model list,
+                // no /models discovery.
                 continue
             }
-            out.append(DiscoveredModel(id: id, displayName: item["display_name"] as? String))
+            // OpenRouter supplies a pretty `name`; the others use `display_name`.
+            var pretty = (provider == .openRouter ? item["name"] : item["display_name"]) as? String
+            // Tag free models so the picker shows it. OpenRouter's `name` almost
+            // always already ends in "(free)" — guarantee it when it doesn't.
+            if provider == .openRouter, id.hasSuffix(":free") {
+                let base = pretty ?? id
+                pretty = base.lowercased().contains("free") ? base : "\(base) (free)"
+            }
+            out.append(DiscoveredModel(id: id, displayName: pretty))
         }
         return out
     }
@@ -12653,7 +13318,7 @@ enum CloudModelDiscovery {
             if name.hasPrefix("gpt-") { name = "GPT-" + name.dropFirst("gpt-".count) }
             return name.replacingOccurrences(of: "-", with: " ")
                 .replacingOccurrences(of: "GPT ", with: "GPT-")
-        case .anthropic:
+        case .anthropic, .anthropicClaudeCode:
             // claude-opus-4-8 → Claude Opus 4.8 (numeric tail joins with dots)
             let parts = canonicalID(id).split(separator: "-").map(String.init)
             var words: [String] = []
@@ -12671,6 +13336,11 @@ enum CloudModelDiscovery {
             return id.split(separator: "-")
                 .map { $0.first?.isNumber == true ? String($0) : String($0).capitalized }
                 .joined(separator: " ")
+        case .openRouter:
+            // ids are "vendor/model"; the API's `name` is preferred upstream,
+            // so this fallback only fires if `name` is absent — the slug reads
+            // well enough.
+            return id
         }
     }
 
@@ -12681,7 +13351,7 @@ enum CloudModelDiscovery {
         // KeychainStore's in-memory cache is main-actor-confined everywhere
         // else; read the keys there, then do the network work off-actor.
         let credentials: [(CloudProvider, String)] = await MainActor.run {
-            [CloudProvider.openAI, .anthropic, .gemini].compactMap { provider in
+            [CloudProvider.openAI, .anthropic, .gemini, .openRouter].compactMap { provider in
                 guard let key = KeychainStore.apiKey(for: provider), !key.isEmpty else { return nil }
                 return (provider, key)
             }
@@ -13045,7 +13715,7 @@ struct OpenAICodexClient: LLMBackend {
                 throw TranslationError.invalidAPIKey(.openAICodex)
             }
             // Try to extract a human-readable message from OpenAI's error JSON.
-            let detail = extractOpenAIErrorMessage(from: bodyData) ?? "HTTP \(http.statusCode)"
+            let detail = extractOpenAIErrorMessage(from: bodyData) ?? CloudHTTPError.friendlyMessage(status: http.statusCode)
             throw TranslationError.cloudError(.openAICodex, detail)
         case 429:
             throw TranslationError.rateLimited(.openAICodex)
@@ -13054,7 +13724,7 @@ struct OpenAICodexClient: LLMBackend {
             for try await chunk in bytes { bodyData.append(chunk) }
             let bodyPreview = String(data: bodyData, encoding: .utf8)?.prefix(800) ?? ""
             CodexDebugLog.append("inference: \(http.statusCode) body=\(bodyPreview)")
-            let detail = extractOpenAIErrorMessage(from: bodyData) ?? "HTTP \(http.statusCode)"
+            let detail = extractOpenAIErrorMessage(from: bodyData) ?? CloudHTTPError.friendlyMessage(status: http.statusCode)
             throw TranslationError.cloudError(.openAICodex, detail)
         }
 
@@ -13277,62 +13947,7 @@ final class CodexLoginAlert: NSObject {
     /// above the browser without stealing focus. Used for both the prerequisite
     /// step and the device-code step.
     private func presentHosting<Content: View>(_ hosting: NSHostingView<Content>) {
-        // The titled+fullSizeContentView panel reports the titlebar as a top
-        // safe-area inset, which SwiftUI turns into ~28pt of dead air above
-        // the content. The panel has no visible titlebar — drop the inset.
-        hosting.safeAreaRegions = []
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-
-        let panel = NSPanel(
-            contentRect: .zero,
-            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.title = "Sign in with ChatGPT"
-        panel.titleVisibility = .hidden
-        panel.titlebarAppearsTransparent = true
-        panel.standardWindowButton(.closeButton)?.isHidden = true
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
-        panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-
-        let backdrop = NSVisualEffectView()
-        backdrop.material = .hudWindow
-        backdrop.blendingMode = .behindWindow
-        backdrop.state = .active
-        backdrop.appearance = NSAppearance(named: .darkAqua)
-        backdrop.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
-            hosting.topAnchor.constraint(equalTo: backdrop.topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor),
-        ])
-        panel.contentView = backdrop
-
-        let size = hosting.fittingSize
-        panel.setContentSize(size)
-        // Upper middle of the screen: visible alongside the browser without
-        // covering the code field in the center of the page.
-        if let screen = NSScreen.main {
-            let frame = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(
-                x: frame.midX - size.width / 2,
-                y: frame.maxY - size.height - frame.height * 0.16
-            ))
-        }
-        panel.orderFrontRegardless()
-        self.panel = panel
+        self.panel = SignInHUD.makePanel(hosting: hosting, title: "Sign in with ChatGPT")
     }
 
     private func closePanel() {
@@ -13438,10 +14053,14 @@ private struct CodexLoginPanelView: View {
             Text("Sign in with ChatGPT")
                 .font(.system(size: 13.5, weight: .semibold))
                 .foregroundStyle(.white)
-            Text("Enter this code on the page that just opened — Nugumi finishes sign-in automatically.")
+            Text("On the page that opened:")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Color.white.opacity(0.66))
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 5) {
+                stepRow(1, "Log in to ChatGPT")
+                stepRow(2, "Confirm it's you")
+                stepRow(3, "Enter the code below, then press Continue")
+            }
 
             HStack(spacing: 10) {
                 Text(code)
@@ -13466,6 +14085,11 @@ private struct CodexLoginPanelView: View {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.white.opacity(0.08))
             )
+
+            Text("Nugumi finishes the rest automatically once you continue.")
+                .font(.system(size: 11))
+                .foregroundStyle(Color.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
                 Button(action: openPage) {
@@ -13499,6 +14123,21 @@ private struct CodexLoginPanelView: View {
         .frame(width: 336)
     }
 
+    @ViewBuilder
+    private func stepRow(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number)")
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundStyle(Color.black.opacity(0.82))
+                .frame(width: 15, height: 15)
+                .background(Circle().fill(Self.mint))
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.78))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private func copyCode() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(code, forType: .string)
@@ -13506,6 +14145,433 @@ private struct CodexLoginPanelView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             copied = false
         }
+    }
+}
+
+// MARK: - Sign-in HUD chrome (shared by ChatGPT + Claude sign-in panels)
+
+/// Builds the borderless dark HUD panel that floats above the browser without
+/// stealing focus. Shared so the ChatGPT and Claude sign-in flows look identical.
+enum SignInHUD {
+    static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
+
+    static func makePanel<Content: View>(hosting: NSHostingView<Content>, title: String) -> NSPanel {
+        // The titled+fullSizeContentView panel reports the titlebar as a top
+        // safe-area inset, which SwiftUI turns into ~28pt of dead air above the
+        // content. The panel has no visible titlebar — drop the inset.
+        hosting.safeAreaRegions = []
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+
+        let panel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = title
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = true
+        panel.isReleasedWhenClosed = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+
+        let backdrop = NSVisualEffectView()
+        backdrop.material = .hudWindow
+        backdrop.blendingMode = .behindWindow
+        backdrop.state = .active
+        backdrop.appearance = NSAppearance(named: .darkAqua)
+        backdrop.addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: backdrop.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor),
+        ])
+        panel.contentView = backdrop
+
+        let size = hosting.fittingSize
+        panel.setContentSize(size)
+        // Upper middle of the screen: visible alongside the browser without
+        // covering the page content in the center.
+        if let screen = NSScreen.main {
+            let frame = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(
+                x: frame.midX - size.width / 2,
+                y: frame.maxY - size.height - frame.height * 0.16
+            ))
+        }
+        panel.orderFrontRegardless()
+        return panel
+    }
+
+    /// Numbered mint step bullet + label, shared by both sign-in panels.
+    @ViewBuilder
+    static func stepRow(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number)")
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundStyle(Color.black.opacity(0.82))
+                .frame(width: 15, height: 15)
+                .background(Circle().fill(mint))
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.78))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - Claude (subscription) sign-in panel
+
+/// Drives the Claude Code OAuth (PKCE) sign-in with the same floating HUD as the
+/// ChatGPT flow: open the browser to the authorize URL, then the user pastes the
+/// `code#state` Anthropic shows them. The panel stays up on a failed exchange so
+/// they can fix the code and retry without restarting.
+@MainActor
+final class ClaudeCodeLoginAlert: NSObject {
+    private var panel: NSPanel?
+    private var finish: ((ClaudeCodeSignInOutcome) -> Void)?
+    private var pkce: ClaudeCodeOAuthClient.PKCE!
+    private let model = ClaudeCodeLoginModel()
+
+    static func present() async -> ClaudeCodeSignInOutcome {
+        await ClaudeCodeLoginAlert().run()
+    }
+
+    private func run() async -> ClaudeCodeSignInOutcome {
+        pkce = ClaudeCodeOAuthClient.makePKCE()
+        NSWorkspace.shared.open(ClaudeCodeOAuthClient.authorizeURL(pkce: pkce))
+
+        model.onSignIn = { [weak self] in self?.submit() }
+        model.onOpenPage = { [weak self] in
+            guard let self else { return }
+            NSWorkspace.shared.open(ClaudeCodeOAuthClient.authorizeURL(pkce: self.pkce))
+        }
+        model.onCancel = { [weak self] in self?.finish?(.cancelled) }
+
+        let outcome = await withCheckedContinuation { (cont: CheckedContinuation<ClaudeCodeSignInOutcome, Never>) in
+            var resumed = false
+            finish = { o in
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: o)
+            }
+            panel = SignInHUD.makePanel(
+                hosting: NSHostingView(rootView: ClaudeCodeLoginPanelView(model: model)),
+                title: "Sign in with Claude"
+            )
+        }
+        finish = nil
+        panel?.orderOut(nil)
+        panel = nil
+        return outcome
+    }
+
+    private func submit() {
+        let code = model.code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty, model.phase != .working else { return }
+        model.phase = .working
+        Task { @MainActor in
+            do {
+                let creds = try await ClaudeCodeOAuthClient.shared.exchange(pastedCode: code, pkce: pkce)
+                KeychainStore.setClaudeCodeCredentials(creds)
+                finish?(.success)
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                model.phase = .error(message)
+            }
+        }
+    }
+}
+
+@MainActor
+final class ClaudeCodeLoginModel: ObservableObject {
+    enum Phase: Equatable {
+        case idle
+        case working
+        case error(String)
+    }
+    @Published var code: String = ""
+    @Published var phase: Phase = .idle
+    var onSignIn: () -> Void = {}
+    var onOpenPage: () -> Void = {}
+    var onCancel: () -> Void = {}
+}
+
+private struct ClaudeCodeLoginPanelView: View {
+    @ObservedObject var model: ClaudeCodeLoginModel
+
+    private var isWorking: Bool { model.phase == .working }
+    private var errorText: String? {
+        if case .error(let m) = model.phase { return m }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Sign in with Claude")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("In the browser tab that just opened:")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.66))
+
+            VStack(alignment: .leading, spacing: 6) {
+                SignInHUD.stepRow(1, "Approve access for Claude Code")
+                SignInHUD.stepRow(2, "Copy the code Anthropic shows you")
+                SignInHUD.stepRow(3, "Paste it below, then press Sign in")
+            }
+
+            TextField("Paste code here", text: $model.code)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.vertical, 9)
+                .padding(.horizontal, 12)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.08)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(errorText == nil ? Color.white.opacity(0.12) : Color(red: 1, green: 0.5, blue: 0.45).opacity(0.6), lineWidth: 1)
+                )
+                .disabled(isWorking)
+                .onSubmit { model.onSignIn() }
+
+            if let errorText {
+                Text(errorText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 1, green: 0.58, blue: 0.52))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button(action: { model.onOpenPage() }) {
+                    Text("Open page again")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(SignInHUD.mint)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 12)
+
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                    Text("Signing in…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                }
+
+                Button(action: { model.onCancel() }) {
+                    Text("Cancel")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 12)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { model.onSignIn() }) {
+                    Text("Sign in")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 14)
+                        .background(Capsule().fill(SignInHUD.mint.opacity(model.code.isEmpty || isWorking ? 0.4 : 1)))
+                }
+                .buttonStyle(.plain)
+                .disabled(model.code.isEmpty || isWorking)
+            }
+        }
+        .padding(16)
+        .frame(width: 360)
+    }
+}
+
+// MARK: - Cloud API key panel
+
+/// Floating HUD for entering an API-key provider's key, matching the sign-in
+/// panels. "Get a key" opens the provider's console and leaves the panel up so
+/// the user can paste straight back. Validates on Save; an invalid key keeps the
+/// panel open with the reason inline instead of relaunching a fresh modal.
+@MainActor
+final class CloudAPIKeyAlert: NSObject {
+    enum Outcome {
+        case saved
+        case savedUnverified(String)
+        case cancelled
+    }
+
+    private var panel: NSPanel?
+    private var finish: ((Outcome) -> Void)?
+    private let provider: CloudProvider
+    private let model = CloudAPIKeyModel()
+
+    private init(provider: CloudProvider) {
+        self.provider = provider
+        super.init()
+    }
+
+    static func present(provider: CloudProvider) async -> Outcome {
+        await CloudAPIKeyAlert(provider: provider).run()
+    }
+
+    private func run() async -> Outcome {
+        model.key = KeychainStore.apiKey(for: provider) ?? ""
+        model.onSave = { [weak self] in self?.save() }
+        model.onGetKey = { [weak self] in
+            guard let self else { return }
+            NSWorkspace.shared.open(self.provider.apiKeyHelpURL)
+        }
+        model.onCancel = { [weak self] in self?.finish?(.cancelled) }
+
+        let outcome = await withCheckedContinuation { (cont: CheckedContinuation<Outcome, Never>) in
+            var resumed = false
+            finish = { o in
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: o)
+            }
+            panel = SignInHUD.makePanel(
+                hosting: NSHostingView(rootView: CloudAPIKeyPanelView(model: model, providerName: provider.displayName)),
+                title: "Connect \(provider.displayName)"
+            )
+        }
+        finish = nil
+        panel?.orderOut(nil)
+        panel = nil
+        return outcome
+    }
+
+    private func save() {
+        let key = model.key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, model.phase != .working else { return }
+        model.phase = .working
+        Task { @MainActor in
+            switch await APIKeyValidator.validate(key, for: provider) {
+            case .valid:
+                KeychainStore.setAPIKey(key, for: provider)
+                finish?(.saved)
+            case .invalid(let reason):
+                model.phase = .error(reason)
+            case .networkUnreachable(let detail):
+                // Save anyway so the user isn't stuck offline; the host shows a note.
+                KeychainStore.setAPIKey(key, for: provider)
+                finish?(.savedUnverified(detail))
+            }
+        }
+    }
+}
+
+@MainActor
+final class CloudAPIKeyModel: ObservableObject {
+    enum Phase: Equatable {
+        case idle
+        case working
+        case error(String)
+    }
+    @Published var key: String = ""
+    @Published var phase: Phase = .idle
+    var onSave: () -> Void = {}
+    var onGetKey: () -> Void = {}
+    var onCancel: () -> Void = {}
+}
+
+private struct CloudAPIKeyPanelView: View {
+    @ObservedObject var model: CloudAPIKeyModel
+    let providerName: String
+
+    private var isWorking: Bool { model.phase == .working }
+    private var errorText: String? {
+        if case .error(let m) = model.phase { return m }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Connect \(providerName)")
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(.white)
+            Text("Paste your \(providerName) API key. It's stored locally on this Mac and only sent to \(providerName) for translation.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Color.white.opacity(0.66))
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("Paste your API key", text: $model.key)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.vertical, 9)
+                .padding(.horizontal, 12)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.08)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(errorText == nil ? Color.white.opacity(0.12) : Color(red: 1, green: 0.5, blue: 0.45).opacity(0.6), lineWidth: 1)
+                )
+                .disabled(isWorking)
+                .onSubmit { model.onSave() }
+
+            if let errorText {
+                Text(errorText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 1, green: 0.58, blue: 0.52))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button(action: { model.onGetKey() }) {
+                    Text("Get a key…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(SignInHUD.mint)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 12)
+
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                    Text("Checking…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                }
+
+                Button(action: { model.onCancel() }) {
+                    Text("Cancel")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 12)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: { model.onSave() }) {
+                    Text("Save")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 14)
+                        .background(Capsule().fill(SignInHUD.mint.opacity(model.key.isEmpty || isWorking ? 0.4 : 1)))
+                }
+                .buttonStyle(.plain)
+                .disabled(model.key.isEmpty || isWorking)
+            }
+        }
+        .padding(16)
+        .frame(width: 360)
     }
 }
 
@@ -13525,8 +14591,8 @@ extension NugumiApp: SettingsHost {
     }
 
     var bootstrapState: BootstrapState { bootstrap.state }
+    func refreshBootstrap() { bootstrap.refresh() }
     var ollamaModels: [OllamaModelOption] { bootstrap.models }
-    var requiresOllamaAccount: Bool { bootstrap.requiresOllamaAccount }
 
     func makeSettingsSnapshot() -> SettingsSnapshot {
         var styles: [AppCategory: WritingStyle] = [:]
@@ -13696,8 +14762,12 @@ extension NugumiApp: SettingsHost {
         case .resetShortcuts:
             resetKeyboardShortcuts()
         case .signInCloud(let provider):
-            presentCredentialPrompt(for: provider) { [weak self] _ in
-                self?.mainWindowController?.bridge.refreshFromHost()
+            presentCredentialPrompt(for: provider) { [weak self] saved in
+                guard let self else { return }
+                // Just connected from the Providers tab → take the user to
+                // Models so they can pick one of the newly-available models.
+                if saved { self.mainWindowController?.bridge.aiEngineTab = 0 }
+                self.mainWindowController?.bridge.refreshFromHost()
             }
         case .signOutCloud(let provider):
             disconnectCloudProvider(provider)

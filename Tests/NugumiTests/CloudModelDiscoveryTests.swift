@@ -13,6 +13,8 @@ final class CloudModelDiscoveryTests: XCTestCase {
             {"id":"gpt-5.6","object":"model"},
             {"id":"gpt-5.4-audio","object":"model"},
             {"id":"gpt-5.3-codex","object":"model"},
+            {"id":"gpt-5-pro","object":"model"},
+            {"id":"gpt-5.2-pro","object":"model"},
             {"id":"gpt-realtime","object":"model"},
             {"id":"whisper-1","object":"model"},
             {"id":"tts-1","object":"model"},
@@ -24,7 +26,8 @@ final class CloudModelDiscoveryTests: XCTestCase {
 
         let parsed = CloudModelDiscovery.parse(provider: .openAI, data: json)
 
-        // gpt-4o dropped: prefix guard only admits gpt-5/gpt-6 families
+        // gpt-4o dropped: prefix guard only admits gpt-5/gpt-6 families.
+        // gpt-5-pro / gpt-5.2-pro dropped: Responses-API-only, reject chat/completions.
         XCTAssertEqual(parsed.map(\.id), ["gpt-5.5", "gpt-5.4-mini", "gpt-5.6"])
     }
 
@@ -61,6 +64,35 @@ final class CloudModelDiscoveryTests: XCTestCase {
         let parsed = CloudModelDiscovery.parse(provider: .gemini, data: json)
 
         XCTAssertEqual(parsed.map(\.id), ["gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3.0-flash"])
+    }
+
+    func testOpenRouterParseAllowlistsVendorsKeepsFreeAndCarriesName() {
+        let json = """
+        {"data":[
+            {"id":"openai/gpt-5.4-mini","name":"OpenAI: GPT-5.4 Mini"},
+            {"id":"anthropic/claude-sonnet-4.6","name":"Anthropic: Claude Sonnet 4.6"},
+            {"id":"deepseek/deepseek-chat:free","name":"DeepSeek: Chat (free)"},
+            {"id":"nvidia/nemotron-nano:free","name":"NVIDIA: Nemotron Nano"},
+            {"id":"openai/gpt-5.4-image-2","name":"OpenAI: GPT-5.4 Image 2"},
+            {"id":"somerandomvendor/mystery-7b","name":"Mystery 7B"},
+            {"id":"google/gemini-2.5-pro","name":"Google: Gemini 2.5 Pro"}
+        ]}
+        """.data(using: .utf8)!
+
+        let parsed = CloudModelDiscovery.parse(provider: .openRouter, data: json)
+
+        // :free kept from ANY vendor (deepseek + non-allowlisted nvidia);
+        // -image dropped; unknown non-free vendor dropped.
+        XCTAssertEqual(parsed.map(\.id),
+                       ["openai/gpt-5.4-mini", "anthropic/claude-sonnet-4.6",
+                        "deepseek/deepseek-chat:free", "nvidia/nemotron-nano:free",
+                        "google/gemini-2.5-pro"])
+        // OpenRouter's `name` field is carried (not `display_name`).
+        XCTAssertEqual(parsed[0].displayName, "OpenAI: GPT-5.4 Mini")
+        // Free name already has "(free)" → carried as-is.
+        XCTAssertEqual(parsed[2].displayName, "DeepSeek: Chat (free)")
+        // Free name missing "(free)" → suffix appended as the tag.
+        XCTAssertEqual(parsed[3].displayName, "NVIDIA: Nemotron Nano (free)")
     }
 
     func testParseReturnsEmptyOnGarbageAndOnCodexProvider() {

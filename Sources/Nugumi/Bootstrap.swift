@@ -14,6 +14,9 @@ extension NSColor {
 
 enum CloudTestResult {
     case success(preview: String)
+    /// Key authenticated but the request couldn't run (out of credits /
+    /// rate-limited). Not a broken key — shown with a ✓, not a ✕.
+    case info(String)
     case failure(String)
 }
 
@@ -28,6 +31,37 @@ enum BootstrapStepStatus: Equatable {
     var isTerminalOK: Bool {
         if case .ok = self { return true }
         return false
+    }
+}
+
+/// Detects when a model *newly* reaches a ready state across bootstrap polls, so
+/// the engine preset only re-applies on a genuine install — not on the
+/// `.checking` blip that `refresh()` stamps on every model each poll. Without
+/// the blip filter, an already-installed model's `.ok → .checking → .ok`
+/// round-trip reads as a fresh install and re-fires the preset, stomping a
+/// user's not-yet-installed model pick (e.g. Gemma 4) back to the default.
+enum ModelReadyTransition {
+    static func anyBecameReady(
+        previous: [String: BootstrapStepStatus],
+        current: [String: BootstrapStepStatus]
+    ) -> Bool {
+        current.contains { id, status in
+            status.isTerminalOK && !(previous[id]?.isTerminalOK ?? false)
+        }
+    }
+
+    /// Fold `current` into `previous`, ignoring transient `.checking` so a poll
+    /// never erases the prior terminal memory of an installed model.
+    static func merge(
+        into previous: [String: BootstrapStepStatus],
+        current: [String: BootstrapStepStatus]
+    ) -> [String: BootstrapStepStatus] {
+        var out = previous
+        for (id, status) in current {
+            if case .checking = status { continue }
+            out[id] = status
+        }
+        return out
     }
 }
 
@@ -62,7 +96,7 @@ final class OllamaBootstrap {
     let baseURL: URL
     let models: [OllamaModelOption]
 
-    var requiresOllamaAccount: Bool {
+    private var hasOllamaCloudModels: Bool {
         models.contains(where: { $0.isCloud })
     }
 
@@ -226,14 +260,14 @@ final class OllamaBootstrap {
         case .signedIn:
             update(\.ollamaSignedIn, .ok)
         case .signedOut:
-            update(\.ollamaSignedIn, requiresOllamaAccount
+            update(\.ollamaSignedIn, hasOllamaCloudModels
                 ? .needsAction("Open Ollama and sign in (free).")
                 : .ok)
         case .unsupported:
             // Older server without /api/me — fall back to the tags heuristic
             // (a cloud model listed implies the account worked at some point).
             let anyCloudPresent = models.contains { $0.isCloud && presentIDs.contains($0.id) }
-            update(\.ollamaSignedIn, anyCloudPresent || !requiresOllamaAccount
+            update(\.ollamaSignedIn, anyCloudPresent || !hasOllamaCloudModels
                 ? .ok
                 : .needsAction("Open Ollama and sign in (free)."))
         }
@@ -503,4 +537,3 @@ private struct PullProgress: Decodable {
         return "Setting up the translator…"
     }
 }
-

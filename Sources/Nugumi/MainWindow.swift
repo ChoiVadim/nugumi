@@ -184,8 +184,12 @@ protocol SettingsHost: AnyObject {
     func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
     func runCloudTest(for provider: CloudProvider) async -> CloudTestResult
     var bootstrapState: BootstrapState { get }
+    /// Re-run the live engine health detection (pings the Ollama server, checks
+    /// app presence, re-reads cloud keys). The window calls this on show/focus
+    /// so the setup card reflects current reality — a server that died after
+    /// launch must flip the steps back to "needs action".
+    func refreshBootstrap()
     var ollamaModels: [OllamaModelOption] { get }
-    var requiresOllamaAccount: Bool { get }
     var appVersionString: String { get }
     var isAppBundle: Bool { get }
 }
@@ -209,11 +213,7 @@ final class NugumiSettingsBridge: ObservableObject {
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
 
-    /// Local Ollama models offered in setup, plus whether an Ollama account is
-    /// required for the current selection. Read once — the set is static for a
-    /// session; live status lives in `bootstrap`.
     let ollamaModels: [OllamaModelOption]
-    let requiresOllamaAccount: Bool
 
     private var modelListObservers: [NSObjectProtocol] = []
 
@@ -225,7 +225,6 @@ final class NugumiSettingsBridge: ObservableObject {
         self.settings = host.makeSettingsSnapshot()
         self.bootstrap = host.bootstrapState
         self.ollamaModels = host.ollamaModels
-        self.requiresOllamaAccount = host.requiresOllamaAccount
 
         // Re-render the model picker when live discovery updates either catalog.
         for name in [Notification.Name.ollamaModelsUpdated, .codexModelsUpdated, .cloudModelsUpdated] {
@@ -445,6 +444,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     func presentAndFocus(section: MainWindowSection? = nil) {
         if let section { bridge.section = section }
+        // Re-detect engine health (not just copy cached state) so the setup card
+        // is current — e.g. Ollama uninstalled / its server stopped since launch.
+        bridge.host?.refreshBootstrap()
         bridge.refreshFromHost()
         bridge.usageStats.refresh()
         showWindow(nil)
@@ -452,7 +454,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        // Pick up changes made elsewhere (e.g. the status-bar menu) while away.
+        // Pick up changes made elsewhere (e.g. the status-bar menu, or Ollama
+        // being quit/uninstalled) while away — re-detect, then sync the UI.
+        bridge.host?.refreshBootstrap()
         bridge.refreshFromHost()
     }
 
@@ -593,6 +597,9 @@ struct DetailContainer<Content: View>: View {
     var subtitle: String?
     /// Optional control pinned to the header's top-right (e.g. an Add button).
     var accessory: AnyView?
+    /// Optional control pinned below the header, above the scroll area (e.g. a
+    /// tab bar) — stays put while the content scrolls.
+    var pinned: AnyView? = nil
     @ViewBuilder var content: () -> Content
 
     init(_ title: String, subtitle: String? = nil, @ViewBuilder content: @escaping () -> Content) {
@@ -611,6 +618,19 @@ struct DetailContainer<Content: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.accessory = AnyView(accessory)
+        self.content = content
+    }
+
+    init<Pinned: View>(
+        _ title: String,
+        subtitle: String? = nil,
+        pinned: Pinned,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.accessory = nil
+        self.pinned = AnyView(pinned)
         self.content = content
     }
 
@@ -637,6 +657,12 @@ struct DetailContainer<Content: View>: View {
                 .padding(.horizontal, 38)
                 .padding(.top, 38)
                 .padding(.bottom, 20)
+
+                if let pinned {
+                    pinned
+                        .padding(.horizontal, 38)
+                        .padding(.bottom, 16)
+                }
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 26) {

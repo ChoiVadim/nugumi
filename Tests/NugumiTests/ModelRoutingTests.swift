@@ -18,14 +18,16 @@ final class ModelRoutingTests: XCTestCase {
         XCTAssertEqual(modelID, "gpt-oss:120b-cloud")
     }
 
-    func testAskNugumiDefaultsToVisionCapableFlagship() {
+    func testAskNugumiDefaultsToFirstVisionCapableModel() {
+        // No hardcoded cloud flagship anymore — the default is the first
+        // vision-capable model in the catalog (Gemma 4 locally).
         let modelID = ModelUseScope.askNugumi.defaultModelID(
             legacySelectedModelID: "gpt-oss:20b"
         )
         let model = LLMModel.option(id: modelID)
 
-        XCTAssertEqual(modelID, "gpt-5.5")
         XCTAssertTrue(model.supportsImages)
+        XCTAssertEqual(modelID, LLMModel.all.first(where: \.supportsImages)?.id)
     }
 
     func testAskNugumiScopeOnlyOffersVisionModels() {
@@ -77,31 +79,37 @@ final class ModelRoutingTests: XCTestCase {
             "Everyday text: gpt-oss:120b"
         )
         XCTAssertEqual(
-            ModelUseScope.askNugumi.menuTitle(for: LLMModel.option(id: "gpt-5.5")),
-            "Ask Nugumi: GPT-5.5"
+            ModelUseScope.askNugumi.menuTitle(for: LLMModel.option(id: "gemma4")),
+            "Ask Nugumi: Gemma 4"
         )
     }
 
-    func testEnginePresetsPairFastTextWithVisionFlagship() {
+    func testCuratedEnginePresetsAreStable() {
+        // Curated engines keep deterministic presets. Discovery-only cloud
+        // providers (OpenAI, Anthropic API key, Gemini, OpenRouter) no longer
+        // have hardcoded presets — they return the first discovered model, or
+        // nil until a key + /models fetch populates the catalog.
         XCTAssertEqual(EngineModelPreset.ollama.modelID(for: .textActions), "gpt-oss:20b")
         XCTAssertEqual(EngineModelPreset.ollama.modelID(for: .askNugumi), "gemma4")
-        XCTAssertEqual(EngineModelPreset.cloud(.openAI).modelID(for: .textActions), "gpt-5.4-mini")
-        XCTAssertEqual(EngineModelPreset.cloud(.openAI).modelID(for: .askNugumi), "gpt-5.5")
-        XCTAssertEqual(EngineModelPreset.cloud(.anthropic).modelID(for: .textActions), "claude-sonnet-4-6")
-        XCTAssertEqual(EngineModelPreset.cloud(.anthropic).modelID(for: .askNugumi), "claude-opus-4-7")
-        XCTAssertEqual(EngineModelPreset.cloud(.gemini).modelID(for: .textActions), "gemini-2.5-flash")
-        XCTAssertEqual(EngineModelPreset.cloud(.gemini).modelID(for: .askNugumi), "gemini-2.5-pro")
+        // Claude Code (no /models endpoint) keeps a prefixed curated default.
+        if let ccText = EngineModelPreset.cloud(.anthropicClaudeCode).modelID(for: .textActions) {
+            XCTAssertEqual(LLMModel.option(id: ccText).cloudProvider, .anthropicClaudeCode)
+        } else {
+            XCTFail("Claude Code must keep a curated preset")
+        }
     }
 
-    func testEnginePresetModelsExistInCatalogAndSupportTheirScope() {
-        for engine: EngineModelPreset in [.ollama, .cloud(.openAI), .cloud(.anthropic), .cloud(.gemini)] {
+    func testCuratedEnginePresetsResolveInCatalog() {
+        // Only curated engines are asserted — discovery-only providers may have
+        // nil presets (no models until a key + /models fetch).
+        for engine: EngineModelPreset in [.ollama, .cloud(.anthropicClaudeCode)] {
             for scope in ModelUseScope.allCases {
                 guard let id = engine.modelID(for: scope) else {
                     XCTFail("no preset for \(engine) / \(scope)")
                     continue
                 }
                 let model = LLMModel.option(id: id)
-                XCTAssertEqual(model.id, id, "preset \(id) must resolve in the curated catalog")
+                XCTAssertEqual(model.id, id, "preset \(id) must resolve in the catalog")
                 if scope == .askNugumi {
                     XCTAssertTrue(model.supportsImages, "Ask Nugumi preset \(id) must be vision-capable")
                 }

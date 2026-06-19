@@ -634,14 +634,14 @@ private struct OnboardingRootView: View {
                 )
                 FinaleChoiceButton(
                     symbol: "person.crop.circle.badge.checkmark",
-                    title: "ChatGPT subscription",
-                    detail: "Already pay for ChatGPT? Just sign in — no extra cost.",
+                    title: "ChatGPT or Claude",
+                    detail: "Already pay for ChatGPT or Claude? Just sign in — no extra cost.",
                     action: { model.pickEngine(.subscription) }
                 )
                 FinaleChoiceButton(
                     symbol: "key.fill",
                     title: "API keys",
-                    detail: "OpenAI, Anthropic, or Google. Pay as you go with your own key.",
+                    detail: "OpenAI, Anthropic, Google, or OpenRouter. Pay as you go with your own key.",
                     action: { model.pickEngine(.apiKeys) }
                 )
             }

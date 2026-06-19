@@ -1007,22 +1007,39 @@ private struct LanguageMenu: View {
 
 struct AIEngineSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
+    @State private var pickerScope: ModelUseScope?
 
     var body: some View {
-        DetailContainer("AI Engine", subtitle: "Which model does the thinking — and how hard.") {
-            FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
-
-            if bridge.aiEngineTab == 0 {
-                ModelScopeCard(scope: .textActions,
-                               title: "Everyday text",
-                               subtitle: "Translate, rewrite, and smart replies.")
-                ModelScopeCard(scope: .askNugumi,
-                               title: "Ask Nugumi",
-                               subtitle: "Screenshot questions. Vision-capable models only.")
-            } else {
-                ForEach(orderedProviderGroups, id: \.self) { group in
-                    providerGroupCard(for: group)
+        ZStack {
+            DetailContainer(
+                "AI Engine",
+                subtitle: "Which model does the thinking — and how hard.",
+                pinned: FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
+            ) {
+                if bridge.aiEngineTab == 0 {
+                    ModelScopeCard(scope: .textActions,
+                                   title: "Everyday text",
+                                   subtitle: "Translate, rewrite, and smart replies.",
+                                   onOpenPicker: { pickerScope = .textActions })
+                    ModelScopeCard(scope: .askNugumi,
+                                   title: "Ask Nugumi",
+                                   subtitle: "Screenshot questions. Vision-capable models only.",
+                                   onOpenPicker: { pickerScope = .askNugumi })
+                } else {
+                    ForEach(orderedProviderGroups, id: \.self) { group in
+                        providerGroupCard(for: group)
+                    }
                 }
+            }
+            if let scope = pickerScope {
+                ModelPickerOverlay(
+                    scope: scope,
+                    onDismiss: { pickerScope = nil },
+                    onChoose: { id in
+                        pickerScope = nil
+                        bridge.perform(.chooseModel(id, scope))
+                    }
+                )
             }
         }
     }
@@ -1038,7 +1055,12 @@ struct AIEngineSection: View {
     private func providerGroupCard(for group: EngineSetupFocus) -> some View {
         switch group {
         case .local:
-            OllamaSetupCard()
+            VStack(alignment: .leading, spacing: 16) {
+                OllamaSetupCard()
+                if !selectedOllamaCloudModels.isEmpty {
+                    OllamaCloudSetupCard(models: selectedOllamaCloudModels)
+                }
+            }
         case .subscription:
             ProviderGroupCard(
                 title: "Subscriptions",
@@ -1051,6 +1073,15 @@ struct AIEngineSection: View {
                 subtitle: "Pay-as-you-go with your own keys. Stored locally on this Mac.",
                 providers: CloudProvider.allCases.filter { !$0.usesOAuth }
             )
+        }
+    }
+
+    private var selectedOllamaCloudModels: [LLMModel] {
+        var seen = Set<String>()
+        return ModelUseScope.allCases.compactMap { scope in
+            let model = LLMModel.option(id: bridge.settings.modelID(for: scope))
+            guard model.isOllama, model.isCloud else { return nil }
+            return seen.insert(model.id).inserted ? model : nil
         }
     }
 }
@@ -1120,13 +1151,15 @@ private struct ModelScopeCard: View {
     let scope: ModelUseScope
     let title: String
     let subtitle: String
+    let onOpenPicker: () -> Void
 
     private var currentID: String { bridge.settings.modelID(for: scope) }
+    private var currentModel: LLMModel { LLMModel.option(id: currentID) }
 
-    private var modelSelection: Binding<String> {
-        Binding(
-            get: { currentID },
-            set: { bridge.perform(.chooseModel($0, scope)) }
+    private var ollamaCloudSignInNotice: String? {
+        AIEngineStatusCopy.ollamaCloudSignInNotice(
+            for: currentModel,
+            signInStatus: bridge.bootstrap.ollamaSignedIn
         )
     }
 
@@ -1138,18 +1171,13 @@ private struct ModelScopeCard: View {
                     Text(subtitle).font(.system(size: 12)).foregroundStyle(FlowTheme.inkSecondary)
                 }
                 SettingRow("Model") {
-                    Menu {
-                        modelSection("Ollama (local)", LLMModel.ollamaModels.filter { !$0.isCloud })
-                        modelSection("Ollama (cloud)", LLMModel.ollamaModels.filter(\.isCloud))
-                        modelSection(CloudProvider.openAI.displayName, LLMModel.cloudModels(for: .openAI))
-                        modelSection(CloudProvider.anthropic.displayName, LLMModel.cloudModels(for: .anthropic))
-                        modelSection(CloudProvider.gemini.displayName, LLMModel.cloudModels(for: .gemini))
-                        modelSection(CloudProvider.openAICodex.displayName, LLMModel.codexModels)
-                    } label: {
-                        MenuFieldLabel(text: LLMModel.option(id: currentID).shortName)
+                    Button(action: onOpenPicker) {
+                        ModelTriggerLabel(text: currentModel.shortName)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
+                    .buttonStyle(.plain)
+                }
+                if let ollamaCloudSignInNotice {
+                    InlineInfoRow(text: ollamaCloudSignInNotice)
                 }
                 SettingRow("Thinking") {
                     PillPicker(options: ThinkingLevel.allCases,
@@ -1159,23 +1187,338 @@ private struct ModelScopeCard: View {
             }
         }
     }
+}
 
-    /// One labeled group of model choices. An inline Picker (not hand-rolled
-    /// Buttons) so every section reserves the same checkmark gutter — otherwise
-    /// only the section containing the selected model indents, which reads as a
-    /// stray leading space. Filtered through the scope (Ask Nugumi shows
-    /// vision-capable only) and hidden entirely when empty.
-    @ViewBuilder
-    private func modelSection(_ title: String, _ source: [LLMModel]) -> some View {
-        let models = scope.availableModels(from: source)
-        if !models.isEmpty {
-            Picker(title, selection: modelSelection) {
-                ForEach(models, id: \.id) { model in
-                    Text(model.displayName).tag(model.id)
+/// The "Model" field — opens the searchable picker sheet. Mirrors
+/// `MenuFieldLabel` but carries its own chevron (no native Menu to draw one).
+private struct ModelTriggerLabel: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(FlowTheme.ink)
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(FlowTheme.inkTertiary)
+        }
+        .padding(.vertical, 7)
+        .padding(.horizontal, 12)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+    }
+}
+
+/// Where a model comes from, shown on Ready-section rows so same-named models
+/// from different providers (e.g. GPT-5.5 via ChatGPT vs OpenAI) are tellable
+/// apart.
+private func modelSourceLabel(_ model: LLMModel) -> String {
+    switch model.backend {
+    case .ollama(let requiresAccount):
+        return requiresAccount ? "Ollama Cloud" : "Ollama"
+    case .cloud(let provider):
+        return provider.displayName
+    }
+}
+
+/// Whether a model can serve a request right now, for the picker's status tags.
+@MainActor
+private func modelIsUsable(_ model: LLMModel, bridge: NugumiSettingsBridge) -> Bool {
+    if let provider = model.cloudProvider {
+        return bridge.hasCredentials(provider)
+    }
+    return bridge.bootstrap.isReady(for: model.id, requiresAccount: model.isCloud)
+}
+
+enum ModelAvailability {
+    case ready       // keyed / signed in / installed — usable right now
+    case needsSetup  // provider not keyed, or local model not installed
+    case paidPlan    // Ollama cloud model that needs a paid Ollama plan
+
+    @MainActor
+    static func of(_ model: LLMModel, bridge: NugumiSettingsBridge) -> ModelAvailability {
+        // Paid wins over sign-in: it holds even once signed in (a free account
+        // won't run these), so it's the more important signal.
+        if model.requiresPaidOllamaPlan { return .paidPlan }
+        return modelIsUsable(model, bridge: bridge) ? .ready : .needsSetup
+    }
+
+    var tag: String? {
+        switch self {
+        case .ready: return nil
+        case .needsSetup: return "needs setup"
+        case .paidPlan: return "paid plan"
+        }
+    }
+}
+
+/// Pure layout helper: usable models float up into one flat "Ready" list; the
+/// rest stay grouped by provider. Pulled out of the view so the partitioning is
+/// unit-testable without a live bridge.
+enum ModelGrouping {
+    struct Group: Equatable { let title: String; let models: [LLMModel] }
+    struct Result: Equatable { let ready: [LLMModel]; let rest: [Group] }
+
+    static func partition(groups: [Group], readyIDs: Set<String>) -> Result {
+        var ready: [LLMModel] = []
+        var seen = Set<String>()
+        for group in groups {
+            for model in group.models where readyIDs.contains(model.id) && seen.insert(model.id).inserted {
+                ready.append(model)
+            }
+        }
+        let rest = groups.compactMap { group -> Group? in
+            let leftover = group.models.filter { !readyIDs.contains($0.id) }
+            return leftover.isEmpty ? nil : Group(title: group.title, models: leftover)
+        }
+        return Result(ready: ready, rest: rest)
+    }
+}
+
+/// Dims the section and centers the picker panel. Clicking the scrim — anywhere
+/// outside the panel — closes it.
+private struct ModelPickerOverlay: View {
+    let scope: ModelUseScope
+    let onDismiss: () -> Void
+    let onChoose: (String) -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+            ModelPickerPanel(scope: scope, onDismiss: onDismiss, onChoose: onChoose)
+        }
+    }
+}
+
+/// Searchable model picker panel. Replaces the overflowing inline Menu: a search
+/// box, a "Ready to use" section, then a section per provider for models that
+/// still need setup or a paid plan.
+private struct ModelPickerPanel: View {
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+    let scope: ModelUseScope
+    let onDismiss: () -> Void
+    let onChoose: (String) -> Void
+
+    @State private var search = ""
+
+    private var currentID: String { bridge.settings.modelID(for: scope) }
+
+    private var groups: [ModelGrouping.Group] {
+        let raw: [(String, [LLMModel])] = [
+            ("Ollama (local)", LLMModel.localOllamaModels),
+            ("Ollama (cloud)", LLMModel.ollamaCloudModels),
+            (CloudProvider.openAI.displayName, LLMModel.cloudModels(for: .openAI)),
+            (CloudProvider.anthropic.displayName, LLMModel.cloudModels(for: .anthropic)),
+            (CloudProvider.gemini.displayName, LLMModel.cloudModels(for: .gemini)),
+            (CloudProvider.openRouter.displayName, LLMModel.cloudModels(for: .openRouter)),
+            (CloudProvider.anthropicClaudeCode.displayName, LLMModel.cloudModels(for: .anthropicClaudeCode)),
+            (CloudProvider.openAICodex.displayName, LLMModel.codexModels)
+        ]
+        return raw.compactMap { title, models in
+            let filtered = scope.availableModels(from: models).filter(matches)
+            return filtered.isEmpty ? nil : ModelGrouping.Group(title: title, models: filtered)
+        }
+    }
+
+    private func matches(_ model: LLMModel) -> Bool {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        return model.displayName.lowercased().contains(q) || model.shortName.lowercased().contains(q)
+    }
+
+    private var partitioned: ModelGrouping.Result {
+        let readyIDs = Set(groups.flatMap(\.models)
+            .filter { ModelAvailability.of($0, bridge: bridge) == .ready }
+            .map(\.id))
+        return ModelGrouping.partition(groups: groups, readyIDs: readyIDs)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            searchField
+            Divider().background(FlowTheme.hairline)
+            list
+        }
+        .frame(width: 440, height: 540)
+        .background(Color(white: 0.11))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(FlowTheme.hairline, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Choose a model")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(FlowTheme.ink)
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                    .frame(width: 24, height: 24)
+                    .background(Circle().fill(FlowTheme.subtleFill))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(FlowTheme.inkTertiary)
+            TextField("Search models", text: $search)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(FlowTheme.ink)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
+
+    private var list: some View {
+        let parts = partitioned
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                if !parts.ready.isEmpty {
+                    // No provider header here, so each row names its own source —
+                    // otherwise GPT-5.5 from ChatGPT vs OpenAI look identical.
+                    sectionHeader("Ready to use")
+                    ForEach(parts.ready, id: \.id) { row($0, trailing: .source) }
+                }
+                ForEach(parts.rest, id: \.title) { group in
+                    sectionHeader(group.title)
+                    ForEach(group.models, id: \.id) { row($0, trailing: .tag) }
+                }
+                if parts.ready.isEmpty && parts.rest.isEmpty {
+                    Text("No models match “\(search)”.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
                 }
             }
-            .pickerStyle(.inline)
+            .padding(.vertical, 8)
         }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(FlowTheme.inkTertiary)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+    }
+
+    /// What the trailing edge of a row shows: the provider name (Ready section,
+    /// which has no header to disambiguate) or the setup/paid tag (grouped
+    /// sections, where the header already names the provider).
+    private enum RowTrailing { case source, tag }
+
+    private func row(_ model: LLMModel, trailing: RowTrailing) -> some View {
+        let selected = model.id == currentID
+        return Button { onChoose(model.id) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(FlowTheme.accent)
+                    .opacity(selected ? 1 : 0)
+                    .frame(width: 14)
+                Text(model.displayName)
+                    .font(.system(size: 13))
+                    .foregroundStyle(FlowTheme.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                rowTrailing(model, trailing)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(selected ? FlowTheme.subtleFill : Color.clear)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func rowTrailing(_ model: LLMModel, _ trailing: RowTrailing) -> some View {
+        switch trailing {
+        case .source:
+            Text(modelSourceLabel(model))
+                .font(.system(size: 11))
+                .foregroundStyle(FlowTheme.inkTertiary)
+        case .tag:
+            let availability = ModelAvailability.of(model, bridge: bridge)
+            if let tag = availability.tag {
+                Text(tag)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(availability == .paidPlan ? FlowTheme.accent : FlowTheme.inkTertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(FlowTheme.subtleFill))
+            }
+        }
+    }
+}
+
+enum AIEngineStatusCopy {
+    static let ollamaCloudSignInNoticeText = "This model runs on Ollama's cloud with a free Ollama account. Local Ollama models work without signing in."
+    static let ollamaCloudPaidNoticeText = "This model runs on Ollama's cloud and needs a paid Ollama plan. Local Ollama models work for free without signing in."
+
+    static func ollamaCloudSignInNotice(
+        for model: LLMModel,
+        signInStatus: BootstrapStepStatus
+    ) -> String? {
+        guard model.isOllama, model.isCloud else { return nil }
+        switch signInStatus {
+        case .needsAction, .failed:
+            return model.requiresPaidOllamaPlan ? ollamaCloudPaidNoticeText : ollamaCloudSignInNoticeText
+        case .unknown, .checking, .ok, .working:
+            return nil
+        }
+    }
+}
+
+private struct InlineInfoRow: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .frame(width: 14)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(FlowTheme.subtleFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(FlowTheme.hairline, lineWidth: 1)
+        )
     }
 }
 
@@ -1241,6 +1584,8 @@ private struct ProviderRow: View {
             switch result {
             case .success(let preview):
                 testResult = "✓ Working — “\(preview)”"
+            case .info(let message):
+                testResult = "✓ \(message)"
             case .failure(let message):
                 testResult = "✕ \(message)"
             }
@@ -1285,13 +1630,47 @@ private struct OllamaSetupCard: View {
                     status: state.serverRunning,
                     primary: StepButton(title: "Open Ollama") { bridge.perform(.launchOllama) }
                 )
-                Divider().background(FlowTheme.hairline)
+                InlineInfoRow(text: "Once Ollama is running, download a model in the Ollama app, then open the Models tab and pick it.")
+            }
+        }
+    }
+}
+
+private struct OllamaCloudSetupCard: View {
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+    let models: [LLMModel]
+
+    private var title: String {
+        models.count == 1
+            ? "Ollama cloud model"
+            : "Ollama cloud models"
+    }
+
+    private var subtitle: String {
+        let names = models.map(\.shortName).joined(separator: ", ")
+        let verb = models.count == 1 ? "runs" : "run"
+        let plan = models.contains(where: \.requiresPaidOllamaPlan)
+            ? "A free Ollama account covers gpt-oss:120b; other cloud models need a paid Ollama plan."
+            : "Sign in with a free Ollama account."
+        return "\(names) \(verb) on Ollama's cloud. \(plan) Local Ollama models work without an account."
+    }
+
+    var body: some View {
+        SubCard {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(FlowTheme.ink)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 SetupStepRow(
-                    title: "3.  Sign in to Ollama (free)",
-                    status: state.ollamaSignedIn,
-                    okMessage: bridge.requiresOllamaAccount
-                        ? "Signed in to your free Ollama account."
-                        : "Not needed if you only use Offline.",
+                    title: "Sign in to Ollama",
+                    status: bridge.bootstrap.ollamaSignedIn,
+                    okMessage: "Signed in to your free Ollama account.",
                     primary: StepButton(title: "Open Ollama") { bridge.perform(.openOllamaSignIn) },
                     secondary: StepButton(title: "Re-check") { bridge.perform(.refreshBootstrap) }
                 )
