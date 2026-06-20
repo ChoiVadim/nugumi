@@ -454,7 +454,12 @@ final class MicrophoneCapture {
     static func requestAuthorization() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
+        case .notDetermined:
+            // requestAccess crashes if NSMicrophoneUsageDescription is missing
+            // (e.g. `swift run`, which has no Info.plist) — only prompt when the
+            // bundle declares it. The shipped .app always does.
+            guard Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") != nil else { return false }
+            return await AVCaptureDevice.requestAccess(for: .audio)
         default: return false
         }
     }
@@ -1692,6 +1697,7 @@ final class LiveTranslationController: NSObject {
     private var segmentStart: Date?
 
     var onMissingAPIKey: (() -> Void)?
+    var onMicrophonePermissionDenied: (() -> Void)?
 
     func toggle(apiKey: String?, targetLanguage: TranslationLanguage) {
         // The hotkey only shows/hides the window — it never changes pause/run state.
@@ -1890,7 +1896,9 @@ final class LiveTranslationController: NSObject {
         case .microphone:
             Task { [weak self] in
                 guard await MicrophoneCapture.requestAuthorization() else {
-                    self?.panel.update(status: "Microphone access denied — enable it in System Settings ▸ Privacy ▸ Microphone.")
+                    guard let self else { return }
+                    self.onMicrophonePermissionDenied?()
+                    self.stop(finalStatus: "Microphone access needed", keepVisible: false)
                     return
                 }
                 guard let self, self.isRunning, self.startGeneration == generation else { return }

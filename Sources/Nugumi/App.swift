@@ -1083,6 +1083,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private lazy var liveTranslationController: LiveTranslationController = {
         let controller = LiveTranslationController()
         controller.onMissingAPIKey = { [weak self] in self?.presentLiveTranslationAPIKeyAlert() }
+        controller.onMicrophonePermissionDenied = { [weak self] in self?.presentMicrophonePermissionAlert() }
         // Captions follow the target language: forward changes (the main window
         // writes targetLanguageID to UserDefaults) into a running session.
         // `updateTargetLanguage` no-ops unless a session is active, so this is
@@ -2077,6 +2078,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         ).showModal()
         guard response == .alertFirstButtonReturn else { return }
         presentMainWindow(section: .aiEngine)
+    }
+
+    @MainActor
+    private func presentMicrophonePermissionAlert() {
+        NSApp.activate(ignoringOtherApps: true)
+        let response = NugumiAlertController(
+            title: "Microphone access needed",
+            message: "Live captions listen to your microphone. Allow access under System Settings → Privacy & Security → Microphone, then start again.",
+            primaryButtonTitle: "Open Settings",
+            secondaryButtonTitle: "Cancel"
+        ).showModal()
+        guard response == .alertFirstButtonReturn else { return }
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+        NSWorkspace.shared.open(url)
     }
 
     private func setupBootstrap() {
