@@ -2259,19 +2259,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func makeStatusBarMenu() -> NSMenu {
         let menu = NSMenu()
 
-        let live = shortcut(for: .liveTranslation)
-        let liveItem = NSMenuItem(
-            title: "Live translation captions",
-            action: #selector(toggleLiveTranslationFromMenu),
-            keyEquivalent: live.menuKeyEquivalent
-        )
-        liveItem.keyEquivalentModifierMask = live.keyEquivalentModifierMask
-        liveItem.image = NSImage(systemSymbolName: "captions.bubble", accessibilityDescription: "Live translation")
-        liveItem.target = self
-        liveItem.tag = MenuItemTag.liveTranslation.rawValue
-        menu.addItem(liveItem)
-        menu.addItem(.separator())
-
         if isRunningFromAppBundle {
             let updates: NSMenuItem
             if let version = availableUpdate?.displayVersionString {
