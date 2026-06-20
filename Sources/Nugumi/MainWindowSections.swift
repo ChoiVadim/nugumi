@@ -58,14 +58,17 @@ private struct ReadOnlyField: View {
 
 private struct KeyCap: View {
     let text: String
+    /// Dimmed style for a fixed, non-rebindable secondary cap (e.g. the Ask
+    /// Nugumi ⌃⌥A alias shown next to its configurable shortcut).
+    var muted: Bool = false
     var body: some View {
         Text(text.isEmpty ? "—" : text)
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
-            .foregroundStyle(FlowTheme.ink)
+            .foregroundStyle(muted ? FlowTheme.inkSecondary : FlowTheme.ink)
             .padding(.vertical, 5)
             .padding(.horizontal, 10)
             .frame(minWidth: 56)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(muted ? 0.04 : 0.08)))
             .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
     }
 }
@@ -118,7 +121,7 @@ private struct HomeContent: View {
                         Text("Welcome back")
                             .font(FlowTheme.serif(30))
                             .foregroundStyle(FlowTheme.ink)
-                        Text("Your recent translations and chats with Nugumi.")
+                        Text("Your recent results and chats with Nugumi.")
                             .font(.system(size: 14))
                             .foregroundStyle(FlowTheme.inkSecondary)
                     }
@@ -292,76 +295,89 @@ private struct InsightsContent: View {
 
     var body: some View {
         DetailCard {
-            VStack(alignment: .leading, spacing: 26) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Insights")
-                        .font(FlowTheme.serif(30))
-                        .foregroundStyle(FlowTheme.ink)
-                    Text("Your translating, by the numbers.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                }
-
-                HStack(spacing: 12) {
-                    StatTile(value: "\(snapshot.currentMonthWords)", label: "words this month", accent: true)
-                    StatTile(value: "\(snapshot.longestStreak)", label: "longest streak")
-                    StatTile(value: "\(snapshot.activeDays)", label: "active days")
-                    StatTile(value: "\(snapshot.averageWordsPerActiveDay)", label: "avg / day")
-                }
-
-                // Two equal-height cards: breakdowns (left) and the activity calendar (right).
-                HStack(alignment: .top, spacing: 12) {
-                    SubCard(padding: 18, fillHeight: true) {
-                        VStack(alignment: .leading, spacing: 18) {
-                            breakdownColumn(
-                                title: "Workflow mix",
-                                rows: snapshot.modeBreakdown
-                                    .filter { $0.count > 0 }
-                                    .map { ($0.kind.title, "\($0.count)", $0.fraction) }
-                            )
-                            Divider().background(FlowTheme.hairline)
-                            breakdownColumn(
-                                title: "Languages",
-                                rows: snapshot.languageBreakdown
-                                    .filter { $0.count > 0 }
-                                    .prefix(5)
-                                    .map { ($0.displayName.isEmpty ? "Unknown" : $0.displayName, "\($0.count)", $0.fraction) }
-                            )
-                            Spacer(minLength: 0)
+            // Center/fill the cards when they fit; scroll when the window is too
+            // short (e.g. at 600pt) instead of clipping or shoving the window off-screen.
+            GeometryReader { geo in
+                // Donuts scale with the window so the cards stay filled on large screens.
+                let donutSize = min(160, max(104, geo.size.width * 0.10))
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 26) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Insights")
+                                .font(FlowTheme.serif(30))
+                                .foregroundStyle(FlowTheme.ink)
+                            Text("Your work, by the numbers.")
+                                .font(.system(size: 14))
+                                .foregroundStyle(FlowTheme.inkSecondary)
                         }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    SubCard(padding: 18, fillHeight: true) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text("Activity")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(FlowTheme.ink)
-                                Spacer()
-                                Text("\(snapshot.currentStreak)-day streak")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(FlowTheme.inkTertiary)
-                            }
-                            ActivityHeatmap(weeks: snapshot.heatmapWeeks)
-                            if let busiest = snapshot.busiestDay, busiest.wordCount > 0 {
-                                Text("Busiest day · \(busiest.date.formatted(.dateTime.month().day())) — \(busiest.wordCount) words")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(FlowTheme.inkTertiary)
-                            }
-                            Spacer(minLength: 0)
+                        HStack(spacing: 12) {
+                            StatTile(value: "\(snapshot.currentMonthWords)", label: "words this month", accent: true)
+                            StatTile(value: "\(snapshot.longestStreak)", label: "longest streak")
+                            StatTile(value: "\(snapshot.activeDays)", label: "active days")
+                            StatTile(value: "\(snapshot.averageWordsPerActiveDay)", label: "avg / day")
                         }
+
+                        // Two equal-height cards: breakdowns (left) and the activity calendar (right).
+                        HStack(alignment: .top, spacing: 12) {
+                            SubCard(padding: 18, fillHeight: true) {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    Spacer(minLength: 0)
+                                    breakdownColumn(
+                                        title: "Workflow mix",
+                                        rows: snapshot.modeBreakdown
+                                            .filter { $0.count > 0 }
+                                            .map { ($0.kind.title, "\($0.count)", $0.fraction) },
+                                        donutSize: donutSize
+                                    )
+                                    breakdownColumn(
+                                        title: "Languages",
+                                        rows: snapshot.languageBreakdown
+                                            .filter { $0.count > 0 }
+                                            .prefix(5)
+                                            .map { ($0.displayName.isEmpty ? "Unknown" : $0.displayName, "\($0.count)", $0.fraction) },
+                                        donutSize: donutSize
+                                    )
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                            SubCard(padding: 18, fillHeight: true) {
+                                VStack(alignment: .leading, spacing: 14) {
+                                    Spacer(minLength: 0)
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text("Activity")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundStyle(FlowTheme.ink)
+                                        Spacer()
+                                        Text("\(snapshot.currentStreak)-day streak")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(FlowTheme.inkTertiary)
+                                    }
+                                    ActivityHeatmap(weeks: snapshot.heatmapWeeks)
+                                    if let busiest = snapshot.busiestDay, busiest.wordCount > 0 {
+                                        Text("Busiest day · \(busiest.date.formatted(.dateTime.month().day())) — \(busiest.wordCount) words")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(FlowTheme.inkTertiary)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                        .frame(maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(38)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                    .background(ScrollerConfigurator())
                 }
-                .frame(maxHeight: .infinity)
             }
-            .padding(38)
         }
     }
 
     @ViewBuilder
-    private func breakdownColumn(title: String, rows: [(String, String, Double)]) -> some View {
+    private func breakdownColumn(title: String, rows: [(String, String, Double)], donutSize: CGFloat) -> some View {
         let rows = rows.sorted { $0.2 > $1.2 }
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
@@ -375,7 +391,8 @@ private struct InsightsContent: View {
                 HStack(alignment: .center, spacing: 18) {
                     DonutChart(
                         fractions: rows.map(\.2),
-                        centerText: "\(Int((rows[0].2 * 100).rounded()))%"
+                        centerText: "\(Int((rows[0].2 * 100).rounded()))%",
+                        size: donutSize
                     )
                     VStack(spacing: 10) {
                         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
@@ -464,7 +481,7 @@ private struct DonutChart: View {
             }
 
             Text(centerText)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .font(.system(size: size * 0.23, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
@@ -939,11 +956,11 @@ struct LanguagesSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
-        DetailContainer("Languages", subtitle: "What Nugumi translates into.") {
+        DetailContainer("Languages", subtitle: "The language Nugumi replies in.") {
             SubCard {
                 VStack(spacing: 18) {
                     SettingRow("Reading language",
-                               subtitle: "Translating selected text or a screen area renders into this language.") {
+                               subtitle: "Selected text or a screen area renders into this language.") {
                         LanguageMenu(current: bridge.settings.targetLanguage) {
                             bridge.perform(.setTargetLanguage($0))
                         }
@@ -1756,6 +1773,15 @@ private struct SetupStepRow: View {
 struct ShortcutsSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
+    /// Actions bucketed into their display groups, preserving allCases order
+    /// within each group.
+    private var groups: [(group: ShortcutGroup, actions: [GlobalShortcutAction])] {
+        ShortcutGroup.allCases.compactMap { group in
+            let actions = GlobalShortcutAction.allCases.filter { $0.group == group }
+            return actions.isEmpty ? nil : (group, actions)
+        }
+    }
+
     var body: some View {
         DetailContainer(
             "Shortcuts",
@@ -1764,21 +1790,40 @@ struct ShortcutsSection: View {
                 bridge.perform(.resetShortcuts)
             }
         ) {
-            SubCard {
-                VStack(spacing: 0) {
-                    ForEach(Array(GlobalShortcutAction.allCases.enumerated()), id: \.element) { index, action in
-                        if index > 0 { Divider().background(FlowTheme.hairline) }
-                        SettingRow(action.menuTitle) {
-                            HStack(spacing: 12) {
-                                KeyCap(text: bridge.settings.shortcut(for: action).displayString)
-                                SecondaryButton(title: "Change") {
-                                    bridge.perform(.recordShortcut(action))
-                                }
+            ForEach(groups, id: \.group) { group, actions in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(group.title.uppercased())
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.6)
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .padding(.leading, 4)
+                    SubCard {
+                        VStack(spacing: 18) {
+                            ForEach(Array(actions.enumerated()), id: \.element) { index, action in
+                                if index > 0 { Divider().background(FlowTheme.hairline) }
+                                shortcutRow(action)
                             }
                         }
-                        .padding(.vertical, 10)
                     }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shortcutRow(_ action: GlobalShortcutAction) -> some View {
+        SettingRow(action.menuTitle) {
+            HStack(spacing: 8) {
+                KeyCap(text: bridge.settings.shortcut(for: action).displayString)
+                // Ask Nugumi also fires on a fixed ⌃⌥A alias — shown muted since
+                // "Change" only rebinds the primary (double-tap ⌃) shortcut.
+                if action == .askNugumi {
+                    KeyCap(text: GlobalShortcutAction.askNugumiAlias.displayString, muted: true)
+                }
+                SecondaryButton(title: "Change") {
+                    bridge.perform(.recordShortcut(action))
+                }
+                .padding(.leading, 4)
             }
         }
     }

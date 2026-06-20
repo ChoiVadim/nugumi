@@ -40,6 +40,7 @@ private enum MenuItemTag: Int {
     case contactSupport = 125
     case permissionsOnboarding = 126
     case mainWindow = 127
+    case liveTranslation = 128
 }
 
 enum InvisibilityState {
@@ -540,7 +541,13 @@ private struct GlobalHotKeyDefinition {
     let displayString: String
 
     init(action: GlobalShortcutAction, shortcut: GlobalShortcut) {
-        id = action.id
+        self.init(id: action.id, shortcut: shortcut)
+    }
+
+    /// Explicit-id variant for fixed hotkeys that aren't backed by a
+    /// `GlobalShortcutAction` slot (e.g. the always-on Ask Nugumi ⌃⌥A alias).
+    init(id: UInt32, shortcut: GlobalShortcut) {
+        self.id = id
         keyCode = shortcut.keyCode
         carbonModifiers = shortcut.carbonModifiers
         modifierFlags = shortcut.modifiers
@@ -1073,6 +1080,26 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var screenshotPanelSide: TranslationPanelController.Side?
     private var screenshotDragTracker: ScreenshotDragTracker?
     private var globalHotKeys: [GlobalHotKey] = []
+    private lazy var liveTranslationController: LiveTranslationController = {
+        let controller = LiveTranslationController()
+        controller.onMissingAPIKey = { [weak self] in self?.presentLiveTranslationAPIKeyAlert() }
+        // Captions follow the target language: forward changes (the main window
+        // writes targetLanguageID to UserDefaults) into a running session.
+        // `updateTargetLanguage` no-ops unless a session is active, so this is
+        // cheap, and the observer is installed lazily on first use so users who
+        // never open live captions pay nothing.
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self, weak controller] _ in
+            Task { @MainActor in
+                guard let self, let controller else { return }
+                controller.updateTargetLanguage(self.targetLanguage)
+            }
+        }
+        return controller
+    }()
     private var modifierDetectors: [DoubleModifierPressDetector] = []
     private var shortcutRecorderWindowController: ShortcutRecorderWindowController?
     private var lastReplacementSourcePID: pid_t?
@@ -1469,7 +1496,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             (.translateOrReply, { [weak self] in self?.startSelectionTranslateOrReply() }),
             (.toggleInvisibility, { [weak self] in self?.toggleInvisibilityMode() }),
             (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() }),
-            (.toggleWritingLanguage, { [weak self] in self?.toggleWritingLanguageAction() })
+            (.toggleWritingLanguage, { [weak self] in self?.toggleWritingLanguageAction() }),
+            (.liveTranslation, { [weak self] in self?.toggleLiveTranslation() })
         ]
 
         for (action, handler) in bindings {
@@ -1491,6 +1519,16 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 detector.start()
             }
         }
+
+        // Always-on ⌃⌥A alias for Ask Nugumi, in addition to its configurable
+        // (default double-tap ⌃) shortcut above. Fixed id avoids colliding with
+        // the action ids 1...7.
+        let askNugumiAlias = GlobalHotKey(
+            definition: GlobalHotKeyDefinition(id: 100, shortcut: GlobalShortcutAction.askNugumiAlias),
+            onPressed: { [weak self] in self?.startAskNugumiPrompt() }
+        )
+        globalHotKeys.append(askNugumiAlias)
+        askNugumiAlias.register()
     }
 
     @MainActor
@@ -2011,6 +2049,36 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         LanguageToggleHUD.shared.show(text: "Writing in \(next.displayName)")
     }
 
+    @MainActor
+    @objc private func toggleLiveTranslationFromMenu() {
+        toggleLiveTranslation()
+    }
+
+    /// Live translation runs exclusively on OpenAI's realtime model, so it is
+    /// gated on an OpenAI API key regardless of which provider the rest of the
+    /// app uses. A missing/empty key surfaces `presentLiveTranslationAPIKeyAlert`
+    /// via the controller's `onMissingAPIKey` hook before any capture starts.
+    @MainActor
+    private func toggleLiveTranslation() {
+        liveTranslationController.toggle(
+            apiKey: KeychainStore.apiKey(for: .openAI),
+            targetLanguage: targetLanguage
+        )
+    }
+
+    @MainActor
+    private func presentLiveTranslationAPIKeyAlert() {
+        NSApp.activate(ignoringOtherApps: true)
+        let response = NugumiAlertController(
+            title: "OpenAI API key required",
+            message: "Live translation runs on OpenAI's realtime model. Add an OpenAI API key under AI Engine → API key models, then try again.",
+            primaryButtonTitle: "Open AI Engine",
+            secondaryButtonTitle: "Cancel"
+        ).showModal()
+        guard response == .alertFirstButtonReturn else { return }
+        presentMainWindow(section: .aiEngine)
+    }
+
     private func setupBootstrap() {
         wireBootstrap()
         Task { @MainActor [weak self] in
@@ -2175,6 +2243,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @MainActor
     private func makeStatusBarMenu() -> NSMenu {
         let menu = NSMenu()
+
+        let live = shortcut(for: .liveTranslation)
+        let liveItem = NSMenuItem(
+            title: "Live translation captions",
+            action: #selector(toggleLiveTranslationFromMenu),
+            keyEquivalent: live.menuKeyEquivalent
+        )
+        liveItem.keyEquivalentModifierMask = live.keyEquivalentModifierMask
+        liveItem.image = NSImage(systemSymbolName: "captions.bubble", accessibilityDescription: "Live translation")
+        liveItem.target = self
+        liveItem.tag = MenuItemTag.liveTranslation.rawValue
+        menu.addItem(liveItem)
+        menu.addItem(.separator())
+
         if isRunningFromAppBundle {
             let updates: NSMenuItem
             if let version = availableUpdate?.displayVersionString {
@@ -4067,6 +4149,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func setKeyboardShortcut(_ shortcut: GlobalShortcut, for action: GlobalShortcutAction) -> Bool {
+        // Reserve the always-on Ask Nugumi alias so no action can shadow it.
+        if shortcut == GlobalShortcutAction.askNugumiAlias {
+            return false
+        }
         for otherAction in GlobalShortcutAction.allCases where otherAction != action {
             if self.shortcut(for: otherAction) == shortcut {
                 return false
@@ -4090,7 +4176,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @objc private func resetSettings() {
         let response = NugumiAlertController(
             title: "Reset settings?",
-            message: "This restores languages, main mode, display, output, AI mode, and keyboard shortcuts. Snippets, dictionary, your email voice sample, and usage stats stay unchanged.",
+            message: "This restores languages, per-app modes, main mode, display, output, AI mode, live captions, and keyboard shortcuts. Snippets, dictionary, saved API keys, your email voice sample, and usage stats stay unchanged.",
             primaryButtonTitle: "Reset",
             secondaryButtonTitle: "Cancel"
         ).showModal()
@@ -4109,8 +4195,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         [
             "targetLanguageID",
             "draftTargetLanguageID",
+            "writingToggleAlternateID",
+            "writingToggleLanguageAID",        // legacy quick-switch A/B pair
+            "writingToggleLanguageBID",
             "floatingButtonDefaultMode",
             "selectionDisplayMode",
+            "liveTranslationSource",            // live captions: audio source + show-original
+            "liveTranslationShowSource",
+            "customAppAssignmentsV1",           // per-app modes (re-synced below)
+            "suppressedBuiltInAppsV1",
             ModelUseScope.textActions.defaultsKey,
             ModelUseScope.askNugumi.defaultsKey,
             ModelUseScope.textActions.thinkingDefaultsKey,
@@ -4128,6 +4221,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         for category in AppCategory.allCases {
             defaults.removeObject(forKey: "writingStyle.\(category.rawValue)")
         }
+        syncAppClassifierOverrides()   // clear the static per-app overrides cache live
 
         GlobalShortcutStore.resetToDefaults(defaults: defaults)
         shortcutRecorderWindowController?.close()

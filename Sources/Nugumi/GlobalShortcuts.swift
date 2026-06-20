@@ -9,6 +9,7 @@ enum GlobalShortcutAction: String, CaseIterable {
     case toggleInvisibility
     case askNugumi
     case toggleWritingLanguage
+    case liveTranslation
 
     var id: UInt32 {
         switch self {
@@ -18,6 +19,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .toggleInvisibility: return 4
         case .askNugumi: return 5
         case .toggleWritingLanguage: return 6
+        case .liveTranslation: return 7
         }
     }
 
@@ -33,6 +35,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .toggleInvisibility: return "Toggle invisibility mode"
         case .askNugumi: return "Ask Nugumi"
         case .toggleWritingLanguage: return "Toggle writing language"
+        case .liveTranslation: return "Live translation captions"
         }
     }
 
@@ -40,47 +43,76 @@ enum GlobalShortcutAction: String, CaseIterable {
         "Set \(menuTitle) shortcut"
     }
 
+    var group: ShortcutGroup {
+        switch self {
+        case .translateOrReply, .translateSelection, .toggleWritingLanguage:
+            return .text
+        case .screenshotArea, .liveTranslation:
+            return .capture
+        case .askNugumi:
+            return .assistant
+        case .toggleInvisibility:
+            return .app
+        }
+    }
+
     var defaultShortcut: GlobalShortcut {
         switch self {
         case .translateOrReply:
-            return GlobalShortcut(
-                keyCode: UInt32(kVK_ANSI_1),
-                modifiers: [.control],
-                keyEquivalent: "1",
-                keyDisplay: "1"
-            )
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_T), letter: "T")
         case .translateSelection:
-            return GlobalShortcut(
-                keyCode: UInt32(kVK_ANSI_2),
-                modifiers: [.control],
-                keyEquivalent: "2",
-                keyDisplay: "2"
-            )
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_R), letter: "R")
         case .screenshotArea:
-            return GlobalShortcut(
-                keyCode: UInt32(kVK_ANSI_3),
-                modifiers: [.control],
-                keyEquivalent: "3",
-                keyDisplay: "3"
-            )
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_S), letter: "S")
         case .toggleInvisibility:
-            return GlobalShortcut(
-                keyCode: UInt32(kVK_ANSI_Backslash),
-                modifiers: [.control, .shift],
-                keyEquivalent: "\\",
-                keyDisplay: "\\"
-            )
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_I), letter: "I")
         case .askNugumi:
-            // Preserves the historical "double-tap Control" gesture; user can
-            // rebind to any combo or another double-tap modifier from the menu.
+            // Signature gesture — double-tap ⌃. Stays rebindable so a user
+            // plagued by accidental misfires can move it to a plain combo. The
+            // always-on ⌃⌥A alias (askNugumiAlias) is the discoverable,
+            // menu-visible way in; it is NOT user-rebindable.
             return GlobalShortcut(doubleTapModifier: .control)
         case .toggleWritingLanguage:
-            return GlobalShortcut(
-                keyCode: UInt32(kVK_ANSI_4),
-                modifiers: [.control],
-                keyEquivalent: "4",
-                keyDisplay: "4"
-            )
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_G), letter: "G")
+        case .liveTranslation:
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_L), letter: "L")
+        }
+    }
+
+    /// Always-on secondary trigger for Ask Nugumi (⌃⌥A). Registered alongside
+    /// the rebindable double-tap ⌃ and reserved by the conflict checker so no
+    /// other action can shadow it.
+    static let askNugumiAlias = GlobalShortcut(
+        keyCode: UInt32(kVK_ANSI_A),
+        modifiers: [.control, .option],
+        keyEquivalent: "a",
+        keyDisplay: "A"
+    )
+
+    /// All combo defaults share the ⌃⌥ ("Control+Option") base — the documented
+    /// safe zone for global hotkeys: clear of ⌘-menu commands, ⌃-letter terminal
+    /// bindings, and ⌥-letter accented-character entry. Letters stay mnemonic.
+    private static func comboDefault(keyCode: UInt32, letter: String) -> GlobalShortcut {
+        GlobalShortcut(
+            keyCode: keyCode,
+            modifiers: [.control, .option],
+            keyEquivalent: letter.lowercased(),
+            keyDisplay: letter
+        )
+    }
+}
+
+/// Display grouping for the Shortcuts settings panel — chunks the 7 actions by
+/// the object they act on, so the list reads as a few categories, not a flat wall.
+enum ShortcutGroup: String, CaseIterable {
+    case text, capture, assistant, app
+
+    var title: String {
+        switch self {
+        case .text: return "Text"
+        case .capture: return "Capture"
+        case .assistant: return "Assistant"
+        case .app: return "App"
         }
     }
 }

@@ -511,7 +511,7 @@ private struct UsageStatsMenuSummaryView: View {
                             WorkflowLegendItem(kind: item.kind)
                         }
                         if snapshot.modeBreakdown.allSatisfy({ $0.count == 0 }) {
-                            Text("Start translating to fill this chart")
+                            Text("Start using Nugumi to fill this chart")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(.secondary)
                         }

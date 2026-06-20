@@ -151,7 +151,17 @@ final class CloudModelDiscoveryTests: XCTestCase {
 
     // MARK: Merge
 
-    private let curatedAnthropic = LLMModel.models(for: .anthropic)
+    // API-key catalogs are now empty (models come from /models discovery), so the
+    // merge logic is exercised against a hand-built curated list rather than the
+    // live (empty) catalog — this tests the merge, not the catalog contents.
+    private let curatedAnthropic: [LLMModel] = [
+        .init(id: "claude-haiku-4-5-20251001", shortName: "Claude Haiku 4.5",
+              displayName: "Claude Haiku 4.5 (fast)", backend: .cloud(.anthropic), supportsImages: true),
+        .init(id: "claude-sonnet-4-6", shortName: "Claude Sonnet 4.6",
+              displayName: "Claude Sonnet 4.6", backend: .cloud(.anthropic), supportsImages: true),
+        .init(id: "claude-opus-4-7", shortName: "Claude Opus 4.7",
+              displayName: "Claude Opus 4.7 (top)", backend: .cloud(.anthropic), supportsImages: true),
+    ]
 
     func testMergeNeverFetchedReturnsCuratedUnchanged() {
         let merged = LLMModel.mergedCloudModels(

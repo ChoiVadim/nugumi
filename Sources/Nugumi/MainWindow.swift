@@ -416,7 +416,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.onClose = onClose
 
         let window = MainWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 820),
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -426,12 +426,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 1000, height: 620)
-        window.setFrameAutosaveName("NugumiMainWindowV2")
+        window.minSize = NSSize(width: 1000, height: 720)
+        window.setFrameAutosaveName("NugumiMainWindowV5")
         window.isOpaque = false
         window.backgroundColor = .clear
         window.appearance = NSAppearance(named: .darkAqua)
-        window.center()
+        // Programmatic windows don't auto-restore from the autosave name — do it
+        // explicitly. Center only when there's no remembered frame (first launch).
+        if !window.setFrameUsingName("NugumiMainWindowV5") {
+            window.center()
+        }
 
         super.init(window: window)
         window.delegate = self
@@ -441,6 +445,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let root = MainWindowRootView().environmentObject(bridge)
         let hosting = NSHostingView(rootView: root)
         hosting.translatesAutoresizingMaskIntoConstraints = false
+        // The window's frame is authoritative — don't let tall SwiftUI content
+        // (e.g. Insights' fixed cards) push the window past its set size and off-screen.
+        hosting.sizingOptions = []
 
         let backdrop = NSVisualEffectView()
         backdrop.material = .hudWindow

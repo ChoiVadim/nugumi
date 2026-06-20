@@ -22,37 +22,27 @@ final class CloudThinkingTests: XCTestCase {
         XCTAssertNil(gemini.outputConfig)
     }
 
-    func testClaudeLegacyThinkingUsesBudgetTokens() {
-        let options = CloudThinkingOptions(
+    func testClaudeUsesReasoningEffortViaCompatEndpoint() {
+        // Anthropic's OpenAI-compat /chat/completions rejects native thinking /
+        // output_config (HTTP 400), so Claude routes through reasoning_effort like
+        // every other compat provider — for legacy and newer models alike.
+        let haiku = CloudThinkingOptions(
             provider: .anthropic,
             model: "claude-haiku-4-5-20251001",
             thinkingLevel: .medium
         )
+        XCTAssertEqual(haiku.reasoningEffort, "medium")
+        XCTAssertNil(haiku.thinking)
+        XCTAssertNil(haiku.outputConfig)
 
-        XCTAssertNil(options.reasoningEffort)
-        XCTAssertEqual(options.thinking?.type, "enabled")
-        XCTAssertEqual(options.thinking?.budgetTokens, 2_048)
-        XCTAssertNil(options.outputConfig)
-    }
-
-    func testClaudeAdaptiveThinkingUsesEffortForNewerModels() {
-        let sonnet = CloudThinkingOptions(
-            provider: .anthropic,
-            model: "claude-sonnet-4-6",
-            thinkingLevel: .low
-        )
         let opus = CloudThinkingOptions(
             provider: .anthropic,
             model: "claude-opus-4-7",
             thinkingLevel: .high
         )
-
-        XCTAssertEqual(sonnet.thinking?.type, "adaptive")
-        XCTAssertNil(sonnet.thinking?.budgetTokens)
-        XCTAssertEqual(sonnet.outputConfig?.effort, "low")
-        XCTAssertEqual(opus.thinking?.type, "adaptive")
-        XCTAssertNil(opus.thinking?.budgetTokens)
-        XCTAssertEqual(opus.outputConfig?.effort, "high")
+        XCTAssertEqual(opus.reasoningEffort, "high")
+        XCTAssertNil(opus.thinking)
+        XCTAssertNil(opus.outputConfig)
     }
 
     func testCloudThinkingOptionsEncodeProviderSpecificKeys() throws {
@@ -73,6 +63,6 @@ final class CloudThinkingTests: XCTestCase {
             thinkingLevel: .medium
         ))
         let anthropicJSON = String(data: anthropicData, encoding: .utf8)
-        XCTAssertEqual(anthropicJSON, #"{"output_config":{"effort":"medium"},"thinking":{"type":"adaptive"}}"#)
+        XCTAssertEqual(anthropicJSON, #"{"reasoning_effort":"medium"}"#)
     }
 }
