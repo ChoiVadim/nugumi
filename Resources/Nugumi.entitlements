@@ -11,5 +11,14 @@
     -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <!--
+        Hardened runtime blocks microphone access unless the app is entitled to
+        it. Live Translation captures the mic via AVAudioEngine, so without this
+        AVCaptureDevice.requestAccess fails silently (no system prompt, app never
+        appears in Privacy ▸ Microphone). System audio uses ScreenCaptureKit,
+        which is TCC-gated (NSScreenCaptureUsageDescription), not an entitlement.
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>
