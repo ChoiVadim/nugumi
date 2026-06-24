@@ -3981,7 +3981,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 switch outcome {
                 case .success:
                     self.bootstrap.refresh()
-                    self.applyEnginePreset(.cloud(.openAICodex))
+                    self.applyEnginePreset(.cloud(.openAICodex), force: true)
                     onSave(true)
                 case .cancelled:
                     onSave(false)
@@ -3998,7 +3998,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 switch outcome {
                 case .success:
                     self.bootstrap.refresh()
-                    self.applyEnginePreset(.cloud(.anthropicClaudeCode))
+                    self.applyEnginePreset(.cloud(.anthropicClaudeCode), force: true)
                     onSave(true)
                 case .cancelled:
                     onSave(false)
@@ -4152,15 +4152,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// replaced. The preset itself must be usable right now, so a half-set-up
     /// engine never grabs a slot.
     @MainActor
-    private func applyEnginePreset(_ engine: EngineModelPreset) {
+    /// `force` = the user just connected this engine (entered a key / signed in),
+    /// so snap every slot to its models even if the current pick still works.
+    /// Healing flows (`healModelSlots`, Ollama auto-install) leave it false so a
+    /// working selection is never stolen out from under the user.
+    private func applyEnginePreset(_ engine: EngineModelPreset, force: Bool = false) {
         var applied = false
         for scope in ModelUseScope.allCases {
             guard let presetID = engine.modelID(for: scope),
                   presetID != modelID(for: scope),
                   isModelUsableNow(presetID)
             else { continue }
-            let untouchedDefault = UserDefaults.standard.string(forKey: scope.defaultsKey) == nil
-            guard untouchedDefault || !isModelUsableNow(modelID(for: scope)) else { continue }
+            if !force {
+                let untouchedDefault = UserDefaults.standard.string(forKey: scope.defaultsKey) == nil
+                guard untouchedDefault || !isModelUsableNow(modelID(for: scope)) else { continue }
+            }
             setModelID(presetID, for: scope)
             analyticsClient.track(.modelChanged, properties: [
                 "model_id": presetID,
@@ -4197,11 +4203,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             switch outcome {
             case .saved:
                 self.bootstrap.refresh()
-                self.applyEnginePreset(.cloud(provider))
+                self.applyEnginePreset(.cloud(provider), force: true)
                 onSave(true)
             case .savedUnverified(let detail):
                 self.bootstrap.refresh()
-                self.applyEnginePreset(.cloud(provider))
+                self.applyEnginePreset(.cloud(provider), force: true)
                 self.presentSelectionTranslationError(
                     "Couldn't reach \(provider.displayName) to verify the key (\(detail)). Saved it locally.",
                     title: "Key saved without verification"

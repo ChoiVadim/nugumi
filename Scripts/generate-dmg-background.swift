@@ -31,16 +31,42 @@ glassOverlay.draw(in: backgroundRect.insetBy(dx: 1, dy: 1), angle: 90)
 NSColor.white.withAlphaComponent(0.16).setStroke()
 NSBezierPath(rect: NSRect(x: 0, y: size.height - 1, width: size.width, height: 1)).stroke()
 
-let arrowFont = NSFont.systemFont(ofSize: 64, weight: .ultraLight)
+// Centered single-line text helper (origin is bottom-left, AppKit style).
+func drawCentered(_ text: String, font: NSFont, color: NSColor, y: CGFloat) {
+    let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+    let line = text as NSString
+    let width = line.size(withAttributes: attrs).width
+    line.draw(at: NSPoint(x: (size.width - width) / 2, y: y), withAttributes: attrs)
+}
+
+// Step 1, stated plainly above the icons.
+drawCentered(
+    "Drag Nugumi to Applications",
+    font: NSFont.systemFont(ofSize: 22, weight: .semibold),
+    color: NSColor.white.withAlphaComponent(0.92),
+    y: 318
+)
+
+// Drag arrow between the app icon (x≈145) and the Applications alias (x≈395).
+let arrowFont = NSFont.systemFont(ofSize: 64, weight: .thin)
 let arrowAttributes: [NSAttributedString.Key: Any] = [
     .font: arrowFont,
-    .foregroundColor: NSColor.white.withAlphaComponent(0.28)
+    .foregroundColor: NSColor.white.withAlphaComponent(0.5)
 ]
 let arrow = "→" as NSString
 let arrowSize = arrow.size(withAttributes: arrowAttributes)
 arrow.draw(
     at: NSPoint(x: (size.width - arrowSize.width) / 2, y: 164),
     withAttributes: arrowAttributes
+)
+
+// Step 2 — the part first-time users miss: nothing auto-launches after a
+// drag-install, so spell out that they must open it from Applications.
+drawCentered(
+    "Then open Nugumi from your Applications folder",
+    font: NSFont.systemFont(ofSize: 13, weight: .regular),
+    color: NSColor.white.withAlphaComponent(0.62),
+    y: 44
 )
 
 image.unlockFocus()
