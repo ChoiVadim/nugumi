@@ -2883,6 +2883,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             targetLanguage: language,
             resultLabel: mode.resultLabel,
             loadingPlaceholder: mode.loadingPlaceholder,
+            showsFollowUp: mode == .selection,
             onTargetLanguageSelected: { [weak self] selectedLanguage in
                 self?.retranslateCurrentPanel(
                     text,
@@ -2896,6 +2897,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 )
             },
             onReplace: onReplace,
+            onFollowUp: mode == .selection ? { [weak self] instruction in
+                self?.reviseCurrentPanel(instruction: instruction)
+            } : nil,
             replaceShortcutSourcePID: replaceShortcutSourcePID,
             onClose: { [weak self] in
                 self?.translationPanelController = nil
@@ -2993,6 +2997,42 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// Footer "Revise or ask a follow-up": regenerate the current selection
+    /// result in place from the user's instruction. Reuses the existing
+    /// `runTranslation` path via `TranslationMode.revise`, so all backends and
+    /// streaming come for free. "Previous response" is the latest shown text, so
+    /// chained revises ("now shorter") build on each other.
+    @MainActor
+    private func reviseCurrentPanel(instruction: String) {
+        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let controller = translationPanelController else {
+            return
+        }
+        // Nothing to revise until the first answer has actually arrived.
+        let previous = controller.displayedResultText
+        guard !previous.isEmpty else { return }
+
+        let composed = TranslationMode.composeReviseInput(
+            source: controller.currentSourceText,
+            previous: previous,
+            instruction: trimmed
+        )
+        let requestID = controller.showLoading(placeholder: TranslationMode.revise.loadingPlaceholder)
+        runTranslation(
+            composed,
+            targetLanguage: controller.currentTargetLanguageValue,
+            mode: .revise,
+            thinkingLevel: textThinkingLevel,
+            appCategory: AppCategoryClassifier.frontmostCategory(),
+            composition: nil,
+            useCache: false,
+            usageKind: .selection,
+            controller: controller,
+            requestID: requestID,
+            recordsHistory: false
+        )
+    }
+
     @MainActor
     private func runTranslation(
         _ text: String,
@@ -3004,7 +3044,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         useCache: Bool,
         usageKind: UsageStatsEventKind,
         controller: TranslationPanelController,
-        requestID: UUID
+        requestID: UUID,
+        recordsHistory: Bool = true
     ) {
         if let busyError = translationErrorIfBootstrapBusy() {
             controller.showError(Self.translationPanelErrorMessage(for: busyError), requestID: requestID)
@@ -3012,7 +3053,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         if useCache, let cachedTranslation = translationCache.translation(for: text, targetLanguage: language, thinkingLevel: thinkingLevel) {
-            recordTranslation(source: text, result: cachedTranslation, kind: usageKind, targetLanguage: language)
+            if recordsHistory {
+                recordTranslation(source: text, result: cachedTranslation, kind: usageKind, targetLanguage: language)
+            }
             analyticsClient.trackCompletedUsage(
                 kind: usageKind,
                 targetLanguageID: language.id,
@@ -3042,7 +3085,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     if useCache {
                         self.translationCache.store(translated, for: text, targetLanguage: language, thinkingLevel: thinkingLevel)
                     }
-                    self.recordTranslation(source: text, result: translated, kind: usageKind, targetLanguage: language)
+                    if recordsHistory {
+                        self.recordTranslation(source: text, result: translated, kind: usageKind, targetLanguage: language)
+                    }
                     self.analyticsClient.trackCompletedUsage(
                         kind: usageKind,
                         targetLanguageID: language.id,
@@ -3838,7 +3883,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     case .smartReply:
                         usageKind = .smartReply
                         language = self.draftTargetLanguage
-                    case .selection, .draftMessage:
+                    case .selection, .draftMessage, .revise:
                         usageKind = .screenArea
                         language = self.targetLanguage
                     }
@@ -7625,7 +7670,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         guard let selectedText, !isReadyLockedUntilPanelCloses else { return }
 
         switch currentMode {
-        case .selection:
+        case .selection, .revise:
             onTranslate?(selectedText)
         case .draftMessage:
             onRewrite?(selectedText)
@@ -8378,7 +8423,7 @@ final class PetMascotView: NSView {
 
     private func drawPixelActionBadge() {
         switch mode {
-        case .selection:
+        case .selection, .revise:
             drawTranslateBadge()
         case .draftMessage:
             drawRewriteBadge()
@@ -8574,7 +8619,7 @@ final class PetMascotView: NSView {
             return "Nugumi pet"
         case .ready:
             switch mode {
-            case .selection:
+            case .selection, .revise:
                 return "Translate selection - right-click to Rewrite, Tab to switch to Reply"
             case .draftMessage:
                 return "Rewrite my text - Tab to switch to Reply"
@@ -8739,7 +8784,7 @@ final class FloatingTranslateButtonController {
 
     private func invokeCurrentMode() {
         switch currentMode {
-        case .selection:
+        case .selection, .revise:
             onTranslate(selectedText)
         case .draftMessage:
             onRewrite(selectedText)
@@ -8787,6 +8832,16 @@ private final class AskPromptTextField: NSTextField {
 }
 
 private final class AskPromptTextFieldCell: NSTextFieldCell {}
+
+/// The translation panel's "Revise or ask a follow-up" field. A plain
+/// `NSTextField` is editable by default; we only add Esc-to-close.
+final class FollowUpTextField: NSTextField {
+    var onEscape: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
+}
 
 private final class AskPromptPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -9316,7 +9371,7 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.title = ""
         actionButton.imagePosition = .imageOnly
         switch currentMode {
-        case .selection:
+        case .selection, .revise:
             actionButton.toolTip = "Translate selection — right-click to Rewrite, Tab to switch to Reply"
         case .draftMessage:
             actionButton.toolTip = "Rewrite my text — Tab to switch to Reply"
@@ -9331,7 +9386,7 @@ final class FloatingTranslateButtonView: NSView {
         let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             switch mode {
-            case .selection:
+            case .selection, .revise:
                 let style = NSMutableParagraphStyle()
                 style.alignment = .center
                 let text = NSAttributedString(string: "あ", attributes: [
@@ -9434,6 +9489,9 @@ final class TranslationPanelController {
 
     var panelFrame: NSRect { panel.frame }
     var isVisible: Bool { panel.isVisible }
+    var displayedResultText: String { contentView.currentResultText }
+    var currentSourceText: String { contentView.currentSourceText }
+    var currentTargetLanguageValue: TranslationLanguage { contentView.currentTargetLanguageValue }
 
     private let loadingPlaceholder: String
 
@@ -9443,8 +9501,10 @@ final class TranslationPanelController {
         targetLanguage: TranslationLanguage,
         resultLabel: String? = nil,
         loadingPlaceholder: String = "Translating",
+        showsFollowUp: Bool = false,
         onTargetLanguageSelected: ((TranslationLanguage) -> Void)? = nil,
         onReplace: ((String) -> Void)? = nil,
+        onFollowUp: ((String) -> Void)? = nil,
         replaceShortcutSourcePID: pid_t? = nil,
         dismissesOnOutsideClick: Bool = true,
         onClose: (() -> Void)? = nil
@@ -9457,7 +9517,7 @@ final class TranslationPanelController {
         let referencePoint = Self.anchorReferencePoint(for: anchor)
         let visibleFrame = NSScreen.visibleFrame(containing: referencePoint)
         let panelHeight = min(
-            TranslationContentView.preferredHeight(sourceText: sourceText, resultText: "\(loadingPlaceholder)..."),
+            TranslationContentView.preferredHeight(sourceText: sourceText, resultText: "\(loadingPlaceholder)...", showsFollowUp: showsFollowUp),
             visibleFrame.height - 32
         )
         let panelSize = NSSize(width: TranslationContentView.preferredWidth, height: panelHeight)
@@ -9473,9 +9533,11 @@ final class TranslationPanelController {
             targetLanguage: targetLanguage,
             resultLabel: resultLabel,
             anchorY: anchorY,
+            showsFollowUp: showsFollowUp,
             onTargetLanguageSelected: onTargetLanguageSelected,
             onReplace: onReplace
         )
+        contentView.onFollowUp = onFollowUp
         panel = NSPanel(
             contentRect: NSRect(origin: origin, size: panelSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -9509,12 +9571,12 @@ final class TranslationPanelController {
     }
 
     @discardableResult
-    func showLoading(targetLanguage: TranslationLanguage? = nil) -> UUID {
+    func showLoading(targetLanguage: TranslationLanguage? = nil, placeholder: String? = nil) -> UUID {
         activeRequestID = UUID()
         if let targetLanguage {
             contentView.setTargetLanguage(targetLanguage)
         }
-        contentView.startLoadingAnimation(baseText: loadingPlaceholder)
+        contentView.startLoadingAnimation(baseText: placeholder ?? loadingPlaceholder)
         resizeToFitContent(animated: false)
         panel.orderFrontRegardless()
         installOutsideClickMonitors()
@@ -10154,7 +10216,7 @@ final class SourcePreviewView: NSView {
     }
 }
 
-final class TranslationContentView: NSView {
+final class TranslationContentView: NSView, NSTextFieldDelegate {
     private enum ResultTone {
         case normal
         case error
@@ -10189,6 +10251,15 @@ final class TranslationContentView: NSView {
     private static let sourceToDividerGap: CGFloat = 13
     private static let dividerToTargetGap: CGFloat = 16
     private static let dividerHeight: CGFloat = 1
+
+    // Footer "Revise or ask a follow-up" row (selection panel only).
+    private static let followUpTopGap: CGFloat = 12
+    private static let followUpDividerToFieldGap: CGFloat = 10
+    private static let followUpFieldHeight: CGFloat = 30
+    private static let followUpIconSize: CGFloat = 16
+    static var followUpFooterHeight: CGFloat {
+        followUpTopGap + dividerHeight + followUpDividerToFieldGap + followUpFieldHeight
+    }
     private static let buttonSize: CGFloat = 18
     private static let resultFontSize: CGFloat = 18
     private static let resultParagraphSpacingFactor: CGFloat = 0.35
@@ -10197,12 +10268,21 @@ final class TranslationContentView: NSView {
 
     var onClose: (() -> Void)?
     var onNeedsResize: (() -> Void)?
+    /// Fires when the user submits the footer "Revise or ask a follow-up" field.
+    var onFollowUp: ((String) -> Void)?
 
     private let sourceText: String
     private var targetLanguage: TranslationLanguage
+    private let showsFollowUp: Bool
+    private let followUpDivider = HairlineSeparatorView()
+    private let followUpField = FollowUpTextField()
+    private let followUpIcon = NSImageView()
     private let resultLabel: String?
     private var resultText = "Translating..."
     private var resultDisplayText = "Translating..."
+    /// The last non-loading result shown. Revise composes against this so a
+    /// follow-up typed mid-revise builds on the real answer, not "Revising...".
+    private var lastRealResultText = ""
     private var resultTone: ResultTone = .normal
     private let resultTextView = NSTextView()
     private let sourceTitleLabel = NSTextField(labelWithString: "")
@@ -10235,6 +10315,7 @@ final class TranslationContentView: NSView {
         targetLanguage: TranslationLanguage,
         resultLabel: String? = nil,
         anchorY: CGFloat,
+        showsFollowUp: Bool = false,
         onTargetLanguageSelected: ((TranslationLanguage) -> Void)? = nil,
         onReplace: ((String) -> Void)? = nil
     ) {
@@ -10242,13 +10323,14 @@ final class TranslationContentView: NSView {
         self.targetLanguage = targetLanguage
         self.resultLabel = resultLabel
         self.anchorYValue = anchorY
+        self.showsFollowUp = showsFollowUp
         self.onTargetLanguageSelected = onTargetLanguageSelected
         self.onReplace = onReplace
         super.init(frame: NSRect(
             x: 0,
             y: 0,
             width: Self.preferredWidth,
-            height: Self.preferredHeight(sourceText: sourceText, resultText: "Translating...")
+            height: Self.preferredHeight(sourceText: sourceText, resultText: "Translating...", showsFollowUp: showsFollowUp)
         ))
         wantsLayer = true
         buildUI()
@@ -10258,7 +10340,7 @@ final class TranslationContentView: NSView {
         nil
     }
 
-    static func preferredHeight(sourceText: String, resultText: String, sourceExpanded: Bool = false) -> CGFloat {
+    static func preferredHeight(sourceText: String, resultText: String, sourceExpanded: Bool = false, showsFollowUp: Bool = false) -> CGFloat {
         let sourceBoxHeight = sourceHeight(for: sourceText, expanded: sourceExpanded)
         let resultBoxHeight = boxHeight(
             for: resultText,
@@ -10274,12 +10356,17 @@ final class TranslationContentView: NSView {
             + sourceToDividerGap + dividerHeight + dividerToTargetGap
             + labelHeight + labelToBoxGap
             + panelPaddingBottom
+            + (showsFollowUp ? followUpFooterHeight : 0)
         return min(max(fixedHeight + sourceBoxHeight + resultBoxHeight, minHeight), maxHeight)
     }
 
     func preferredHeightForCurrentContent() -> CGFloat {
-        Self.preferredHeight(sourceText: sourceText, resultText: resultDisplayText, sourceExpanded: sourceExpanded)
+        Self.preferredHeight(sourceText: sourceText, resultText: resultDisplayText, sourceExpanded: sourceExpanded, showsFollowUp: showsFollowUp)
     }
+
+    var currentResultText: String { lastRealResultText }
+    var currentSourceText: String { sourceText }
+    var currentTargetLanguageValue: TranslationLanguage { targetLanguage }
 
     static func anchorY(for screenY: CGFloat, panelOriginY: CGFloat, panelHeight: CGFloat) -> CGFloat {
         min(max(screenY - panelOriginY, 0), panelHeight)
@@ -10574,7 +10661,61 @@ final class TranslationContentView: NSView {
         content.addSubview(chromeOverlay)
         self.chromeOverlay = chromeOverlay
 
+        if showsFollowUp {
+            buildFollowUpFooter(in: content)
+        }
+
         setResult(resultText)
+    }
+
+    private func buildFollowUpFooter(in content: NSView) {
+        content.addSubview(followUpDivider)
+
+        let iconConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        // ponytail: SF Symbol placeholder for the leading glyph; swap for a
+        // mascot icon if the brand wants it.
+        followUpIcon.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)?
+            .withSymbolConfiguration(iconConfig)
+        followUpIcon.contentTintColor = NSColor(calibratedWhite: 1.0, alpha: 0.55)
+        followUpIcon.imageScaling = .scaleProportionallyUpOrDown
+        content.addSubview(followUpIcon)
+
+        followUpField.placeholderAttributedString = NSAttributedString(
+            string: "Revise or ask a follow-up",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+                .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.42)
+            ]
+        )
+        followUpField.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+        followUpField.textColor = NSColor(calibratedWhite: 1.0, alpha: 0.92)
+        followUpField.isBezeled = false
+        followUpField.isBordered = false
+        followUpField.drawsBackground = false
+        followUpField.focusRingType = .none
+        followUpField.cell?.usesSingleLineMode = true
+        followUpField.cell?.wraps = false
+        followUpField.cell?.isScrollable = true
+        followUpField.delegate = self
+        followUpField.onEscape = { [weak self] in self?.onClose?() }
+        content.addSubview(followUpField)
+    }
+
+    private func submitFollowUp() {
+        let text = followUpField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        followUpField.stringValue = ""
+        onFollowUp?(text)
+    }
+
+    // Submit on Return only (not on focus loss), and swallow the keystroke so
+    // the field doesn't beep or insert a newline.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === followUpField, commandSelector == #selector(NSResponder.insertNewline(_:)) else {
+            return false
+        }
+        submitFollowUp()
+        return true
     }
 
     private func configureScrollView(_ scrollView: NSScrollView) {
@@ -10652,6 +10793,7 @@ final class TranslationContentView: NSView {
             + Self.sourceToDividerGap + Self.dividerHeight + Self.dividerToTargetGap
             + Self.labelHeight + Self.labelToBoxGap
             + Self.panelPaddingBottom
+            + (showsFollowUp ? Self.followUpFooterHeight : 0)
         let availableBoxHeight = max(
             Self.collapsedSourceBoxHeight + Self.minimumResultBoxHeight,
             bounds.height - fixedHeight
@@ -10772,6 +10914,33 @@ final class TranslationContentView: NSView {
             scrollToTop(resultScrollView)
             shouldScrollResultToTop = false
         }
+
+        if showsFollowUp {
+            layoutFollowUpFooter()
+        }
+    }
+
+    private func layoutFollowUpFooter() {
+        let fieldY = Self.panelPaddingBottom
+        followUpIcon.frame = NSRect(
+            x: Self.panelPaddingX,
+            y: fieldY + (Self.followUpFieldHeight - Self.followUpIconSize) / 2,
+            width: Self.followUpIconSize,
+            height: Self.followUpIconSize
+        )
+        let fieldX = Self.panelPaddingX + Self.followUpIconSize + 8
+        followUpField.frame = NSRect(
+            x: fieldX,
+            y: fieldY,
+            width: Self.panelPaddingX + Self.contentWidth - fieldX,
+            height: Self.followUpFieldHeight
+        )
+        followUpDivider.frame = NSRect(
+            x: Self.panelPaddingX,
+            y: fieldY + Self.followUpFieldHeight + Self.followUpDividerToFieldGap,
+            width: Self.contentWidth,
+            height: Self.dividerHeight
+        )
     }
 
     func setResult(_ text: String) {
@@ -10811,6 +10980,9 @@ final class TranslationContentView: NSView {
 
         resultText = cleanedText
         resultDisplayText = resultTextView.string
+        if !isInternalLoadingUpdate {
+            lastRealResultText = cleanedText
+        }
         updateActionButtonStates()
         layoutForCurrentSize()
     }
@@ -10968,10 +11140,14 @@ enum TranslationMode {
     case selection
     case draftMessage
     case smartReply
+    /// Internal re-render of an existing `.selection` result: the user typed a
+    /// "revise or ask a follow-up" instruction and we regenerate the answer in
+    /// place. Never assigned to a pet/mascot surface — only the result panel.
+    case revise
 
     var usesCompositionSettings: Bool {
         switch self {
-        case .selection:
+        case .selection, .revise:
             return false
         case .draftMessage, .smartReply:
             return true
@@ -10980,7 +11156,7 @@ enum TranslationMode {
 
     var resultLabel: String? {
         switch self {
-        case .selection, .draftMessage:
+        case .selection, .draftMessage, .revise:
             return nil
         case .smartReply:
             return "Reply"
@@ -10995,7 +11171,25 @@ enum TranslationMode {
             return "Rewriting"
         case .selection:
             return "Translating"
+        case .revise:
+            return "Revising"
         }
+    }
+
+    /// Wraps the original text, the prior answer, and the user's instruction into
+    /// the single `text` argument the existing one-shot `translate(...)` path
+    /// carries — so revise reuses all four backends with no transport changes.
+    static func composeReviseInput(source: String, previous: String, instruction: String) -> String {
+        """
+        Original text:
+        \(source)
+
+        Your previous response:
+        \(previous)
+
+        Revision request:
+        \(instruction)
+        """
     }
 
     func systemPrompt(
@@ -11053,6 +11247,16 @@ enum TranslationMode {
             Cleanup — \(composition?.cleanup.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
 
             Return only the reply or answer text. No commentary, no labels, no preface, no explanation of what you're doing, no quotes around the answer.
+            """
+        case .revise:
+            """
+            You are refining a response you previously gave the user. Their message has three labeled parts: the original text they were looking at, your previous response to it, and a revision request.
+
+            Apply the revision request to your previous response. If the request asks you to change the response (shorter, simpler, more detail, different tone, etc.), produce the updated version. If it asks a follow-up question instead of an edit, answer it directly — your answer replaces the previous response.
+
+            Write the result in \(targetLanguage.promptName), in the same plain, accessible style aimed at a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. Keep every fact, name, number, and quotation accurate; do not invent claims.
+
+            Return only the updated response text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
             """
         }
     }
@@ -11756,6 +11960,10 @@ struct OllamaClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
+        case .revise:
+            // Already composed deliberately (labeled sections) — don't let the
+            // selection cleaner collapse the structure the prompt relies on.
+            sourceText = text
         }
         guard !sourceText.isEmpty else {
             throw TranslationError.emptyResponse
@@ -12018,6 +12226,10 @@ struct OpenAIChatClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
+        case .revise:
+            // Already composed deliberately (labeled sections) — don't let the
+            // selection cleaner collapse the structure the prompt relies on.
+            sourceText = text
         }
         guard !sourceText.isEmpty || !images.isEmpty else {
             throw TranslationError.emptyResponse
@@ -13196,6 +13408,10 @@ struct ClaudeCodeClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
+        case .revise:
+            // Already composed deliberately (labeled sections) — don't let the
+            // selection cleaner collapse the structure the prompt relies on.
+            sourceText = text
         }
         guard !sourceText.isEmpty || !images.isEmpty else {
             throw TranslationError.emptyResponse
@@ -13833,6 +14049,10 @@ struct OpenAICodexClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
+        case .revise:
+            // Already composed deliberately (labeled sections) — don't let the
+            // selection cleaner collapse the structure the prompt relies on.
+            sourceText = text
         }
         guard !sourceText.isEmpty || !images.isEmpty else {
             throw TranslationError.emptyResponse
