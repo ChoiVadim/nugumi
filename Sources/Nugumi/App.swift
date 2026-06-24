@@ -3252,6 +3252,26 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         AXIsProcessTrusted()
     }
 
+    /// Point-of-use Accessibility request (selection / reply shortcuts). Unlike
+    /// the silent launch-time `requestAccessibilityPermissionIfNeeded`
+    /// (prompt:false), this surfaces macOS's native trust dialog the first time
+    /// so the user actually gets asked. macOS won't re-show that dialog, so on
+    /// later attempts open the Accessibility pane directly instead.
+    @MainActor
+    private func requestAccessibilityPermissionInteractively() {
+        let key = "permissions.accessibilityRequested"
+        let firstTime = !UserDefaults.standard.bool(forKey: key)
+        UserDefaults.standard.set(true, forKey: key)
+        if firstTime {
+            let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(opts)
+        } else {
+            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+            NSWorkspace.shared.open(url)
+        }
+        startAccessibilityTrustWatcher()
+    }
+
     private func startAccessibilityTrustWatcher() {
         guard accessibilityTrustTimer == nil else { return }
         let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
@@ -3606,8 +3626,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @MainActor
     private func startSelectionTranslateOrReply() {
         guard accessibilityIsTrusted() else {
-            requestAccessibilityPermissionIfNeeded()
-            presentPermissionsWindowIfNeeded()
+            requestAccessibilityPermissionInteractively()
             return
         }
 
@@ -3668,8 +3687,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     @MainActor
     private func startSelectedTextTranslationForReplacement() {
         guard accessibilityIsTrusted() else {
-            requestAccessibilityPermissionIfNeeded()
-            presentPermissionsWindowIfNeeded()
+            requestAccessibilityPermissionInteractively()
             return
         }
 
@@ -3935,6 +3953,18 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         if let screenshotError = error as? ScreenshotTranslationError,
            case .screenRecordingPermissionDenied = screenshotError {
+            // First time: surface macOS's native Screen Recording prompt — this
+            // call also registers Nugumi in the Privacy list. It's a no-op once
+            // the user has answered, so only then fall back to the guide-to-
+            // Settings alert. Shared flag keeps this in sync with onboarding.
+            let requestedKey = "permissionsOnboarding.screenCaptureRequested"
+            if !CGPreflightScreenCaptureAccess(),
+               !UserDefaults.standard.bool(forKey: requestedKey) {
+                UserDefaults.standard.set(true, forKey: requestedKey)
+                _ = CGRequestScreenCaptureAccess()
+                startScreenRecordingTrustWatcher()
+                return
+            }
             let response = NugumiAlertController(
                 title: "Screen recording required",
                 message: screenshotError.localizedDescription,
@@ -10409,6 +10439,11 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     private static let buttonSize: CGFloat = 18
     private static let resultFontSize: CGFloat = 18
     private static let resultParagraphSpacingFactor: CGFloat = 0.35
+    // Gap between block paragraphs. Markdown collapses the blank line the model
+    // emits between paragraphs, so spacing has to stand in for it — sized near a
+    // full line so it reads like the literal blank line the plain-text render
+    // shows. Paragraphs only; lists/headers keep the tighter base factor.
+    private static let resultParagraphGapFactor: CGFloat = 1.1
     private static let textInsetY: CGFloat = 3
     private static let scrollableTextBottomPadding: CGFloat = 18
 
@@ -10434,10 +10469,11 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     /// follow-up typed mid-revise builds on the real answer, not "Revising...".
     private var lastRealResultText = ""
 
-    // Streaming throttle: re-rendering markdown (esp. NSTextTable) + resizing on
-    // every chunk makes the panel shake. Coalesce to ~8 renders/sec; first and
-    // final chunks always render (leading + trailing edge).
-    private static let resultThrottleInterval: TimeInterval = 0.12
+    // Streaming throttle: just coalesces the per-chunk resize now that streaming
+    // renders plain text (no markdown/NSTextTable re-layout to amortize). Kept
+    // small so tokens land near word-by-word; first and final chunks always
+    // render (leading + trailing edge).
+    private static let resultThrottleInterval: TimeInterval = 0.03
     private var pendingResultText: String?
     private var pendingResultTone: ResultTone = .normal
     private var resultThrottleScheduled = false
@@ -10765,18 +10801,22 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         return out
     }
 
-    /// Streaming render: inline markdown only (bold/italic/code/links), one
-    /// paragraph style, whitespace preserved. Block constructs (tables/headers)
-    /// reflow as their syntax completes mid-stream, so they're deferred to the
-    /// final render (`renderedMarkdownText`). Stable while text streams in.
+    /// Streaming render: plain text, no markdown at all. Even inline syntax
+    /// (bold/italic/code) reflows the line as it completes mid-stream — a
+    /// half-streamed `**bol` shows its asterisks, then snaps to bold and shifts.
+    /// So *all* markdown is deferred to the final block render
+    /// (`renderedMarkdownText`): raw syntax shows briefly while text streams in,
+    /// then resolves once. One transform instead of a twitch per token.
     static func renderedStreamingText(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
-        let s = inlineAttributed(text, font: font, color: color)
-        guard s.length > 0 else { return s }
+        guard !text.isEmpty else { return NSAttributedString() }
         let p = NSMutableParagraphStyle()
         p.lineBreakMode = .byWordWrapping
         p.paragraphSpacing = font.pointSize * resultParagraphSpacingFactor
-        s.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: s.length))
-        return s
+        return NSAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: p
+        ])
     }
 
     /// Inline-only markdown (bold/italic/code/links) for a single block of text.
@@ -10815,10 +10855,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         return rendered
     }
 
-    private static func blockParagraphStyle(font: NSFont, headIndent: CGFloat = 0, spacingBefore: CGFloat = 0) -> NSMutableParagraphStyle {
+    private static func blockParagraphStyle(font: NSFont, headIndent: CGFloat = 0, spacingBefore: CGFloat = 0, spacingFactor: CGFloat = resultParagraphSpacingFactor) -> NSMutableParagraphStyle {
         let p = NSMutableParagraphStyle()
         p.lineBreakMode = .byWordWrapping
-        p.paragraphSpacing = font.pointSize * resultParagraphSpacingFactor
+        p.paragraphSpacing = font.pointSize * spacingFactor
         p.paragraphSpacingBefore = spacingBefore
         if headIndent > 0 {
             p.headIndent = headIndent
@@ -10829,7 +10869,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
     private static func renderParagraph(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
         let s = inlineAttributed(text, font: font, color: color)
-        s.addAttribute(.paragraphStyle, value: blockParagraphStyle(font: font), range: NSRange(location: 0, length: s.length))
+        s.addAttribute(.paragraphStyle, value: blockParagraphStyle(font: font, spacingFactor: resultParagraphGapFactor), range: NSRange(location: 0, length: s.length))
         s.append(NSAttributedString(string: "\n"))
         return s
     }
@@ -10960,7 +11000,9 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     }
 
     private static func renderedResultHeight(markdown: String, width: CGFloat) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: resultFontSize, weight: .semibold)
+        // Match the body weight rendered into resultTextView (regular), else the
+        // measured height disagrees with what's drawn.
+        let font = NSFont.systemFont(ofSize: resultFontSize, weight: .regular)
         let attr = renderedMarkdownText(markdown, font: font, color: .white)
         return resultBoxHeight(rawTextHeight: attributedTextHeight(attr, width: width))
     }
@@ -10977,7 +11019,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         var font = baseFont
         var changed = false
         if intent & stronglyEmphasized != 0 {
-            font = NSFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
+            font = NSFont.systemFont(ofSize: baseFont.pointSize, weight: .bold)
             changed = true
         }
         if intent & emphasized != 0 {
@@ -11066,7 +11108,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         configureTextView(
             resultTextView,
             text: resultText,
-            font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
+            // Body is regular weight; `**bold**` markdown carries its own bold via
+            // markdownFont. A semibold base made every result look bold and left
+            // real emphasis indistinguishable from plain text.
+            font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .regular),
             color: ResultTone.normal.color
         )
         resultScrollView.documentView = resultTextView

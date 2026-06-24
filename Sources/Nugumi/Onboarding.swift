@@ -292,6 +292,15 @@ final class OnboardingModel: ObservableObject {
     func skipAction() {
         switch page {
         case .feature:
+            // Skipping the feature walkthrough must not also skip the
+            // permissions step. Route to the permissions page (still skippable
+            // from there) instead of closing onboarding outright — mirrors the
+            // end-of-tour routing in advanceFeature.
+            if (mode == .firstRun && nextPermission != nil) || mode == .replay {
+                markTourComplete()
+                page = .permissions
+                return
+            }
             finishTour(skipped: true)
         case .finale:
             finishTour(skipped: false)
