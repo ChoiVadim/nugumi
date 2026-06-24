@@ -102,6 +102,7 @@ struct SettingsSnapshot {
     /// The user's free-text instruction for the custom style. Empty when unset.
     var customStyleInstruction: String = ""
     var invisibilityEnabled: Bool
+    var launchAtLogin: Bool = false
     var writingStyles: [AppCategory: WritingStyle]
     var textModelID: String
     var askNugumiModelID: String
@@ -157,6 +158,7 @@ enum SettingsIntent {
     case setThinkingLevel(ThinkingLevel, ModelUseScope)
     case chooseModel(String, ModelUseScope)
     case toggleInvisibility
+    case setLaunchAtLogin(Bool)
     case recordShortcut(GlobalShortcutAction)
     case resetShortcuts
     case signInCloud(CloudProvider)

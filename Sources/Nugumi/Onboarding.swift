@@ -609,6 +609,15 @@ private struct OnboardingRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The backdrop is a translucent `.hudWindow` vibrancy view that samples
+        // the desktop behind the window. On a bright wallpaper it washes out to
+        // light, dropping `inkSecondary` body text to near-invisible. The main
+        // window never shows this because its text always sits on a scrimmed
+        // card (material + black 0.26); onboarding text sits on the bare
+        // backdrop, so it needs its own root scrim to keep the dark theme — and
+        // the text — readable regardless of what's behind the window.
+        // ponytail: single tunable scrim; bump opacity if still too light.
+        .background(Color.black.opacity(0.55))
         .animation(.easeInOut(duration: 0.18), value: model.page)
         .onReceive(poll) { _ in model.refreshPermissions() }
     }

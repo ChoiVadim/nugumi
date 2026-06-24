@@ -6,6 +6,7 @@ import CoreText
 import CryptoKit
 import Darwin
 import Foundation
+import ServiceManagement
 import Sparkle
 import SwiftUI
 import UserNotifications
@@ -1443,6 +1444,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 OnboardingModel.introPlayedKey,
                 "mainWindowAutoShownV1",
                 "permissionsOnboarding.screenCaptureRequested",
+                "didSetDefaultLoginItemV1",
             ] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
@@ -1476,7 +1478,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             screenRecordingTrusted: CGPreflightScreenCaptureAccess()
         ))
         reconcilePermissionAnalyticsAtLaunch()
+        enableLaunchAtLoginByDefaultIfNeeded()
         showMainWindowOnFirstRunIfNeeded()
+    }
+
+    /// First launch from the app bundle registers Nugumi as a login item so the
+    /// user never has to re-open it from Applications. One-time and flag-guarded,
+    /// so a later manual toggle-off in Settings sticks (we never re-enable).
+    @MainActor
+    private func enableLaunchAtLoginByDefaultIfNeeded() {
+        guard isRunningFromAppBundle else { return }
+        let key = "didSetDefaultLoginItemV1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        LaunchAtLogin.set(true)
     }
 
     /// Opens the main window once after install so users discover it. While the
@@ -11777,6 +11792,27 @@ enum APIKeyValidator {
     }
 }
 
+/// Launch-at-login via the native ServiceManagement API (macOS 13+). The app
+/// bundle registers *itself* as the login item — no separate helper target.
+/// Callers MUST gate on `isRunningFromAppBundle`: `SMAppService` is meaningless
+/// under `swift run` (no bundle) and the registration would point at the
+/// transient `.build` binary.
+enum LaunchAtLogin {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    static func set(_ enabled: Bool) {
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled { try SMAppService.mainApp.register() }
+            } else {
+                if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
+            }
+        } catch {
+            NSLog("[Nugumi] Launch-at-login \(enabled ? "register" : "unregister") failed: \(error.localizedDescription)")
+        }
+    }
+}
+
 enum KeychainStore {
     private enum CacheEntry {
         case missing
@@ -15128,6 +15164,7 @@ extension NugumiApp: SettingsHost {
             emailVoiceSample: emailVoiceSample,
             customStyleInstruction: customStyleInstruction,
             invisibilityEnabled: invisibilityModeEnabled,
+            launchAtLogin: isRunningFromAppBundle && LaunchAtLogin.isEnabled,
             writingStyles: styles,
             textModelID: textModelID,
             askNugumiModelID: askNugumiModelID,
@@ -15245,6 +15282,9 @@ extension NugumiApp: SettingsHost {
         case .setGenZMode(let enabled):
             genZModeEnabled = enabled
             updateMenuState()
+        case .setLaunchAtLogin(let enabled):
+            guard isRunningFromAppBundle else { break }
+            LaunchAtLogin.set(enabled)
         case .setEmailVoiceSample(let sample):
             emailVoiceSample = sample
         case .setCustomStyleInstruction(let text):

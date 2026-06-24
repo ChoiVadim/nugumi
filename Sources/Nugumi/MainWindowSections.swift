@@ -1989,15 +1989,25 @@ struct BehaviorSection: View {
             }
 
             SubCard {
-                SettingRow("Invisibility mode",
-                           subtitle: "Hide Nugumi's windows from screen recording and screenshots.") {
-                    Toggle("", isOn: Binding(
-                        get: { bridge.settings.invisibilityEnabled },
-                        set: { _ in bridge.perform(.toggleInvisibility) }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .tint(FlowTheme.accent)
+                VStack(spacing: 18) {
+                    SettingRow("Launch at login",
+                               subtitle: "Start Nugumi automatically when you log in to your Mac.") {
+                        Toggle("", isOn: bridge.binding(\.launchAtLogin) { .setLaunchAtLogin($0) })
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .tint(FlowTheme.accent)
+                    }
+                    Divider().background(FlowTheme.hairline)
+                    SettingRow("Invisibility mode",
+                               subtitle: "Hide Nugumi's windows from screen recording and screenshots.") {
+                        Toggle("", isOn: Binding(
+                            get: { bridge.settings.invisibilityEnabled },
+                            set: { _ in bridge.perform(.toggleInvisibility) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(FlowTheme.accent)
+                    }
                 }
             }
         }
