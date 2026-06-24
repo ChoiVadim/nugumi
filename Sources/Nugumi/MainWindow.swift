@@ -99,6 +99,8 @@ struct SettingsSnapshot {
     /// The user's saved email voice sample (style reference for the email
     /// category). Empty when unset.
     var emailVoiceSample: String = ""
+    /// The user's free-text instruction for the custom style. Empty when unset.
+    var customStyleInstruction: String = ""
     var invisibilityEnabled: Bool
     var writingStyles: [AppCategory: WritingStyle]
     var textModelID: String
@@ -148,6 +150,7 @@ enum SettingsIntent {
     case setCleanupLevel(CleanupLevel)
     case setGenZMode(Bool)
     case setEmailVoiceSample(String)
+    case setCustomStyleInstruction(String)
     case setWritingStyle(WritingStyle, AppCategory)
     case addAppToCategory(AppCategory)
     case removeApp(String)
@@ -214,6 +217,10 @@ final class NugumiSettingsBridge: ObservableObject {
     /// Engine picked on the onboarding finale — that group's card leads the
     /// Providers tab. `nil` keeps the default order.
     @Published var engineSetupFocus: EngineSetupFocus?
+    /// Non-nil while the "Choose a model" picker is open. Lives here (not in the
+    /// section view) so the scrim is rendered at the window root and dims the
+    /// sidebar too — a panel-scoped overlay can't paint past the detail column.
+    @Published var modelPickerScope: ModelUseScope?
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
     /// True when a background check has found an update — drives the sidebar
@@ -506,6 +513,18 @@ struct MainWindowRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if let scope = bridge.modelPickerScope {
+                ModelPickerOverlay(
+                    scope: scope,
+                    onDismiss: { bridge.modelPickerScope = nil },
+                    onChoose: { id in
+                        bridge.modelPickerScope = nil
+                        bridge.perform(.chooseModel(id, scope))
+                    }
+                )
+            }
+        }
     }
 }
 

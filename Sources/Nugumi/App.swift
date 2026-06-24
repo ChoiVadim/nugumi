@@ -950,6 +950,16 @@ struct CompositionSettings: Equatable {
     /// greeting, rhythm, and sign-off the model mirrors. Only populated for the
     /// `email` category; `nil`/empty elsewhere, so the prompt section vanishes.
     let voiceSample: String?
+    /// Free-text instruction for the `custom` category. When set, it replaces
+    /// the register directive in compose prompts. `nil` everywhere else.
+    var customInstruction: String? = nil
+
+    /// The writing-style directive injected into compose prompts: the user's
+    /// custom instruction when present, otherwise the chosen register's text.
+    func writingStyleDirective(for languageID: String) -> String {
+        if let customInstruction, !customInstruction.isEmpty { return customInstruction }
+        return style.promptDescription(for: languageID)
+    }
 
     /// Casual and polite registers must never contain the em dash (—); it reads
     /// as AI writing and clashes with conversational tone. Formal keeps it. The
@@ -957,7 +967,8 @@ struct CompositionSettings: Equatable {
     /// negative instruction, so the output is also stripped deterministically
     /// (see `TextNormalizer.cleanedTranslation(_:stripEmDash:)`).
     var bansEmDash: Bool {
-        style == .casual || style == .polite
+        // A custom instruction governs its own punctuation — don't strip for it.
+        customInstruction == nil && (style == .casual || style == .polite)
     }
 }
 
@@ -1307,6 +1318,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var emailVoiceSample: String {
         get { UserDefaults.standard.string(forKey: "voiceSample.email") ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: "voiceSample.email") }
+    }
+
+    /// Free-text instruction for the `custom` style. Personal content (like the
+    /// email voice sample and Snippets), so it survives a settings reset.
+    private var customStyleInstruction: String {
+        get { UserDefaults.standard.string(forKey: "customStyleInstructionV1") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "customStyleInstructionV1") }
     }
 
     private var replacementMode: ReplacementMode {
@@ -1743,6 +1761,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             sourceText: prompt,
             targetLanguage: targetLanguage,
             resultLabel: "Answer",
+            // The answer is meant to be read — don't let a stray click dismiss it.
+            dismissesOnOutsideClick: false,
             onClose: { [weak self] in
                 self?.translationPanelController = nil
                 self?.floatingTargetButton?.close()
@@ -2200,6 +2220,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// the main window.
     @MainActor
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Ignore the reopen our own panels trigger when they activate the app to
+        // take focus — only a genuine Dock/Finder relaunch should surface a window.
+        if SelfActivationGuard.isSuppressing { return false }
         if let onboardingWindowController {
             onboardingWindowController.presentAndActivate()
         } else {
@@ -2901,8 +2924,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func compositionSettings(for mode: TranslationMode, appCategory: AppCategory) -> CompositionSettings? {
-        // TEMP DIAGNOSTIC (voice-sample issue) — remove once resolved.
-        CodexDebugLog.append("[voice-debug] mode=\(mode) category=\(appCategory) frontmost=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nil") savedSampleChars=\(emailVoiceSample.count)")
         guard mode.usesCompositionSettings else {
             // Translate/selection ignores writing style, cleanup, snippets, and
             // voice sample. The only composition input it honors is the global
@@ -2914,12 +2935,18 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let voiceSample = appCategory == .email
             ? emailVoiceSample.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
+        let instruction = appCategory == .custom
+            ? customStyleInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
         return CompositionSettings(
             style: writingStyle(for: appCategory),
             cleanup: cleanupLevel,
             snippets: snippetsStore.usableSnippets(),
-            genZ: genZModeEnabled,
-            voiceSample: voiceSample.isEmpty ? nil : voiceSample
+            // Gen Z is a casual-chat register; it clobbers the email voice
+            // sample's formal greeting + signature. Never apply it to email.
+            genZ: genZModeEnabled && appCategory != .email,
+            voiceSample: voiceSample.isEmpty ? nil : voiceSample,
+            customInstruction: instruction.isEmpty ? nil : instruction
         )
     }
 
@@ -3220,7 +3247,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         presentPermissionsWindow(force: false)
     }
 
-    private func presentPermissionsWindow(force: Bool) {
+    private func presentPermissionsWindow(force: Bool, replay: Bool = false) {
         let axTrusted = AXIsProcessTrusted()
         let scrTrusted = CGPreflightScreenCaptureAccess()
         guard force
@@ -3250,7 +3277,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             ))
         }
         let controller = OnboardingWindowController(
-            mode: force ? .review : .firstRun,
+            mode: replay ? .replay : (force ? .review : .firstRun),
             onPickEngine: { [weak self] choice in
                 guard let self else { return }
                 self.presentMainWindow(section: .aiEngine)
@@ -8630,6 +8657,7 @@ final class FloatingTranslateButtonController {
 
     func show() {
         panel.orderFrontRegardless()
+        buttonView.enableHoverScaling()
         let interceptor = TabKeyInterceptor { [weak self] in
             self?.toggleMode()
         }
@@ -8784,6 +8812,24 @@ private final class AskPromptPanel: NSPanel {
     }
 }
 
+/// Activating an `.accessory` app that wasn't frontmost makes macOS deliver a
+/// reopen event — the same one a Dock relaunch sends. Our own panels activate
+/// the app to take focus, so `applicationShouldHandleReopen` can't tell those
+/// apart from a genuine relaunch and would pop the main window. Any internal
+/// activation routes through here, opening a brief window during which the
+/// delegate ignores reopen.
+@MainActor
+enum SelfActivationGuard {
+    private static var suppressUntil = Date.distantPast
+
+    static func activate() {
+        suppressUntil = Date().addingTimeInterval(0.6)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    static var isSuppressing: Bool { Date() < suppressUntil }
+}
+
 @MainActor
 final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     private static let textMovementUserInfoKey = "NSTextMovement"
@@ -8843,7 +8889,7 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     func show() {
         textField.stringValue = ""
         textField.isEnabled = true
-        NSApp.activate(ignoringOtherApps: true)
+        SelfActivationGuard.activate()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(textField)
         installOutsideClickMonitors()
@@ -8869,7 +8915,7 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         textField.isEnabled = true
         textField.stringValue = ""
         setPlaceholder(message)
-        NSApp.activate(ignoringOtherApps: true)
+        SelfActivationGuard.activate()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(textField)
     }
@@ -9094,6 +9140,13 @@ final class FloatingTranslateButtonView: NSView {
     private var currentMode: TranslationMode
     private var isLoading = false
 
+    private var hoverTrackingArea: NSTrackingArea?
+    private var hoverScalingEnabled = false
+    /// The full-size frame the controller laid out; rest/hover scale around it.
+    private var fullFrame: NSRect = .zero
+    /// Resting scale for the idle floating button; springs up to 1.0 on hover.
+    private static let restScale: CGFloat = 0.84
+
     init(initialMode: TranslationMode) {
         self.currentMode = initialMode
         super.init(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
@@ -9116,6 +9169,69 @@ final class FloatingTranslateButtonView: NSView {
         layer.shadowOffset = CGSize(width: 0, height: -3)
         layer.shadowPath = CGPath(ellipseIn: bounds, transform: nil)
         layer.masksToBounds = false
+    }
+
+    /// Shrinks the idle button and starts tracking hover. Called only for the
+    /// persistent floating button; the loading/target variants stay full-size.
+    func enableHoverScaling() {
+        hoverScalingEnabled = true
+        fullFrame = frame
+        // Let the glyph image ride the frame: it rescales with the button bounds.
+        actionButton.imageScaling = .scaleProportionallyUpOrDown
+        applyScale(Self.restScale, animated: false)
+        updateTrackingAreas()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+            self.hoverTrackingArea = nil
+        }
+        guard hoverScalingEnabled else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard hoverScalingEnabled, !isLoading else { return }
+        applyScale(1.0, animated: true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard hoverScalingEnabled, !isLoading else { return }
+        applyScale(Self.restScale, animated: true)
+    }
+
+    /// Resizes the whole button via its frame — the only resize an
+    /// `NSVisualEffectView` honors. The glyph is an `imageScaling` image, so it
+    /// stretches with the animating button bounds: bar and icon scale as one.
+    private func applyScale(_ scale: CGFloat, animated: Bool) {
+        guard hoverScalingEnabled, fullFrame.width > 0 else { return }
+
+        let targetFrame = NSRect(
+            x: fullFrame.midX - fullFrame.width * scale / 2,
+            y: fullFrame.midY - fullFrame.height * scale / 2,
+            width: fullFrame.width * scale,
+            height: fullFrame.height * scale
+        )
+
+        guard animated else {
+            frame = targetFrame
+            return
+        }
+
+        // Springy overshoot makes the grow feel lively rather than mechanical.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.26
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
+            animator().frame = targetFrame
+        }
     }
 
     private func buildUI() {
@@ -9167,6 +9283,8 @@ final class FloatingTranslateButtonView: NSView {
         guard isLoading != loading else { return }
         isLoading = loading
         if loading {
+            // The spinner reads best at full size — drop any resting shrink.
+            applyScale(1.0, animated: true)
             actionButton.isHidden = true
             actionButton.toolTip = nil
             progressIndicator.isHidden = false
@@ -9191,34 +9309,55 @@ final class FloatingTranslateButtonView: NSView {
     }
 
     private func applyModeVisuals() {
+        // Render every glyph as an image (not a title/fixed-point symbol) so the
+        // hover frame animation can scale it — `imageScaling` stretches it to the
+        // animating button bounds.
+        actionButton.image = Self.glyphImage(for: currentMode)
+        actionButton.title = ""
+        actionButton.imagePosition = .imageOnly
         switch currentMode {
         case .selection:
-            actionButton.image = nil
-            actionButton.title = "あ"
-            actionButton.imagePosition = .noImage
             actionButton.toolTip = "Translate selection — right-click to Rewrite, Tab to switch to Reply"
         case .draftMessage:
-            let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-            if let image = NSImage(systemSymbolName: "text.insert", accessibilityDescription: "Rewrite my text")
-                ?? NSImage(systemSymbolName: "pencil.line", accessibilityDescription: "Rewrite my text") {
-                actionButton.image = image.withSymbolConfiguration(config)
-                actionButton.title = ""
-                actionButton.imagePosition = .imageOnly
-            } else {
-                actionButton.image = nil
-                actionButton.title = "✎"
-                actionButton.imagePosition = .noImage
-            }
             actionButton.toolTip = "Rewrite my text — Tab to switch to Reply"
         case .smartReply:
-            let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-            actionButton.image = NSImage(
-                systemSymbolName: "bubble.left.fill",
-                accessibilityDescription: "Generate reply or answer"
-            )?.withSymbolConfiguration(config)
-            actionButton.title = ""
-            actionButton.imagePosition = .imageOnly
             actionButton.toolTip = "Generate reply — Tab to switch back"
+        }
+    }
+
+    /// A mode's glyph centered in a button-sized canvas with baked-in padding, so
+    /// `imageScaling` shrinks/grows it proportionally as the button frame animates.
+    private static func glyphImage(for mode: TranslationMode) -> NSImage {
+        let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            switch mode {
+            case .selection:
+                let style = NSMutableParagraphStyle()
+                style.alignment = .center
+                let text = NSAttributedString(string: "あ", attributes: [
+                    .font: NSFont.systemFont(ofSize: 17, weight: .semibold),
+                    .foregroundColor: NSColor.white,
+                    .paragraphStyle: style,
+                ])
+                let size = text.size()
+                text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
+            case .draftMessage, .smartReply:
+                let name = mode == .draftMessage ? "text.insert" : "bubble.left.fill"
+                let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+                guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                    .withSymbolConfiguration(config) else { return false }
+                let target = NSRect(
+                    x: rect.midX - symbol.size.width / 2,
+                    y: rect.midY - symbol.size.height / 2,
+                    width: symbol.size.width,
+                    height: symbol.size.height
+                )
+                symbol.draw(in: target)
+                // Template symbols draw as black; tint the drawn glyph white.
+                NSColor.white.set()
+                target.fill(using: .sourceAtop)
+            }
+            return true
         }
     }
 
@@ -9288,6 +9427,10 @@ final class TranslationPanelController {
     private var didClose = false
     private let onClose: (() -> Void)?
     private let replaceShortcutSourcePID: pid_t?
+    /// When false, a click outside the panel does NOT dismiss it — only the ✕
+    /// button or Esc. The Ask Nugumi answer uses this so reading it isn't a
+    /// one-misclick-away-from-gone affair.
+    private let dismissesOnOutsideClick: Bool
 
     var panelFrame: NSRect { panel.frame }
     var isVisible: Bool { panel.isVisible }
@@ -9303,12 +9446,14 @@ final class TranslationPanelController {
         onTargetLanguageSelected: ((TranslationLanguage) -> Void)? = nil,
         onReplace: ((String) -> Void)? = nil,
         replaceShortcutSourcePID: pid_t? = nil,
+        dismissesOnOutsideClick: Bool = true,
         onClose: (() -> Void)? = nil
     ) {
         self.loadingPlaceholder = loadingPlaceholder
         self.anchor = anchor
         self.onClose = onClose
         self.replaceShortcutSourcePID = replaceShortcutSourcePID
+        self.dismissesOnOutsideClick = dismissesOnOutsideClick
         let referencePoint = Self.anchorReferencePoint(for: anchor)
         let visibleFrame = NSScreen.visibleFrame(containing: referencePoint)
         let panelHeight = min(
@@ -9411,20 +9556,19 @@ final class TranslationPanelController {
     }
 
     private func installOutsideClickMonitors() {
-        guard globalOutsideClickMonitor == nil, localOutsideClickMonitor == nil else {
-            return
+        if dismissesOnOutsideClick, globalOutsideClickMonitor == nil, localOutsideClickMonitor == nil {
+            let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            globalOutsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+                self?.closeIfClickIsOutside(event)
+            }
+
+            localOutsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+                self?.closeIfClickIsOutside(event)
+                return event
+            }
         }
 
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        globalOutsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.closeIfClickIsOutside(event)
-        }
-
-        localOutsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.closeIfClickIsOutside(event)
-            return event
-        }
-
+        guard localEscapeKeyMonitor == nil else { return }
         localEscapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self,
                   event.keyCode == UInt16(kVK_Escape),
@@ -10879,37 +11023,19 @@ enum TranslationMode {
             Return only the \(targetLanguage.promptName) output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
             """
         case .draftMessage:
-            if composition?.cleanup == CleanupLevel.none {
-                """
-                Translate the user's drafted outgoing message into \(targetLanguage.promptName). Preserve the user's phrasing, sentence structure, and word choices as faithfully as the target language allows — even if the result reads slightly stiff or non-idiomatic. Do not polish, smooth, naturalize, or rewrite the draft beyond what literal translation strictly requires. If the draft is already entirely in \(targetLanguage.promptName), return it essentially unchanged; correct only outright errors. If only part of the draft is in \(targetLanguage.promptName) and the rest is in one or more other languages, translate the foreign parts literally into \(targetLanguage.promptName) and keep the \(targetLanguage.promptName) parts verbatim — do not rephrase or re-translate them. Stitch the result into one coherent message, but do not naturalize beyond what is needed to make it grammatical.
+            """
+            Translate the user's drafted outgoing message into natural \(targetLanguage.promptName). Infer the user's actual intent, emotion, and social situation, then say it the way a native \(targetLanguage.promptName) speaker would send it in a chat or message. If the draft is already entirely in \(targetLanguage.promptName), do not translate it; lightly rewrite/polish it only when needed so it sounds natural and sendable. If only part of the draft is in \(targetLanguage.promptName) and the rest is in one or more other languages, translate the foreign parts into \(targetLanguage.promptName) and weave everything into one cohesive, natural-sounding message — keep the \(targetLanguage.promptName) portions intact unless they need light polish to flow with the rest. Treat code-switching as the user reaching for words they didn't know in \(targetLanguage.promptName), not as a stylistic choice to preserve.
 
-                The selected Writing style controls register, honorifics, and formality — apply it for those purposes only, not as a license to rephrase or stylize. Preserve verbatim: emojis, URLs, usernames, product names, numbers, line breaks. If the draft is a fragment, translate the fragment as-is without inventing extra context.
+            The selected Writing style is authoritative. The source draft tells you meaning, intent, emotion, and how direct the user wants to be, but it must not override the selected Writing style. When goals conflict, follow this priority: (1) meaning, (2) selected Writing style, (3) intended directness and emotional signal within that style, (4) cultural naturalness — idioms, honorifics, word order, (5) surface details to preserve verbatim — emojis, URLs, usernames, product names, numbers, line breaks, (6) literal wording (always lowest). If the draft is blunt, keep the result concise and direct, but still use the selected Writing style. Do not pad a curt one-liner into a long paragraph unless the meaning requires it. If the draft is awkward or phrased like a direct translation, smooth it while keeping the same intent. If the draft is a fragment, return a natural sendable fragment without inventing extra context.
 
-                Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
+            Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
 
-                Context — the user is composing this message in \(appCategory.promptHint)
+            Context — the user is composing this message in \(appCategory.promptHint)
 
-                Writing style — \(composition?.style.promptDescription(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
+            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))\(TranslationMode.cleanupSection(for: composition?.cleanup))\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
 
-                Return only the final \(targetLanguage.promptName) message, with no commentary, labels, alternatives, quotes, or explanations.
-                """
-            } else {
-                """
-                Translate the user's drafted outgoing message into natural \(targetLanguage.promptName). Infer the user's actual intent, emotion, and social situation, then say it the way a native \(targetLanguage.promptName) speaker would send it in a chat or message. If the draft is already entirely in \(targetLanguage.promptName), do not translate it; lightly rewrite/polish it only when needed so it sounds natural and sendable. If only part of the draft is in \(targetLanguage.promptName) and the rest is in one or more other languages, translate the foreign parts into \(targetLanguage.promptName) and weave everything into one cohesive, natural-sounding message — keep the \(targetLanguage.promptName) portions intact unless they need light polish to flow with the rest. Treat code-switching as the user reaching for words they didn't know in \(targetLanguage.promptName), not as a stylistic choice to preserve.
-
-                The selected Writing style is authoritative. The source draft tells you meaning, intent, emotion, and how direct the user wants to be, but it must not override the selected Writing style. When goals conflict, follow this priority: (1) meaning, (2) selected Writing style, (3) intended directness and emotional signal within that style, (4) cultural naturalness — idioms, honorifics, word order, (5) surface details to preserve verbatim — emojis, URLs, usernames, product names, numbers, line breaks, (6) literal wording (always lowest). If the draft is blunt, keep the result concise and direct, but still use the selected Writing style. Do not pad a curt one-liner into a long paragraph unless the meaning requires it. If the draft is awkward or phrased like a direct translation, smooth it while keeping the same intent. If the draft is a fragment, return a natural sendable fragment without inventing extra context.
-
-                Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
-
-                Context — the user is composing this message in \(appCategory.promptHint)
-
-                Writing style — \(composition?.style.promptDescription(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
-
-                Cleanup — \(composition?.cleanup.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
-
-                Return only the final \(targetLanguage.promptName) message, with no commentary, labels, alternatives, quotes, or explanations.
-                """
-            }
+            Return only the final \(targetLanguage.promptName) message, with no commentary, labels, alternatives, quotes, or explanations.
+            """
         case .smartReply:
             """
             The user has selected text in another app. The text is either (a) a message they received — email, chat message, DM, comment, support ticket, or similar; or (b) a question they need to answer — a quiz item, exam question, multiple-choice question, or open question. Decide which it is from the text itself, then respond appropriately. Write your reply or answer in \(targetLanguage.promptName), regardless of what language the source text is in.
@@ -10922,7 +11048,7 @@ enum TranslationMode {
 
             Context — the user is replying inside \(appCategory.promptHint)
 
-            Writing style — \(composition?.style.promptDescription(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
+            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
 
             Cleanup — \(composition?.cleanup.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
 
@@ -10966,6 +11092,14 @@ enum TranslationMode {
         return "\n\n" + GenZStyle.promptSection(for: languageID)
     }
 
+    /// Cleanup/polish instruction block. Empty string for `.none` (and nil), so
+    /// "no cleanup" injects no prompt at all and the writing style stays the only
+    /// authority — cleanup is a polish axis, orthogonal to register/Gen Z styling.
+    private static func cleanupSection(for level: CleanupLevel?) -> String {
+        guard let level, level != .none else { return "" }
+        return "\n\nCleanup — \(level.promptDescription)"
+    }
+
     /// The user's email voice sample as a template block. Empty string when
     /// there's no sample (so callsites stay inline). `compositionSettings` only
     /// populates `voiceSample` for the email category, so this is a no-op
@@ -10998,6 +11132,10 @@ enum AppCategory: String, CaseIterable, Codable {
     case workMessages
     case email
     case other
+    /// User-authored style: apps the user explicitly assigns here use a
+    /// free-text instruction (see `customStyleInstruction`) in place of a
+    /// register. Never an auto-fallback — reachable only via explicit assignment.
+    case custom
 
     var displayName: String {
         switch self {
@@ -11005,6 +11143,7 @@ enum AppCategory: String, CaseIterable, Codable {
         case .workMessages: return "Work messages"
         case .email: return "Email"
         case .other: return "Other"
+        case .custom: return "Custom"
         }
     }
 
@@ -11018,6 +11157,8 @@ enum AppCategory: String, CaseIterable, Codable {
             return "an email client. Longer-form medium where greetings, full sentences, and sign-offs are normal."
         case .other:
             return "an unspecified app. No strong medium expectation — defer to the user's chosen style."
+        case .custom:
+            return "an app you've assigned a custom writing style to. The custom writing style below is authoritative — follow it exactly."
         }
     }
 }
@@ -11112,7 +11253,7 @@ extension AppCategory {
     var defaultWritingStyle: WritingStyle {
         switch self {
         case .personalMessages: return .casual
-        case .workMessages, .other: return .polite
+        case .workMessages, .other, .custom: return .polite
         case .email: return .formal
         }
     }
@@ -14765,6 +14906,7 @@ extension NugumiApp: SettingsHost {
             cleanupLevel: cleanupLevel,
             genZMode: genZModeEnabled,
             emailVoiceSample: emailVoiceSample,
+            customStyleInstruction: customStyleInstruction,
             invisibilityEnabled: invisibilityModeEnabled,
             writingStyles: styles,
             textModelID: textModelID,
@@ -14885,6 +15027,8 @@ extension NugumiApp: SettingsHost {
             updateMenuState()
         case .setEmailVoiceSample(let sample):
             emailVoiceSample = sample
+        case .setCustomStyleInstruction(let text):
+            customStyleInstruction = text
         case .setWritingStyle(let style, let category):
             setWritingStyle(style, for: category)
             updateMenuState()
@@ -14945,7 +15089,8 @@ extension NugumiApp: SettingsHost {
         case .contactSupport:
             contactSupport()
         case .openPermissionsHelp:
-            presentPermissionsWindow(force: true)
+            // Show the full first-run sequence exactly as a new user sees it.
+            presentPermissionsWindow(force: true, replay: true)
         case .resetSettings:
             resetSettings()
         case .quit:

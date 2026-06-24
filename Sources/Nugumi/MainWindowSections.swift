@@ -497,16 +497,31 @@ struct StyleSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
-        DetailContainer("Style", subtitle: "How Nugumi writes when it rewrites your messages and replies.") {
+        DetailContainer(
+            "Style",
+            subtitle: "How Nugumi writes when it rewrites your messages and replies.",
+            accessory: HStack(spacing: 8) {
+                Text("Gen Z")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                Toggle("", isOn: bridge.binding(\.genZMode) { .setGenZMode($0) })
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(FlowTheme.accent)
+            }
+            .help("works both ways 💀 your texts come out in gen z AND nugumi explains everything back to you in it too, zero unc energy anywhere")
+        ) {
             PageBanner(
                 title: "Your voice, per place",
                 message: "Nugumi picks a category automatically from the app you're in. Set the register for each below.",
                 symbol: "textformat.alt"
             )
 
-            ForEach(AppCategory.allCases, id: \.self) { category in
+            ForEach(AppCategory.allCases.filter { $0 != .custom }, id: \.self) { category in
                 StyleCard(category: category, selection: bridge.writingStyleBinding(category))
             }
+
+            CustomStyleCard()
 
             SubCard {
                 VStack(alignment: .leading, spacing: 14) {
@@ -527,16 +542,6 @@ struct StyleSection: View {
                         CleanupExample(level: bridge.settings.cleanupLevel)
                     }
                     .animation(.easeInOut(duration: 0.15), value: bridge.settings.cleanupLevel)
-                }
-            }
-
-            SubCard {
-                SettingRow("Gen Z mode",
-                           subtitle: "works both ways 💀 your texts come out in gen z AND nugumi explains everything back to you in it too, zero unc energy anywhere") {
-                    Toggle("", isOn: bridge.binding(\.genZMode) { .setGenZMode($0) })
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .tint(FlowTheme.accent)
                 }
             }
         }
@@ -698,12 +703,145 @@ private struct StyleCard: View {
             case .polite: return "Hi Alex! Any time next week for a quick call about the proposal? Thanks, Sam"
             case .casual: return "hey alex! free next week for a quick call about the proposal?"
             }
-        case .other:
+        case .other, .custom:
             switch style {
             case .formal: return "Hello, could you let me know the best time to reach you?"
             case .polite: return "Hi! When's a good time to reach you?"
             case .casual: return "hey whats a good time to reach you?"
             }
+        }
+    }
+}
+
+/// The single user-authored style: a free-text instruction that replaces the
+/// register, plus the apps it applies to. Sits at the bottom of the Style page.
+private struct CustomStyleCard: View {
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+
+    var body: some View {
+        SubCard {
+            // Two columns: the description + apps on the left, the instruction
+            // editor on the right where it gets the full column height.
+            HStack(alignment: .top, spacing: 22) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Custom style")
+                        .font(FlowTheme.serif(19))
+                        .foregroundStyle(FlowTheme.ink)
+
+                    Text("Write your own instruction and pick the apps it applies to. It replaces the register (Formal/Polite/Casual) for those apps.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // Pins the apps to the bottom so they line up with the
+                    // editor's foot; the editor's minHeight sets the column height.
+                    // No label — the description already explains the apps.
+                    Spacer(minLength: 16)
+
+                    AppIconStrip(category: .custom, apps: bridge.settings.apps(for: .custom))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(FlowTheme.hairline)
+                    .frame(width: 1)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    fieldLabel("Instruction")
+                    CustomInstructionEditor(text: bridge.settings.customStyleInstruction)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(FlowTheme.inkSecondary)
+    }
+}
+
+/// Multi-line editor for the custom style instruction. Mirrors
+/// `EmailVoiceSampleEditor`: a local draft persisted on every change.
+private struct CustomInstructionEditor: View {
+    @EnvironmentObject var bridge: NugumiSettingsBridge
+    @State private var draft: String
+
+    init(text: String) {
+        _draft = State(initialValue: text)
+    }
+
+    var body: some View {
+        PlainTextEditor(text: $draft)
+            .frame(minHeight: 150, maxHeight: .infinity)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 11)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+            .overlay(alignment: .topLeading) {
+                if draft.isEmpty {
+                    Text("e.g. Reply in lowercase, keep it short, no emojis — like texting a close friend.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 11)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: draft) { _, newValue in
+                bridge.perform(.setCustomStyleInstruction(newValue))
+            }
+    }
+}
+
+/// Plain multi-line editor backed by `NSTextView` so we fully own the scroll view.
+/// SwiftUI's `TextEditor` re-applies its own scroller config on every update, so
+/// `autohidesScrollers` never sticks there — owning the `NSScrollView` makes the
+/// track auto-hide when the text fits. Mirrors the app's other NSTextView editors.
+private struct PlainTextEditor: NSViewRepresentable {
+    @Binding var text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = NSTextView()
+        textView.delegate = context.coordinator
+        textView.string = text
+        textView.font = .systemFont(ofSize: 13)
+        textView.textColor = .white
+        textView.insertionPointColor = .white
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.widthTracksTextView = true
+        textView.autoresizingMask = [.width]
+
+        let scroll = NSScrollView()
+        scroll.documentView = textView
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let textView = scroll.documentView as? NSTextView else { return }
+        if textView.string != text { textView.string = text }
+        textView.textColor = .white
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        private let parent: PlainTextEditor
+        init(_ parent: PlainTextEditor) { self.parent = parent }
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
         }
     }
 }
@@ -883,10 +1021,7 @@ private struct EmailVoiceSampleEditor: View {
                 .foregroundStyle(FlowTheme.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextEditor(text: $draft)
-                .scrollContentBackground(.hidden)
-                .font(.system(size: 13))
-                .foregroundStyle(FlowTheme.ink)
+            PlainTextEditor(text: $draft)
                 .frame(minHeight: 104)
                 .padding(.vertical, 7)
                 .padding(.horizontal, 11)
@@ -897,8 +1032,8 @@ private struct EmailVoiceSampleEditor: View {
                         Text("Hello,\n\n…\n\nBest regards,\nYour name")
                             .font(.system(size: 13))
                             .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
+                            .padding(.vertical, 7)
+                            .padding(.horizontal, 11)
                             .allowsHitTesting(false)
                     }
                 }
@@ -1024,39 +1159,26 @@ private struct LanguageMenu: View {
 
 struct AIEngineSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
-    @State private var pickerScope: ModelUseScope?
 
     var body: some View {
-        ZStack {
-            DetailContainer(
-                "AI Engine",
-                subtitle: "Which model does the thinking — and how hard.",
-                pinned: FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
-            ) {
-                if bridge.aiEngineTab == 0 {
-                    ModelScopeCard(scope: .textActions,
-                                   title: "Everyday text",
-                                   subtitle: "Translate, rewrite, and smart replies.",
-                                   onOpenPicker: { pickerScope = .textActions })
-                    ModelScopeCard(scope: .askNugumi,
-                                   title: "Ask Nugumi",
-                                   subtitle: "Screenshot questions. Vision-capable models only.",
-                                   onOpenPicker: { pickerScope = .askNugumi })
-                } else {
-                    ForEach(orderedProviderGroups, id: \.self) { group in
-                        providerGroupCard(for: group)
-                    }
+        DetailContainer(
+            "AI Engine",
+            subtitle: "Which model does the thinking — and how hard.",
+            pinned: FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
+        ) {
+            if bridge.aiEngineTab == 0 {
+                ModelScopeCard(scope: .textActions,
+                               title: "Everyday text",
+                               subtitle: "Translate, rewrite, and smart replies.",
+                               onOpenPicker: { bridge.modelPickerScope = .textActions })
+                ModelScopeCard(scope: .askNugumi,
+                               title: "Ask Nugumi",
+                               subtitle: "Screenshot questions. Vision-capable models only.",
+                               onOpenPicker: { bridge.modelPickerScope = .askNugumi })
+            } else {
+                ForEach(orderedProviderGroups, id: \.self) { group in
+                    providerGroupCard(for: group)
                 }
-            }
-            if let scope = pickerScope {
-                ModelPickerOverlay(
-                    scope: scope,
-                    onDismiss: { pickerScope = nil },
-                    onChoose: { id in
-                        pickerScope = nil
-                        bridge.perform(.chooseModel(id, scope))
-                    }
-                )
             }
         }
     }
@@ -1293,9 +1415,10 @@ enum ModelGrouping {
     }
 }
 
-/// Dims the section and centers the picker panel. Clicking the scrim — anywhere
-/// outside the panel — closes it.
-private struct ModelPickerOverlay: View {
+/// Dims the whole window and centers the picker panel. Rendered at the window
+/// root (see `MainWindowRootView`) so the scrim reaches the sidebar too.
+/// Clicking the scrim — anywhere outside the panel — closes it.
+struct ModelPickerOverlay: View {
     let scope: ModelUseScope
     let onDismiss: () -> Void
     let onChoose: (String) -> Void
@@ -1307,6 +1430,7 @@ private struct ModelPickerOverlay: View {
                 .onTapGesture(perform: onDismiss)
             ModelPickerPanel(scope: scope, onDismiss: onDismiss, onChoose: onChoose)
         }
+        .onExitCommand(perform: onDismiss)
     }
 }
 
@@ -1320,6 +1444,7 @@ private struct ModelPickerPanel: View {
     let onChoose: (String) -> Void
 
     @State private var search = ""
+    @FocusState private var searchFocused: Bool
 
     private var currentID: String { bridge.settings.modelID(for: scope) }
 
@@ -1399,6 +1524,8 @@ private struct ModelPickerPanel: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(FlowTheme.ink)
+                .focused($searchFocused)
+                .onAppear { searchFocused = true }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

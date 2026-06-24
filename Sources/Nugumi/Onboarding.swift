@@ -121,9 +121,13 @@ final class OnboardingModel: ObservableObject {
     /// `.firstRun` keeps the historical auto-advance/auto-close behavior;
     /// `.review` (opened from Help) always shows permission status and never
     /// closes itself — the user looks around and leaves when they want.
+    /// `.replay` walks the exact first-run sequence (intro → tour → permissions
+    /// → finale) from the top, ignoring the completed flags, so an existing user
+    /// sees precisely what a brand-new user would. Never auto-closes.
     enum Mode {
         case firstRun
         case review
+        case replay
     }
 
     enum Page: Equatable {
@@ -184,7 +188,10 @@ final class OnboardingModel: ObservableObject {
         // First-run order: intro video → feature tour → permissions (only if
         // something is missing) → engine choice. Review mode always starts on
         // the permissions page so granted status stays visible.
-        if mode == .firstRun, !Self.hasCompletedFeatureTour {
+        if mode == .replay {
+            // Always from the very top, regardless of what's already completed.
+            page = OnboardingIntroVideo.url != nil ? .intro : .feature(0)
+        } else if mode == .firstRun, !Self.hasCompletedFeatureTour {
             if !Self.hasPlayedIntro, OnboardingIntroVideo.url != nil {
                 page = .intro
             } else if Self.hasPlayedIntro, nextPermission != nil {
@@ -267,7 +274,9 @@ final class OnboardingModel: ObservableObject {
             case .screenRecording:
                 openScreenRecordingSettings()
             case nil:
-                if mode == .review {
+                if mode == .replay {
+                    page = .finale
+                } else if mode == .review {
                     page = .feature(0)
                 } else if !Self.mainWindowEverAutoShown {
                     // Initial setup is still in progress (the main window has
@@ -292,7 +301,7 @@ final class OnboardingModel: ObservableObject {
             // grant. Declining one must not strand the user here — on first run
             // fall through to the engine choice (the actually-required setup
             // step) instead of closing onboarding outright.
-            if mode == .firstRun, !Self.mainWindowEverAutoShown {
+            if mode == .replay || (mode == .firstRun && !Self.mainWindowEverAutoShown) {
                 page = .finale
                 return
             }
@@ -335,8 +344,9 @@ final class OnboardingModel: ObservableObject {
         // tour must not replay after that restart.
         markTourComplete()
         // Collect missing permissions before the engine choice, now that the
-        // user has seen what they unlock.
-        if mode == .firstRun, nextPermission != nil {
+        // user has seen what they unlock. Replay always shows this page so the
+        // sequence matches a new user's even when permissions are already set.
+        if (mode == .firstRun && nextPermission != nil) || mode == .replay {
             page = .permissions
         } else {
             page = .finale
