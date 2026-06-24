@@ -1787,7 +1787,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         )
         translationPanelController = controller
         let panelRequestID = controller.showLoading(targetLanguage: targetLanguage)
-        controller.showTranslation(response.message, requestID: panelRequestID)
+        controller.showTranslation(response.message, requestID: panelRequestID, isFinal: true)
 
         if let target = response.petTarget {
             presentFloatingAskTargetPointer(for: target, capture: capture)
@@ -2898,6 +2898,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             targetLanguage: language,
             resultLabel: mode.resultLabel,
             loadingPlaceholder: mode.loadingPlaceholder,
+            showsSource: mode != .selection,
             showsFollowUp: mode == .selection,
             onTargetLanguageSelected: { [weak self] selectedLanguage in
                 self?.retranslateCurrentPanel(
@@ -3076,7 +3077,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 targetLanguageID: language.id,
                 modelID: textModelID
             )
-            controller.showTranslation(cachedTranslation, requestID: requestID)
+            controller.showTranslation(cachedTranslation, requestID: requestID, isFinal: true)
             return
         }
 
@@ -3108,7 +3109,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         targetLanguageID: language.id,
                         modelID: self.textModelID
                     )
-                    controller.showTranslation(translated, requestID: requestID)
+                    controller.showTranslation(translated, requestID: requestID, isFinal: true)
                 }
             } catch {
                 await MainActor.run {
@@ -8850,8 +8851,54 @@ private final class AskPromptTextFieldCell: NSTextFieldCell {}
 
 /// The translation panel's "Revise or ask a follow-up" field. A plain
 /// `NSTextField` is editable by default; we only add Esc-to-close.
+/// A non-bezeled `NSTextField` draws its text near the top of its frame, not
+/// centered — so the leading icon (centered in the row) sat below the text.
+/// This cell vertically centers the text in both draw and edit states.
+private final class VerticallyCenteredTextFieldCell: NSTextFieldCell {
+    private func centered(_ rect: NSRect) -> NSRect {
+        let textHeight = cellSize(forBounds: rect).height
+        guard textHeight < rect.height else { return rect }
+        let dy = (rect.height - textHeight) / 2
+        return NSRect(x: rect.minX, y: rect.minY + dy, width: rect.width, height: textHeight)
+    }
+
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        super.drawingRect(forBounds: centered(rect))
+    }
+
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor: NSText, delegate: Any?, event: NSEvent?) {
+        super.edit(withFrame: centered(rect), in: controlView, editor: editor, delegate: delegate, event: event)
+    }
+
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor: NSText, delegate: Any?, start: Int, length: Int) {
+        super.select(withFrame: centered(rect), in: controlView, editor: editor, delegate: delegate, start: start, length: length)
+    }
+}
+
 final class FollowUpTextField: NSTextField {
     var onEscape: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // NSCell(textCell:) yields a label-style cell (not editable), so
+        // re-enable editing/selection or the field can't take focus.
+        cell = VerticallyCenteredTextFieldCell(textCell: "")
+        isEditable = true
+        isSelectable = true
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    // The panel uses `becomesKeyOnlyIfNeeded`, so it won't grab key until a view
+    // asks for it. Force key + first responder on click so typing works even
+    // while the source app is frontmost.
+    override func mouseDown(with event: NSEvent) {
+        window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
 
     override func cancelOperation(_ sender: Any?) {
         onEscape?()
@@ -8859,6 +8906,35 @@ final class FollowUpTextField: NSTextField {
 }
 
 private final class AskPromptPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command {
+            switch event.charactersIgnoringModifiers {
+            case "v":
+                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) { return true }
+            case "c":
+                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) { return true }
+            case "x":
+                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) { return true }
+            case "a":
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) { return true }
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+/// The translation result panel. Plain borderless `NSPanel` returns
+/// `canBecomeKey == false`, so its text field (the follow-up input) could never
+/// take focus. Overriding it — while keeping `becomesKeyOnlyIfNeeded` on the
+/// instance — lets the field become key on click without the panel stealing key
+/// the moment it appears (which would disrupt the source app's selection).
+private final class TranslationResultPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
@@ -9515,7 +9591,8 @@ final class TranslationPanelController {
         sourceText: String,
         targetLanguage: TranslationLanguage,
         resultLabel: String? = nil,
-        loadingPlaceholder: String = "Translating",
+        loadingPlaceholder: String = "Thinking",
+        showsSource: Bool = true,
         showsFollowUp: Bool = false,
         onTargetLanguageSelected: ((TranslationLanguage) -> Void)? = nil,
         onReplace: ((String) -> Void)? = nil,
@@ -9532,7 +9609,7 @@ final class TranslationPanelController {
         let referencePoint = Self.anchorReferencePoint(for: anchor)
         let visibleFrame = NSScreen.visibleFrame(containing: referencePoint)
         let panelHeight = min(
-            TranslationContentView.preferredHeight(sourceText: sourceText, resultText: "\(loadingPlaceholder)...", showsFollowUp: showsFollowUp),
+            TranslationContentView.preferredHeight(sourceText: sourceText, resultText: "\(loadingPlaceholder)...", showsSource: showsSource, showsFollowUp: showsFollowUp),
             visibleFrame.height - 32
         )
         let panelSize = NSSize(width: TranslationContentView.preferredWidth, height: panelHeight)
@@ -9548,12 +9625,13 @@ final class TranslationPanelController {
             targetLanguage: targetLanguage,
             resultLabel: resultLabel,
             anchorY: anchorY,
+            showsSource: showsSource,
             showsFollowUp: showsFollowUp,
             onTargetLanguageSelected: onTargetLanguageSelected,
             onReplace: onReplace
         )
         contentView.onFollowUp = onFollowUp
-        panel = NSPanel(
+        panel = TranslationResultPanel(
             contentRect: NSRect(origin: origin, size: panelSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -9576,6 +9654,11 @@ final class TranslationPanelController {
         contentView.onClose = { [weak self] in self?.close() }
         contentView.onNeedsResize = { [weak self] in
             self?.resizeToFitContent(animated: true)
+        }
+        // Resize only when a result actually renders (throttled), so streaming
+        // doesn't shake the panel on every chunk.
+        contentView.onResultRendered = { [weak self] in
+            self?.resizeToFitContent(animated: false)
         }
     }
 
@@ -9600,13 +9683,14 @@ final class TranslationPanelController {
         return activeRequestID
     }
 
-    func showTranslation(_ text: String, requestID: UUID? = nil) {
+    func showTranslation(_ text: String, requestID: UUID? = nil, isFinal: Bool = false) {
         guard requestIsCurrent(requestID) else {
             return
         }
 
-        contentView.setResult(text)
-        resizeToFitContent(animated: false)
+        // Partials render inline (stable while streaming); the final chunk
+        // (isFinal) re-renders as block markdown — tables/headers/lists.
+        contentView.setResult(text, isFinal: isFinal)
     }
 
     func showError(_ message: String, requestID: UUID? = nil) {
@@ -9615,7 +9699,6 @@ final class TranslationPanelController {
         }
 
         contentView.setError(message)
-        resizeToFitContent(animated: true)
     }
 
     func close() {
@@ -9964,7 +10047,7 @@ final class HairlineSeparatorView: NSView {
 }
 
 private enum TranslationPanelPalette {
-    static let targetTitle = NSColor(calibratedWhite: 1.0, alpha: 0.84)
+    static let targetTitle = NSColor(calibratedWhite: 1.0, alpha: 0.5)
     static let resultText = NSColor(calibratedWhite: 0.94, alpha: 0.96)
     static let resultLink = NSColor(calibratedWhite: 1.0, alpha: 0.82)
     static let actionIconEnabled = NSColor(calibratedWhite: 1.0, alpha: 0.68)
@@ -9976,10 +10059,8 @@ final class LanguagePickerButton: NSButton {
     static let titleLeadingInset: CGFloat = 8
 
     private static let horizontalPadding: CGFloat = 8
-    private static let chevronGap: CGFloat = 8
-    private static let chevronWidth: CGFloat = 10
-    private static let chevronHeight: CGFloat = 16
-    private static let chevronBackgroundSize: CGFloat = 18
+    private static let chevronGap: CGFloat = 6
+    private static let pickerIndicatorWidth: CGFloat = 12
 
     private let titleFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
     private let titleColor = TranslationPanelPalette.targetTitle
@@ -9992,7 +10073,7 @@ final class LanguagePickerButton: NSButton {
 
     var preferredWidth: CGFloat {
         let titleWidth = ceil((displayTitle as NSString).size(withAttributes: [.font: titleFont]).width)
-        let affordanceWidth = pickerEnabled ? Self.chevronGap + Self.chevronBackgroundSize : 0
+        let affordanceWidth = pickerEnabled ? Self.chevronGap + Self.pickerIndicatorWidth : 0
         let paddedWidth = titleWidth + Self.horizontalPadding * 2 + affordanceWidth
         return min(max(paddedWidth, 64), 220)
     }
@@ -10056,50 +10137,34 @@ final class LanguagePickerButton: NSButton {
         title.draw(at: titleOrigin)
 
         guard pickerEnabled && (isHovered || isMenuOpen || isHighlighted),
-              bounds.width > Self.horizontalPadding * 2 + Self.chevronBackgroundSize
+              bounds.width > Self.horizontalPadding * 2 + Self.pickerIndicatorWidth
         else {
             return
         }
 
-        drawChevronPair()
+        drawPickerIndicator(titleHeight: titleSize.height)
     }
 
-    private func drawChevronPair() {
-        let backgroundRect = NSRect(
-            x: bounds.maxX - Self.horizontalPadding - Self.chevronBackgroundSize,
-            y: floor((bounds.height - Self.chevronBackgroundSize) / 2),
-            width: Self.chevronBackgroundSize,
-            height: Self.chevronBackgroundSize
-        )
-        NSColor(calibratedWhite: 1.0, alpha: 0.11).setFill()
-        NSBezierPath(ovalIn: backgroundRect).fill()
+    private func drawPickerIndicator(titleHeight: CGFloat) {
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+        guard let base = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: nil)?
+            .withSymbolConfiguration(config) else {
+            return
+        }
 
-        let origin = NSPoint(
-            x: backgroundRect.midX - Self.chevronWidth / 2,
-            y: floor((bounds.height - Self.chevronHeight) / 2)
-        )
-        let midX = origin.x + Self.chevronWidth / 2
-        let rightX = origin.x + Self.chevronWidth
+        let size = base.size
+        let tinted = NSImage(size: size, flipped: false) { rect in
+            base.draw(in: rect)
+            self.titleColor.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
 
-        NSColor(calibratedWhite: 1.0, alpha: 0.88).setStroke()
-
-        let up = NSBezierPath()
-        up.lineWidth = 2.0
-        up.lineCapStyle = .round
-        up.lineJoinStyle = .round
-        up.move(to: NSPoint(x: origin.x + 1, y: origin.y + 10))
-        up.line(to: NSPoint(x: midX, y: origin.y + 14))
-        up.line(to: NSPoint(x: rightX - 1, y: origin.y + 10))
-        up.stroke()
-
-        let down = NSBezierPath()
-        down.lineWidth = 2.0
-        down.lineCapStyle = .round
-        down.lineJoinStyle = .round
-        down.move(to: NSPoint(x: origin.x + 1, y: origin.y + 6))
-        down.line(to: NSPoint(x: midX, y: origin.y + 2))
-        down.line(to: NSPoint(x: rightX - 1, y: origin.y + 6))
-        down.stroke()
+        // Center on the title's vertical center, mirroring the title's -1 nudge.
+        let textCenterY = floor((bounds.height - titleHeight) / 2) - 1 + titleHeight / 2
+        let x = bounds.maxX - Self.horizontalPadding - size.width
+        let y = textCenterY - size.height / 2
+        tinted.draw(at: NSPoint(x: floor(x), y: floor(y)), from: .zero, operation: .sourceOver, fraction: 1.0)
     }
 
     func setTitle(_ title: String, pickerEnabled: Bool) {
@@ -10231,6 +10296,64 @@ final class SourcePreviewView: NSView {
     }
 }
 
+/// A single line of text with a highlight that sweeps across it — the "AI is
+/// working" shimmer. Used as the result panel's loading state instead of
+/// cycling dots. The text shape masks an animated gradient.
+final class ShimmerTextLabel: NSView {
+    private let gradientLayer = CAGradientLayer()
+    private let textLayer = CATextLayer()
+    private var displayFont = NSFont.systemFont(ofSize: 16, weight: .semibold)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        textLayer.contentsScale = scale
+        textLayer.alignmentMode = .left
+        textLayer.truncationMode = .end
+        textLayer.isWrapped = false
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        gradientLayer.mask = textLayer
+        layer?.addSublayer(gradientLayer)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func configure(text: String, font: NSFont, base: NSColor, highlight: NSColor) {
+        displayFont = font
+        textLayer.string = text
+        textLayer.font = font as CTFont
+        textLayer.fontSize = font.pointSize
+        // Narrow bright band riding on a dim base; animating `locations` sweeps it.
+        gradientLayer.colors = [base, base, highlight, base, base].map(\.cgColor)
+        gradientLayer.locations = [0, 0.35, 0.5, 0.65, 1]
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        gradientLayer.frame = bounds
+        let lineHeight = ceil(displayFont.ascender - displayFont.descender + displayFont.leading)
+        textLayer.frame = NSRect(x: 0, y: max(0, (bounds.height - lineHeight) / 2), width: bounds.width, height: lineHeight)
+    }
+
+    func startAnimating() {
+        guard gradientLayer.animation(forKey: "shimmer") == nil else { return }
+        let anim = CABasicAnimation(keyPath: "locations")
+        anim.fromValue = [-0.6, -0.25, 0.0, 0.25, 0.6]
+        anim.toValue = [0.4, 0.75, 1.0, 1.25, 1.6]
+        anim.duration = 1.4
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        gradientLayer.add(anim, forKey: "shimmer")
+    }
+
+    func stopAnimating() {
+        gradientLayer.removeAnimation(forKey: "shimmer")
+    }
+}
+
 final class TranslationContentView: NSView, NSTextFieldDelegate {
     private enum ResultTone {
         case normal
@@ -10269,8 +10392,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
     // Footer "Revise or ask a follow-up" row (selection panel only).
     private static let followUpTopGap: CGFloat = 12
-    private static let followUpDividerToFieldGap: CGFloat = 10
-    private static let followUpFieldHeight: CGFloat = 30
+    // Equal to panelPaddingBottom so the field's center sits equidistant from the
+    // divider above and the panel's bottom edge below.
+    private static let followUpDividerToFieldGap: CGFloat = panelPaddingBottom
+    private static let followUpFieldHeight: CGFloat = 20
     private static let followUpIconSize: CGFloat = 16
     static var followUpFooterHeight: CGFloat {
         followUpTopGap + dividerHeight + followUpDividerToFieldGap + followUpFieldHeight
@@ -10283,21 +10408,38 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
     var onClose: (() -> Void)?
     var onNeedsResize: (() -> Void)?
+    /// Fires after an actual (throttled) result render so the panel resizes only
+    /// when content really changed — not on every streamed chunk.
+    var onResultRendered: (() -> Void)?
     /// Fires when the user submits the footer "Revise or ask a follow-up" field.
     var onFollowUp: ((String) -> Void)?
 
     private let sourceText: String
     private var targetLanguage: TranslationLanguage
+    private let showsSource: Bool
     private let showsFollowUp: Bool
     private let followUpDivider = HairlineSeparatorView()
     private let followUpField = FollowUpTextField()
     private let followUpIcon = NSImageView()
     private let resultLabel: String?
-    private var resultText = "Translating..."
-    private var resultDisplayText = "Translating..."
+    private var resultText = "Thinking..."
+    private var resultDisplayText = "Thinking..."
     /// The last non-loading result shown. Revise composes against this so a
     /// follow-up typed mid-revise builds on the real answer, not "Revising...".
     private var lastRealResultText = ""
+
+    // Streaming throttle: re-rendering markdown (esp. NSTextTable) + resizing on
+    // every chunk makes the panel shake. Coalesce to ~8 renders/sec; first and
+    // final chunks always render (leading + trailing edge).
+    private static let resultThrottleInterval: TimeInterval = 0.12
+    private var pendingResultText: String?
+    private var pendingResultTone: ResultTone = .normal
+    private var resultThrottleScheduled = false
+    private var lastResultRenderTime: TimeInterval = 0
+    /// Whether the last render used the full block renderer (tables/headers) vs
+    /// the inline streaming renderer — so the final block render isn't skipped
+    /// just because its text matches the last streamed partial.
+    private var lastRenderUsedBlock = false
     private var resultTone: ResultTone = .normal
     private let resultTextView = NSTextView()
     private let sourceTitleLabel = NSTextField(labelWithString: "")
@@ -10319,9 +10461,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     private let onTargetLanguageSelected: ((TranslationLanguage) -> Void)?
     private let onReplace: ((String) -> Void)?
     private var loadingBaseText: String?
-    private var loadingTimer: Timer?
-    private var loadingDotCount = 0
-    private var isInternalLoadingUpdate = false
+    private let loadingShimmer = ShimmerTextLabel()
 
     var isTargetLanguageMenuOpen = false
 
@@ -10330,6 +10470,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         targetLanguage: TranslationLanguage,
         resultLabel: String? = nil,
         anchorY: CGFloat,
+        showsSource: Bool = true,
         showsFollowUp: Bool = false,
         onTargetLanguageSelected: ((TranslationLanguage) -> Void)? = nil,
         onReplace: ((String) -> Void)? = nil
@@ -10338,6 +10479,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         self.targetLanguage = targetLanguage
         self.resultLabel = resultLabel
         self.anchorYValue = anchorY
+        self.showsSource = showsSource
         self.showsFollowUp = showsFollowUp
         self.onTargetLanguageSelected = onTargetLanguageSelected
         self.onReplace = onReplace
@@ -10345,7 +10487,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             x: 0,
             y: 0,
             width: Self.preferredWidth,
-            height: Self.preferredHeight(sourceText: sourceText, resultText: "Translating...", showsFollowUp: showsFollowUp)
+            height: Self.preferredHeight(sourceText: sourceText, resultText: "Thinking...", showsSource: showsSource, showsFollowUp: showsFollowUp)
         ))
         wantsLayer = true
         buildUI()
@@ -10355,28 +10497,52 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         nil
     }
 
-    static func preferredHeight(sourceText: String, resultText: String, sourceExpanded: Bool = false, showsFollowUp: Bool = false) -> CGFloat {
-        let sourceBoxHeight = sourceHeight(for: sourceText, expanded: sourceExpanded)
-        let resultBoxHeight = boxHeight(
-            for: resultText,
-            font: NSFont.systemFont(ofSize: resultFontSize, weight: .semibold),
-            width: contentWidth,
-            minimum: minimumResultBoxHeight,
-            maximum: maximumResultBoxHeight,
-            paragraphSpacing: resultFontSize * resultParagraphSpacingFactor
+    static func preferredHeight(sourceText: String, resultText: String, sourceExpanded: Bool = false, showsSource: Bool = true, showsFollowUp: Bool = false) -> CGFloat {
+        preferredHeight(
+            sourceText: sourceText,
+            resultBoxHeight: renderedResultHeight(markdown: resultText, width: contentWidth),
+            sourceExpanded: sourceExpanded,
+            showsSource: showsSource,
+            showsFollowUp: showsFollowUp
         )
+    }
 
+    static func preferredHeight(sourceText: String, resultBoxHeight: CGFloat, sourceExpanded: Bool, showsSource: Bool, showsFollowUp: Bool) -> CGFloat {
+        let sourceBoxHeight = sourceHeight(for: sourceText, expanded: sourceExpanded)
+
+        // Source section (label + box + divider + gaps) is omitted entirely when
+        // showsSource is false — the result becomes the top section.
+        let sourceSectionHeight = showsSource
+            ? (labelHeight + labelToBoxGap + sourceBoxHeight + sourceToDividerGap + dividerHeight + dividerToTargetGap)
+            : 0
         let fixedHeight = panelPaddingTop
-            + labelHeight + labelToBoxGap
-            + sourceToDividerGap + dividerHeight + dividerToTargetGap
+            + sourceSectionHeight
             + labelHeight + labelToBoxGap
             + panelPaddingBottom
             + (showsFollowUp ? followUpFooterHeight : 0)
-        return min(max(fixedHeight + sourceBoxHeight + resultBoxHeight, minHeight), maxHeight)
+        return min(max(fixedHeight + resultBoxHeight, minHeight), maxHeight)
     }
 
     func preferredHeightForCurrentContent() -> CGFloat {
-        Self.preferredHeight(sourceText: sourceText, resultText: resultDisplayText, sourceExpanded: sourceExpanded, showsFollowUp: showsFollowUp)
+        // Measure what's actually shown (inline while streaming, block on final),
+        // not a re-rendered block version — otherwise the panel height disagrees
+        // with the displayed text mid-stream and the result twitches.
+        let resultBox: CGFloat
+        if !isShowingLoadingState, let storage = resultTextView.textStorage, storage.length > 0 {
+            resultBox = Self.resultBoxHeight(rawTextHeight: Self.attributedTextHeight(storage, width: Self.contentWidth))
+        } else {
+            // While loading, size for the placeholder (e.g. "Revising"), not the
+            // prior answer still held in resultText — otherwise revise blows the
+            // panel up to the old result's height with the shimmer floating in it.
+            resultBox = Self.renderedResultHeight(markdown: loadingBaseText ?? resultText, width: Self.contentWidth)
+        }
+        return Self.preferredHeight(
+            sourceText: sourceText,
+            resultBoxHeight: resultBox,
+            sourceExpanded: sourceExpanded,
+            showsSource: showsSource,
+            showsFollowUp: showsFollowUp
+        )
     }
 
     var currentResultText: String { lastRealResultText }
@@ -10516,7 +10682,100 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         return ceil(layoutManager.usedRect(for: container).height)
     }
 
-    private static func renderedMarkdownText(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
+    /// Block-level markdown: paragraphs, ATX headers, bullet/numbered lists, and
+    /// GitHub-style tables. Answers (follow-ups) emit real markdown now, not just
+    /// plain translations, so block constructs must render instead of leaking as
+    /// raw `|` pipes and `#`. Inline styling (bold/italic/code/links) is applied
+    /// per block via `inlineAttributed`.
+    static func renderedMarkdownText(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        let lines = text.components(separatedBy: "\n")
+        let out = NSMutableAttributedString()
+        var i = 0
+        var lastWasTable = false
+
+        while i < lines.count {
+            let raw = lines[i]
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.isEmpty {
+                i += 1
+                continue
+            }
+
+            // Table: a row with pipes immediately followed by a `|---|---|` rule.
+            if trimmed.contains("|"), i + 1 < lines.count, isTableSeparatorRow(lines[i + 1]) {
+                var rows = [raw]
+                i += 2 // header row + separator
+                while i < lines.count {
+                    let t = lines[i].trimmingCharacters(in: .whitespaces)
+                    guard !t.isEmpty, t.contains("|") else { break }
+                    rows.append(lines[i])
+                    i += 1
+                }
+                out.append(renderTable(rows: rows, font: font, color: color))
+                lastWasTable = true
+                continue
+            }
+
+            // ATX header (# .. ######)
+            if let (level, content) = parseHeader(trimmed) {
+                out.append(renderHeader(content, level: level, baseFont: font, color: color))
+                lastWasTable = false
+                i += 1
+                continue
+            }
+
+            // List item (-, *, +, or "1.")
+            if let item = parseListItem(raw) {
+                out.append(renderListItem(marker: item.marker, content: item.content, font: font, color: color))
+                lastWasTable = false
+                i += 1
+                continue
+            }
+
+            // Paragraph: consecutive non-blank, non-block lines. Joined with "\n"
+            // so the model's intended soft breaks survive (matches prior behavior).
+            var paragraphLines = [raw]
+            i += 1
+            while i < lines.count {
+                let l = lines[i]
+                let t = l.trimmingCharacters(in: .whitespaces)
+                if t.isEmpty { break }
+                if parseHeader(t) != nil { break }
+                if parseListItem(l) != nil { break }
+                if t.contains("|"), i + 1 < lines.count, isTableSeparatorRow(lines[i + 1]) { break }
+                paragraphLines.append(l)
+                i += 1
+            }
+            out.append(renderParagraph(paragraphLines.joined(separator: "\n"), font: font, color: color))
+            lastWasTable = false
+        }
+
+        // Drop the final newline so the box isn't padded with a blank line — but
+        // not after a table, where it terminates the last cell's paragraph.
+        if !lastWasTable, out.string.hasSuffix("\n") {
+            out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1))
+        }
+        return out
+    }
+
+    /// Streaming render: inline markdown only (bold/italic/code/links), one
+    /// paragraph style, whitespace preserved. Block constructs (tables/headers)
+    /// reflow as their syntax completes mid-stream, so they're deferred to the
+    /// final render (`renderedMarkdownText`). Stable while text streams in.
+    static func renderedStreamingText(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        let s = inlineAttributed(text, font: font, color: color)
+        guard s.length > 0 else { return s }
+        let p = NSMutableParagraphStyle()
+        p.lineBreakMode = .byWordWrapping
+        p.paragraphSpacing = font.pointSize * resultParagraphSpacingFactor
+        s.addAttribute(.paragraphStyle, value: p, range: NSRange(location: 0, length: s.length))
+        return s
+    }
+
+    /// Inline-only markdown (bold/italic/code/links) for a single block of text.
+    /// No paragraph style, no trailing newline — block renderers add those.
+    private static func inlineAttributed(_ text: String, font: NSFont, color: NSColor) -> NSMutableAttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         let rendered = (try? AttributedString(markdown: text, options: options))
             .map { NSMutableAttributedString($0) }
@@ -10527,21 +10786,11 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         }
 
         let fullRange = NSRange(location: 0, length: rendered.length)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byWordWrapping
-        paragraph.paragraphSpacing = font.pointSize * resultParagraphSpacingFactor
-        rendered.addAttributes([
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: paragraph
-        ], range: fullRange)
+        rendered.addAttributes([.font: font, .foregroundColor: color], range: fullRange)
 
         var fontRuns: [(NSRange, NSFont)] = []
         rendered.enumerateAttribute(.inlinePresentationIntent, in: fullRange) { value, range, _ in
-            guard let intent = (value as? NSNumber)?.intValue else {
-                return
-            }
-
+            guard let intent = (value as? NSNumber)?.intValue else { return }
             if let styledFont = markdownFont(for: intent, baseFont: font) {
                 fontRuns.append((range, styledFont))
             }
@@ -10550,20 +10799,164 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             rendered.addAttribute(.font, value: styledFont, range: range)
         }
 
-        var linkRuns: [NSRange] = []
         rendered.enumerateAttribute(.link, in: fullRange) { value, range, _ in
-            if value != nil {
-                linkRuns.append(range)
-            }
-        }
-        for range in linkRuns {
+            guard value != nil else { return }
             rendered.addAttributes([
                 .foregroundColor: TranslationPanelPalette.resultLink,
                 .underlineStyle: NSUnderlineStyle.single.rawValue
             ], range: range)
         }
-
         return rendered
+    }
+
+    private static func blockParagraphStyle(font: NSFont, headIndent: CGFloat = 0, spacingBefore: CGFloat = 0) -> NSMutableParagraphStyle {
+        let p = NSMutableParagraphStyle()
+        p.lineBreakMode = .byWordWrapping
+        p.paragraphSpacing = font.pointSize * resultParagraphSpacingFactor
+        p.paragraphSpacingBefore = spacingBefore
+        if headIndent > 0 {
+            p.headIndent = headIndent
+            p.tabStops = [NSTextTab(textAlignment: .left, location: headIndent)]
+        }
+        return p
+    }
+
+    private static func renderParagraph(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        let s = inlineAttributed(text, font: font, color: color)
+        s.addAttribute(.paragraphStyle, value: blockParagraphStyle(font: font), range: NSRange(location: 0, length: s.length))
+        s.append(NSAttributedString(string: "\n"))
+        return s
+    }
+
+    private static func renderHeader(_ text: String, level: Int, baseFont: NSFont, color: NSColor) -> NSAttributedString {
+        let scale: CGFloat = level <= 1 ? 1.3 : (level == 2 ? 1.15 : 1.05)
+        let headerFont = NSFont.systemFont(ofSize: baseFont.pointSize * scale, weight: .bold)
+        let s = inlineAttributed(text, font: headerFont, color: color)
+        s.addAttribute(
+            .paragraphStyle,
+            value: blockParagraphStyle(font: headerFont, spacingBefore: baseFont.pointSize * 0.4),
+            range: NSRange(location: 0, length: s.length)
+        )
+        s.append(NSAttributedString(string: "\n"))
+        return s
+    }
+
+    private static func renderListItem(marker: String, content: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        let indent = font.pointSize * 1.5
+        let s = NSMutableAttributedString(string: "\(marker)\t", attributes: [.font: font, .foregroundColor: color])
+        s.append(inlineAttributed(content, font: font, color: color))
+        s.addAttribute(.paragraphStyle, value: blockParagraphStyle(font: font, headIndent: indent), range: NSRange(location: 0, length: s.length))
+        s.append(NSAttributedString(string: "\n"))
+        return s
+    }
+
+    private static func isTableSeparatorRow(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        guard t.contains("-"), t.contains("|") else { return false }
+        let cells = t.split(separator: "|", omittingEmptySubsequences: true)
+        guard !cells.isEmpty else { return false }
+        return cells.allSatisfy { cell in
+            let c = cell.trimmingCharacters(in: .whitespaces)
+            return !c.isEmpty && c.allSatisfy { $0 == "-" || $0 == ":" }
+        }
+    }
+
+    private static func parseHeader(_ trimmed: String) -> (level: Int, content: String)? {
+        guard trimmed.hasPrefix("#") else { return nil }
+        var level = 0
+        var idx = trimmed.startIndex
+        while idx < trimmed.endIndex, trimmed[idx] == "#", level < 6 {
+            level += 1
+            idx = trimmed.index(after: idx)
+        }
+        guard idx < trimmed.endIndex, trimmed[idx] == " " else { return nil }
+        return (level, String(trimmed[idx...]).trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func parseListItem(_ line: String) -> (marker: String, content: String)? {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        for prefix in ["- ", "* ", "+ "] where t.hasPrefix(prefix) {
+            return ("•", String(t.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces))
+        }
+        if let dot = t.range(of: ". ") {
+            let num = t[t.startIndex..<dot.lowerBound]
+            if !num.isEmpty, num.allSatisfy(\.isNumber) {
+                return ("\(num).", String(t[dot.upperBound...]).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return nil
+    }
+
+    private static func splitTableRow(_ line: String) -> [String] {
+        var t = line.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("|") { t.removeFirst() }
+        if t.hasSuffix("|") { t.removeLast() }
+        return t.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private static func renderTable(rows: [String], font: NSFont, color: NSColor) -> NSAttributedString {
+        let parsed = rows.map { splitTableRow($0) }
+        let columns = parsed.map(\.count).max() ?? 0
+        guard columns > 0 else { return NSAttributedString(string: "\n") }
+
+        let table = NSTextTable()
+        table.numberOfColumns = columns
+        table.layoutAlgorithm = .automaticLayoutAlgorithm
+        table.hidesEmptyCells = false
+
+        let borderColor = color.withAlphaComponent(0.22)
+        let result = NSMutableAttributedString()
+        for (rowIndex, cells) in parsed.enumerated() {
+            let isHeader = rowIndex == 0
+            let cellFont = isHeader ? NSFont.systemFont(ofSize: font.pointSize, weight: .bold) : font
+            for column in 0..<columns {
+                let cellText = column < cells.count ? cells[column] : ""
+                let block = NSTextTableBlock(table: table, startingRow: rowIndex, rowSpan: 1, startingColumn: column, columnSpan: 1)
+                block.setBorderColor(borderColor)
+                block.setWidth(1, type: .absoluteValueType, for: .border)
+                block.setWidth(6, type: .absoluteValueType, for: .padding)
+                if isHeader {
+                    block.backgroundColor = color.withAlphaComponent(0.06)
+                }
+
+                let cellStyle = NSMutableParagraphStyle()
+                cellStyle.textBlocks = [block]
+                cellStyle.lineBreakMode = .byWordWrapping
+
+                let cellAttr = inlineAttributed(cellText, font: cellFont, color: color)
+                cellAttr.append(NSAttributedString(string: "\n"))
+                cellAttr.addAttribute(.paragraphStyle, value: cellStyle, range: NSRange(location: 0, length: cellAttr.length))
+                result.append(cellAttr)
+            }
+        }
+        return result
+    }
+
+    /// Height of an already-rendered attributed string (incl. NSTextTable blocks)
+    /// at a given width. The plain-string `textHeight` undercounts tables.
+    private static func attributedTextHeight(_ attributed: NSAttributedString, width: CGFloat) -> CGFloat {
+        guard attributed.length > 0 else { return 0 }
+        let storage = NSTextStorage(attributedString: attributed)
+        let layoutManager = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = false
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: container)
+        return ceil(layoutManager.usedRect(for: container).height)
+    }
+
+    /// Result box height for markdown source: render then measure so tables and
+    /// headers get their true height. Clamped to the result box bounds.
+    private static func resultBoxHeight(rawTextHeight: CGFloat) -> CGFloat {
+        min(max(rawTextHeight + textInsetY * 2 + 4, minimumResultBoxHeight), maximumResultBoxHeight)
+    }
+
+    private static func renderedResultHeight(markdown: String, width: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: resultFontSize, weight: .semibold)
+        let attr = renderedMarkdownText(markdown, font: font, color: .white)
+        return resultBoxHeight(rawTextHeight: attributedTextHeight(attr, width: width))
     }
 
     private static func markdownFont(for intent: Int, baseFont: NSFont) -> NSFont? {
@@ -10600,13 +10993,6 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         let content = panelGlass.contentView
         self.panelGlass = panelGlass
 
-        configureSectionLabel(
-            sourceTitleLabel,
-            text: "Source",
-            color: NSColor(calibratedWhite: 1.0, alpha: 0.74)
-        )
-        content.addSubview(sourceTitleLabel)
-
         closeButton = makeIconButton(
             symbolName: "xmark",
             accessibilityDescription: "Close",
@@ -10616,21 +11002,30 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             to: content
         )
 
-        configureScrollView(sourceScrollView)
-        configureTextView(
-            sourceTextView,
-            text: sourceText,
-            font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold),
-            color: NSColor(calibratedWhite: 1.0, alpha: 0.90)
-        )
-        sourceScrollView.documentView = sourceTextView
-        sourceScrollView.isHidden = true
-        sourcePreviewView.onMore = { [weak self] in
-            self?.expandSource()
+        if showsSource {
+            configureSectionLabel(
+                sourceTitleLabel,
+                text: "Source",
+                color: NSColor(calibratedWhite: 1.0, alpha: 0.74)
+            )
+            content.addSubview(sourceTitleLabel)
+
+            configureScrollView(sourceScrollView)
+            configureTextView(
+                sourceTextView,
+                text: sourceText,
+                font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold),
+                color: NSColor(calibratedWhite: 1.0, alpha: 0.90)
+            )
+            sourceScrollView.documentView = sourceTextView
+            sourceScrollView.isHidden = true
+            sourcePreviewView.onMore = { [weak self] in
+                self?.expandSource()
+            }
+            content.addSubview(sourcePreviewView)
+            content.addSubview(sourceScrollView)
+            content.addSubview(sourceDivider)
         }
-        content.addSubview(sourcePreviewView)
-        content.addSubview(sourceScrollView)
-        content.addSubview(sourceDivider)
 
         targetTitleButton.target = self
         targetTitleButton.action = #selector(showTargetLanguageMenu)
@@ -10676,6 +11071,9 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         content.addSubview(chromeOverlay)
         self.chromeOverlay = chromeOverlay
 
+        loadingShimmer.isHidden = true
+        content.addSubview(loadingShimmer)
+
         if showsFollowUp {
             buildFollowUpFooter(in: content)
         }
@@ -10687,9 +11085,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         content.addSubview(followUpDivider)
 
         let iconConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
-        // ponytail: SF Symbol placeholder for the leading glyph; swap for a
-        // mascot icon if the brand wants it.
-        followUpIcon.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)?
+        followUpIcon.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)?
             .withSymbolConfiguration(iconConfig)
         followUpIcon.contentTintColor = NSColor(calibratedWhite: 1.0, alpha: 0.55)
         followUpIcon.imageScaling = .scaleProportionallyUpOrDown
@@ -10743,6 +11139,9 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     }
 
     private func configureTextView(_ textView: NSTextView, text: String, font: NSFont, color: NSColor) {
+        // Accessing layoutManager opts the view into TextKit 1, whose NSTextTable
+        // support is mature and matches our TextKit-1 height measurement.
+        _ = textView.layoutManager
         textView.string = text
         textView.drawsBackground = false
         textView.isEditable = false
@@ -10802,109 +11201,99 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         )
         chromeOverlay?.frame = NSRect(x: 0, y: 0, width: Self.bodyWidth, height: bodyHeight)
 
-        let sourceBoxHeight = Self.sourceHeight(for: sourceText, expanded: sourceExpanded)
-        let fixedHeight = Self.panelPaddingTop
-            + Self.labelHeight + Self.labelToBoxGap
-            + Self.sourceToDividerGap + Self.dividerHeight + Self.dividerToTargetGap
-            + Self.labelHeight + Self.labelToBoxGap
-            + Self.panelPaddingBottom
-            + (showsFollowUp ? Self.followUpFooterHeight : 0)
-        let availableBoxHeight = max(
-            Self.collapsedSourceBoxHeight + Self.minimumResultBoxHeight,
-            bounds.height - fixedHeight
-        )
-        let resolvedSourceBoxHeight = min(
-            sourceBoxHeight,
-            max(Self.collapsedSourceBoxHeight, availableBoxHeight - Self.minimumResultBoxHeight)
-        )
-        let resolvedResultBoxHeight = max(Self.minimumResultBoxHeight, availableBoxHeight - resolvedSourceBoxHeight)
+        let resolvedResultBoxHeight: CGFloat
+        var y: CGFloat
 
-        var y = bodyHeight - Self.panelPaddingTop - Self.labelHeight
-        sourceTitleLabel.frame = NSRect(
-            x: Self.panelPaddingX,
-            y: y,
-            width: Self.contentWidth - Self.buttonSize - 8,
-            height: Self.labelHeight
-        )
-        closeButton?.frame = NSRect(
-            x: Self.bodyWidth - Self.panelPaddingX - Self.buttonSize,
-            y: y + (Self.labelHeight - Self.buttonSize) / 2,
-            width: Self.buttonSize,
-            height: Self.buttonSize
-        )
-
-        y -= Self.labelToBoxGap + resolvedSourceBoxHeight
-        let sourceScrollFrame = NSRect(
-            x: Self.panelPaddingX,
-            y: y,
-            width: Self.contentWidth,
-            height: resolvedSourceBoxHeight
-        )
-        let collapsedSourceText = Self.collapsedSourceText(sourceText)
-        let sourceCanExpand = Self.singleLineWidth(
-            for: collapsedSourceText,
-            font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold)
-        ) > Self.contentWidth
-            || collapsedSourceText != sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        sourcePreviewView.frame = sourceScrollFrame
-        sourcePreviewView.configure(text: collapsedSourceText, canExpand: sourceCanExpand)
-        sourcePreviewView.isHidden = sourceExpanded
-        sourceScrollView.isHidden = !sourceExpanded
-
-        if sourceExpanded {
-            let sourceRawTextHeight = Self.textHeight(
-                for: sourceText,
-                font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold),
-                width: sourceScrollFrame.width
+        if showsSource {
+            let sourceBoxHeight = Self.sourceHeight(for: sourceText, expanded: sourceExpanded)
+            let fixedHeight = Self.panelPaddingTop
+                + Self.labelHeight + Self.labelToBoxGap
+                + Self.sourceToDividerGap + Self.dividerHeight + Self.dividerToTargetGap
+                + Self.labelHeight + Self.labelToBoxGap
+                + Self.panelPaddingBottom
+                + (showsFollowUp ? Self.followUpFooterHeight : 0)
+            let availableBoxHeight = max(
+                Self.collapsedSourceBoxHeight + Self.minimumResultBoxHeight,
+                bounds.height - fixedHeight
             )
-            Self.layoutScrollableTextView(
-                sourceTextView,
-                inside: sourceScrollView,
-                scrollFrame: sourceScrollFrame,
-                rawTextHeight: sourceRawTextHeight,
-                showsOverflowScroller: true
+            let resolvedSourceBoxHeight = min(
+                sourceBoxHeight,
+                max(Self.collapsedSourceBoxHeight, availableBoxHeight - Self.minimumResultBoxHeight)
             )
-            if shouldScrollSourceToTop {
-                scrollToTop(sourceScrollView)
-                shouldScrollSourceToTop = false
+            resolvedResultBoxHeight = max(Self.minimumResultBoxHeight, availableBoxHeight - resolvedSourceBoxHeight)
+
+            y = bodyHeight - Self.panelPaddingTop - Self.labelHeight
+            sourceTitleLabel.frame = NSRect(
+                x: Self.panelPaddingX,
+                y: y,
+                width: Self.contentWidth - Self.buttonSize - 8,
+                height: Self.labelHeight
+            )
+            closeButton?.frame = NSRect(
+                x: Self.bodyWidth - Self.panelPaddingX - Self.buttonSize,
+                y: y + (Self.labelHeight - Self.buttonSize) / 2,
+                width: Self.buttonSize,
+                height: Self.buttonSize
+            )
+
+            y -= Self.labelToBoxGap + resolvedSourceBoxHeight
+            let sourceScrollFrame = NSRect(
+                x: Self.panelPaddingX,
+                y: y,
+                width: Self.contentWidth,
+                height: resolvedSourceBoxHeight
+            )
+            let collapsedSourceText = Self.collapsedSourceText(sourceText)
+            let sourceCanExpand = Self.singleLineWidth(
+                for: collapsedSourceText,
+                font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold)
+            ) > Self.contentWidth
+                || collapsedSourceText != sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            sourcePreviewView.frame = sourceScrollFrame
+            sourcePreviewView.configure(text: collapsedSourceText, canExpand: sourceCanExpand)
+            sourcePreviewView.isHidden = sourceExpanded
+            sourceScrollView.isHidden = !sourceExpanded
+
+            if sourceExpanded {
+                let sourceRawTextHeight = Self.textHeight(
+                    for: sourceText,
+                    font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold),
+                    width: sourceScrollFrame.width
+                )
+                Self.layoutScrollableTextView(
+                    sourceTextView,
+                    inside: sourceScrollView,
+                    scrollFrame: sourceScrollFrame,
+                    rawTextHeight: sourceRawTextHeight,
+                    showsOverflowScroller: true
+                )
+                if shouldScrollSourceToTop {
+                    scrollToTop(sourceScrollView)
+                    shouldScrollSourceToTop = false
+                }
             }
+
+            y -= Self.sourceToDividerGap + Self.dividerHeight
+            sourceDivider.frame = NSRect(
+                x: Self.panelPaddingX,
+                y: y,
+                width: Self.contentWidth,
+                height: Self.dividerHeight
+            )
+
+            y -= Self.dividerToTargetGap + Self.labelHeight
+            layoutTargetRow(topY: y, includeClose: false)
+        } else {
+            let fixedHeight = Self.panelPaddingTop
+                + Self.labelHeight + Self.labelToBoxGap
+                + Self.panelPaddingBottom
+                + (showsFollowUp ? Self.followUpFooterHeight : 0)
+            resolvedResultBoxHeight = max(Self.minimumResultBoxHeight, bounds.height - fixedHeight)
+
+            y = bodyHeight - Self.panelPaddingTop - Self.labelHeight
+            layoutTargetRow(topY: y, includeClose: true)
         }
-
-        y -= Self.sourceToDividerGap + Self.dividerHeight
-        sourceDivider.frame = NSRect(
-            x: Self.panelPaddingX,
-            y: y,
-            width: Self.contentWidth,
-            height: Self.dividerHeight
-        )
-
-        y -= Self.dividerToTargetGap + Self.labelHeight
-        let targetActionButtonCount = replaceButton == nil ? 1 : 2
-        let targetActionWidth = CGFloat(targetActionButtonCount) * Self.buttonSize
-            + CGFloat(max(0, targetActionButtonCount - 1)) * 8
-        let targetTitleLeadingInset = LanguagePickerButton.titleLeadingInset
-        targetTitleButton.frame = NSRect(
-            x: Self.panelPaddingX - targetTitleLeadingInset,
-            y: y + (Self.labelHeight - Self.buttonSize) / 2,
-            width: min(
-                targetTitleButton.preferredWidth,
-                Self.contentWidth - targetActionWidth - 8 + targetTitleLeadingInset
-            ),
-            height: Self.buttonSize
-        )
-        copyButton?.frame = NSRect(
-            x: Self.bodyWidth - Self.panelPaddingX - Self.buttonSize,
-            y: y + (Self.labelHeight - Self.buttonSize) / 2,
-            width: Self.buttonSize,
-            height: Self.buttonSize
-        )
-        replaceButton?.frame = NSRect(
-            x: Self.bodyWidth - Self.panelPaddingX - Self.buttonSize * 2 - 8,
-            y: y + (Self.labelHeight - Self.buttonSize) / 2,
-            width: Self.buttonSize,
-            height: Self.buttonSize
-        )
 
         y -= Self.labelToBoxGap + resolvedResultBoxHeight
         let resultScrollFrame = NSRect(
@@ -10913,12 +11302,29 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             width: Self.contentWidth,
             height: resolvedResultBoxHeight
         )
-        let resultRawTextHeight = Self.textHeight(
-            for: resultDisplayText,
-            font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
-            width: resultScrollFrame.width,
-            paragraphSpacing: Self.resultFontSize * Self.resultParagraphSpacingFactor
+        // Fit the shimmer to the text width so the highlight sweeps across the
+        // word itself, not mostly empty result-box space to its right.
+        let shimmerFont = NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold)
+        let shimmerTextWidth = ceil(((loadingBaseText ?? "") as NSString).size(withAttributes: [.font: shimmerFont]).width) + 4
+        loadingShimmer.frame = NSRect(
+            x: resultScrollFrame.minX,
+            y: resultScrollFrame.minY,
+            width: min(max(shimmerTextWidth, 1), resultScrollFrame.width),
+            height: resultScrollFrame.height
         )
+        // Measure the rendered attributed content (tables/headers included), not
+        // the plain string, so tall blocks get the right scroll height.
+        let resultRawTextHeight: CGFloat
+        if let storage = resultTextView.textStorage, storage.length > 0 {
+            resultRawTextHeight = Self.attributedTextHeight(storage, width: resultScrollFrame.width)
+        } else {
+            resultRawTextHeight = Self.textHeight(
+                for: resultDisplayText,
+                font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
+                width: resultScrollFrame.width,
+                paragraphSpacing: Self.resultFontSize * Self.resultParagraphSpacingFactor
+            )
+        }
         Self.layoutScrollableTextView(
             resultTextView,
             inside: resultScrollView,
@@ -10933,6 +11339,37 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         if showsFollowUp {
             layoutFollowUpFooter()
         }
+    }
+
+    /// Lays out the "<language> … [replace] [copy] [close?]" row with its top at
+    /// `y`. `includeClose` puts the ✕ here (used when the source section above it
+    /// is hidden, so this row is the panel's header).
+    private func layoutTargetRow(topY y: CGFloat, includeClose: Bool) {
+        var actionButtonCount = 1 // copy
+        if replaceButton != nil { actionButtonCount += 1 }
+        if includeClose { actionButtonCount += 1 }
+        let targetActionWidth = CGFloat(actionButtonCount) * Self.buttonSize
+            + CGFloat(max(0, actionButtonCount - 1)) * 8
+        let titleLeadingInset = LanguagePickerButton.titleLeadingInset
+        targetTitleButton.frame = NSRect(
+            x: Self.panelPaddingX - titleLeadingInset,
+            y: y + (Self.labelHeight - Self.buttonSize) / 2,
+            width: min(
+                targetTitleButton.preferredWidth,
+                Self.contentWidth - targetActionWidth - 8 + titleLeadingInset
+            ),
+            height: Self.buttonSize
+        )
+
+        let buttonY = y + (Self.labelHeight - Self.buttonSize) / 2
+        var rightX = Self.bodyWidth - Self.panelPaddingX - Self.buttonSize
+        if includeClose {
+            closeButton?.frame = NSRect(x: rightX, y: buttonY, width: Self.buttonSize, height: Self.buttonSize)
+            rightX -= Self.buttonSize + 8
+        }
+        copyButton?.frame = NSRect(x: rightX, y: buttonY, width: Self.buttonSize, height: Self.buttonSize)
+        rightX -= Self.buttonSize + 8
+        replaceButton?.frame = NSRect(x: rightX, y: buttonY, width: Self.buttonSize, height: Self.buttonSize)
     }
 
     private func layoutFollowUpFooter() {
@@ -10958,23 +11395,57 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         )
     }
 
-    func setResult(_ text: String) {
-        setResult(text, tone: .normal)
+    func setResult(_ text: String, isFinal: Bool = false) {
+        if isFinal {
+            // Final chunk: drop any throttled partial, render full block markdown.
+            pendingResultText = nil
+            renderResultNow(text, tone: .normal, useBlockMarkdown: true)
+        } else {
+            scheduleResult(text, tone: .normal)
+        }
     }
 
     func setError(_ text: String) {
-        setResult(text, tone: .error)
+        // Errors are terminal and rare — render immediately, no throttle.
+        pendingResultText = nil
+        renderResultNow(text, tone: .error, useBlockMarkdown: true)
     }
 
-    private func setResult(_ text: String, tone: ResultTone) {
-        if !isInternalLoadingUpdate {
-            stopLoadingAnimation()
+    /// Coalesces streamed partials: renders on the leading edge, then at most
+    /// once per `resultThrottleInterval`. Streaming uses the inline renderer; the
+    /// final chunk re-renders as block markdown via `setResult(isFinal:)`.
+    private func scheduleResult(_ text: String, tone: ResultTone) {
+        pendingResultText = text
+        pendingResultTone = tone
+        let now = Date().timeIntervalSinceReferenceDate
+        let elapsed = now - lastResultRenderTime
+        if elapsed >= Self.resultThrottleInterval {
+            flushPendingResult()
+        } else if !resultThrottleScheduled {
+            resultThrottleScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + (Self.resultThrottleInterval - elapsed)) { [weak self] in
+                self?.flushPendingResult()
+            }
         }
+    }
+
+    private func flushPendingResult() {
+        resultThrottleScheduled = false
+        guard let text = pendingResultText else { return }
+        pendingResultText = nil
+        lastResultRenderTime = Date().timeIntervalSinceReferenceDate
+        renderResultNow(text, tone: pendingResultTone, useBlockMarkdown: false)
+    }
+
+    private func renderResultNow(_ text: String, tone: ResultTone, useBlockMarkdown: Bool) {
+        // Any real content (partial or final) ends the loading shimmer.
+        stopLoadingAnimation()
         let cleanedText = TextNormalizer.cleanedTranslation(text)
 
-        if cleanedText == resultText, tone == resultTone {
+        if cleanedText == resultText, tone == resultTone, useBlockMarkdown == lastRenderUsedBlock {
             return
         }
+        lastRenderUsedBlock = useBlockMarkdown
 
         if !cleanedText.hasPrefix(resultText) || tone != resultTone {
             shouldScrollResultToTop = true
@@ -10982,11 +11453,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
         resultTone = tone
         resultTextView.textColor = tone.color
-        let renderedText = Self.renderedMarkdownText(
-            cleanedText,
-            font: resultTextView.font ?? NSFont.systemFont(ofSize: Self.resultFontSize, weight: .regular),
-            color: tone.color
-        )
+        let renderFont = resultTextView.font ?? NSFont.systemFont(ofSize: Self.resultFontSize, weight: .regular)
+        let renderedText = useBlockMarkdown
+            ? Self.renderedMarkdownText(cleanedText, font: renderFont, color: tone.color)
+            : Self.renderedStreamingText(cleanedText, font: renderFont, color: tone.color)
         if let textStorage = resultTextView.textStorage {
             textStorage.setAttributedString(renderedText)
         } else {
@@ -10995,45 +11465,37 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
         resultText = cleanedText
         resultDisplayText = resultTextView.string
-        if !isInternalLoadingUpdate {
-            lastRealResultText = cleanedText
-        }
+        lastRealResultText = cleanedText
         updateActionButtonStates()
         layoutForCurrentSize()
+        onResultRendered?()
     }
 
     func startLoadingAnimation(baseText: String) {
-        stopLoadingAnimation()
+        // Drop any throttled render still queued from a previous request.
+        pendingResultText = nil
         loadingBaseText = baseText
-        loadingDotCount = 0
-        renderLoadingFrame()
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickLoadingAnimation() }
-        }
-        loadingTimer = timer
+        loadingShimmer.configure(
+            text: baseText,
+            font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
+            base: NSColor(calibratedWhite: 1.0, alpha: 0.42),
+            highlight: NSColor(calibratedWhite: 1.0, alpha: 0.98)
+        )
+        loadingShimmer.isHidden = false
+        loadingShimmer.startAnimating()
+        resultScrollView.isHidden = true
+        layoutForCurrentSize()
     }
 
     func stopLoadingAnimation() {
-        loadingTimer?.invalidate()
-        loadingTimer = nil
+        guard loadingBaseText != nil else { return }
         loadingBaseText = nil
+        loadingShimmer.stopAnimating()
+        loadingShimmer.isHidden = true
+        resultScrollView.isHidden = false
     }
 
     var isShowingLoadingState: Bool { loadingBaseText != nil }
-
-    private func tickLoadingAnimation() {
-        guard loadingBaseText != nil else { return }
-        loadingDotCount = (loadingDotCount + 1) % 4
-        renderLoadingFrame()
-    }
-
-    private func renderLoadingFrame() {
-        guard let baseText = loadingBaseText else { return }
-        let dots = String(repeating: ".", count: loadingDotCount)
-        isInternalLoadingUpdate = true
-        setResult("\(baseText)\(dots)")
-        isInternalLoadingUpdate = false
-    }
 
     private func scrollToTop(_ scrollView: NSScrollView) {
         guard let documentView = scrollView.documentView else {
@@ -11185,7 +11647,7 @@ enum TranslationMode {
         case .draftMessage:
             return "Rewriting"
         case .selection:
-            return "Translating"
+            return "Thinking"
         case .revise:
             return "Revising"
         }
