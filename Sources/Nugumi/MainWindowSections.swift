@@ -155,7 +155,7 @@ private struct HomeContent: View {
                             Text("No history yet")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(FlowTheme.ink)
-                            Text("Select text anywhere and translate, rewrite, reply, or ask Nugumi — it shows up here.")
+                            Text("Select text anywhere and translate, rewrite, reply, or ask Nugumi - it shows up here.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(FlowTheme.inkSecondary)
                         }
@@ -357,7 +357,7 @@ private struct InsightsContent: View {
                                     }
                                     ActivityHeatmap(weeks: snapshot.heatmapWeeks)
                                     if let busiest = snapshot.busiestDay, busiest.wordCount > 0 {
-                                        Text("Busiest day · \(busiest.date.formatted(.dateTime.month().day())) — \(busiest.wordCount) words")
+                                        Text("Busiest day · \(busiest.date.formatted(.dateTime.month().day())) - \(busiest.wordCount) words")
                                             .font(.system(size: 11))
                                             .foregroundStyle(FlowTheme.inkTertiary)
                                     }
@@ -556,7 +556,7 @@ private extension CleanupLevel {
         case .none: return "Keeps your phrasing exactly as written."
         case .light: return "Fixes typos and obvious grammar slips, nothing more."
         case .medium: return "Smooths awkward phrasing for clarity and flow."
-        case .high: return "Polishes thoroughly — tight, clear sentences with no filler."
+        case .high: return "Polishes thoroughly - tight, clear sentences with no filler."
         }
     }
 
@@ -568,7 +568,7 @@ private extension CleanupLevel {
         case .none:   return (before, "i think we shoud meet tommorow if thats ok with u")
         case .light:  return (before, "I think we should meet tomorrow if that's ok with you.")
         case .medium: return (before, "I think we should meet tomorrow, if that works for you.")
-        case .high:   return (before, "Let's meet tomorrow — does that work for you?")
+        case .high:   return (before, "Let's meet tomorrow - does that work for you?")
         }
     }
 }
@@ -652,7 +652,7 @@ private struct StyleCard: View {
                         // into, so there's nothing to assign — explain instead.
                         VStack(alignment: .leading, spacing: 10) {
                             fieldLabel("Scope")
-                            Text("Apps and sites that don't match the categories above land here automatically — nothing to assign.")
+                            Text("Apps and sites that don't match the categories above land here automatically - nothing to assign.")
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(FlowTheme.inkTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -781,7 +781,7 @@ private struct CustomInstructionEditor: View {
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
             .overlay(alignment: .topLeading) {
                 if draft.isEmpty {
-                    Text("e.g. Reply in lowercase, keep it short, no emojis — like texting a close friend.")
+                    Text("e.g. Reply in lowercase, keep it short, no emojis - like texting a close friend.")
                         .font(.system(size: 13))
                         .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
                         .padding(.vertical, 7)
@@ -1163,7 +1163,7 @@ struct AIEngineSection: View {
     var body: some View {
         DetailContainer(
             "AI Engine",
-            subtitle: "Which model does the thinking — and how hard.",
+            subtitle: "Which model does the thinking - and how hard.",
             pinned: FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
         ) {
             if bridge.aiEngineTab == 0 {
@@ -1203,7 +1203,7 @@ struct AIEngineSection: View {
         case .subscription:
             ProviderGroupCard(
                 title: "Subscriptions",
-                subtitle: "Use a plan you already pay for — sign in with your account.",
+                subtitle: "Use a plan you already pay for - sign in with your account.",
                 providers: CloudProvider.allCases.filter { $0.usesOAuth }
             )
         case .apiKeys:
@@ -1434,9 +1434,10 @@ struct ModelPickerOverlay: View {
     }
 }
 
-/// Searchable model picker panel. Replaces the overflowing inline Menu: a search
-/// box, a "Ready to use" section, then a section per provider for models that
-/// still need setup or a paid plan.
+/// Two-pane model picker. Left column lists providers with their available-model
+/// counts; clicking one reveals that provider's models on the right. Selecting a
+/// model only stages it — the Switch button commits the change (so nothing applies
+/// on a stray click). Mirrors the "SET MAIN MODEL" reference layout.
 private struct ModelPickerPanel: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
     let scope: ModelUseScope
@@ -1444,12 +1445,17 @@ private struct ModelPickerPanel: View {
     let onChoose: (String) -> Void
 
     @State private var search = ""
+    @State private var selectedTitle: String?
+    @State private var pendingID: String?
     @FocusState private var searchFocused: Bool
 
     private var currentID: String { bridge.settings.modelID(for: scope) }
+    private var currentModel: LLMModel { LLMModel.option(id: currentID) }
 
-    private var groups: [ModelGrouping.Group] {
-        let raw: [(String, [LLMModel])] = [
+    /// Catalog order, paired with each provider's raw models. Single source for
+    /// both the filtered `entries` and the un-filtered `currentTitle` lookup.
+    private var rawEntries: [(String, [LLMModel])] {
+        [
             ("Ollama (local)", LLMModel.localOllamaModels),
             ("Ollama (cloud)", LLMModel.ollamaCloudModels),
             (CloudProvider.openAI.displayName, LLMModel.cloudModels(for: .openAI)),
@@ -1459,10 +1465,31 @@ private struct ModelPickerPanel: View {
             (CloudProvider.anthropicClaudeCode.displayName, LLMModel.cloudModels(for: .anthropicClaudeCode)),
             (CloudProvider.openAICodex.displayName, LLMModel.codexModels)
         ]
-        return raw.compactMap { title, models in
-            let filtered = scope.availableModels(from: models).filter(matches)
-            return filtered.isEmpty ? nil : ModelGrouping.Group(title: title, models: filtered)
+    }
+
+    /// Every provider, including empties — the left column shows "0 models" for
+    /// providers with nothing in this scope rather than hiding them.
+    private var entries: [ModelGrouping.Group] {
+        rawEntries.map { title, models in
+            ModelGrouping.Group(title: title, models: scope.availableModels(from: models).filter(matches))
         }
+    }
+
+    /// Provider that holds the current model — tagged CURRENT in the left column.
+    private var currentTitle: String? {
+        rawEntries.first { $0.1.contains { $0.id == currentID } }?.0
+    }
+
+    /// Models shown on the right. Falls back to the first matching provider while
+    /// filtering so a search never leaves the right pane stuck on an empty group.
+    private var shownEntry: ModelGrouping.Group? {
+        let list = entries
+        let selected = list.first { $0.title == selectedTitle }
+        if let selected, !selected.models.isEmpty { return selected }
+        if !search.trimmingCharacters(in: .whitespaces).isEmpty {
+            return list.first { !$0.models.isEmpty } ?? selected
+        }
+        return selected ?? list.first
     }
 
     private func matches(_ model: LLMModel) -> Bool {
@@ -1471,21 +1498,20 @@ private struct ModelPickerPanel: View {
         return model.displayName.lowercased().contains(q) || model.shortName.lowercased().contains(q)
     }
 
-    private var partitioned: ModelGrouping.Result {
-        let readyIDs = Set(groups.flatMap(\.models)
-            .filter { ModelAvailability.of($0, bridge: bridge) == .ready }
-            .map(\.id))
-        return ModelGrouping.partition(groups: groups, readyIDs: readyIDs)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             header
             searchField
             Divider().background(FlowTheme.hairline)
-            list
+            HStack(spacing: 0) {
+                providerColumn
+                Divider().background(FlowTheme.hairline)
+                modelColumn
+            }
+            Divider().background(FlowTheme.hairline)
+            footer
         }
-        .frame(width: 440, height: 540)
+        .frame(width: 640, height: 560)
         .background(Color(white: 0.11))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
@@ -1493,13 +1519,26 @@ private struct ModelPickerPanel: View {
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
+        .onAppear {
+            searchFocused = true
+            if selectedTitle == nil {
+                selectedTitle = currentTitle
+                    ?? entries.first { !$0.models.isEmpty }?.title
+                    ?? entries.first?.title
+            }
+        }
     }
 
     private var header: some View {
-        HStack {
-            Text("Choose a model")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(FlowTheme.ink)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Choose a model")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FlowTheme.ink)
+                Text("Current: \(currentModel.shortName) · \(modelSourceLabel(currentModel))")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(FlowTheme.inkTertiary)
+            }
             Spacer()
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
@@ -1520,12 +1559,11 @@ private struct ModelPickerPanel: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(FlowTheme.inkTertiary)
-            TextField("Search models", text: $search)
+            TextField("Filter providers and models", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(FlowTheme.ink)
                 .focused($searchFocused)
-                .onAppear { searchFocused = true }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -1535,89 +1573,142 @@ private struct ModelPickerPanel: View {
         .padding(.bottom, 12)
     }
 
-    private var list: some View {
-        let parts = partitioned
-        return ScrollView {
+    private var providerColumn: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                ForEach(entries, id: \.title) { providerRow($0) }
+            }
+            .padding(.vertical, 8)
+        }
+        .frame(width: 200)
+    }
+
+    private func providerRow(_ entry: ModelGrouping.Group) -> some View {
+        let isSelected = entry.title == selectedTitle
+        let isCurrent = entry.title == currentTitle
+        let empty = entry.models.isEmpty
+        return Button { selectedTitle = entry.title } label: {
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(isSelected ? FlowTheme.accent : Color.clear)
+                    .frame(width: 2.5)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(entry.title)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(empty ? FlowTheme.inkTertiary : FlowTheme.ink)
+                            .lineLimit(1)
+                        if isCurrent {
+                            Text("CURRENT")
+                                .font(.system(size: 8.5, weight: .bold))
+                                .foregroundStyle(FlowTheme.accent)
+                        }
+                    }
+                    Text("\(entry.models.count) model\(entry.models.count == 1 ? "" : "s")")
+                        .font(.system(size: 11))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                }
+                // 16px from the column edge to match the header + search field
+                // (the 2.5px accent bar already sits in that gap).
+                .padding(.leading, 13.5)
+                Spacer(minLength: 0)
+            }
+            .padding(.trailing, 16)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(isSelected ? FlowTheme.subtleFill : Color.clear)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var modelColumn: some View {
+        ScrollView {
             LazyVStack(alignment: .leading, spacing: 1) {
-                if !parts.ready.isEmpty {
-                    // No provider header here, so each row names its own source —
-                    // otherwise GPT-5.5 from ChatGPT vs OpenAI look identical.
-                    sectionHeader("Ready to use")
-                    ForEach(parts.ready, id: \.id) { row($0, trailing: .source) }
-                }
-                ForEach(parts.rest, id: \.title) { group in
-                    sectionHeader(group.title)
-                    ForEach(group.models, id: \.id) { row($0, trailing: .tag) }
-                }
-                if parts.ready.isEmpty && parts.rest.isEmpty {
-                    Text("No models match “\(search)”.")
+                if let entry = shownEntry, !entry.models.isEmpty {
+                    ForEach(entry.models, id: \.id) { modelRow($0) }
+                } else {
+                    Text(emptyMessage)
                         .font(.system(size: 12))
                         .foregroundStyle(FlowTheme.inkTertiary)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                        .padding(16)
                 }
             }
             .padding(.vertical, 8)
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(FlowTheme.inkTertiary)
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
+    private var emptyMessage: String {
+        search.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "No models from this provider yet. Connect it under Providers."
+            : "No models match “\(search)”."
     }
 
-    /// What the trailing edge of a row shows: the provider name (Ready section,
-    /// which has no header to disambiguate) or the setup/paid tag (grouped
-    /// sections, where the header already names the provider).
-    private enum RowTrailing { case source, tag }
-
-    private func row(_ model: LLMModel, trailing: RowTrailing) -> some View {
-        let selected = model.id == currentID
-        return Button { onChoose(model.id) } label: {
+    private func modelRow(_ model: LLMModel) -> some View {
+        let isPending = model.id == pendingID
+        let isCurrent = model.id == currentID
+        let availability = ModelAvailability.of(model, bridge: bridge)
+        return Button { pendingID = model.id } label: {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(FlowTheme.accent)
-                    .opacity(selected ? 1 : 0)
+                    .opacity(isPending ? 1 : 0)
                     .frame(width: 14)
                 Text(model.displayName)
                     .font(.system(size: 13))
                     .foregroundStyle(FlowTheme.ink)
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                rowTrailing(model, trailing)
+                if isCurrent {
+                    Text("CURRENT")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                } else if let tag = availability.tag {
+                    Text(tag)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(FlowTheme.subtleFill))
+                }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .background(selected ? FlowTheme.subtleFill : Color.clear)
+            .background(isPending ? FlowTheme.subtleFill : Color.clear)
         }
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
-    private func rowTrailing(_ model: LLMModel, _ trailing: RowTrailing) -> some View {
-        switch trailing {
-        case .source:
-            Text(modelSourceLabel(model))
+    private var footer: some View {
+        let enabled = pendingID != nil
+        return HStack(spacing: 10) {
+            Text("Applies right away.")
                 .font(.system(size: 11))
                 .foregroundStyle(FlowTheme.inkTertiary)
-        case .tag:
-            let availability = ModelAvailability.of(model, bridge: bridge)
-            if let tag = availability.tag {
-                Text(tag)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(availability == .paidPlan ? FlowTheme.accent : FlowTheme.inkTertiary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(FlowTheme.subtleFill))
+            Spacer()
+            SecondaryButton(title: "Cancel") { onDismiss() }
+            Button {
+                if let pendingID { onChoose(pendingID) }
+            } label: {
+                Text("Switch")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(enabled ? Color.white : FlowTheme.inkTertiary)
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(enabled ? FlowTheme.accent : Color.white.opacity(0.06))
+                    )
             }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 }
 
@@ -1727,7 +1818,7 @@ private struct ProviderRow: View {
             testing = false
             switch result {
             case .success(let preview):
-                testResult = "✓ Working — “\(preview)”"
+                testResult = "✓ Working - “\(preview)”"
             case .info(let message):
                 testResult = "✓ \(message)"
             case .failure(let message):
@@ -1756,21 +1847,21 @@ private struct OllamaSetupCard: View {
                     Text("Local models (Ollama)")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(FlowTheme.ink)
-                    Text("Runs entirely on your Mac — private and free, but downloads about 12 GB. Do these steps in order.")
+                    Text("Runs entirely on your Mac - private and free, but downloads about 12 GB. Do these steps in order.")
                         .font(.system(size: 12))
                         .foregroundStyle(FlowTheme.inkSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 SetupStepRow(
-                    title: "1.  Install Ollama",
+                    title: "1. Install Ollama",
                     status: state.ollamaInstalled,
                     primary: StepButton(title: "Open download page") { bridge.perform(.openOllamaInstall) },
                     secondary: StepButton(title: "Re-check") { bridge.perform(.refreshBootstrap) }
                 )
                 Divider().background(FlowTheme.hairline)
                 SetupStepRow(
-                    title: "2.  Start Ollama",
+                    title: "2. Start Ollama",
                     status: state.serverRunning,
                     primary: StepButton(title: "Open Ollama") { bridge.perform(.launchOllama) }
                 )

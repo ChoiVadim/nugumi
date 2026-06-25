@@ -518,7 +518,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        messageLabel.stringValue = "Click the field, then press keys for \(action.menuTitle) — or double-tap ⌃ ⌥ ⇧ ⌘."
+        messageLabel.stringValue = "Click the field, then press keys for \(action.menuTitle) - or double-tap ⌃ ⌥ ⇧ ⌘."
         messageLabel.font = Self.messageFont
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 0
@@ -810,7 +810,7 @@ private final class ShortcutCaptureFieldView: NSView {
 
         case .recording:
             label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-            label.stringValue = "Type a shortcut — or double-tap ⌃ ⌥ ⇧ ⌘"
+            label.stringValue = "Type a shortcut - or double-tap ⌃ ⌥ ⇧ ⌘"
             label.textColor = .secondaryLabelColor
             setBorderColor(NSColor.controlAccentColor.withAlphaComponent(0.85))
 
@@ -822,7 +822,7 @@ private final class ShortcutCaptureFieldView: NSView {
 
         case .conflict:
             label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-            label.stringValue = "Already used — try another"
+            label.stringValue = "Already used - try another"
             label.textColor = .secondaryLabelColor
             setBorderColor(NSColor.systemRed.withAlphaComponent(0.85))
         }

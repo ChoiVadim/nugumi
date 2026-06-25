@@ -1385,8 +1385,8 @@ final class LiveCaptionPanelController: NSObject {
         let isSystem = source == .systemAudio
         audioSourceButton?.image = Self.symbolImage(isSystem ? "speaker.wave.2" : "mic",
                                                     source.title, pointSize: 13)
-        audioSourceButton?.toolTip = isSystem ? "System audio — tap to use the microphone"
-                                              : "Microphone — tap to use system audio"
+        audioSourceButton?.toolTip = isSystem ? "System audio - tap to use the microphone"
+                                              : "Microphone - tap to use system audio"
     }
 
     func showCaptions() {
@@ -1759,7 +1759,7 @@ final class LiveTranslationController: NSObject {
     }
 
     private func currentStatusText() -> String {
-        if isPaused { return "Paused — press play to continue" }
+        if isPaused { return "Paused - press play to continue" }
         if isRunning { return "Listening → \(targetLanguage.displayName)" }
         return "Stopped"
     }
@@ -1823,7 +1823,7 @@ final class LiveTranslationController: NSObject {
         session.onStatusChange = { [weak self] status in
             guard let self else { return }
             if case .failed(let message) = status {
-                self.stop(finalStatus: "Error: \(message) — stopped.", keepVisible: true)
+                self.stop(finalStatus: "Error: \(message) - stopped.", keepVisible: true)
             } else {
                 self.panel.update(status: Self.statusText(status, language: self.targetLanguage))
             }
@@ -1866,7 +1866,7 @@ final class LiveTranslationController: NSObject {
         teardownCaptureAndSession()
         renderTranscripts()
         panel.setPaused(true)
-        panel.update(status: "Paused — press play to continue")
+        panel.update(status: "Paused - press play to continue")
         updateCost()
     }
 

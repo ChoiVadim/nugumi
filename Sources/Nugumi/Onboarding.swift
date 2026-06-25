@@ -40,7 +40,7 @@ struct FeatureTourStep {
         return [
             FeatureTourStep(
                 title: "Ask Nugumi anything",
-                body: "A confusing screen, an error, or just a question — Nugumi looks at what's in front of you and answers on the spot.",
+                body: "A confusing screen, an error, or just a question - Nugumi looks at what's in front of you and answers on the spot.",
                 actionTitle: "Open the prompt near your cursor",
                 actionDetail: askActionDetail(for: askShortcut),
                 badge: .keys(askShortcut.displayString),
@@ -48,7 +48,7 @@ struct FeatureTourStep {
             ),
             FeatureTourStep(
                 title: "Read any language without leaving work",
-                body: "Slack, Gmail, Notion, PDFs, websites — wherever the text is. And if it can't be selected, just capture that part of the screen.",
+                body: "Slack, Gmail, Notion, PDFs, websites - wherever the text is. And if it can't be selected, just capture that part of the screen.",
                 actionTitle: "Select text, then left-click",
                 actionDetail: "Highlight the text and left-click the Nugumi button that appears near the selection.",
                 badge: .mouseLeft,
@@ -56,15 +56,15 @@ struct FeatureTourStep {
             ),
             FeatureTourStep(
                 title: "Write naturally. Send like a native",
-                body: "Type in the language you think in. Nugumi turns it into your writing language — natural grammar, tone, and phrasing.",
+                body: "Type in the language you think in. Nugumi turns it into your writing language - natural grammar, tone, and phrasing.",
                 actionTitle: "Select your draft, then right-click",
-                actionDetail: "Highlight what you wrote and right-click the Nugumi button — it comes back in your writing language.",
+                actionDetail: "Highlight what you wrote and right-click the Nugumi button - it comes back in your writing language.",
                 badge: .mouseRight,
                 videoURL: videoURL(named: "fix", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")
             ),
             FeatureTourStep(
                 title: "Replies that know the answer",
-                body: "This one reads their message and writes the response for you — even when it takes knowledge, like a question asked in the chat.",
+                body: "This one reads their message and writes the response for you - even when it takes knowledge, like a question asked in the chat.",
                 actionTitle: "Draft a reply",
                 actionDetail: "Select an incoming message. Press Tab on the Nugumi button to switch to reply, then click.",
                 badge: .keys("⇥"),
@@ -439,7 +439,7 @@ final class OnboardingModel: ObservableObject {
         case .feature(let index):
             return steps[index].body
         case .finale:
-            return "Nugumi needs a model to think with. Pick one of three options — you can switch anytime."
+            return "Nugumi needs a model to think with. Pick one of three options - you can switch anytime."
         }
     }
 
@@ -656,14 +656,14 @@ private struct OnboardingRootView: View {
             HStack(alignment: .top, spacing: 24) {
                 FinaleChoiceButton(
                     symbol: "desktopcomputer",
-                    title: "Local — Ollama",
+                    title: "Local - Ollama",
                     detail: "Free and private. Runs entirely on your Mac, works offline.",
                     action: { model.pickEngine(.local) }
                 )
                 FinaleChoiceButton(
                     symbol: "person.crop.circle.badge.checkmark",
                     title: "ChatGPT or Claude",
-                    detail: "Already pay for ChatGPT or Claude? Just sign in — no extra cost.",
+                    detail: "Already pay for ChatGPT or Claude? Just sign in - no extra cost.",
                     action: { model.pickEngine(.subscription) }
                 )
                 FinaleChoiceButton(
@@ -1142,12 +1142,12 @@ private struct PermissionPreviewPanel: View {
                 // itself silently at launch and the button opens System
                 // Settings directly. One step only.
                 VStack(alignment: .leading, spacing: 9) {
-                    plainCaption("The button opens System Settings — turn Nugumi on in the list.")
+                    plainCaption("The button opens System Settings - turn Nugumi on in the list.")
                     settingsListPreview
                 }
             } else {
                 VStack(alignment: .leading, spacing: 9) {
-                    stepCaption(1, "macOS will ask first — click “Open System Settings”.")
+                    stepCaption(1, "macOS will ask first - click “Open System Settings”.")
                     if let prompt = Self.promptImage {
                         Image(nsImage: prompt)
                             .resizable()

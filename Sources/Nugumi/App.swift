@@ -723,12 +723,13 @@ private enum TextNormalizer {
         return cleanedStructuredSource(cleaned)
     }
 
-    static func cleanedTranslation(_ text: String, stripEmDash: Bool = false) -> String {
+    static func cleanedTranslation(_ text: String) -> String {
         var cleaned = normalizedBaseText(text)
 
-        if stripEmDash {
-            cleaned = removingEmDashes(cleaned)
-        }
+        // Rule #1: the em dash (—) is banned everywhere, unconditionally — every
+        // style, every mode, every backend, gen-z on or off. This is the single
+        // chokepoint all output flows through, so stripping here covers all paths.
+        cleaned = removingEmDashes(cleaned)
 
         cleaned = cleaned.replacingOccurrences(
             of: #"[ \t]+\n"#,
@@ -818,11 +819,11 @@ private enum TextNormalizer {
             .replacingOccurrences(of: "\u{200B}", with: "")
     }
 
-    /// Deterministic backstop for the casual/polite em-dash ban. Replaces the em
-    /// dash (—) / horizontal bar (―), and a space-padded en dash (–) used as a
-    /// clause separator, with a comma. An unspaced en dash inside a numeric range
-    /// (2020–2021) is left untouched. Only the compose path passes
-    /// `stripEmDash: true` for casual/polite — formal and translate never do.
+    /// Deterministic backstop for the universal em-dash ban (rule #1). Replaces
+    /// the em dash (—) / horizontal bar (―), and a space-padded en dash (–) used
+    /// as a clause separator, with a comma. An unspaced en dash inside a numeric
+    /// range (2020–2021) is left untouched. Runs on every `cleanedTranslation`
+    /// call, so it applies to all styles, modes, and backends without exception.
     private static func removingEmDashes(_ text: String) -> String {
         var result = text.replacingOccurrences(
             of: #"\s*[\x{2014}\x{2015}]\s*"#,
@@ -962,15 +963,6 @@ struct CompositionSettings: Equatable {
         return style.promptDescription(for: languageID)
     }
 
-    /// Casual and polite registers must never contain the em dash (—); it reads
-    /// as AI writing and clashes with conversational tone. Formal keeps it. The
-    /// prompt asks the model to avoid it, but local models routinely ignore that
-    /// negative instruction, so the output is also stripped deterministically
-    /// (see `TextNormalizer.cleanedTranslation(_:stripEmDash:)`).
-    var bansEmDash: Bool {
-        // A custom instruction governs its own punctuation — don't strip for it.
-        customInstruction == nil && (style == .casual || style == .polite)
-    }
 }
 
 private final class TranslationCache {
@@ -2973,13 +2965,16 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let instruction = appCategory == .custom
             ? customStyleInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
+        let resolvedStyle = writingStyle(for: appCategory)
         return CompositionSettings(
-            style: writingStyle(for: appCategory),
+            style: resolvedStyle,
             cleanup: cleanupLevel,
             snippets: snippetsStore.usableSnippets(),
-            // Gen Z is a casual-chat register; it clobbers the email voice
-            // sample's formal greeting + signature. Never apply it to email.
-            genZ: genZModeEnabled && appCategory != .email,
+            // Gen Z is a casual-chat register. It clobbers email's formal
+            // greeting + signature, and directly contradicts the formal
+            // register's no-contractions / deferential rules — so never apply
+            // it to email or to formal style.
+            genZ: genZModeEnabled && appCategory != .email && resolvedStyle != .formal,
             voiceSample: voiceSample.isEmpty ? nil : voiceSample,
             customInstruction: instruction.isEmpty ? nil : instruction
         )
@@ -4124,7 +4119,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         switch provider {
         case .openAICodex:
             guard let m = LLMModel.codexModels.first else {
-                return .failure("No Codex models known yet — sign in first.")
+                return .failure("No Codex models known yet - sign in first.")
             }
             guard provider.hasCredentials else {
                 return .failure("Not signed in to ChatGPT.")
@@ -4186,7 +4181,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             default:
                 reason = "the request couldn't run, but the key authenticated."
             }
-            return .info("Key is valid — \(reason)")
+            return .info("Key is valid - \(reason)")
         } catch let error as TranslationError {
             return .failure(error.errorDescription ?? "Unknown error.")
         } catch {
@@ -6493,6 +6488,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private let promptPanel: NSPanel
     private let promptContainerView: NSView
     private let targetMarkerPanel: NSPanel
+    private var targetMarkerGlideTimer: Timer?
     private let petView: PetMascotView
     private let appIconView: NSImageView
     private let promptBubbleView: PetPromptBubbleView
@@ -7402,14 +7398,51 @@ final class PetController: NSObject, NSTextFieldDelegate {
         targetMarkerPanel.alphaValue = 1
         targetMarkerPanel.orderFrontRegardless()
 
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.46
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            targetMarkerPanel.animator().setFrame(frame, display: true)
+        // Constant glide speed: scale duration by distance so the arrow moves at
+        // the same points/sec whether the target is near or far. Floor keeps very
+        // short hops visible; ceiling stops full-screen jumps from dragging.
+        let dx = destCenter.x - petCenter.x
+        let dy = destCenter.y - petCenter.y
+        let distance = hypot(dx, dy)
+        let glideSpeed: CGFloat = 350 // points per second
+        let duration = Double(min(3.5, max(0.8, distance / glideSpeed)))
+
+        // Wiggle: a unit vector perpendicular to the travel direction, swept by a
+        // sine that's zero at both ends — the arrow sways one way then the other
+        // but still launches from the pet and lands dead-on the target. Amplitude
+        // stays small (a gentle, alive drift), the swing count keeps it lively.
+        let perp: (x: CGFloat, y: CGFloat) = distance > 0.001
+            ? (-dy / distance, dx / distance) : (0, 0)
+        let amplitude = min(28, distance * 0.06) // subtle wiggle
+        let swings: CGFloat = 6 // many visible left/right sways
+        let size = frame.size
+        let start = petCenter
+        let begin = CACurrentMediaTime()
+
+        targetMarkerGlideTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] tick in
+            guard let self else { tick.invalidate(); return }
+            let p = min(1.0, (CACurrentMediaTime() - begin) / max(duration, 0.0001))
+            let eased = 0.5 - 0.5 * cos(p * Double.pi) // ease in/out along the track
+            let lateral = amplitude * CGFloat(sin(p * Double.pi * Double(swings)))
+            let cx = start.x + dx * CGFloat(eased) + perp.x * lateral
+            let cy = start.y + dy * CGFloat(eased) + perp.y * lateral
+            self.targetMarkerPanel.setFrameOrigin(
+                NSPoint(x: cx - size.width / 2, y: cy - size.height / 2)
+            )
+            if p >= 1.0 {
+                tick.invalidate()
+                self.targetMarkerGlideTimer = nil
+                self.targetMarkerPanel.setFrame(frame, display: true) // snap exact
+            }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        targetMarkerGlideTimer = timer
     }
 
     private func hideTargetMarker() {
+        targetMarkerGlideTimer?.invalidate()
+        targetMarkerGlideTimer = nil
         targetMarkerPanel.orderOut(nil)
         targetMarkerPanel.alphaValue = 1
     }
@@ -9532,11 +9565,11 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.imagePosition = .imageOnly
         switch currentMode {
         case .selection, .revise:
-            actionButton.toolTip = "Translate selection — right-click to Rewrite, Tab to switch to Reply"
+            actionButton.toolTip = "Translate selection - right-click to Rewrite, Tab to switch to Reply"
         case .draftMessage:
-            actionButton.toolTip = "Rewrite my text — Tab to switch to Reply"
+            actionButton.toolTip = "Rewrite my text - Tab to switch to Reply"
         case .smartReply:
-            actionButton.toolTip = "Generate reply — Tab to switch back"
+            actionButton.toolTip = "Generate reply - Tab to switch back"
         }
     }
 
@@ -11956,7 +11989,7 @@ enum WritingStyle: String, CaseIterable, Codable {
     /// language absent here falls back to `registerSummary` alone.
     private static let languageRules: [WritingStyle: [String: String]] = [
         .formal: [
-            "en": "In English: full sentences, no contractions, deferential tone.",
+            "en": "In English: NO contractions — write 'I am', 'cannot', 'I would', 'do not' in full. Complete, well-structured sentences. Open deferentially when it fits ('I hope you are well', 'Thank you for your message') and close formally ('Kind regards', 'Best regards', 'Sincerely'). Precise, slightly formal vocabulary (request, regarding, assistance, apologise, kindly, at your earliest convenience); soften requests fully ('Could you kindly...', 'I would be grateful if you could...', 'Would it be possible to...'). No slang, no abbreviations, no emoji, no exclamation marks. Professional and modern, never pompous or archaic. Example: 'can you send me the report?' → 'Could you kindly send me the report at your earliest convenience? I would be most grateful.'",
             "ko": "In Korean: use 합쇼체 (-습니다 / -십시오), never 해요체 and never 반말.",
             "ja": "In Japanese: use です/ます with deferential phrasing.",
             "ru": "In Russian: use Вы with full formal constructions.",
@@ -11966,7 +11999,7 @@ enum WritingStyle: String, CaseIterable, Codable {
             "zh-Hans": "In Chinese: use 您 with respectful set phrases (请, 麻烦您, 敬请) and no slang.",
         ],
         .polite: [
-            "en": "In English: complete sentences, contractions OK, warm but professional.",
+            "en": "In English: contractions are welcome (I'd, you're, can't, won't) — this is the warm, everyday professional register of a friendly email to a colleague. Complete but relaxed sentences. A light greeting ('Hi', 'Hope you're well') and a friendly sign-off ('Thanks so much', 'Best', 'Cheers') fit naturally. Plain, direct words (ask, about, help, sorry, sure) with lightly softened requests ('Could you...', 'Would you mind...', 'When you get a chance...'). At most one exclamation mark; the warmth comes from word choice, not punctuation. No slang and no texting abbreviations (no lmk/btw/tmrw). Example: 'can you send me the report?' → 'Hi! Could you send me the report when you get a chance? Thanks so much.'",
             "ko": "In Korean: use 해요체 (-아요 / -어요 / -해요), not 합쇼체 and not 반말.",
             "ja": "In Japanese: use です/ます in their everyday softer form.",
             "ru": "In Russian: use Вы with conversational warmth.",
@@ -11976,7 +12009,7 @@ enum WritingStyle: String, CaseIterable, Codable {
             "zh-Hans": "In Chinese: use 您 or 你 with a warm, polite tone and 请 where natural.",
         ],
         .casual: [
-            "en": "In English: natural casual capitalization (still capitalize names and sentence starts).",
+            "en": "In English: how you'd actually text a close friend. Heavy contractions and reductions (gonna, wanna, kinda, lemme, dunno, 'cause), short fragments and the odd run-on, blunt and direct ('sure', 'my bad', 'no worries', 'sounds good'). Everyday texting abbreviations are fine (lmk, btw, idk, tbh, rn, tmrw) but NOT loud Gen-Z slang — that's a separate mode. Keep natural casual capitalization (still capitalize names and sentence starts), light punctuation: periods optional on short messages, '...' and a single '!' fine. Drop formal greetings and sign-offs — 'hey' or nothing. Example: 'I will be unable to attend the meeting tomorrow, I apologize' → 'Hey, can't make the meeting tmrw, my bad'",
             "ko": "In Korean: use 반말 (-해, -야, -지), never 해요체 and never 합쇼체.",
             "ja": "In Japanese: use plain form (だ/する).",
             "ru": "In Russian: use ты-forms.",
@@ -12050,8 +12083,9 @@ enum CleanupLevel: String, CaseIterable, Codable {
 
 /// Gen Z styling overlay for compose prompts. Activated by the global Gen Z
 /// toggle (`CompositionSettings.genZ`). The language-neutral `coreGuidance`
-/// always leads — its load-bearing instruction is RESTRAINT (1–2 slang markers
-/// max) — followed by one target language's native-youth-slang block.
+/// always leads — its load-bearing instruction is FULL transformation (rewrite
+/// the whole message in slang, don't sprinkle one marker on formal text) —
+/// followed by one target language's native-youth-slang block.
 ///
 /// Synthesized from 2024–2026 per-language research. Slang churns fast, so each
 /// block favors the durable signal (lowercase, dropped end-period, 💀/😭 over 😂,
@@ -12064,11 +12098,11 @@ enum GenZStyle {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
     static let coreGuidance = """
-        Gen Z mode is ON. Rewrite the message the way a Gen Z native (born ~1997–2012) would actually text it to a friend — casual digital register, not formal writing.
+        Gen Z mode is ON. Rewrite the message the way a Gen Z native (born ~1997–2012) would text it to a friend — casual digital register, not formal writing.
         CRITICAL — preserve the user's real meaning, intent, and information exactly. Change only the voice and styling, never what they are saying, and never invent new content.
-        The #1 rule is restraint: real Gen Z texts are mostly plain language with at most 1–2 slang markers. Piling on slang is the single biggest tell of an adult faking it, so under-dose rather than over-dose; when unsure, drop the slang and keep only the styling.
-        Default to all-lowercase. Drop the period at the end of a message (a trailing period reads cold or passive-aggressive). Keep it short.
-        Tone skews ironic, understated, deadpan, hyperbolic-for-jokes, and lightly self-deprecating — never earnest, peppy, or corporate.
+        The #1 rule is to FULLY transform the message: rewrite the whole thing in slang, don't just sprinkle one marker on top of otherwise-formal text. Replace every formal/earnest word with its slang equivalent (impressed → lowkey obsessed, excellent → it ate / fire, very successful → so gonna cook / big W, talking about it → everyone's on it). Aim for 3+ slang markers per message. The failure mode to avoid is leaving formal phrasing untouched — if a sentence still reads corporate after you rewrite it, you under-did it.
+        Default to all-lowercase. Drop the period at the end of a message (a trailing period reads cold or passive-aggressive). Keep it punchy.
+        Tone skews ironic, deadpan, hyperbolic-for-jokes, and lightly self-deprecating — never earnest, peppy, or corporate.
         Use the target language's OWN native youth slang below — never translate English slang word-for-word into the target language.
         Still respect the selected register/honorific level (e.g. politeness or formality) while adding the Gen Z flavor.
         """
@@ -12089,9 +12123,10 @@ enum GenZStyle {
         English (US / global internet). All-lowercase; abbreviate freely: fr (for real), ngl, istg, idk, rn, tbh, lowkey/highkey, ong, deadass, iykyk, atp. Laughter is 💀 or 😭 or 'lmao' — never 😂 (a millennial tell).
         Current vocab: rizz (charm), no cap (no lie), it's giving X (gives off X), ate / understood the assignment (nailed it), cooked (doomed), mid (mediocre), crash out (lose it), delulu (delusional), bet (ok/deal), fire/bussin (great), 'that's so real' (agreement), aura (cool points).
         Cringe — avoid: skibidi, gyatt, sigma, Ohio, rizzler (Gen-Alpha brainrot); and millennial fossils: slay (overused), bae, on fleek, adulting, yas.
-        Examples:
-        - 'I'm really excited, this is going to be great' → 'ngl im so hyped this is gonna be fire'
-        - 'Sorry, I can't make it tonight, I'm exhausted' → 'cant make it tn im so cooked sorry'
+        Examples (note how every formal word gets swapped, not just one):
+        - 'I'm really excited, this is going to be great' → 'ngl im so hyped this is gonna be fire fr'
+        - 'Sorry, I can't make it tonight, I'm exhausted' → 'cant make it tn im so cooked 💀 sorry'
+        - 'I was genuinely impressed by your presentation today. It was excellent, everyone was talking about it, and I think you're going to be very successful' → 'ngl your presentation today? it ate and left no crumbs fr 💀 no cap everyone was lowkey obsessed, you're so gonna cook, big W'
         """
 
     private static let ruGuide = """
@@ -12246,7 +12281,7 @@ enum CloudProvider: String, Codable, CaseIterable {
     var displayName: String {
         switch self {
         case .openAI:      "OpenAI"
-        case .openAICodex: "ChatGPT"
+        case .openAICodex: "Codex"
         case .anthropic:   "Anthropic"
         case .gemini:      "Google"
         case .openRouter:  "OpenRouter"
@@ -12556,7 +12591,6 @@ struct OllamaClient: LLMBackend {
             throw TranslationError.ollama("Selected Ollama model doesn't support images.")
         }
 
-        let stripEmDash = mode.usesCompositionSettings && (composition?.bansEmDash ?? false)
         let imageStrings = images.isEmpty ? nil : images.map(\.base64String)
         let body = ChatRequest(
             model: model,
@@ -12616,7 +12650,7 @@ struct OllamaClient: LLMBackend {
             let decoded = try decoder.decode(ChatResponse.self, from: data)
             translated += decoded.message.content
 
-            let partial = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
+            let partial = TextNormalizer.cleanedTranslation(translated)
             if !partial.isEmpty {
                 onPartial(partial)
             }
@@ -12626,7 +12660,7 @@ struct OllamaClient: LLMBackend {
             }
         }
 
-        let finalTranslation = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
+        let finalTranslation = TextNormalizer.cleanedTranslation(translated)
         guard !finalTranslation.isEmpty else {
             throw TranslationError.emptyResponse
         }
@@ -12821,7 +12855,6 @@ struct OpenAIChatClient: LLMBackend {
             appCategory: appCategory,
             composition: composition
         )
-        let stripEmDash = mode.usesCompositionSettings && (composition?.bansEmDash ?? false)
         let userContent: OpenAIContent = images.isEmpty
             ? .string(sourceText)
             : .parts([.text(sourceText)] + images.map { .imageURL($0.openAIDataURI) })
@@ -12897,7 +12930,7 @@ struct OpenAIChatClient: LLMBackend {
             }
             if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
                 translated += delta
-                let partial = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
+                let partial = TextNormalizer.cleanedTranslation(translated)
                 if !partial.isEmpty {
                     onPartial(partial)
                 }
@@ -12905,7 +12938,7 @@ struct OpenAIChatClient: LLMBackend {
             if chunk.choices.first?.finishReason != nil { break }
         }
 
-        let finalTranslation = TextNormalizer.cleanedTranslation(translated, stripEmDash: stripEmDash)
+        let finalTranslation = TextNormalizer.cleanedTranslation(translated)
         guard !finalTranslation.isEmpty else {
             throw TranslationError.emptyResponse
         }
@@ -13152,7 +13185,7 @@ enum CloudHTTPError {
     static func friendlyMessage(status: Int) -> String {
         switch status {
         case 400: return "Couldn't process that request. Try shorter text or another model."
-        case 402: return "You're out of credits. Add funds to use paid models — free models still work."
+        case 402: return "You're out of credits. Add funds to use paid models - free models still work."
         case 404: return "That model isn't available right now. Pick another in settings."
         case 408: return "The request timed out. Try again."
         case 413: return "The text or image is too large for this model."
@@ -13222,7 +13255,7 @@ enum TranslationError: LocalizedError {
         case .rateLimited(let provider):
             "\(provider.displayName) rate limit reached. Try again in a minute, or switch model."
         case .outOfCredits(let provider):
-            "\(provider.displayName) is out of credits. Add funds to use paid models — free models still work."
+            "\(provider.displayName) is out of credits. Add funds to use paid models - free models still work."
         case .cloudError(let provider, let detail):
             "\(provider.displayName): \(detail)"
         }
@@ -14659,14 +14692,13 @@ struct OpenAICodexClient: LLMBackend {
             reasoning: CodexReasoningConfig(effort: thinkingLevel.cloudReasoningEffort)
         )
 
-        let stripEmDash = mode.usesCompositionSettings && (composition?.bansEmDash ?? false)
         var streamed = ""
         try await runStreaming(body: body, timeoutInterval: 25) { delta in
             streamed += delta
-            let partial = TextNormalizer.cleanedTranslation(streamed, stripEmDash: stripEmDash)
+            let partial = TextNormalizer.cleanedTranslation(streamed)
             if !partial.isEmpty { onPartial(partial) }
         }
-        let final = TextNormalizer.cleanedTranslation(streamed, stripEmDash: stripEmDash)
+        let final = TextNormalizer.cleanedTranslation(streamed)
         guard !final.isEmpty else { throw TranslationError.emptyResponse }
         return final
     }
@@ -14774,7 +14806,7 @@ struct OpenAICodexClient: LLMBackend {
             if urlError.code == .notConnectedToInternet {
                 message = "No internet connection."
             } else {
-                message = "Sometimes drops requests — just try one more time."
+                message = "Sometimes drops requests - just try one more time."
             }
             throw TranslationError.cloudError(.openAICodex, message)
         }

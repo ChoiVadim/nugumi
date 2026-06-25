@@ -579,7 +579,7 @@ struct SidebarView: View {
                         .foregroundStyle(FlowTheme.accent)
                 }
                 .buttonStyle(.plain)
-                .help("Update available — click to install")
+                .help("Update available - click to install")
             }
         }
         .frame(height: 26)
