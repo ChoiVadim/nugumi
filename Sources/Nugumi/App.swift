@@ -2477,8 +2477,23 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         updateMenuState()
     }
 
+    private var lastAccessibilitySelectionPromptAt: Date?
+
     private func handleMouseUp(_ event: NSEvent) {
         guard accessibilityIsTrusted() else {
+            // Reading the highlighted text needs Accessibility, so without it a
+            // drag-select would silently do nothing. When the user clearly made
+            // a selection gesture, surface the permission request — throttled so
+            // we never spam System Settings on repeated drags / stray gestures.
+            if selectionDisplayMode != .off,
+               isLikelySelectionGesture(event),
+               NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
+                let now = Date()
+                if lastAccessibilitySelectionPromptAt.map({ now.timeIntervalSince($0) > 15 }) ?? true {
+                    lastAccessibilitySelectionPromptAt = now
+                    requestAccessibilityPermissionInteractively()
+                }
+            }
             return
         }
 
