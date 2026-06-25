@@ -3252,23 +3252,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         AXIsProcessTrusted()
     }
 
-    /// Point-of-use Accessibility request (selection / reply shortcuts). Unlike
-    /// the silent launch-time `requestAccessibilityPermissionIfNeeded`
-    /// (prompt:false), this surfaces macOS's native trust dialog the first time
-    /// so the user actually gets asked. macOS won't re-show that dialog, so on
-    /// later attempts open the Accessibility pane directly instead.
+    /// Point-of-use Accessibility request (selection / reply shortcuts). The
+    /// launch-time `requestAccessibilityPermissionIfNeeded` (prompt:false)
+    /// already registers Nugumi in the Accessibility list — and macOS only ever
+    /// shows its native prompt:true dialog while the app is ABSENT from that
+    /// list, so prompt:true here is a permanent silent no-op. Open the
+    /// Accessibility pane directly instead: it's the only reliably-visible
+    /// "grant me access" UI we can surface at point of use.
     @MainActor
     private func requestAccessibilityPermissionInteractively() {
-        let key = "permissions.accessibilityRequested"
-        let firstTime = !UserDefaults.standard.bool(forKey: key)
-        UserDefaults.standard.set(true, forKey: key)
-        if firstTime {
-            let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(opts)
-        } else {
-            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            NSWorkspace.shared.open(url)
-        }
+        // Re-probe (prompt:false) so the Nugumi row exists even right after a
+        // tccutil reset, then jump straight to the toggle.
+        let probe = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(probe)
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        NSWorkspace.shared.open(url)
         startAccessibilityTrustWatcher()
     }
 
@@ -3947,6 +3945,26 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Relaunch Nugumi reliably without depending on macOS's TCC "Quit &
+    /// Reopen" — that path is flaky for LSUIElement agent apps (it quits but
+    /// doesn't reopen) and gets confused when more than one copy of
+    /// com.nugumi.app is registered. Detach a helper that waits for us to fully
+    /// exit, then reopens our exact bundle. Falls back to a plain quit in dev
+    /// (`swift run`), where there is no .app to reopen.
+    @MainActor
+    private func relaunchApp() {
+        guard isRunningFromAppBundle else {
+            NSApp.terminate(nil)
+            return
+        }
+        let path = Bundle.main.bundlePath
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "sleep 1; /usr/bin/open \"\(path)\""]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+
     @MainActor
     private func presentScreenshotTranslationError(_ error: Error) {
         NSApp.activate(ignoringOtherApps: true)
@@ -3969,14 +3987,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 title: "Screen recording required",
                 message: screenshotError.localizedDescription,
                 primaryButtonTitle: "Open settings",
-                secondaryButtonTitle: "Quit Nugumi"
+                secondaryButtonTitle: "Quit & Reopen"
             ).showModal()
             switch response {
             case .alertFirstButtonReturn:
                 let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
                 NSWorkspace.shared.open(url)
             case .alertSecondButtonReturn:
-                NSApp.terminate(nil)
+                relaunchApp()
             default:
                 break
             }
@@ -5542,7 +5560,7 @@ enum ScreenshotTranslationError: LocalizedError {
         case .noTextRecognized:
             "No readable text was found in the selected area."
         case .screenRecordingPermissionDenied:
-            "Nugumi needs Screen Recording permission to capture screenshots. Open settings to enable it, then choose Quit Nugumi and reopen Nugumi for the change to take effect."
+            "Nugumi needs Screen Recording permission to capture screenshots. Open settings to enable it, then choose Quit & Reopen to apply the change."
         }
     }
 
@@ -11000,9 +11018,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     }
 
     private static func renderedResultHeight(markdown: String, width: CGFloat) -> CGFloat {
-        // Match the body weight rendered into resultTextView (regular), else the
-        // measured height disagrees with what's drawn.
-        let font = NSFont.systemFont(ofSize: resultFontSize, weight: .regular)
+        let font = NSFont.systemFont(ofSize: resultFontSize, weight: .semibold)
         let attr = renderedMarkdownText(markdown, font: font, color: .white)
         return resultBoxHeight(rawTextHeight: attributedTextHeight(attr, width: width))
     }
@@ -11019,7 +11035,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         var font = baseFont
         var changed = false
         if intent & stronglyEmphasized != 0 {
-            font = NSFont.systemFont(ofSize: baseFont.pointSize, weight: .bold)
+            font = NSFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold)
             changed = true
         }
         if intent & emphasized != 0 {
@@ -11108,10 +11124,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         configureTextView(
             resultTextView,
             text: resultText,
-            // Body is regular weight; `**bold**` markdown carries its own bold via
-            // markdownFont. A semibold base made every result look bold and left
-            // real emphasis indistinguishable from plain text.
-            font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .regular),
+            font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
             color: ResultTone.normal.color
         )
         resultScrollView.documentView = resultTextView
