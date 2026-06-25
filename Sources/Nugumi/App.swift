@@ -1425,6 +1425,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Nugumi is a dark-only design (white ink on dark glass everywhere). Pin
+        // the whole app to dark so windows/panels render correctly even when macOS
+        // is in light mode — otherwise the system serves a light material and the
+        // white text on the floating Ask Nugumi panels becomes invisible. This is
+        // the single source of truth; the per-window .darkAqua pins are redundant.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+
         // Developer switch: NUGUMI_FIRST_RUN=1 clears the first-run flags so
         // the full install experience (intro video → permissions → feature
         // tour → engine choice → main window) replays on this launch. TCC
