@@ -761,11 +761,6 @@ final class RecordIndicatorView: NSView {
 enum LiveSummarizer {
     static func summarize(_ transcript: String, apiKey: String, language: String,
                           model: String = "gpt-5.4-mini") async throws -> String {
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 60
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let system = "Summarize transcripts of live audio (calls, videos, lectures, meetings). "
             + "Open with ONE short sentence giving the gist — what it's about. Then a blank line, then the "
             + "key points as a markdown bullet list using '- ', each bullet one concrete fact in ≤12 words. "
@@ -774,13 +769,43 @@ enum LiveSummarizer {
             + "there are genuinely distinct points, and never pad to reach a count. "
             + "No 'TL;DR' or 'Key points' headings. Write the ENTIRE summary in \(language), "
             + "regardless of the transcript's language."
-        let body: [String: Any] = [
-            "model": model,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": transcript]
-            ]
+        return try await chat([
+            ["role": "system", "content": system],
+            ["role": "user", "content": transcript]
+        ], apiKey: apiKey, model: model)
+    }
+
+    /// Answers a follow-up question grounded in the transcript + its summary.
+    /// `history` is the prior [user, assistant] turns so follow-ups chain.
+    static func answer(question: String, transcript: String, summary: String,
+                       history: [[String: Any]], apiKey: String, language: String,
+                       model: String = "gpt-5.4-mini") async throws -> String {
+        let system = "You answer follow-up questions about a transcript of live audio "
+            + "(a call, video, lecture or meeting). Ground every answer in the transcript and its summary — "
+            + "do not invent facts. If the answer isn't in the transcript, say so briefly. "
+            + "Be concise and direct. Answer in \(language), regardless of the transcript's language."
+        var messages: [[String: Any]] = [
+            ["role": "system", "content": system],
+            ["role": "user", "content": "Transcript:\n\(transcript)\n\nSummary:\n\(summary)"],
+            ["role": "assistant", "content": "Understood — ask me anything about it."]
         ]
+        messages.append(contentsOf: history)
+        messages.append(["role": "user", "content": question])
+        return try await chat(messages, apiKey: apiKey, model: model)
+    }
+
+    /// Shared chat-completions POST. Kept minimal (no temperature / max_tokens)
+    /// so it works across the gpt-5 model family.
+    // ponytail: sends the full transcript; truncate the oldest turns if a long
+    // session ever overruns the model's context window.
+    private static func chat(_ messages: [[String: Any]], apiKey: String,
+                             model: String) async throws -> String {
+        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let body: [String: Any] = ["model": model, "messages": messages]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -808,8 +833,24 @@ enum LiveSummarizer {
     }
 }
 
-/// Borderless panel that can still become key (needed so the summary panel's
-/// Cmd+C key equivalent fires).
+/// Pins thin, auto-hiding overlay scrollers. In a borderless floating panel
+/// (mouse attached), a plain NSScrollView reverts a manually-set `.overlay`
+/// back to the system's wide legacy scroller, whose track never disappears —
+/// overriding the getter stops that revert so it matches the translate window.
+final class OverlayScrollView: NSScrollView {
+    override var scrollerStyle: NSScroller.Style {
+        get { .overlay }
+        set {}
+    }
+}
+
+/// Borderless live panel that can still become key — needed so the summary's
+/// follow-up field can take text focus (and Cmd+C fires). `.nonactivatingPanel`
+/// keeps the translated app frontmost while we hold key, so nothing is stolen.
+final class KeyableLivePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 /// Borderless icon button with a soft rounded hover highlight — used for the
 /// captions header controls (pause/minimize/close).
 /// Two modes:
@@ -919,6 +960,9 @@ final class LiveCaptionPanelController: NSObject {
     private var summaryLeftPins: [NSLayoutConstraint] = []
     private var summaryOnRight = true
     private let summaryTextView = NSTextView()
+    private let summaryTitleLabel = NSTextField(labelWithString: "Summary")
+    private let summaryShimmer = ShimmerTextLabel()   // replaces the title while working
+    private let followUpField = FollowUpTextField()
     private var summaryText = ""
     private var isSummaryShown = false
     private var isProgrammaticResize = false
@@ -929,7 +973,7 @@ final class LiveCaptionPanelController: NSObject {
     private let statusLabel = NSTextField(labelWithString: "")
     private let costLabel = NSTextField(labelWithString: "")
     private let textView = NSTextView()
-    private let scrollView = NSScrollView()
+    private let scrollView = OverlayScrollView()
 
     // Glass palette — mirrors TranslationPanelPalette (which is private to App.swift)
     // so the captions window matches the translate window's white-on-glass look.
@@ -943,6 +987,8 @@ final class LiveCaptionPanelController: NSObject {
     private static let iconColorActive = NSColor(calibratedWhite: 1.0, alpha: 0.95)
 
     private var pauseButton: HoverIconButton?
+    private var summaryCopyButton: HoverIconButton?
+    private var copiedRevert: Timer?              // reverts the copy glyph after the "copied" flash
     private var sourceToggleButton: NSButton?     // 🅰 show-original toggle
     private var audioSourceButton: HoverIconButton?  // single 🔊/🎙 toggle — shows the active source
     private var currentSource: LiveAudioSource = .systemAudio
@@ -958,11 +1004,12 @@ final class LiveCaptionPanelController: NSObject {
     var onTogglePause: (() -> Void)?
     var onToggleSource: (() -> Void)?
     var onSummarize: (() -> Void)?
+    var onFollowUp: ((String) -> Void)?
     var onRestart: (() -> Void)?
     var onSourceChange: ((LiveAudioSource) -> Void)?
 
     override init() {
-        panel = NSPanel(
+        panel = KeyableLivePanel(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 560),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
@@ -1140,13 +1187,11 @@ final class LiveCaptionPanelController: NSObject {
         return button
     }
 
-    /// Labelled "✨ Summarize" pill — the primary action reads as a word, not a
-    /// bare icon. Rounded-rect background mode (vs. the round icon buttons).
+    /// Text-only "Summarize" pill — the primary action reads as a word.
+    /// Rounded-rect background mode (vs. the round icon buttons).
     private func makeSummarizeButton() -> HoverIconButton {
         let button = HoverIconButton(title: "Summarize", target: self, action: #selector(summarizeTapped))
-        button.image = Self.symbolImage("sparkles", "Summarize", pointSize: 12)
-        button.imagePosition = .imageLeading
-        button.imageHugsTitle = true
+        button.imagePosition = .noImage
         button.attributedTitle = NSAttributedString(string: "Summarize", attributes: [
             .foregroundColor: Self.titleColor,
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
@@ -1241,7 +1286,6 @@ final class LiveCaptionPanelController: NSObject {
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
-        scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.scrollerKnobStyle = .light
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -1472,15 +1516,20 @@ final class LiveCaptionPanelController: NSObject {
         summarySep.alphaValue = 0   // only shown while the summary is open
         content.addSubview(summarySep)
 
-        let title = NSTextField(labelWithString: "Summary")
+        let title = summaryTitleLabel
         title.font = .systemFont(ofSize: 12, weight: .semibold)
         title.textColor = Self.titleColor
         title.translatesAutoresizingMaskIntoConstraints = false
+
+        // Shimmer overlays the title position while the model works.
+        summaryShimmer.translatesAutoresizingMaskIntoConstraints = false
+        summaryShimmer.isHidden = true
 
         let headerContainer = insetContainer(draggable: true)   // summary header = drag handle
 
         let copyButton = iconButton("doc.on.doc", tint: Self.iconColor, hover: Self.hoverNeutral,
                                     action: #selector(copySummaryTapped), help: "Copy summary")
+        summaryCopyButton = copyButton
         let closeButton = iconButton("xmark", tint: Self.iconColor, hover: Self.hoverNeutral,
                                      action: #selector(closeSummaryTapped), help: "Close summary")
 
@@ -1496,18 +1545,44 @@ final class LiveCaptionPanelController: NSObject {
         summaryTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         summaryTextView.textContainer?.widthTracksTextView = true
 
-        let scroll = NSScrollView()
+        let scroll = OverlayScrollView()
         scroll.documentView = summaryTextView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.scrollerKnobStyle = .light
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
+        // Bottom follow-up input — wrapped in the same inset card as the player
+        // toolbar (matching height/bg), with a trailing send button. Submits on
+        // Return or the button.
+        let inputContainer = insetContainer()
+
+        followUpField.translatesAutoresizingMaskIntoConstraints = false
+        followUpField.placeholderAttributedString = NSAttributedString(
+            string: "Ask a follow-up…",
+            attributes: [.font: NSFont.systemFont(ofSize: 13),
+                         .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.42)])
+        followUpField.font = .systemFont(ofSize: 13)
+        followUpField.textColor = Self.bodyColor
+        followUpField.isBezeled = false
+        followUpField.isBordered = false
+        followUpField.drawsBackground = false
+        followUpField.focusRingType = .none
+        followUpField.cell?.usesSingleLineMode = true
+        followUpField.cell?.wraps = false
+        followUpField.cell?.isScrollable = true
+        followUpField.delegate = self
+        followUpField.onEscape = { [weak self] in self?.setSummaryShown(false, animated: true) }
+
+        let sendButton = roundButton("arrow.up", action: #selector(sendFollowUpTapped), help: "Send")
+
         summaryColumn.addSubview(headerContainer)
         summaryColumn.addSubview(scroll)
-        [title, copyButton, closeButton].forEach { headerContainer.addSubview($0) }
+        summaryColumn.addSubview(inputContainer)
+        inputContainer.addSubview(followUpField)
+        inputContainer.addSubview(sendButton)
+        [title, summaryShimmer, copyButton, closeButton].forEach { headerContainer.addSubview($0) }
 
         NSLayoutConstraint.activate([
             // Header card — matches the main panel's top container.
@@ -1518,6 +1593,12 @@ final class LiveCaptionPanelController: NSObject {
 
             title.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor, constant: 14),
             title.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
+
+            // Shimmer occupies the title slot (between leading edge and copy button).
+            summaryShimmer.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor, constant: 14),
+            summaryShimmer.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
+            summaryShimmer.trailingAnchor.constraint(lessThanOrEqualTo: copyButton.leadingAnchor, constant: -8),
+            summaryShimmer.heightAnchor.constraint(equalToConstant: 18),
 
             closeButton.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor, constant: -8),
             closeButton.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
@@ -1531,14 +1612,77 @@ final class LiveCaptionPanelController: NSObject {
             scroll.topAnchor.constraint(equalTo: headerContainer.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: summaryColumn.leadingAnchor, constant: 14),
             scroll.trailingAnchor.constraint(equalTo: summaryColumn.trailingAnchor, constant: -14),
-            scroll.bottomAnchor.constraint(equalTo: summaryColumn.bottomAnchor, constant: -12),
+            scroll.bottomAnchor.constraint(equalTo: inputContainer.topAnchor, constant: -8),
+
+            // Input card — same inset style/height as the player toolbar.
+            inputContainer.leadingAnchor.constraint(equalTo: summaryColumn.leadingAnchor, constant: 12),
+            inputContainer.trailingAnchor.constraint(equalTo: summaryColumn.trailingAnchor, constant: -12),
+            inputContainer.bottomAnchor.constraint(equalTo: summaryColumn.bottomAnchor, constant: -12),
+            inputContainer.heightAnchor.constraint(equalToConstant: 48),
+
+            followUpField.leadingAnchor.constraint(equalTo: inputContainer.leadingAnchor, constant: 14),
+            followUpField.centerYAnchor.constraint(equalTo: inputContainer.centerYAnchor),
+            followUpField.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -6),
+
+            sendButton.trailingAnchor.constraint(equalTo: inputContainer.trailingAnchor, constant: -10),
+            sendButton.centerYAnchor.constraint(equalTo: inputContainer.centerYAnchor),
+            sendButton.widthAnchor.constraint(equalToConstant: 28),
+            sendButton.heightAnchor.constraint(equalToConstant: 28),
         ])
     }
 
+    /// Opens the summary panel and runs the shimmer while the model works, so
+    /// tapping Summarize gives immediate "something's happening" feedback.
+    func showSummaryLoading() {
+        startShimmer("Summarizing…")
+        setSummaryShown(true, animated: true)
+    }
+
+    /// Swaps the header title for the sweeping shimmer with the given label;
+    /// the body is left untouched until the result replaces it.
+    private func startShimmer(_ text: String) {
+        summaryTitleLabel.isHidden = true
+        summaryShimmer.configure(
+            text: text,
+            font: .systemFont(ofSize: 12, weight: .semibold),
+            base: NSColor(calibratedWhite: 1.0, alpha: 0.30),
+            highlight: NSColor(calibratedWhite: 1.0, alpha: 0.95))
+        summaryShimmer.isHidden = false
+        summaryShimmer.startAnimating()
+    }
+
+    private func stopSummaryLoading() {
+        summaryShimmer.stopAnimating()
+        summaryShimmer.isHidden = true
+        summaryTitleLabel.isHidden = false
+    }
+
     func showSummary(_ text: String) {
+        stopSummaryLoading()
         summaryText = text
         summaryTextView.textStorage?.setAttributedString(Self.attributedSummary(text))
         setSummaryShown(true, animated: true)
+    }
+
+    /// Replace-mode follow-up: the answer alone takes over the summary body.
+    /// Re-clicking Summarize restores the (still-cached) summary.
+    func showFollowUpAnswer(_ answer: String) {
+        stopSummaryLoading()
+        summaryText = answer
+        summaryTextView.textStorage?.setAttributedString(Self.attributedSummary(answer))
+        summaryTextView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+    }
+
+    /// Shimmer shown the instant a question is submitted, until the answer lands.
+    func showFollowUpPending() {
+        startShimmer("Thinking…")
+    }
+
+    private func submitFollowUp() {
+        let text = followUpField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        followUpField.stringValue = ""
+        onFollowUp?(text)
     }
 
     /// Renders the model's lightweight markdown (**bold**, *italic*, `- ` bullets,
@@ -1640,8 +1784,10 @@ final class LiveCaptionPanelController: NSObject {
     /// Collapse any open summary (no animation) so a restarted session begins
     /// clean rather than showing the previous conversation's summary.
     func resetSummaryForNewSession() {
+        stopSummaryLoading()
         summaryText = ""
         summaryTextView.string = ""
+        followUpField.stringValue = ""
         setSummaryShown(false, animated: false)
     }
 
@@ -1649,6 +1795,24 @@ final class LiveCaptionPanelController: NSObject {
         guard !summaryText.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(summaryText, forType: .string)
+        flashCopied()
+    }
+
+    /// Brief "copied" confirmation: the copy glyph becomes a checkmark in the
+    /// same gray as the neighbouring close icon (so the two read as a pair),
+    /// then reverts. Re-tapping restarts the timer rather than stacking reverts.
+    private func flashCopied() {
+        guard let button = summaryCopyButton else { return }
+        button.image = Self.symbolImage("checkmark", "Copied")
+        button.contentTintColor = Self.iconColor
+        copiedRevert?.invalidate()
+        copiedRevert = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let button = self.summaryCopyButton else { return }
+                button.image = Self.symbolImage("doc.on.doc", "Copy summary")
+                button.contentTintColor = button.baseTint
+            }
+        }
     }
 
     @objc private func stopTapped() { onStop?() }
@@ -1656,11 +1820,22 @@ final class LiveCaptionPanelController: NSObject {
     @objc private func pauseTapped() { onTogglePause?() }
     @objc private func sourceToggled() { onToggleSource?() }
     @objc private func summarizeTapped() { onSummarize?() }
+    @objc private func sendFollowUpTapped() { submitFollowUp() }
     @objc private func copySummaryTapped() { copySummary() }
     @objc private func closeSummaryTapped() { setSummaryShown(false, animated: true) }
     @objc private func restartTapped() { onRestart?() }
     @objc private func cycleSourceTapped() {
         onSourceChange?(currentSource == .systemAudio ? .microphone : .systemAudio)
+    }
+}
+
+extension LiveCaptionPanelController: NSTextFieldDelegate {
+    // Submit on Return only — swallow the keystroke so the field doesn't beep.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === followUpField,
+              commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
+        submitFollowUp()
+        return true
     }
 }
 
@@ -1690,6 +1865,10 @@ final class LiveTranslationController: NSObject {
     private var apiKey: String = ""
     // Last (transcript, summary) pair — re-summarizing identical text reuses it.
     private var summaryCache: (text: String, summary: String)?
+    // Follow-up Q&A grounding: the summary currently on screen + prior turns.
+    // Reset whenever a fresh summary is shown so questions chain within one summary.
+    private var lastSummary = ""
+    private var followUpHistory: [[String: Any]] = []
 
     // Active-time accounting. Pause freezes it, so cost/billing only count the
     // time audio is actually streaming, not wall-clock since first start.
@@ -1729,6 +1908,8 @@ final class LiveTranslationController: NSObject {
         accumulatedSeconds = 0
         isCollapsed = false
         summaryCache = nil
+        lastSummary = ""
+        followUpHistory = []
         LiveAudioSource.current = .microphone   // every new session defaults to the mic
         panel.resetSummaryForNewSession()
 
@@ -1737,6 +1918,7 @@ final class LiveTranslationController: NSObject {
         panel.onTogglePause = { [weak self] in self?.togglePauseResume() }
         panel.onToggleSource = { [weak self] in self?.toggleSource() }
         panel.onSummarize = { [weak self] in self?.summarize() }
+        panel.onFollowUp = { [weak self] question in self?.askFollowUp(question) }
         panel.onRestart = { [weak self] in self?.restart() }
         panel.onSourceChange = { [weak self] newSource in self?.changeSource(to: newSource) }
         panel.setSource(LiveAudioSource.current)
@@ -1769,11 +1951,13 @@ final class LiveTranslationController: NSObject {
         guard !text.isEmpty else { panel.update(status: "Nothing to summarize yet."); return }
         // Reuse the last summary if the transcript hasn't changed — no API call.
         if let cached = summaryCache, cached.text == text {
+            startFollowUpThread(with: cached.summary)
             panel.showSummary(cached.summary)
             return
         }
         guard !apiKey.isEmpty else { onMissingAPIKey?(); return }
         panel.update(status: "Summarizing…")
+        panel.showSummaryLoading()
         let key = apiKey
         let language = targetLanguage.displayName   // reading language — always summarize in it
         Task { [weak self] in
@@ -1781,10 +1965,43 @@ final class LiveTranslationController: NSObject {
                 let summary = try await LiveSummarizer.summarize(text, apiKey: key, language: language)
                 guard let self else { return }
                 self.summaryCache = (text, summary)
+                self.startFollowUpThread(with: summary)
                 self.panel.showSummary(summary)
                 self.panel.update(status: self.currentStatusText())
             } catch {
-                self?.panel.update(status: "Summary failed: \(error.localizedDescription)")
+                guard let self else { return }
+                self.panel.showSummary("⚠︎ Couldn't summarize: \(error.localizedDescription)")
+                self.panel.update(status: self.currentStatusText())
+            }
+        }
+    }
+
+    /// A freshly shown summary starts a clean follow-up conversation grounded in it.
+    private func startFollowUpThread(with summary: String) {
+        lastSummary = summary
+        followUpHistory = []
+    }
+
+    private func askFollowUp(_ question: String) {
+        guard !lastSummary.isEmpty else { return }   // only meaningful once a summary exists
+        guard !apiKey.isEmpty else { onMissingAPIKey?(); return }
+        let transcript = dialogue.translationText   // grounded in the transcript as it stands now
+        let summary = lastSummary
+        let history = followUpHistory
+        let key = apiKey
+        let language = targetLanguage.displayName
+        panel.showFollowUpPending()
+        Task { [weak self] in
+            do {
+                let answer = try await LiveSummarizer.answer(
+                    question: question, transcript: transcript, summary: summary,
+                    history: history, apiKey: key, language: language)
+                guard let self else { return }
+                self.followUpHistory.append(["role": "user", "content": question])
+                self.followUpHistory.append(["role": "assistant", "content": answer])
+                self.panel.showFollowUpAnswer(answer)
+            } catch {
+                self?.panel.showFollowUpAnswer("⚠︎ Couldn't answer: \(error.localizedDescription)")
             }
         }
     }

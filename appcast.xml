@@ -487,5 +487,16 @@
                 type="application/octet-stream"
                 sparkle:edSignature="PDHrlEgGSkRIn+E+tvG10TEo5mYKtdj6XWzGPooHNdWwWUYqufKodZ5Vh5mRSk1zD9lZ1WuoeSyUoj9kRc6ADQ==" length="30925979" />
         </item>
+        <item>
+            <title>Version 0.14.0</title>
+            <pubDate>Fri, 26 Jun 2026 04:55:37 +0000</pubDate>
+            <sparkle:version>51</sparkle:version>
+            <sparkle:shortVersionString>0.14.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/ChoiVadim/nugumi/releases/download/v0.14.0/Nugumi-0.14.0.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="0SaW9D79uE+v/lk5EL6Oc5jYc+oiWu57QdhT/RxKbSDv+hwfb39LG9+nqzf/Xf190jpYrvXMtbgVrmm4dSoECA==" length="30953992" />
+        </item>
     </channel>
 </rss>
