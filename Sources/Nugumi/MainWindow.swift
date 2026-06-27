@@ -90,6 +90,7 @@ struct VisualEffectBackground: NSViewRepresentable {
 struct SettingsSnapshot {
     var targetLanguage: TranslationLanguage
     var draftTargetLanguage: TranslationLanguage
+    var liveSourceLanguage: TranslationLanguage
     var writingToggleAlternate: TranslationLanguage
     var floatingDefaultMode: FloatingButtonDefaultMode
     var selectionDisplayMode: SelectionDisplayMode
@@ -144,6 +145,7 @@ struct AppRef: Equatable, Hashable {
 enum SettingsIntent {
     case setTargetLanguage(TranslationLanguage)
     case setDraftTargetLanguage(TranslationLanguage)
+    case setLiveSourceLanguage(TranslationLanguage)
     case setWritingToggleAlternate(TranslationLanguage)
     case setFloatingDefaultMode(FloatingButtonDefaultMode)
     case setSelectionDisplayMode(SelectionDisplayMode)

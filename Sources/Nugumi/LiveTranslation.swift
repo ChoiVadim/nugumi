@@ -12,51 +12,71 @@ enum LiveTranslationLanguage {
         default: return language.id
         }
     }
+
+    /// UserDefaults key for the live source-language pick ("auto" or a language id).
+    static let sourceDefaultsKey = "liveSourceLanguageID"
+
+    /// ISO-639-1 hint for the input-transcription model, or nil for auto-detect.
+    static func sourceAPICode(forID id: String?) -> String? {
+        guard let id, !id.isEmpty, id != "auto" else { return nil }
+        return id == "zh-Hans" ? "zh" : id
+    }
 }
 
-/// One spoken utterance paired with its translation.
+/// Source STT and its streaming translation, shown as TWO DECOUPLED streams.
 ///
-/// The Realtime translate model streams the translation token-by-token
-/// (`output_transcript.delta`) *during* speech, and emits the original as a
-/// single complete `input_transcript.delta` at the *end* of each utterance. So
-/// we buffer translation tokens and close a segment when the matching original
-/// arrives — keeping original and translation paired and in sync (instead of
-/// drifting when the two streams segment differently).
-/// Source STT and its translation, paired for display. The two realtime streams
-/// can't be time-synced (translation lags the source by ~1–2s in content, and the
-/// API gives no pairing IDs), so we pair by ORDER — sentence k of the source with
-/// sentence k of the translation — and pace the source so it can't race ahead.
+/// The two realtime streams (`input_transcript.delta` = source, `output_transcript.delta`
+/// = translation) lag each other by a variable amount that even flips sign (the
+/// translation sometimes leads, sometimes trails the source). Forcing them into
+/// paired rows therefore always drifts or merges on some audio. Instead each stream
+/// is segmented into its own sentence-sized entries and they're rendered in the
+/// order their first tokens arrived — interleaved by time, never paired. No lag to
+/// estimate, nothing to mis-anchor: each sentence is its own row.
 struct LiveDialogue: Equatable {
+    /// A display row carries EITHER source OR translation (the other side empty) —
+    /// the struct keeps both fields so the renderer/tests stay unchanged.
     struct Row: Equatable {
         var source: String
         var translation: String
     }
 
-    /// A source pause this long starts a new unit — long enough to be a sentence
-    /// break, not a mid-sentence phrase pause (which would over-split the source
-    /// and break order-pairing with the translation's sentences).
+    private struct Entry: Equatable {
+        var text: String = ""
+        let isSource: Bool
+    }
+
+    /// A source pause this long starts a new source entry — long enough to be a
+    /// sentence break, not a mid-sentence phrase pause.
     /// ponytail: speaker-dependent heuristic; raise if sentences split, lower if they merge.
     static let sourceGapMs = 1100
 
-    private(set) var originals: [String] = []
-    private(set) var translations: [String] = []
-    private var lastOriginalMs: Int?
+    private var entries: [Entry] = []        // both streams, in first-token-arrival order
+    private var lastSourceMs: Int?
+    private var lastSourceEndedSentence = false
     private var translationSentenceOpen = false
+    private var sourceIndex = -1             // index of the open source entry in `entries`
+    private var translationIndex = -1        // index of the open translation entry
 
     mutating func appendOriginal(_ token: String, ms: Int?) {
-        if originals.isEmpty || isGap(ms, since: lastOriginalMs) {
-            originals.append("")
+        // New source entry on first token, an audio pause, or a sentence end.
+        if sourceIndex < 0 || isGap(ms, since: lastSourceMs) || lastSourceEndedSentence {
+            entries.append(Entry(isSource: true))
+            sourceIndex = entries.count - 1
         }
-        originals[originals.count - 1] += token
-        if let ms { lastOriginalMs = ms }
+        entries[sourceIndex].text += token
+        lastSourceEndedSentence = Self.endsSentence(token)
+        if let ms { lastSourceMs = ms }
     }
 
     mutating func appendTranslation(_ token: String, ms: Int?) {
-        if !translationSentenceOpen {
-            translations.append("")
+        // New translation entry at the start of each sentence — keeps it whole and
+        // splits long output into readable per-sentence rows (no giant blocks).
+        if translationIndex < 0 || !translationSentenceOpen {
+            entries.append(Entry(isSource: false))
+            translationIndex = entries.count - 1
             translationSentenceOpen = true
         }
-        translations[translations.count - 1] += token
+        entries[translationIndex].text += token
         if Self.endsSentence(token) { translationSentenceOpen = false }
     }
 
@@ -70,29 +90,52 @@ struct LiveDialogue: Equatable {
         return ".!?。！？…".contains(last)
     }
 
-    /// Source ↔ translation paired by order (sentence k ↔ sentence k). Source the
-    /// translation hasn't reached yet collects into one trailing "live" row, so
-    /// the committed pairs stay in lockstep and the original can't pile up as
-    /// orphan lines ahead of the translation.
+    /// One row per entry, in arrival order — source rows and translation rows
+    /// interleaved by time, each carrying only its own side.
     var rows: [Row] {
-        let src = originals.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        let trans = translations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        var result: [Row] = []
-        for k in 0..<trans.count {
-            let s = k < src.count ? src[k] : ""
-            if s.isEmpty && trans[k].isEmpty { continue }
-            result.append(Row(source: s, translation: trans[k]))
+        entries.compactMap { e in
+            let t = Self.collapseLoops(e.text.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard !t.isEmpty else { return nil }
+            return e.isSource ? Row(source: t, translation: "") : Row(source: "", translation: t)
         }
-        let live = src.dropFirst(trans.count).joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !live.isEmpty { result.append(Row(source: live, translation: "")) }
-        return result
     }
 
     /// All translation text joined (for Summarize).
     var translationText: String {
-        translations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        entries.filter { !$0.isSource }
+            .map { Self.collapseLoops($0.text.trimmingCharacters(in: .whitespacesAndNewlines)) }
             .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Cosmetic only: collapse a word-group (1–6 words) the realtime model looped
+    /// 3+ times in a row down to one occurrence ("ты ты ты ты"; "нам стоит уйти, нам
+    /// стоит уйти, …"). Loops are model garbage on hard audio — this just stops them
+    /// filling the panel. 3+ reps, so genuine emphasis ("very very") survives.
+    // ponytail: O(words²·6) per entry per render; entries are sentence-sized so it's cheap.
+    static func collapseLoops(_ text: String) -> String {
+        let words = text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        guard words.count >= 3 else { return text }
+        var out: [String] = []
+        var i = 0
+        while i < words.count {
+            var collapsed = false
+            var n = min(6, (words.count - i) / 2)
+            while n >= 1 {
+                let gram = Array(words[i ..< i + n])
+                var reps = 1
+                var j = i + n
+                while j + n <= words.count && Array(words[j ..< j + n]) == gram { reps += 1; j += n }
+                if reps >= 3 {
+                    out.append(contentsOf: gram)
+                    i = j
+                    collapsed = true
+                    break
+                }
+                n -= 1
+            }
+            if !collapsed { out.append(words[i]); i += 1 }
+        }
+        return out.joined(separator: " ")
     }
 }
 
@@ -282,6 +325,7 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
 
     private let apiKey: String
     private var languageCode: String
+    private let sourceLanguageCode: String?   // ISO-639-1 transcription hint, nil = auto-detect
     private let safetyIdentifier: String
     private var session: URLSession?
     private var task: URLSessionWebSocketTask?
@@ -293,9 +337,10 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     private let taskLock = NSLock()
     private var reconnectScheduled = false
 
-    init(apiKey: String, languageCode: String, safetyIdentifier: String) {
+    init(apiKey: String, languageCode: String, sourceLanguageCode: String?, safetyIdentifier: String) {
         self.apiKey = apiKey
         self.languageCode = languageCode
+        self.sourceLanguageCode = sourceLanguageCode
         self.safetyIdentifier = safetyIdentifier
     }
 
@@ -356,10 +401,13 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
             ])
             // Enable source-language transcription so we also receive the original
             // text (session.input_transcript.delta). Sent as a separate update so a
-            // rejection here can't drop the (working) output-language config.
+            // rejection here can't drop the (working) output-language config. A pinned
+            // source language hint improves transcription accuracy; omitted = auto.
+            var transcription: [String: Any] = ["model": "gpt-realtime-whisper"]
+            if let src = self.sourceLanguageCode { transcription["language"] = src }
             self.sendJSON([
                 "type": "session.update",
-                "session": ["audio": ["input": ["transcription": ["model": "gpt-realtime-whisper"]]]]
+                "session": ["audio": ["input": ["transcription": transcription]]]
             ])
             self.onStatusChange?(.listening)
         }
@@ -528,7 +576,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
             try await stream.startCapture()
             if isStopped {
-                stream.stopCapture { _ in }
+                try? await stream.stopCapture()
                 return
             }
             self.stream = stream
@@ -981,7 +1029,6 @@ final class LiveCaptionPanelController: NSObject {
     private static let titleColor = NSColor(calibratedWhite: 1.0, alpha: 0.84)
     private static let costColor = NSColor(calibratedWhite: 1.0, alpha: 0.45)
     private static let bodyColor = NSColor(calibratedWhite: 0.94, alpha: 0.96)
-    private static let partialColor = NSColor(calibratedWhite: 1.0, alpha: 0.5)
     private static let sourceColor = NSColor(calibratedWhite: 1.0, alpha: 0.42)
     private static let iconColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
     private static let iconColorActive = NSColor(calibratedWhite: 1.0, alpha: 0.95)
@@ -1472,13 +1519,12 @@ final class LiveCaptionPanelController: NSObject {
     func render(_ dialogue: LiveDialogue, showSource: Bool) {
         let body = NSMutableAttributedString()
         for row in dialogue.rows {
+            // Decoupled rows carry only one side. Source is the dim gray line, the
+            // translation the bright primary one.
             if showSource, !row.source.isEmpty {
-                // The trailing live row (no translation yet) is the in-progress
-                // edge — render it brighter so it reads as "now hearing".
-                let isLive = row.translation.isEmpty
                 body.append(NSAttributedString(string: row.source + "\n", attributes: [
                     .font: NSFont.systemFont(ofSize: 12),
-                    .foregroundColor: isLive ? Self.partialColor : Self.sourceColor
+                    .foregroundColor: Self.sourceColor
                 ]))
             }
             if !row.translation.isEmpty {
@@ -2018,9 +2064,12 @@ final class LiveTranslationController: NSObject {
         panel.setPaused(false)
         panel.update(status: "Connecting… → \(targetLanguage.displayName)")
 
+        let sourceCode = LiveTranslationLanguage.sourceAPICode(
+            forID: UserDefaults.standard.string(forKey: LiveTranslationLanguage.sourceDefaultsKey))
         let session = RealtimeTranslationSession(
             apiKey: apiKey,
             languageCode: LiveTranslationLanguage.apiCode(for: targetLanguage),
+            sourceLanguageCode: sourceCode,
             safetyIdentifier: LiveTranslationController.safetyIdentifier()
         )
         session.onTranslatedDelta = { [weak self] delta, ms in

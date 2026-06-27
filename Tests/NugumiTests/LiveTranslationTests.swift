@@ -41,43 +41,95 @@ final class LiveTranslationTests: XCTestCase {
         XCTAssertEqual(RealtimeServerEvent(jsonString: "not json"), .ignored)
     }
 
-    func testRowsPairSourceAndTranslationByOrder() {
+    /// Decoupled streams: source and translation are SEPARATE rows (each carries only
+    /// its own side), rendered in the order their first tokens arrived.
+    func testSourceAndTranslationAreSeparateRowsInArrivalOrder() {
         var d = LiveDialogue()
-        // Two source sentences (split by a long pause) + two translated sentences.
-        d.appendOriginal("안녕하세요", ms: 100)
-        d.appendOriginal("반갑습니다", ms: 100 + LiveDialogue.sourceGapMs + 200)
-        d.appendTranslation("Hello.", ms: 300)
-        d.appendTranslation(" Nice to meet you.", ms: 600)
+        d.appendOriginal("привет.", ms: 1000)
+        d.appendTranslation("Hello.", ms: 1200)
         XCTAssertEqual(d.rows, [
-            LiveDialogue.Row(source: "안녕하세요", translation: "Hello."),
-            LiveDialogue.Row(source: "반갑습니다", translation: "Nice to meet you."),
+            LiveDialogue.Row(source: "привет.", translation: ""),
+            LiveDialogue.Row(source: "", translation: "Hello."),
         ])
     }
 
-    func testTranslationSplitsOnSentencePunctuation() {
+    /// A long translation splits per sentence into its OWN rows — no giant block
+    /// piling onto one source segment (the wall-of-text complaint).
+    func testTranslationSplitsPerSentenceIntoSeparateRows() {
         var d = LiveDialogue()
-        d.appendTranslation("Hello", ms: 0)
-        d.appendTranslation(" world.", ms: 50)   // sentence ends
-        d.appendTranslation(" Bye", ms: 100)     // next sentence
-        XCTAssertEqual(d.translations, ["Hello world.", " Bye"])
+        d.appendOriginal("исходник.", ms: 1000)
+        d.appendTranslation("One.", ms: 1100)
+        d.appendTranslation(" Two.", ms: 1200)
+        d.appendTranslation(" Three.", ms: 1300)
+        XCTAssertEqual(d.rows.filter { !$0.translation.isEmpty }.map(\.translation),
+                       ["One.", "Two.", "Three."])
+    }
+
+    /// Interleaved arrival order is preserved (source1, trans1, source2, trans2…).
+    func testInterleavedArrivalOrderPreserved() {
+        var d = LiveDialogue()
+        let gap = LiveDialogue.sourceGapMs
+        d.appendOriginal("рус1.", ms: 1000)
+        d.appendTranslation("Eng1.", ms: 1200)
+        d.appendOriginal("рус2.", ms: 1000 + gap + 200)
+        d.appendTranslation("Eng2.", ms: 4000)
+        XCTAssertEqual(d.rows, [
+            LiveDialogue.Row(source: "рус1.", translation: ""),
+            LiveDialogue.Row(source: "", translation: "Eng1."),
+            LiveDialogue.Row(source: "рус2.", translation: ""),
+            LiveDialogue.Row(source: "", translation: "Eng2."),
+        ])
+    }
+
+    /// When the translation LEADS the source (the sign-flipped lag that broke
+    /// pairing), it simply renders first — no merging, no offset, no crash.
+    func testTranslationLeadingSourceRendersTranslationFirst() {
+        var d = LiveDialogue()
+        d.appendTranslation("We went fishing.", ms: 1000)    // translation arrives first
+        d.appendOriginal("выехали на рыбалку.", ms: 1500)     // its source lands later
+        XCTAssertEqual(d.rows, [
+            LiveDialogue.Row(source: "", translation: "We went fishing."),
+            LiveDialogue.Row(source: "выехали на рыбалку.", translation: ""),
+        ])
+    }
+
+    func testCollapseLoopsCollapsesRepeatedWordGroups() {
+        XCTAssertEqual(LiveDialogue.collapseLoops("ты ты ты ты должен был"), "ты должен был")
+        XCTAssertEqual(
+            LiveDialogue.collapseLoops("нам стоит уйти, нам стоит уйти, нам стоит уйти, нам стоит уйти."),
+            "нам стоит уйти, нам стоит уйти.")
+        // Two reps survive (genuine emphasis), only 3+ collapse.
+        XCTAssertEqual(LiveDialogue.collapseLoops("very very good"), "very very good")
+        XCTAssertEqual(LiveDialogue.collapseLoops("symmetrically, symmetrically."), "symmetrically, symmetrically.")
     }
 
     func testSourceSplitsOnLongPauseNotShortPause() {
         var d = LiveDialogue()
         d.appendOriginal("코딩의", ms: 0)
-        d.appendOriginal("흐름이", ms: 800)                      // short phrase pause → same unit
-        d.appendOriginal("디자인", ms: 800 + LiveDialogue.sourceGapMs + 100)   // long pause → new unit
-        XCTAssertEqual(d.originals, ["코딩의흐름이", "디자인"])
+        d.appendOriginal("흐름이", ms: 800)                                  // short phrase pause → same row
+        d.appendOriginal("디자인", ms: 800 + LiveDialogue.sourceGapMs + 100) // long pause → new row
+        XCTAssertEqual(d.rows.map(\.source), ["코딩의흐름이", "디자인"])
     }
 
-    func testUntranslatedSourceCollectsInLiveRow() {
+    func testSourceSplitsOnSentenceEndWithoutPause() {
         var d = LiveDialogue()
-        d.appendOriginal("문장하나", ms: 0)
-        d.appendOriginal("문장둘", ms: LiveDialogue.sourceGapMs + 100)
-        d.appendTranslation("Sentence one.", ms: 200)   // only the first is translated
+        d.appendOriginal("Hello.", ms: 1000)   // sentence ends
+        d.appendOriginal(" Bye", ms: 1100)     // next sentence, no pause
+        XCTAssertEqual(d.rows.map(\.source), ["Hello.", "Bye"])
+    }
+
+    /// Untranslated source still shows (as its own rows) while the translation
+    /// catches up — nothing waits on a pairing.
+    func testUntranslatedSourceStillShows() {
+        var d = LiveDialogue()
+        let gap = LiveDialogue.sourceGapMs
+        d.appendOriginal("문장하나.", ms: 1000)
+        d.appendOriginal("문장둘.", ms: 1000 + gap + 100)
+        d.appendTranslation("Sentence one.", ms: 1100)  // only first translated so far
         XCTAssertEqual(d.rows, [
-            LiveDialogue.Row(source: "문장하나", translation: "Sentence one."),
-            LiveDialogue.Row(source: "문장둘", translation: ""),   // live edge — not yet translated
+            LiveDialogue.Row(source: "문장하나.", translation: ""),
+            LiveDialogue.Row(source: "문장둘.", translation: ""),
+            LiveDialogue.Row(source: "", translation: "Sentence one."),
         ])
     }
 

@@ -1107,6 +1107,14 @@ struct LanguagesSection: View {
                             bridge.perform(.setDraftTargetLanguage($0))
                         }
                     }
+                    Divider().background(FlowTheme.hairline)
+                    SettingRow("Live audio language",
+                               subtitle: "The spoken language live mode listens for. Auto-detect works; picking it improves accuracy.") {
+                        LanguageMenu(current: bridge.settings.liveSourceLanguage,
+                                     options: TranslationLanguage.liveSourceOptions) {
+                            bridge.perform(.setLiveSourceLanguage($0))
+                        }
+                    }
                 }
             }
 
@@ -1132,11 +1140,12 @@ struct LanguagesSection: View {
 
 private struct LanguageMenu: View {
     let current: TranslationLanguage
+    var options: [TranslationLanguage] = TranslationLanguage.all
     let onSelect: (TranslationLanguage) -> Void
 
     var body: some View {
         Menu {
-            ForEach(TranslationLanguage.all, id: \.id) { language in
+            ForEach(options, id: \.id) { language in
                 Button {
                     onSelect(language)
                 } label: {
