@@ -13,14 +13,6 @@ enum LiveTranslationLanguage {
         }
     }
 
-    /// UserDefaults key for the live source-language pick ("auto" or a language id).
-    static let sourceDefaultsKey = "liveSourceLanguageID"
-
-    /// ISO-639-1 hint for the input-transcription model, or nil for auto-detect.
-    static func sourceAPICode(forID id: String?) -> String? {
-        guard let id, !id.isEmpty, id != "auto" else { return nil }
-        return id == "zh-Hans" ? "zh" : id
-    }
 }
 
 /// Source STT and its streaming translation, shown as TWO DECOUPLED streams.
@@ -325,7 +317,6 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
 
     private let apiKey: String
     private var languageCode: String
-    private let sourceLanguageCode: String?   // ISO-639-1 transcription hint, nil = auto-detect
     private let safetyIdentifier: String
     private var session: URLSession?
     private var task: URLSessionWebSocketTask?
@@ -337,10 +328,9 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
     private let taskLock = NSLock()
     private var reconnectScheduled = false
 
-    init(apiKey: String, languageCode: String, sourceLanguageCode: String?, safetyIdentifier: String) {
+    init(apiKey: String, languageCode: String, safetyIdentifier: String) {
         self.apiKey = apiKey
         self.languageCode = languageCode
-        self.sourceLanguageCode = sourceLanguageCode
         self.safetyIdentifier = safetyIdentifier
     }
 
@@ -401,13 +391,12 @@ final class RealtimeTranslationSession: NSObject, URLSessionWebSocketDelegate {
             ])
             // Enable source-language transcription so we also receive the original
             // text (session.input_transcript.delta). Sent as a separate update so a
-            // rejection here can't drop the (working) output-language config. A pinned
-            // source language hint improves transcription accuracy; omitted = auto.
-            var transcription: [String: Any] = ["model": "gpt-realtime-whisper"]
-            if let src = self.sourceLanguageCode { transcription["language"] = src }
+            // rejection here can't drop the (working) output-language config.
+            // NOTE: this endpoint rejects a `transcription.language` hint ("Unknown
+            // parameter") — the translate model auto-detects the source. Don't add it.
             self.sendJSON([
                 "type": "session.update",
-                "session": ["audio": ["input": ["transcription": transcription]]]
+                "session": ["audio": ["input": ["transcription": ["model": "gpt-realtime-whisper"]]]]
             ])
             self.onStatusChange?(.listening)
         }
@@ -2064,12 +2053,9 @@ final class LiveTranslationController: NSObject {
         panel.setPaused(false)
         panel.update(status: "Connecting… → \(targetLanguage.displayName)")
 
-        let sourceCode = LiveTranslationLanguage.sourceAPICode(
-            forID: UserDefaults.standard.string(forKey: LiveTranslationLanguage.sourceDefaultsKey))
         let session = RealtimeTranslationSession(
             apiKey: apiKey,
             languageCode: LiveTranslationLanguage.apiCode(for: targetLanguage),
-            sourceLanguageCode: sourceCode,
             safetyIdentifier: LiveTranslationController.safetyIdentifier()
         )
         session.onTranslatedDelta = { [weak self] delta, ms in
