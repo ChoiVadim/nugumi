@@ -699,12 +699,7 @@ struct TranslationLanguage: Equatable {
     ]
 
     static let defaultLanguage = all.first { $0.id == "en" } ?? all[0]
-    static let defaultDraftLanguage = all.first { $0.id == "ko" } ?? defaultLanguage
-
-    /// "Auto-detect" sentinel for the live source-language picker (id `"auto"`).
-    /// Selecting it omits the API language hint so the model auto-detects.
-    static let autoDetect = TranslationLanguage(id: "auto", displayName: "Auto-detect", promptName: "Auto")
-    static let liveSourceOptions: [TranslationLanguage] = [autoDetect] + all
+    static let defaultDraftLanguage = all.first { $0.id == "en" } ?? defaultLanguage
 
     static func language(id: String) -> TranslationLanguage {
         all.first { $0.id == id } ?? defaultLanguage
@@ -1170,17 +1165,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
         set {
             UserDefaults.standard.set(newValue.id, forKey: "draftTargetLanguageID")
-        }
-    }
-    /// The spoken language live mode listens for. Defaults to Auto-detect; pinning
-    /// it gives the transcription model a hint that improves source accuracy.
-    private var liveSourceLanguage: TranslationLanguage {
-        get {
-            let id = UserDefaults.standard.string(forKey: LiveTranslationLanguage.sourceDefaultsKey) ?? TranslationLanguage.autoDetect.id
-            return id == TranslationLanguage.autoDetect.id ? .autoDetect : TranslationLanguage.language(id: id)
-        }
-        set {
-            UserDefaults.standard.set(newValue.id, forKey: LiveTranslationLanguage.sourceDefaultsKey)
         }
     }
     /// The single "other" language the "Toggle writing language" shortcut flips
@@ -15751,7 +15735,6 @@ extension NugumiApp: SettingsHost {
         return SettingsSnapshot(
             targetLanguage: targetLanguage,
             draftTargetLanguage: draftTargetLanguage,
-            liveSourceLanguage: liveSourceLanguage,
             writingToggleAlternate: writingToggleAlternate,
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
@@ -15860,10 +15843,6 @@ extension NugumiApp: SettingsHost {
             translationPanelController?.close()
             translationPanelController = nil
             updateMenuState()
-        case .setLiveSourceLanguage(let language):
-            // Applied at the next live session start (the transcription language
-            // hint is sent on connect, not changed mid-session).
-            liveSourceLanguage = language
         case .setWritingToggleAlternate(let language):
             writingToggleAlternate = language
         case .setFloatingDefaultMode(let mode):
