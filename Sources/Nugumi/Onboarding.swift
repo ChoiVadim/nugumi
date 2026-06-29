@@ -20,18 +20,10 @@ enum PermissionKind {
 // MARK: - Feature tour data
 
 struct FeatureTourStep {
-    /// What the instruction badge shows — the actual gesture, not a generic icon.
-    enum Badge {
-        case mouseLeft
-        case mouseRight
-        case keys(String)
-    }
-
     let title: String
     let body: String
-    let actionTitle: String
-    let actionDetail: String
-    let badge: Badge
+    /// Dead-simple "how to use" as a 1·2·3 list — plain language, no jargon.
+    let steps: [String]
     let videoURL: URL
 
     static var all: [FeatureTourStep] {
@@ -40,34 +32,38 @@ struct FeatureTourStep {
         return [
             FeatureTourStep(
                 title: "Ask Nugumi anything",
-                body: "A confusing screen, an error, or just a question - Nugumi looks at what's in front of you and answers on the spot.",
-                actionTitle: "Open the prompt near your cursor",
-                actionDetail: askActionDetail(for: askShortcut),
-                badge: .keys(askShortcut.displayString),
+                body: "Confused by something on your screen? Ask Nugumi - it looks and answers.",
+                steps: askSteps(for: askShortcut),
                 videoURL: videoURL(named: "ask", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")
             ),
             FeatureTourStep(
-                title: "Read any language without leaving work",
-                body: "Slack, Gmail, Notion, PDFs, websites - wherever the text is. And if it can't be selected, just capture that part of the screen.",
-                actionTitle: "Select text, then left-click",
-                actionDetail: "Highlight the text and left-click the Nugumi button that appears near the selection.",
-                badge: .mouseLeft,
+                title: "Understand anything you read",
+                body: "Stuck on a word or a sentence? Nugumi explains it in simple words - and you can keep asking.",
+                steps: [
+                    "Select the text you don't get.",
+                    "Click the Nugumi that pops up next to it.",
+                    "Read the answer. Ask more if you want.",
+                ],
                 videoURL: videoURL(named: "understand", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4")
             ),
             FeatureTourStep(
-                title: "Write naturally. Send like a native",
-                body: "Type in the language you think in. Nugumi turns it into your writing language - natural grammar, tone, and phrasing.",
-                actionTitle: "Select your draft, then right-click",
-                actionDetail: "Highlight what you wrote and right-click the Nugumi button - it comes back in your writing language.",
-                badge: .mouseRight,
+                title: "Write it rough, send it clean",
+                body: "Write however it comes out. Nugumi makes it clean and natural - in a style you pick for each app.",
+                steps: [
+                    "Write your message.",
+                    "Select it.",
+                    "Right-click the Nugumi that pops up.",
+                ],
                 videoURL: videoURL(named: "fix", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")
             ),
             FeatureTourStep(
                 title: "Replies that know the answer",
-                body: "This one reads their message and writes the response for you - even when it takes knowledge, like a question asked in the chat.",
-                actionTitle: "Draft a reply",
-                actionDetail: "Select an incoming message. Press Tab on the Nugumi button to switch to reply, then click.",
-                badge: .keys("⇥"),
+                body: "Nugumi reads the message you got and writes the reply for you.",
+                steps: [
+                    "Select the message you got.",
+                    "Nugumi pops up - press Tab to switch to reply.",
+                    "Click Nugumi.",
+                ],
                 videoURL: videoURL(named: "reply", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")
             )
         ]
@@ -83,16 +79,18 @@ struct FeatureTourStep {
         return URL(string: remote)!
     }
 
-    private static func askActionDetail(for shortcut: GlobalShortcut) -> String {
+    /// Ask's first step depends on the user's configured shortcut.
+    private static func askSteps(for shortcut: GlobalShortcut) -> [String] {
+        let trigger: String
         switch shortcut.kind {
         case .doubleTap:
             let glyph = shortcut.displayString
             let single = String(glyph.prefix(glyph.count / 2))
-            let name = modifierName(forGlyph: single)
-            return "Press \(name) twice, type your question, then press Return."
+            trigger = "Press \(modifierName(forGlyph: single)) twice."
         case .combo:
-            return "Press \(shortcut.displayString), type your question, then press Return."
+            trigger = "Press \(shortcut.displayString)."
         }
+        return [trigger, "Type your question.", "Press Return."]
     }
 
     private static func modifierName(forGlyph glyph: String) -> String {
@@ -479,6 +477,10 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     /// 16:9 so the 1920×1080 intro clip fills the window edge to edge.
     private static let introContentSize = NSSize(width: 960, height: 540)
     private static let standardContentSize = NSSize(width: 900, height: 640)
+    /// Feature tour: a full-width 16:9 video hero on top (720×405) with the
+    /// title, how-to card and buttons stacked beneath it. Height is sized to
+    /// hug the content so the buttons sit just under the steps, not way below.
+    private static let featureContentSize = NSSize(width: 720, height: 735)
 
     private let model: OnboardingModel
     private let onClose: () -> Void
@@ -495,7 +497,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         model.openEngineSetup = onPickEngine
         model.onTourFinished = onTourFinished
 
-        let contentSize = model.page == .intro ? Self.introContentSize : Self.standardContentSize
+        let contentSize = Self.contentSize(for: model.page)
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -555,9 +557,17 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     /// Grows the window from the widescreen intro frame to the standard
     /// two-column frame (and back, in theory), keeping it centered in place.
+    private static func contentSize(for page: OnboardingModel.Page) -> NSSize {
+        switch page {
+        case .intro: return introContentSize
+        case .feature: return featureContentSize
+        case .permissions, .finale: return standardContentSize
+        }
+    }
+
     private func resizeWindow(for page: OnboardingModel.Page) {
         guard let window else { return }
-        let target = page == .intro ? Self.introContentSize : Self.standardContentSize
+        let target = Self.contentSize(for: page)
         let current = window.contentRect(forFrameRect: window.frame).size
         guard abs(current.width - target.width) > 0.5 || abs(current.height - target.height) > 0.5 else { return }
         var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: target))
@@ -605,7 +615,9 @@ private struct OnboardingRootView: View {
                 IntroVideoPage(onFinish: { model.advanceFromIntro() })
             case .finale:
                 finaleColumn
-            case .permissions, .feature:
+            case .feature(let index):
+                featureStacked(index: index)
+            case .permissions:
                 HStack(spacing: 0) {
                     leftColumn
                         .frame(width: 360)
@@ -753,29 +765,10 @@ private struct OnboardingRootView: View {
 
             Spacer(minLength: 16)
 
-            Button(action: { model.primaryAction() }) {
-                Text(model.primaryTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(FlowTheme.accent)
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            primaryButton
 
             if model.page != .finale {
-                Button(action: { model.skipAction() }) {
-                    Text(model.skipTitle)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.56))
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
+                skipButton
             } else {
                 Spacer().frame(height: 29)
             }
@@ -804,6 +797,106 @@ private struct OnboardingRootView: View {
         }
         .padding(EdgeInsets(top: 44, leading: 24, bottom: 32, trailing: 26))
         .animation(.easeInOut(duration: 0.18), value: model.page)
+    }
+
+    // MARK: Feature tour — stacked layout (full-width video on top)
+
+    /// Feature pages put the demo clip first, edge to edge across the window's
+    /// full width, then the title, how-to card and buttons beneath it. Landscape
+    /// 16:9 clips fill the width with no letterboxing, unlike the old two-column
+    /// layout where a wide clip left empty bands above and below.
+    private func featureStacked(index: Int) -> some View {
+        let step = model.steps[index]
+        return GeometryReader { geo in
+            VStack(spacing: 0) {
+                // Full-bleed 16:9 hero across the ENTIRE window width. Height is
+                // driven explicitly from the measured width (× 9/16) so the
+                // greedy content below can't squeeze it narrower — that's what
+                // left side margins when it used aspectRatio(.fit).
+                LoopingVideoPlayer(url: step.videoURL)
+                    .frame(width: geo.size.width, height: geo.size.width * 9.0 / 16.0)
+                    .clipped()
+
+                VStack(alignment: .leading, spacing: 0) {
+                    featureProgress(index: index)
+
+                    HStack(alignment: .top, spacing: 26) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(step.title)
+                                .font(FlowTheme.serif(26))
+                                .foregroundStyle(FlowTheme.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(step.body)
+                                .font(.system(size: 13))
+                                .foregroundStyle(FlowTheme.inkSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        FeatureInstructionCard(step: step)
+                            .frame(width: 300)
+                    }
+                    .padding(.top, 22)
+
+                    Spacer(minLength: 18)
+
+                    primaryButton
+                    skipButton
+                }
+                .padding(.horizontal, 38)
+                .padding(.top, 22)
+                .padding(.bottom, 26)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+        // Match the intro clip: reach under the transparent titlebar so the
+        // hero is flush with the very top edge.
+        .ignoresSafeArea(edges: .top)
+        .animation(.easeInOut(duration: 0.18), value: model.page)
+    }
+
+    private func featureProgress(index: Int) -> some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 5) {
+                ForEach(0..<model.steps.count, id: \.self) { segment in
+                    Capsule()
+                        .fill(segment <= index ? FlowTheme.accent : Color.white.opacity(0.14))
+                        .frame(width: 26, height: 4)
+                }
+            }
+            Text("\(index + 1) / \(model.steps.count)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(FlowTheme.inkTertiary)
+            Spacer()
+        }
+        .frame(height: 16)
+    }
+
+    private var primaryButton: some View {
+        Button(action: { model.primaryAction() }) {
+            Text(model.primaryTitle)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(FlowTheme.accent)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var skipButton: some View {
+        Button(action: { model.skipAction() }) {
+            Text(model.skipTitle)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.56))
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 12)
     }
 }
 
@@ -969,52 +1062,37 @@ private struct PermissionCard: View {
 
 // MARK: - Feature instruction card
 
+/// "How to use" as a left-aligned, numbered 1·2·3 list — the simplest possible
+/// read, like a settings menu's step list.
 private struct FeatureInstructionCard: View {
     let step: FeatureTourStep
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.07))
-                Circle()
-                    .strokeBorder(FlowTheme.hairline, lineWidth: 1)
-                badgeContent
-            }
-            .frame(width: 64, height: 64)
-
-            Text("HOW TO")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(FlowTheme.inkTertiary)
-                .padding(.top, 20)
-            Text(step.actionTitle)
-                .font(.system(size: 17, weight: .semibold))
+        VStack(alignment: .leading, spacing: 14) {
+            Text("How to use")
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(FlowTheme.ink)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 6)
-            Text(step.actionDetail)
-                .font(.system(size: 12.5))
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
-        }
-        .frame(maxWidth: .infinity)
-    }
 
-    @ViewBuilder
-    private var badgeContent: some View {
-        switch step.badge {
-        case .mouseLeft:
-            MouseClickIcon(rightSide: false)
-        case .mouseRight:
-            MouseClickIcon(rightSide: true)
-        case .keys(let glyphs):
-            Text(glyphs)
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(OnboardingPalette.mint)
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(step.steps.enumerated()), id: \.offset) { index, text in
+                    HStack(alignment: .top, spacing: 11) {
+                        Text("\(index + 1)")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(OnboardingPalette.mint)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(Color.white.opacity(0.08)))
+                            .overlay(Circle().strokeBorder(FlowTheme.hairline, lineWidth: 1))
+                        Text(text)
+                            .font(.system(size: 13.5))
+                            .foregroundStyle(FlowTheme.inkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 2)
+                    }
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1087,30 +1165,6 @@ private struct IntroPlayerView: NSViewRepresentable {
         coordinator.player?.pause()
         coordinator.player = nil
         view.player = nil
-    }
-}
-
-/// Tiny mouse glyph with the pressed button highlighted — communicates
-/// left-click vs right-click at a glance.
-private struct MouseClickIcon: View {
-    let rightSide: Bool
-
-    var body: some View {
-        ZStack {
-            Capsule(style: .continuous)
-                .strokeBorder(OnboardingPalette.mint, lineWidth: 1.8)
-            // Divider between the two buttons (top half only).
-            Rectangle()
-                .fill(OnboardingPalette.mint.opacity(0.8))
-                .frame(width: 1.5, height: 12)
-                .offset(y: -10)
-            // The pressed button.
-            Capsule(style: .continuous)
-                .fill(OnboardingPalette.mint)
-                .frame(width: 8, height: 12)
-                .offset(x: rightSide ? 6 : -6, y: -9)
-        }
-        .frame(width: 25, height: 37)
     }
 }
 
