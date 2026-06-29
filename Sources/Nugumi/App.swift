@@ -2912,8 +2912,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             targetLanguage: language,
             resultLabel: mode.resultLabel,
             loadingPlaceholder: mode.loadingPlaceholder,
-            showsSource: mode != .selection,
-            showsFollowUp: mode == .selection,
+            showsSource: false,
+            showsFollowUp: true,
             onTargetLanguageSelected: { [weak self] selectedLanguage in
                 self?.retranslateCurrentPanel(
                     text,
@@ -2927,9 +2927,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 )
             },
             onReplace: onReplace,
-            onFollowUp: mode == .selection ? { [weak self] instruction in
-                self?.reviseCurrentPanel(instruction: instruction)
-            } : nil,
+            onFollowUp: { [weak self] instruction in
+                self?.reviseCurrentPanel(
+                    instruction: instruction,
+                    reviseMode: mode == .selection ? .revise : .reviseMessage,
+                    usageKind: usageKind
+                )
+            },
             replaceShortcutSourcePID: replaceShortcutSourcePID,
             onClose: { [weak self] in
                 self?.translationPanelController = nil
@@ -3036,7 +3040,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// streaming come for free. "Previous response" is the latest shown text, so
     /// chained revises ("now shorter") build on each other.
     @MainActor
-    private func reviseCurrentPanel(instruction: String) {
+    private func reviseCurrentPanel(
+        instruction: String,
+        reviseMode: TranslationMode = .revise,
+        usageKind: UsageStatsEventKind = .selection
+    ) {
         let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let controller = translationPanelController else {
             return
@@ -3050,16 +3058,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             previous: previous,
             instruction: trimmed
         )
-        let requestID = controller.showLoading(placeholder: TranslationMode.revise.loadingPlaceholder)
+        // Reply revises keep the writing style/voice; translate revises don't.
+        let appCategory = AppCategoryClassifier.frontmostCategory()
+        let composition = reviseMode.usesCompositionSettings
+            ? compositionSettings(for: reviseMode, appCategory: appCategory)
+            : nil
+        let requestID = controller.showLoading(placeholder: reviseMode.loadingPlaceholder)
         runTranslation(
             composed,
             targetLanguage: controller.currentTargetLanguageValue,
-            mode: .revise,
+            mode: reviseMode,
             thinkingLevel: textThinkingLevel,
-            appCategory: AppCategoryClassifier.frontmostCategory(),
-            composition: nil,
+            appCategory: appCategory,
+            composition: composition,
             useCache: false,
-            usageKind: .selection,
+            usageKind: usageKind,
             controller: controller,
             requestID: requestID,
             recordsHistory: false
@@ -3932,7 +3945,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     case .smartReply:
                         usageKind = .smartReply
                         language = self.draftTargetLanguage
-                    case .selection, .draftMessage, .revise:
+                    case .selection, .draftMessage, .revise, .reviseMessage:
                         usageKind = .screenArea
                         language = self.targetLanguage
                     }
@@ -7795,7 +7808,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         guard let selectedText, !isReadyLockedUntilPanelCloses else { return }
 
         switch currentMode {
-        case .selection, .revise:
+        case .selection, .revise, .reviseMessage:
             onTranslate?(selectedText)
         case .draftMessage:
             onRewrite?(selectedText)
@@ -8548,7 +8561,7 @@ final class PetMascotView: NSView {
 
     private func drawPixelActionBadge() {
         switch mode {
-        case .selection, .revise:
+        case .selection, .revise, .reviseMessage:
             drawTranslateBadge()
         case .draftMessage:
             drawRewriteBadge()
@@ -8744,7 +8757,7 @@ final class PetMascotView: NSView {
             return "Nugumi pet"
         case .ready:
             switch mode {
-            case .selection, .revise:
+            case .selection, .revise, .reviseMessage:
                 return "Translate selection - right-click to Rewrite, Tab to switch to Reply"
             case .draftMessage:
                 return "Rewrite my text - Tab to switch to Reply"
@@ -8909,7 +8922,7 @@ final class FloatingTranslateButtonController {
 
     private func invokeCurrentMode() {
         switch currentMode {
-        case .selection, .revise:
+        case .selection, .revise, .reviseMessage:
             onTranslate(selectedText)
         case .draftMessage:
             onRewrite(selectedText)
@@ -9571,7 +9584,7 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.title = ""
         actionButton.imagePosition = .imageOnly
         switch currentMode {
-        case .selection, .revise:
+        case .selection, .revise, .reviseMessage:
             actionButton.toolTip = "Translate selection - right-click to Rewrite, Tab to switch to Reply"
         case .draftMessage:
             actionButton.toolTip = "Rewrite my text - Tab to switch to Reply"
@@ -9586,7 +9599,7 @@ final class FloatingTranslateButtonView: NSView {
         let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             switch mode {
-            case .selection, .revise:
+            case .selection, .revise, .reviseMessage:
                 let style = NSMutableParagraphStyle()
                 style.alignment = .center
                 let text = NSAttributedString(string: "あ", attributes: [
@@ -9768,6 +9781,10 @@ final class TranslationPanelController {
         // doesn't shake the panel on every chunk.
         contentView.onResultRendered = { [weak self] in
             self?.resizeToFitContent(animated: false)
+        }
+        contentView.onFollowUpFocusChange = { [weak self] focused in
+            // Only the rewrite panel installs an interceptor; nil elsewhere = no-op.
+            focused ? self?.returnKeyInterceptor?.disable() : self?.returnKeyInterceptor?.enable()
         }
     }
 
@@ -10527,6 +10544,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     var onResultRendered: (() -> Void)?
     /// Fires when the user submits the footer "Revise or ask a follow-up" field.
     var onFollowUp: ((String) -> Void)?
+    /// Fires when the follow-up field gains (`true`) or loses (`false`) focus, so
+    /// the controller can suspend the Return-key interceptor while the user is
+    /// typing a follow-up (the rewrite flow otherwise steals Return to paste).
+    var onFollowUpFocusChange: ((Bool) -> Void)?
 
     private let sourceText: String
     private var targetLanguage: TranslationLanguage
@@ -11248,6 +11269,20 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         return true
     }
 
+    // Suspend the Return-key interceptor while the follow-up field is being
+    // edited (Return must submit the follow-up, not paste the rewrite). Pressing
+    // Return to submit keeps editing, so this only re-enables when focus truly
+    // leaves the field (the user clicks/tabs away).
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard (obj.object as AnyObject?) === followUpField else { return }
+        onFollowUpFocusChange?(true)
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard (obj.object as AnyObject?) === followUpField else { return }
+        onFollowUpFocusChange?(false)
+    }
+
     private func configureScrollView(_ scrollView: NSScrollView) {
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -11740,12 +11775,16 @@ enum TranslationMode {
     /// "revise or ask a follow-up" instruction and we regenerate the answer in
     /// place. Never assigned to a pet/mascot surface — only the result panel.
     case revise
+    /// Revise/follow-up for an outgoing message — both `.smartReply` (a drafted
+    /// reply) and `.draftMessage` (a polished draft). Keeps composition (writing
+    /// style/voice). Panel-only, never a pet/mascot surface.
+    case reviseMessage
 
     var usesCompositionSettings: Bool {
         switch self {
         case .selection, .revise:
             return false
-        case .draftMessage, .smartReply:
+        case .draftMessage, .smartReply, .reviseMessage:
             return true
         }
     }
@@ -11754,7 +11793,7 @@ enum TranslationMode {
         switch self {
         case .selection, .draftMessage, .revise:
             return nil
-        case .smartReply:
+        case .smartReply, .reviseMessage:
             return "Reply"
         }
     }
@@ -11767,7 +11806,7 @@ enum TranslationMode {
             return "Rewriting"
         case .selection:
             return "Thinking"
-        case .revise:
+        case .revise, .reviseMessage:
             return "Revising"
         }
     }
@@ -11853,6 +11892,18 @@ enum TranslationMode {
             Write the result in \(targetLanguage.promptName), in the same plain, accessible style aimed at a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. Keep every fact, name, number, and quotation accurate; do not invent claims.
 
             Return only the updated response text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
+            """
+        case .reviseMessage:
+            """
+            You previously wrote a message for the user to send. Their input has three labeled parts: the original text (what they were working from — a message they received, a question, or their own rough draft), your previous message, and a revision request.
+
+            Apply the revision request to your previous message. If it is an instruction (shorter, warmer, more formal, add a detail, fix something, etc.), produce the updated message. If it asks a follow-up question instead of an edit, answer it in the context of this message — your answer replaces the previous message.
+
+            Write the result in \(targetLanguage.promptName), natural and ready to send, in the user's voice. Match the selected Writing style below. Don't restate or quote the original, don't add greetings or sign-offs unless warranted, and don't address the user — produce only the message body they would paste into the field.
+
+            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
+
+            Return only the updated message text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
             """
         }
     }
@@ -12579,7 +12630,7 @@ struct OllamaClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise:
+        case .revise, .reviseMessage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -12844,7 +12895,7 @@ struct OpenAIChatClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise:
+        case .revise, .reviseMessage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -14025,7 +14076,7 @@ struct ClaudeCodeClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise:
+        case .revise, .reviseMessage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -14666,7 +14717,7 @@ struct OpenAICodexClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise:
+        case .revise, .reviseMessage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
