@@ -11,3 +11,4 @@ sparkle_private_key.txt
 *.pem
 *.gpg
 *.key
+.gstack/
