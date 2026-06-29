@@ -24,7 +24,7 @@ Nugumi is a native macOS assistant for people who work across languages every da
 
 <br>
 
-<video src="assets/intro.mov" width="100%" controls muted playsinline></video>
+<img src="assets/intro.gif" alt="Nugumi product overview demo" width="100%">
 
 ## What Nugumi Does
 
@@ -47,25 +47,25 @@ Use it for questions like:
 
 With a vision-capable model, Nugumi captures only the screen area needed for the question, explains the context, and keeps the final decision with you.
 
-<video src="assets/ask_v2.mov" width="100%" controls muted playsinline></video>
+<img src="assets/ask_v2.gif" alt="Asking Nugumi about the current screen" width="100%">
 
 ### Understand Selected Text
 
 Select text and use Nugumi to translate it into your reading language. If the text is already in your language, Nugumi can simplify dense writing, explain jargon, and turn unclear wording into plain language.
 
-<video src="assets/understand_v2.mov" width="100%" controls muted playsinline></video>
+<img src="assets/understand_v2.gif" alt="Using Nugumi to understand selected text" width="100%">
 
 ### Rewrite Your Draft
 
 Write the thought in the language that feels natural to you, then ask Nugumi to make it clear, professional, and native-sounding in your target language. It can preserve your meaning while improving grammar, tone, formatting, and idioms.
 
-<video src="assets/fix_v2.mov" width="100%" controls muted playsinline></video>
+<img src="assets/fix_v2.gif" alt="Using Nugumi to rewrite a draft" width="100%">
 
 ### Reply in Your Voice
 
 Select an incoming message, customer request, recruiting note, or work thread. Nugumi understands the context and drafts a concise reply using your preferred writing style, snippets, and dictionary terms.
 
-<video src="assets/reply_v2.mov" width="100%" controls muted playsinline></video>
+<img src="assets/reply_v2.gif" alt="Using Nugumi to draft a reply" width="100%">
 
 ## Feature Overview
 
@@ -189,17 +189,17 @@ swift test --filter LiveTranslationTests
 
 ### Updating README Media
 
-Use the 16:9 v2 videos in `assets` for README demos:
+Use the GIF exports in `assets` for README demos so they render directly on GitHub:
 
 | Workflow | Asset |
 | --- | --- |
-| Product overview | `assets/intro.mov` |
-| Ask Nugumi | `assets/ask_v2.mov` |
-| Understand selected text | `assets/understand_v2.mov` |
-| Rewrite draft | `assets/fix_v2.mov` |
-| Smart reply | `assets/reply_v2.mov` |
+| Product overview | `assets/intro.gif` |
+| Ask Nugumi | `assets/ask_v2.gif` |
+| Understand selected text | `assets/understand_v2.gif` |
+| Rewrite draft | `assets/fix_v2.gif` |
+| Smart reply | `assets/reply_v2.gif` |
 
-Older non-v2 captures remain in the repo for reference, but the README should use the v2 assets.
+The `.mov` files remain the source captures. Older non-v2 captures remain in the repo for reference, but the README should use the v2 GIF exports.
 
 ## FAQ
 
