@@ -69,6 +69,37 @@ final class GlobalShortcutsTests: XCTestCase {
         }
     }
 
+    // Double-tapping the COMBO ⌃⇧Tab (press ⌃⇧Tab, release, repeat, fast) must
+    // not fire: the Shift appearing each round cancels the pending ⌃ tap.
+    func testDoubleTapControlShiftTabDoesNotFire() {
+        var state = DoubleTapState()
+        let t0 = Date()
+        // Two full ⌃⇧Tab gestures within the window; Shift is always present.
+        let seq: [(NSEvent.ModifierFlags, TimeInterval)] = [
+            ([.control], 0.00), ([.control, .shift], 0.02), ([.control], 0.05), ([], 0.07),
+            ([.control], 0.12), ([.control, .shift], 0.14), ([.control], 0.17), ([], 0.19),
+        ]
+        for (mods, dt) in seq {
+            XCTAssertFalse(
+                state.step(supportedActive: mods, modifier: [.control], now: t0.addingTimeInterval(dt), interval: 0.30),
+                "double ⌃⇧Tab must never fire"
+            )
+        }
+    }
+
+    // Double ⌃Tab (no Shift) is caught by the non-modifier key press cancelling
+    // the pending tap — Tab is a keyDown, not a modifier.
+    func testDoubleTapControlTabDoesNotFire() {
+        var state = DoubleTapState()
+        let t0 = Date()
+        // ⌃ down, Tab pressed, release; then again within the window.
+        XCTAssertFalse(state.step(supportedActive: [.control], modifier: [.control], now: t0, interval: 0.30))
+        state.noteOtherKeyPressed() // Tab
+        XCTAssertFalse(state.step(supportedActive: [], modifier: [.control], now: t0.addingTimeInterval(0.05), interval: 0.30))
+        XCTAssertFalse(state.step(supportedActive: [.control], modifier: [.control], now: t0.addingTimeInterval(0.10), interval: 0.30),
+                       "second ⌃ after a Tab keypress must not fire")
+    }
+
     // A genuine double-tap ⌃ (down, up, down within the interval) still fires.
     func testGenuineDoubleTapControlFires() {
         var state = DoubleTapState()
