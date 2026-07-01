@@ -276,6 +276,42 @@ struct GlobalShortcut: Codable, Equatable {
     }
 }
 
+/// Pure double-tap state machine, decoupled from `NSEvent` so it can be
+/// unit-tested by feeding modifier-set transitions directly.
+struct DoubleTapState {
+    private var lastSupportedWasEmpty = true
+    private var lastTapDate: Date?
+
+    /// Feed the supported-modifier set from each `flagsChanged`, in order.
+    /// A tap is a CLEAN transition — no supported modifier held just before —
+    /// into exactly `modifier`. Requiring the previous state to be empty is
+    /// what stops releasing a SECOND modifier (e.g. Shift during ⌃⇧Tab, which
+    /// walks {⌃⇧}→{⌃}) from masquerading as a fresh Control press.
+    /// - Returns: true when this transition completes a double-tap.
+    mutating func step(
+        supportedActive: NSEvent.ModifierFlags,
+        modifier: NSEvent.ModifierFlags,
+        now: Date,
+        interval: TimeInterval
+    ) -> Bool {
+        let cameFromClean = lastSupportedWasEmpty
+        defer { lastSupportedWasEmpty = supportedActive.isEmpty }
+        guard cameFromClean, supportedActive == modifier else { return false }
+
+        if let last = lastTapDate, now.timeIntervalSince(last) <= interval {
+            lastTapDate = nil
+            return true
+        }
+        lastTapDate = now
+        return false
+    }
+
+    mutating func reset() {
+        lastSupportedWasEmpty = true
+        lastTapDate = nil
+    }
+}
+
 @MainActor
 final class DoubleModifierPressDetector {
     private let modifier: NSEvent.ModifierFlags
@@ -283,8 +319,7 @@ final class DoubleModifierPressDetector {
     private let onDetected: @MainActor () -> Void
     private var globalMonitor: Any?
     private var localMonitor: Any?
-    private var lastDownDate: Date?
-    private var wasDown = false
+    private var state = DoubleTapState()
     var isEnabled = true {
         didSet {
             if isEnabled != oldValue {
@@ -336,27 +371,16 @@ final class DoubleModifierPressDetector {
     }
 
     private func resetState() {
-        lastDownDate = nil
-        wasDown = false
+        state.reset()
     }
 
     private func handle(_ event: NSEvent) {
         guard isEnabled else { return }
 
         let active = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // The modifier is "down" only if it is the SOLE supported modifier
-        // currently pressed — combos like Cmd+Ctrl should not feed the detector.
         let supportedActive = active.intersection(GlobalShortcut.supportedModifiers)
-        let isDown = supportedActive == modifier
-        defer { wasDown = isDown }
-        guard isDown, !wasDown else { return }
-
-        let now = Date()
-        if let last = lastDownDate, now.timeIntervalSince(last) <= interval {
-            lastDownDate = nil
+        if state.step(supportedActive: supportedActive, modifier: modifier, now: Date(), interval: interval) {
             onDetected()
-        } else {
-            lastDownDate = now
         }
     }
 }

@@ -47,6 +47,48 @@ final class GlobalShortcutsTests: XCTestCase {
         }
     }
 
+    // ⌃⇧Tab (and any ⌃⇧+key where Shift is released while Control is held)
+    // must NOT fire the double-tap-⌃ detector. The modifier set walks
+    // {}→{⌃}→{⌃⇧}→{⌃}→{} — the {⌃⇧}→{⌃} step used to look like a fresh
+    // Control press and misfire Ask Nugumi.
+    func testControlShiftTabDoesNotTriggerDoubleTap() {
+        var state = DoubleTapState()
+        let t0 = Date()
+        let steps: [(NSEvent.ModifierFlags, TimeInterval)] = [
+            ([.control], 0.00),          // ⌃ down
+            ([.control, .shift], 0.02),  // + ⇧
+            ([.control], 0.05),          // ⇧ up, ⌃ still held  <- phantom "down"
+            ([], 0.08),                  // ⌃ up
+        ]
+        for (mods, dt) in steps {
+            let fired = state.step(
+                supportedActive: mods, modifier: [.control],
+                now: t0.addingTimeInterval(dt), interval: 0.30
+            )
+            XCTAssertFalse(fired, "⌃⇧Tab must never fire double-tap ⌃")
+        }
+    }
+
+    // A genuine double-tap ⌃ (down, up, down within the interval) still fires.
+    func testGenuineDoubleTapControlFires() {
+        var state = DoubleTapState()
+        let t0 = Date()
+        XCTAssertFalse(state.step(supportedActive: [.control], modifier: [.control], now: t0, interval: 0.30))
+        XCTAssertFalse(state.step(supportedActive: [], modifier: [.control], now: t0.addingTimeInterval(0.05), interval: 0.30))
+        XCTAssertTrue(state.step(supportedActive: [.control], modifier: [.control], now: t0.addingTimeInterval(0.10), interval: 0.30),
+                      "clean second ⌃ within interval should fire")
+    }
+
+    // Two taps too far apart are not a double-tap.
+    func testDoubleTapControlRespectsInterval() {
+        var state = DoubleTapState()
+        let t0 = Date()
+        XCTAssertFalse(state.step(supportedActive: [.control], modifier: [.control], now: t0, interval: 0.30))
+        XCTAssertFalse(state.step(supportedActive: [], modifier: [.control], now: t0.addingTimeInterval(0.05), interval: 0.30))
+        XCTAssertFalse(state.step(supportedActive: [.control], modifier: [.control], now: t0.addingTimeInterval(0.40), interval: 0.30),
+                       "second ⌃ after the window should not fire")
+    }
+
     // Groups partition the action set: each action lands in exactly one group,
     // and the groups together cover every action.
     func testGroupsPartitionAllActions() {
