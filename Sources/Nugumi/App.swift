@@ -2752,7 +2752,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         near: screenPoint,
                         selectionRect: selectionRect,
                         panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true
+                        keepPetReadyUntilPanelCloses: true,
+                        restoresReadyOnUserDismiss: true
                     )
                 },
                 onRewrite: { [weak self] text in
@@ -2761,7 +2762,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         near: screenPoint,
                         selectionRect: selectionRect,
                         panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true
+                        keepPetReadyUntilPanelCloses: true,
+                        restoresReadyOnUserDismiss: true
                     )
                 },
                 onSmartReply: { [weak self] text in
@@ -2770,7 +2772,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         near: screenPoint,
                         selectionRect: selectionRect,
                         panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true
+                        keepPetReadyUntilPanelCloses: true,
+                        restoresReadyOnUserDismiss: true
                     )
                 }
             )
@@ -2788,7 +2791,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     text,
                     near: screenPoint,
                     selectionRect: selectionRect,
-                    panelSide: panelSide
+                    panelSide: panelSide,
+                    restoresReadyOnUserDismiss: true
                 )
             },
             onRewrite: { [weak self] text in
@@ -2796,7 +2800,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     text,
                     near: screenPoint,
                     selectionRect: selectionRect,
-                    panelSide: panelSide
+                    panelSide: panelSide,
+                    restoresReadyOnUserDismiss: true
                 )
             },
             onSmartReply: { [weak self] text in
@@ -2806,7 +2811,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     text,
                     near: screenPoint,
                     selectionRect: selectionRect,
-                    panelSide: panelSide
+                    panelSide: panelSide,
+                    restoresReadyOnUserDismiss: true
                 )
             }
         )
@@ -2821,7 +2827,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         near screenPoint: NSPoint,
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
-        keepPetReadyUntilPanelCloses: Bool = false
+        keepPetReadyUntilPanelCloses: Bool = false,
+        restoresReadyOnUserDismiss: Bool = false
     ) {
         lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
 
@@ -2851,6 +2858,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 selectionRect: selectionRect,
                 panelSide: panelSide,
                 keepPetReadyUntilPanelCloses: keepPetReadyUntilPanelCloses,
+                restoresReadyOnUserDismiss: restoresReadyOnUserDismiss,
                 onReplace: { [weak self] translation in
                     self?.replaceCurrentSelection(with: translation)
                 },
@@ -2865,7 +2873,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         near screenPoint: NSPoint,
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
-        keepPetReadyUntilPanelCloses: Bool = false
+        keepPetReadyUntilPanelCloses: Bool = false,
+        restoresReadyOnUserDismiss: Bool = false
     ) {
         translate(
             text,
@@ -2876,7 +2885,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             usageKind: .smartReply,
             selectionRect: selectionRect,
             panelSide: panelSide,
-            keepPetReadyUntilPanelCloses: keepPetReadyUntilPanelCloses
+            keepPetReadyUntilPanelCloses: keepPetReadyUntilPanelCloses,
+            restoresReadyOnUserDismiss: restoresReadyOnUserDismiss
         )
     }
 
@@ -2891,6 +2901,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
         keepPetReadyUntilPanelCloses: Bool = false,
+        restoresReadyOnUserDismiss: Bool = false,
         onReplace: ((String) -> Void)? = nil,
         replaceShortcutSourcePID: pid_t? = nil
     ) {
@@ -2942,6 +2953,20 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         )
         translationPanelController?.close()
         translationPanelController = controller
+        if restoresReadyOnUserDismiss {
+            // The selection usually survives an Esc / ✕ / copy dismissal, so
+            // re-arm the pet/button for it. If the dismissing click actually
+            // killed the selection, the global mouse-up re-read finds nothing
+            // and clears the ready state right back.
+            controller.onUserDismiss = { [weak self] in
+                self?.showTranslateButton(
+                    for: text,
+                    near: screenPoint,
+                    selectionRect: selectionRect,
+                    panelSide: panelSide
+                )
+            }
+        }
         if keepPetReadyUntilPanelCloses {
             holdPetReadyUntilActivePanelCloses(mode: mode)
         }
@@ -3691,7 +3716,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         cleaned,
                         near: mouseLocation,
                         selectionRect: selection.selectionRect,
-                        panelSide: panelSide
+                        panelSide: panelSide,
+                        restoresReadyOnUserDismiss: true
                     )
                 case .translate:
                     let cleaned = TextNormalizer.cleanedSelection(selection.text)
@@ -3705,7 +3731,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         mode: .selection,
                         usageKind: .selection,
                         selectionRect: selection.selectionRect,
-                        panelSide: panelSide
+                        panelSide: panelSide,
+                        restoresReadyOnUserDismiss: true
                     )
                 }
             }
@@ -3749,7 +3776,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     near: mouseLocation,
                     selectionRect: selection.selectionRect,
                     panelSide: self.panelSideForSelectionEnding(at: mouseLocation),
-                    keepPetReadyUntilPanelCloses: true
+                    keepPetReadyUntilPanelCloses: true,
+                    restoresReadyOnUserDismiss: true
                 )
             }
         }
@@ -9693,7 +9721,12 @@ final class TranslationPanelController {
     private var commandCopyInterceptor: CommandCopyInterceptor?
     private var returnKeyInterceptor: ReturnKeyInterceptor?
     private var didClose = false
+    private var wasDismissedByUser = false
     private let onClose: (() -> Void)?
+    /// Fires after `onClose` only when the user dismissed the panel (Esc, ✕,
+    /// copy, outside click) — never on programmatic closes (panel replaced,
+    /// Replace action, screenshot capture starting).
+    var onUserDismiss: (() -> Void)?
     private let replaceShortcutSourcePID: pid_t?
     /// When false, a click outside the panel does NOT dismiss it — only the ✕
     /// button or Esc. The Ask Nugumi answer uses this so reading it isn't a
@@ -9773,7 +9806,7 @@ final class TranslationPanelController {
         // and the button-tap is swallowed by the activation.
         panel.becomesKeyOnlyIfNeeded = true
         panel.contentView = contentView
-        contentView.onClose = { [weak self] in self?.close() }
+        contentView.onClose = { [weak self] in self?.dismissByUser() }
         contentView.onNeedsResize = { [weak self] in
             self?.resizeToFitContent(animated: true)
         }
@@ -9839,6 +9872,14 @@ final class TranslationPanelController {
         removeReturnKeyInterceptor()
         panel.close()
         onClose?()
+        if wasDismissedByUser {
+            onUserDismiss?()
+        }
+    }
+
+    private func dismissByUser() {
+        wasDismissedByUser = true
+        close()
     }
 
     private func installOutsideClickMonitors() {
@@ -9863,7 +9904,7 @@ final class TranslationPanelController {
             else {
                 return event
             }
-            self.close()
+            self.dismissByUser()
             return nil
         }
     }
@@ -9930,7 +9971,7 @@ final class TranslationPanelController {
         }
 
         contentView.copyResultToPasteboard()
-        close()
+        dismissByUser()
     }
 
     private func closeIfClickIsOutside(_ event: NSEvent) {
@@ -9947,7 +9988,7 @@ final class TranslationPanelController {
             return
         }
 
-        close()
+        dismissByUser()
     }
 
     private func requestIsCurrent(_ requestID: UUID?) -> Bool {
