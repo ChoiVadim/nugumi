@@ -2403,10 +2403,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // the Cmd+A keystroke. Mirror the mouse-up gating delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             guard let self else { return }
-            let preferClipboard = !self.selectionReader.isLikelyEditableElementAtMouseLocation()
+            // ⌘A in Finder selects files, not text — a synthesized ⌘C would
+            // copy the files themselves. AX-only read there (silent, no-op).
+            let allowsClipboard = frontmostBundleID != "com.apple.finder"
+            let preferClipboard = allowsClipboard
+                && !self.selectionReader.isLikelyEditableElementAtMouseLocation()
             self.selectionReader.readSelectedTextContext(
                 preferClipboard: preferClipboard,
-                allowClipboardFallback: true
+                allowClipboardFallback: allowsClipboard
             ) { [weak self] selection in
                 guard let self else { return }
 
@@ -2539,7 +2543,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             if self.shortcutRecorderWindowController != nil {
                 return
             }
-            let preferClipboard = self.shouldAttemptClipboardSelectionFallback(for: event)
+            // A drag in Finder (desktop included) is a marquee selecting
+            // files, not text. Never synthesize ⌘C there: with nothing
+            // selected Finder beeps, and with icons selected it clobbers the
+            // clipboard with the files and "translates" their names.
+            let allowsClipboard = frontmostBundleID != "com.apple.finder"
+            let preferClipboard = allowsClipboard
+                && self.shouldAttemptClipboardSelectionFallback(for: event)
 
             // Clipboard fallback after a failed AX read covers apps that
             // expose a text-area-ish AX role (so `preferClipboard` is false)
@@ -2549,12 +2559,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             // a stray click would synthesize Cmd+C for nothing.
             self.selectionReader.readSelectedTextContext(
                 preferClipboard: preferClipboard,
-                allowClipboardFallback: isGesture
+                allowClipboardFallback: isGesture && allowsClipboard
             ) { [weak self] selection in
                 guard let self else { return }
 
                 guard let selection, !selection.text.isEmpty else {
-                    if isGesture {
+                    // Don't count Finder marquee drags as "app blocks text
+                    // access" — they never had text to begin with.
+                    if isGesture && allowsClipboard {
                         self.noteUnreadableSelection(
                             bundleID: frontmostBundleID,
                             appName: frontmostAppName
