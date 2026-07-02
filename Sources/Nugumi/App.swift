@@ -1019,6 +1019,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var mouseMonitor: Any?
     private var keyboardMonitor: Any?
     private var lastLeftMouseDownLocation: NSPoint?
+    /// Pasteboard changeCount at the start of the current selection gesture.
+    /// If it advances before the clipboard fallback runs, the frontmost app
+    /// copied on its own (copy-on-select TUIs, click-to-copy sites) — that
+    /// copy is the selection and must survive on the clipboard.
+    private var lastMouseDownPasteboardChangeCount: Int?
     /// Per-bundle count of consecutive selection-gesture attempts that returned
     /// no readable text. Apps like KakaoTalk expose neither AX text attributes
     /// nor a working Cmd+C path, so the floating bar silently never appears —
@@ -2346,6 +2351,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             let mouseLocation = NSEvent.mouseLocation
             if event.type == .leftMouseDown {
                 self.lastLeftMouseDownLocation = mouseLocation
+                self.lastMouseDownPasteboardChangeCount = NSPasteboard.general.changeCount
                 if self.isScreenshotTranslationRunning {
                     self.screenshotDragStartLocation = mouseLocation
                     self.screenshotDragEndLocation = nil
@@ -2398,6 +2404,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
         let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
+        let pasteboardBaseline = NSPasteboard.general.changeCount
 
         // The target app updates its AX selection state after macOS dispatches
         // the Cmd+A keystroke. Mirror the mouse-up gating delay.
@@ -2410,7 +2417,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 && !self.selectionReader.isLikelyEditableElementAtMouseLocation()
             self.selectionReader.readSelectedTextContext(
                 preferClipboard: preferClipboard,
-                allowClipboardFallback: allowsClipboard
+                allowClipboardFallback: allowsClipboard,
+                pasteboardBaseline: pasteboardBaseline
             ) { [weak self] selection in
                 guard let self else { return }
 
@@ -2559,7 +2567,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             // a stray click would synthesize Cmd+C for nothing.
             self.selectionReader.readSelectedTextContext(
                 preferClipboard: preferClipboard,
-                allowClipboardFallback: isGesture && allowsClipboard
+                allowClipboardFallback: isGesture && allowsClipboard,
+                pasteboardBaseline: self.lastMouseDownPasteboardChangeCount
             ) { [weak self] selection in
                 guard let self else { return }
 
@@ -5143,10 +5152,11 @@ final class SelectionReader {
     func readSelectedTextContext(
         preferClipboard: Bool = false,
         allowClipboardFallback: Bool,
+        pasteboardBaseline: Int? = nil,
         completion: @escaping (SelectedTextContext?) -> Void
     ) {
         if preferClipboard {
-            ClipboardSelectionReader.readSelectedText { [weak self] clipboardText in
+            ClipboardSelectionReader.readSelectedText(pasteboardBaseline: pasteboardBaseline) { [weak self] clipboardText in
                 if let clipboardText, !clipboardText.isEmpty {
                     completion(SelectedTextContext(text: clipboardText, selectionRect: nil))
                     return
@@ -5166,7 +5176,7 @@ final class SelectionReader {
             return
         }
 
-        ClipboardSelectionReader.readSelectedText { selectedText in
+        ClipboardSelectionReader.readSelectedText(pasteboardBaseline: pasteboardBaseline) { selectedText in
             guard let selectedText else {
                 completion(nil)
                 return
@@ -5447,10 +5457,25 @@ final class SelectionReader {
 enum ClipboardSelectionReader {
     private static let pollingInterval: TimeInterval = 0.02
     private static let pollingTimeout: TimeInterval = 0.5
-    private static let lateRestoreGrace: TimeInterval = 0.5
 
-    static func readSelectedText(completion: @escaping (String?) -> Void) {
+    static func readSelectedText(
+        pasteboardBaseline: Int? = nil,
+        completion: @escaping (String?) -> Void
+    ) {
         let pasteboard = NSPasteboard.general
+
+        // The frontmost app already copied during this gesture (copy-on-select
+        // TUIs, click-to-copy sites with a "copied!" toast). That copy IS the
+        // selection: use it, skip the synthetic ⌘C, and leave the clipboard
+        // alone — the app copied intentionally, so restoring an older snapshot
+        // over it would silently break the copy the app just announced.
+        if let pasteboardBaseline, pasteboard.changeCount != pasteboardBaseline {
+            let copiedText = pasteboard.string(forType: .string)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            completion(copiedText.flatMap { TextNormalizer.looksMeaningful($0) ? $0 : nil })
+            return
+        }
+
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
         let originalChangeCount = pasteboard.changeCount
 
@@ -5483,12 +5508,11 @@ enum ClipboardSelectionReader {
         }
 
         if Date() >= deadline {
-            monitorLatePasteboardChange(
-                pasteboard: pasteboard,
-                originalChangeCount: originalChangeCount,
-                deadline: Date().addingTimeInterval(lateRestoreGrace),
-                snapshot: snapshot
-            )
+            // No late-restore pass here: reverting whatever lands on the
+            // clipboard next used to eat genuine copies the user (or the app's
+            // own copy button) made right after a failed fallback. If the app
+            // answers the synthetic ⌘C late, the selection stays on the
+            // clipboard — mild, and far better than clobbering a real copy.
             completion(nil)
             return
         }
@@ -5506,31 +5530,6 @@ enum ClipboardSelectionReader {
 
     private static func postCommandC() {
         KeyboardShortcutPoster.postCommandShortcut(keyCode: CGKeyCode(kVK_ANSI_C))
-    }
-
-    private static func monitorLatePasteboardChange(
-        pasteboard: NSPasteboard,
-        originalChangeCount: Int,
-        deadline: Date,
-        snapshot: PasteboardSnapshot
-    ) {
-        if pasteboard.changeCount != originalChangeCount {
-            snapshot.restore(to: pasteboard)
-            return
-        }
-
-        guard Date() < deadline else {
-            return
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + pollingInterval) {
-            monitorLatePasteboardChange(
-                pasteboard: pasteboard,
-                originalChangeCount: originalChangeCount,
-                deadline: deadline,
-                snapshot: snapshot
-            )
-        }
     }
 }
 
