@@ -1745,6 +1745,84 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Follow-up from the floating answer panel's input field — the Ask
+    /// analog of `reviseCurrentPanel`. Reuses the open panel (loading → new
+    /// answer in place) and keeps the dialog context (`askHistory`) plus a
+    /// fresh screen capture, so it continues the conversation just like pet
+    /// mode's "continue" does.
+    @MainActor
+    private func submitAskNugumiFollowUp(_ instruction: String) {
+        let clean = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, !isAskNugumiRunning,
+              let controller = translationPanelController else { return }
+
+        let model = LLMModel.option(id: askNugumiModelID)
+        guard model.supportsImages else {
+            controller.showError("Ask Nugumi needs a vision model.")
+            return
+        }
+        if let setupError = askNugumiSetupErrorIfNeeded(for: model) {
+            controller.showError(Self.translationPanelErrorMessage(for: setupError))
+            return
+        }
+
+        let requestID = UUID()
+        askNugumiTask?.cancel()
+        askNugumiRequestID = requestID
+        isAskNugumiRunning = true
+        let panelRequestID = controller.showLoading()
+
+        let cursorLocation = NSEvent.mouseLocation
+        let backend = askBackend
+        askNugumiTask = Task { [weak self] in
+            do {
+                let sharingSnapshot = await MainActor.run { Self.hideAppWindowsFromScreenCapture() }
+                let capture: AskNugumiScreenCapture
+                do {
+                    capture = try await ScreenshotCapture.captureActiveScreen(containing: cursorLocation)
+                } catch {
+                    await MainActor.run { Self.restoreAppWindowSharing(sharingSnapshot) }
+                    throw error
+                }
+                await MainActor.run { Self.restoreAppWindowSharing(sharingSnapshot) }
+                try Task.checkCancellation()
+
+                let history = await MainActor.run { self?.askHistory ?? [] }
+                let level = await MainActor.run { self?.askNugumiThinkingLevel ?? .high }
+                let response = try await backend.ask(
+                    history: history,
+                    question: clean,
+                    image: capture.image,
+                    thinkingLevel: level
+                ) { _ in }
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    guard let self, self.askNugumiRequestID == requestID,
+                          self.translationPanelController === controller else { return }
+                    self.clearAskNugumiRequestIfCurrent(requestID)
+                    self.recordAskTurn(question: clean, answer: response.message)
+                    controller.showTranslation(response.message, requestID: panelRequestID, isFinal: true)
+                    if let target = response.petTarget {
+                        self.presentFloatingAskTargetPointer(for: target, capture: capture)
+                    } else {
+                        self.floatingTargetButton?.close()
+                        self.floatingTargetButton = nil
+                    }
+                }
+            } catch is CancellationError {
+                await MainActor.run { self?.clearAskNugumiRequestIfCurrent(requestID) }
+            } catch {
+                await MainActor.run {
+                    guard let self, self.askNugumiRequestID == requestID,
+                          self.translationPanelController === controller else { return }
+                    self.clearAskNugumiRequestIfCurrent(requestID)
+                    controller.showError(error.localizedDescription, requestID: panelRequestID)
+                }
+            }
+        }
+    }
+
     @MainActor
     private func presentAskNugumiResult(
         _ response: AskNugumiResponse,
@@ -1780,13 +1858,22 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             sourceText: prompt,
             targetLanguage: targetLanguage,
             resultLabel: "Answer",
+            // Same layout as the translate/reply modal: no source box, plus a
+            // follow-up field so the dialog can continue like it does in pet mode.
+            showsSource: false,
+            showsFollowUp: true,
+            onFollowUp: { [weak self] instruction in
+                self?.submitAskNugumiFollowUp(instruction)
+            },
             // The answer is meant to be read — don't let a stray click dismiss it.
             dismissesOnOutsideClick: false,
             onClose: { [weak self] in
-                self?.translationPanelController = nil
-                self?.floatingTargetButton?.close()
-                self?.floatingTargetButton = nil
-                self?.petController?.clearReady()
+                guard let self else { return }
+                if self.isAskNugumiRunning { self.cancelAskNugumiRequest() }
+                self.translationPanelController = nil
+                self.floatingTargetButton?.close()
+                self.floatingTargetButton = nil
+                self.petController?.clearReady()
             }
         )
         translationPanelController = controller
@@ -2412,7 +2499,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             guard let self else { return }
             // ⌘A in Finder selects files, not text — a synthesized ⌘C would
             // copy the files themselves. AX-only read there (silent, no-op).
+            // Same for open/save panels in any app: ⌘A selects file rows.
             let allowsClipboard = frontmostBundleID != "com.apple.finder"
+                && !self.selectionReader.isInsideOpenSavePanel()
             let preferClipboard = allowsClipboard
                 && !self.selectionReader.isLikelyEditableElementAtMouseLocation()
             self.selectionReader.readSelectedTextContext(
@@ -2555,7 +2644,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             // files, not text. Never synthesize ⌘C there: with nothing
             // selected Finder beeps, and with icons selected it clobbers the
             // clipboard with the files and "translates" their names.
+            // Open/save panels in ANY app are the same file-browsing surface
+            // (double-clicking a folder to enter it counts as a selection
+            // gesture and would beep on every navigation).
             let allowsClipboard = frontmostBundleID != "com.apple.finder"
+                && !self.selectionReader.isInsideOpenSavePanel()
             let preferClipboard = allowsClipboard
                 && self.shouldAttemptClipboardSelectionFallback(for: event)
 
@@ -5207,6 +5300,29 @@ final class SelectionReader {
         return false
     }
 
+    /// The gesture landed inside an open/save panel (any host app). Rows
+    /// there are files, not text — a synthesized ⌘C beeps with nothing
+    /// copyable, or clobbers the clipboard with file items, exactly like
+    /// Finder. AppKit tags the panel window with a stable AXIdentifier
+    /// that survives localization and sheet presentation.
+    func isInsideOpenSavePanel() -> Bool {
+        for element in [elementAtMouseLocation(), focusedElement()].compactMap({ $0 }) {
+            var currentElement: AXUIElement? = element
+            for _ in 0..<10 {
+                guard let element = currentElement else { break }
+
+                if let identifier = identifier(of: element),
+                   identifier == "open-panel" || identifier == "save-panel" {
+                    return true
+                }
+
+                currentElement = parent(of: element)
+            }
+        }
+
+        return false
+    }
+
     func readSelectedText() -> String? {
         readSelectedTextContext()?.text
     }
@@ -5276,6 +5392,21 @@ final class SelectionReader {
         }
 
         return element
+    }
+
+    private func identifier(of element: AXUIElement) -> String? {
+        var identifierValue: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            kAXIdentifierAttribute as CFString,
+            &identifierValue
+        )
+
+        guard result == .success else {
+            return nil
+        }
+
+        return identifierValue as? String
     }
 
     private func role(of element: AXUIElement) -> String? {
