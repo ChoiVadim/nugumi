@@ -95,6 +95,24 @@ final class CloudModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(parsed[3].displayName, "NVIDIA: Nemotron Nano (free)")
     }
 
+    func testClaudeCodeParsesLikeAnthropic() {
+        // Claude Code has no dedicated models endpoint; it reads the standard
+        // Anthropic /v1/models list, so parsing must match .anthropic.
+        let json = """
+        {"data":[
+            {"id":"claude-fable-5","display_name":"Claude Fable 5","type":"model"},
+            {"id":"claude-opus-4-8","display_name":"Claude Opus 4.8","type":"model"},
+            {"id":"gpt-4o","display_name":"nope","type":"model"}
+        ],"has_more":false}
+        """.data(using: .utf8)!
+
+        let parsed = CloudModelDiscovery.parse(provider: .anthropicClaudeCode, data: json)
+
+        // Non-claude ids dropped; display_name carried through.
+        XCTAssertEqual(parsed.map(\.id), ["claude-fable-5", "claude-opus-4-8"])
+        XCTAssertEqual(parsed[0].displayName, "Claude Fable 5")
+    }
+
     func testParseReturnsEmptyOnGarbageAndOnCodexProvider() {
         let garbage = "not json".data(using: .utf8)!
         XCTAssertTrue(CloudModelDiscovery.parse(provider: .openAI, data: garbage).isEmpty)
@@ -170,67 +188,67 @@ final class CloudModelDiscoveryTests: XCTestCase {
         XCTAssertEqual(merged, curatedAnthropic)
     }
 
-    func testMergeKeepsCuratedNamesAndOrderForConfirmedModels() {
+    func testMergeShowsOnlyDiscoveredInResponseOrder() {
+        // Discovery has run → curated is dropped entirely; the picker shows
+        // exactly what the endpoint returned, in response order, with the
+        // API's names (generated only when display_name is absent).
         let discovered: [CloudModelDiscovery.DiscoveredModel] = [
-            .init(id: "claude-opus-4-7", displayName: "Claude Opus 4.7"),
-            .init(id: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6"),
+            .init(id: "claude-opus-4-8", displayName: "Claude Opus 4.8"),
+            .init(id: "claude-magnum-5-0", displayName: nil),
             .init(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5"),
         ]
         let merged = LLMModel.mergedCloudModels(
             provider: .anthropic, curated: curatedAnthropic, discovered: discovered
         )
-        XCTAssertEqual(merged, curatedAnthropic)
-        XCTAssertEqual(merged.first?.displayName, "Claude Haiku 4.5 (fast)")
+        XCTAssertEqual(merged.map(\.id),
+                       ["claude-opus-4-8", "claude-magnum-5-0", "claude-haiku-4-5-20251001"])
+        // No curated tier-hint names leak in.
+        XCTAssertEqual(merged.map(\.displayName),
+                       ["Claude Opus 4.8", "Claude Magnum 5.0", "Claude Haiku 4.5"])
+        XCTAssertTrue(merged.allSatisfy(\.supportsImages))
+        XCTAssertTrue(merged.allSatisfy { $0.cloudProvider == .anthropic })
     }
 
-    func testMergeHidesCuratedModelAbsentFromFetch() {
+    func testMergeDedupesDatedAndUndatedAliases() {
+        // A dated + undated alias for the same model must collapse to one row;
+        // the first occurrence (response order) wins.
         let discovered: [CloudModelDiscovery.DiscoveredModel] = [
-            .init(id: "claude-sonnet-4-6", displayName: nil),
-            .init(id: "claude-haiku-4-5-20251001", displayName: nil),
+            .init(id: "claude-haiku-4-5", displayName: "Claude Haiku 4.5"),
+            .init(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5 dated"),
+            .init(id: "claude-opus-4-8", displayName: "Claude Opus 4.8"),
         ]
         let merged = LLMModel.mergedCloudModels(
             provider: .anthropic, curated: curatedAnthropic, discovered: discovered
         )
-        XCTAssertFalse(merged.contains { $0.id == "claude-opus-4-7" })
-        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.map(\.id), ["claude-haiku-4-5", "claude-opus-4-8"])
+        XCTAssertEqual(merged[0].displayName, "Claude Haiku 4.5")
     }
 
-    func testMergeMatchesCuratedDatedIdAgainstUndatedFetch() {
-        // Curated claude-haiku-4-5-20251001 must survive a fetch reporting
-        // the undated alias claude-haiku-4-5.
+    // Claude Code curated entries use `claude-code/` ids (apiModelID = bare id)
+    // so they never collide with the .anthropic API-key provider's claude models.
+    private let curatedClaudeCode: [LLMModel] = [
+        .init(id: "claude-code/claude-haiku-4-5-20251001", apiModelID: "claude-haiku-4-5-20251001",
+              shortName: "Claude Haiku 4.5", displayName: "Claude Haiku 4.5 (fast)",
+              backend: .cloud(.anthropicClaudeCode), supportsImages: true),
+        .init(id: "claude-code/claude-opus-4-8", apiModelID: "claude-opus-4-8",
+              shortName: "Claude Opus 4.8", displayName: "Claude Opus 4.8 (top)",
+              backend: .cloud(.anthropicClaudeCode), supportsImages: true),
+    ]
+
+    func testMergeClaudeCodePrefixesEveryDiscoveredIDAndKeepsBareAPIModelID() {
         let discovered: [CloudModelDiscovery.DiscoveredModel] = [
-            .init(id: "claude-haiku-4-5", displayName: nil),
-            .init(id: "claude-sonnet-4-6", displayName: nil),
-            .init(id: "claude-opus-4-7", displayName: nil),
+            .init(id: "claude-opus-4-8", displayName: "Claude Opus 4.8"),
+            .init(id: "claude-fable-5", displayName: "Claude Fable 5"),
         ]
         let merged = LLMModel.mergedCloudModels(
-            provider: .anthropic, curated: curatedAnthropic, discovered: discovered
+            provider: .anthropicClaudeCode, curated: curatedClaudeCode, discovered: discovered
         )
-        XCTAssertEqual(merged, curatedAnthropic)
-    }
-
-    func testMergeAppendsFreshModelsWithGeneratedNamesNewestFirst() {
-        let discovered: [CloudModelDiscovery.DiscoveredModel] = [
-            .init(id: "claude-haiku-4-5-20251001", displayName: nil),
-            .init(id: "claude-sonnet-4-6", displayName: nil),
-            .init(id: "claude-opus-4-7", displayName: nil),
-            .init(id: "claude-opus-4-8", displayName: "Claude Opus 4.8 (API)"),
-            .init(id: "claude-opus-4-10", displayName: nil),
-            .init(id: "claude-magnum-5-0", displayName: nil),
-        ]
-        let merged = LLMModel.mergedCloudModels(
-            provider: .anthropic, curated: curatedAnthropic, discovered: discovered
-        )
-        XCTAssertEqual(Array(merged.prefix(3)), curatedAnthropic)
-
-        let fresh = Array(merged.dropFirst(3))
-        XCTAssertEqual(fresh.map(\.id), ["claude-opus-4-10", "claude-opus-4-8", "claude-magnum-5-0"])
-        // API display_name wins when present; generated otherwise.
-        XCTAssertEqual(fresh[0].displayName, "Claude Opus 4.10")
-        XCTAssertEqual(fresh[1].displayName, "Claude Opus 4.8 (API)")
-        XCTAssertEqual(fresh[2].displayName, "Claude Magnum 5.0")
-        XCTAssertTrue(fresh.allSatisfy(\.supportsImages))
-        XCTAssertTrue(fresh.allSatisfy { $0.cloudProvider == .anthropic })
+        // Discovered-only, in response order; every id gets the claude-code/
+        // prefix while apiModelID stays the bare id /v1/messages expects.
+        XCTAssertEqual(merged.map(\.id), ["claude-code/claude-opus-4-8", "claude-code/claude-fable-5"])
+        XCTAssertEqual(merged.map(\.apiModelID), ["claude-opus-4-8", "claude-fable-5"])
+        XCTAssertEqual(merged.last?.displayName, "Claude Fable 5")
+        XCTAssertTrue(merged.allSatisfy { $0.cloudProvider == .anthropicClaudeCode })
     }
 
     func testOptionResolvesDiscoveredCloudID() {

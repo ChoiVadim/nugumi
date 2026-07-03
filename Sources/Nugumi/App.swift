@@ -153,10 +153,9 @@ struct LLMModel: Equatable {
         apiKeyModels.filter { $0.cloudProvider == provider }
     }
 
-    /// Picker list for one API-key provider: curated entries (with their
-    /// hand-written names and tier hints) confirmed by the last successful
-    /// /models fetch, followed by fetched chat models we don't curate yet.
-    /// Never fetched → curated list unchanged.
+    /// Picker list for one cloud provider: once /models discovery has run,
+    /// exactly the models it returned (deduped, in response order). Before the
+    /// first successful fetch, the curated floor from LLMModel.all.
     static func cloudModels(for provider: CloudProvider) -> [LLMModel] {
         mergedCloudModels(
             provider: provider,
@@ -165,38 +164,35 @@ struct LLMModel: Equatable {
         )
     }
 
-    /// Pure merge (testable without UserDefaults). Matching is canonical-id
-    /// based so Anthropic's dated/undated aliases compare equal. Fresh models
-    /// sort descending by id (numeric-aware, so 4-10 outranks 4-9) — within
-    /// one provider's naming scheme that puts
-    /// newer versions first — and default to supportsImages like Codex
-    /// discovery does (backend rejects images for text-only models; hiding
-    /// usable models is worse).
+    /// Pure resolver (testable without UserDefaults). When discovery has run,
+    /// returns ONLY the discovered models — no curated merge — in response
+    /// order, deduped by canonical id (a dated + undated alias collapse to
+    /// one). Claude Code shares model ids with the .anthropic provider, so its
+    /// ids get a `claude-code/` prefix while apiModelID stays the bare id sent
+    /// to /v1/messages. Defaults to supportsImages (the backend rejects images
+    /// for text-only models; hiding usable models is worse). `discovered == nil`
+    /// (never fetched) → curated floor unchanged.
     static func mergedCloudModels(
         provider: CloudProvider,
         curated: [LLMModel],
         discovered: [CloudModelDiscovery.DiscoveredModel]?
     ) -> [LLMModel] {
         guard let discovered, !discovered.isEmpty else { return curated }
-        let fetchedIDs = Set(discovered.map { CloudModelDiscovery.canonicalID($0.id) })
-        let curatedIDs = Set(curated.map { CloudModelDiscovery.canonicalID($0.apiModelID) })
-
-        var out = curated.filter {
-            fetchedIDs.contains(CloudModelDiscovery.canonicalID($0.apiModelID))
-        }
-        let fresh = discovered
-            .filter { !curatedIDs.contains(CloudModelDiscovery.canonicalID($0.id)) }
-            .sorted { $0.id.compare($1.id, options: .numeric) == .orderedDescending }
-        out += fresh.map { model in
+        var seen = Set<String>()
+        var out: [LLMModel] = []
+        for model in discovered {
+            guard seen.insert(CloudModelDiscovery.canonicalID(model.id)).inserted else { continue }
             let name = model.displayName
                 ?? CloudModelDiscovery.prettyName(provider: provider, id: model.id)
-            return LLMModel(
-                id: model.id,
+            let id = provider == .anthropicClaudeCode ? "claude-code/\(model.id)" : model.id
+            out.append(LLMModel(
+                id: id,
+                apiModelID: model.id,
                 shortName: name,
                 displayName: name,
                 backend: .cloud(provider),
                 supportsImages: true
-            )
+            ))
         }
         return out
     }
@@ -310,7 +306,7 @@ struct LLMModel: Equatable {
         // was lost (e.g. defaults never flushed), a stored discovered id
         // silently falls back to defaultModel below — unlike curated ids,
         // which always resolve. Accepted best-effort trade-off.
-        for provider in [CloudProvider.openAI, .anthropic, .gemini, .openRouter] {
+        for provider in [CloudProvider.openAI, .anthropic, .gemini, .openRouter, .anthropicClaudeCode] {
             if let cloud = cloudModels(for: provider).first(where: { $0.id == id }) {
                 return cloud
             }
@@ -1473,8 +1469,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         setupGlobalHotKeys()
         syncAppClassifierOverrides()
         setupBootstrap()
-        // Refresh the API-key providers' model catalogs (best-effort, cached).
+        // Refresh the API-key providers' + Claude Code model catalogs and the
+        // ChatGPT/Codex catalog (best-effort, cached). Codex previously only
+        // refreshed on fresh login, so an existing session never saw catalog
+        // changes until re-login — mirror the cloud refresh at every launch.
         Task.detached { await CloudModelDiscovery.refreshAll() }
+        Task.detached { await CodexModelDiscovery.refreshFromAPI() }
         _ = updaterController
         analyticsClient.trackInstallIfNeeded()
         analyticsClient.track(.appLaunched, properties: permissionStatusProperties(
@@ -14415,8 +14415,10 @@ enum CodexModelDiscovery {
             guard let slug = (item["slug"] as? String)?.trimmingCharacters(in: .whitespaces),
                   !slug.isEmpty
             else { continue }
-            if let v = item["visibility"] as? String,
-               ["hide", "hidden"].contains(v.lowercased()) { continue }
+            // Surface every returned model except the review-only variants
+            // (codex-auto-review) — they're not chat models and error if picked
+            // for translation.
+            if slug.contains("auto-review") { continue }
             let priority: Int = {
                 if let n = item["priority"] as? Int { return n }
                 if let n = item["priority"] as? Double { return Int(n) }
@@ -14489,7 +14491,7 @@ enum CloudModelDiscovery {
                 guard id.hasPrefix("gpt-5") || id.hasPrefix("gpt-6"),
                       !openAIDropMarkers.contains(where: id.contains)
                 else { continue }
-            case .anthropic:
+            case .anthropic, .anthropicClaudeCode:
                 guard id.hasPrefix("claude-") else { continue }
             case .gemini:
                 if id.hasPrefix("models/") { id = String(id.dropFirst("models/".count)) }
@@ -14501,9 +14503,9 @@ enum CloudModelDiscovery {
                 guard isFree || openRouterVendorAllowlist.contains(where: id.hasPrefix),
                       !openRouterDropMarkers.contains(where: id.contains)
                 else { continue }
-            case .openAICodex, .anthropicClaudeCode:
-                // OAuth providers: inference-only scope, curated model list,
-                // no /models discovery.
+            case .openAICodex:
+                // ChatGPT subscription uses its own codex/models endpoint
+                // (CodexModelDiscovery), not the OpenAI /v1/models list.
                 continue
             }
             // OpenRouter supplies a pretty `name`; the others use `display_name`.
@@ -14596,6 +14598,36 @@ enum CloudModelDiscovery {
             else { continue }
             CloudModelCache.update(provider: provider, models: parse(provider: provider, data: data))
         }
+        await refreshClaudeCode()
+    }
+
+    /// Claude Code (OAuth subscription) has no dedicated models endpoint, so
+    /// try the standard Anthropic /v1/models with the OAuth bearer + Claude Code
+    /// headers. If the inference-only OAuth scope forbids the list call, the
+    /// request 401s (or the body is unparseable) and the cache is left
+    /// untouched — the curated Claude Code entries in LLMModel.all stay the
+    /// floor. No-ops silently when the user isn't signed in.
+    static func refreshClaudeCode() async {
+        let token: String
+        do {
+            token = try await ClaudeCodeCredentialBroker.resolveAccessToken()
+        } catch {
+            return
+        }
+        var request = URLRequest(url: CloudProvider.anthropicClaudeCode.modelsURL)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("claude-cli/2.0.0 (external, cli)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 15
+        guard let (data, resp) = try? await URLSession.shared.data(for: request),
+              let http = resp as? HTTPURLResponse, http.statusCode == 200
+        else { return }
+        CloudModelCache.update(
+            provider: .anthropicClaudeCode,
+            models: parse(provider: .anthropicClaudeCode, data: data)
+        )
     }
 }
 
