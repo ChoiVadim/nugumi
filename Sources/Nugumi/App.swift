@@ -2442,7 +2442,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 if self.isScreenshotTranslationRunning {
                     self.screenshotDragStartLocation = mouseLocation
                     self.screenshotDragEndLocation = nil
+                    return
                 }
+                // This click is already dropping any live selection in the
+                // target app — dismiss the selection UI now instead of after
+                // the mouse-up read (80ms gate + AX + up to 0.5s clipboard
+                // poll). If this same gesture makes a new selection, the
+                // mouse-up pipeline re-shows it.
+                if let controller = self.translationPanelController,
+                   controller.isVisible,
+                   controller.panelFrame.insetBy(dx: -4, dy: -4).contains(mouseLocation) {
+                    return
+                }
+                self.translateButtonController?.close()
+                self.translateButtonController = nil
+                self.petController?.clearReady()
                 return
             }
 
