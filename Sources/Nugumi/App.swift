@@ -1020,6 +1020,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// copied on its own (copy-on-select TUIs, click-to-copy sites) — that
     /// copy is the selection and must survive on the clipboard.
     private var lastMouseDownPasteboardChangeCount: Int?
+    private var lastMouseDownDragPasteboardChangeCount: Int?
     /// Per-bundle count of consecutive selection-gesture attempts that returned
     /// no readable text. Apps like KakaoTalk expose neither AX text attributes
     /// nor a working Cmd+C path, so the floating bar silently never appears —
@@ -2439,6 +2440,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             if event.type == .leftMouseDown {
                 self.lastLeftMouseDownLocation = mouseLocation
                 self.lastMouseDownPasteboardChangeCount = NSPasteboard.general.changeCount
+                self.lastMouseDownDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
                 if self.isScreenshotTranslationRunning {
                     self.screenshotDragStartLocation = mouseLocation
                     self.screenshotDragEndLocation = nil
@@ -2806,6 +2808,16 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         guard let downLocation = lastLeftMouseDownLocation else {
+            return false
+        }
+
+        // A real drag-and-drop session (files, photos, dragged text) always
+        // writes to the drag pasteboard when the session starts; a
+        // drag-to-select never does. Dropping a photo into a browser input
+        // used to read as a selection drag here, and the clipboard fallback's
+        // synthesized ⌘C then beeped with nothing to copy.
+        if let baseline = lastMouseDownDragPasteboardChangeCount,
+           NSPasteboard(name: .drag).changeCount != baseline {
             return false
         }
 
