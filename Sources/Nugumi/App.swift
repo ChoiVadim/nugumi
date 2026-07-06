@@ -1021,6 +1021,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// copy is the selection and must survive on the clipboard.
     private var lastMouseDownPasteboardChangeCount: Int?
     private var lastMouseDownDragPasteboardChangeCount: Int?
+    private var lastMouseDownWindowNumber: Int?
+    private var lastMouseDownWindowBounds: CGRect?
     /// Per-bundle count of consecutive selection-gesture attempts that returned
     /// no readable text. Apps like KakaoTalk expose neither AX text attributes
     /// nor a working Cmd+C path, so the floating bar silently never appears —
@@ -2441,6 +2443,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 self.lastLeftMouseDownLocation = mouseLocation
                 self.lastMouseDownPasteboardChangeCount = NSPasteboard.general.changeCount
                 self.lastMouseDownDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
+                self.lastMouseDownWindowNumber = event.windowNumber
+                self.lastMouseDownWindowBounds = Self.windowBounds(forWindowNumber: event.windowNumber)
                 if self.isScreenshotTranslationRunning {
                     self.screenshotDragStartLocation = mouseLocation
                     self.screenshotDragEndLocation = nil
@@ -2640,7 +2644,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // the user may have switched apps during the 80ms+AX-read window, and
         // we want to attribute the unreadable-selection signal to the app
         // where the drag actually happened.
-        let isDragGesture = isDragSelectionGesture(event)
+        let isDragGesture = isDragSelectionGesture(event, upLocation: mouseLocation)
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let frontmostBundleID = frontmostApp?.bundleIdentifier
         let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
@@ -2666,7 +2670,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             let allowsClipboard = frontmostBundleID != "com.apple.finder"
                 && !self.selectionReader.isInsideOpenSavePanel()
             let preferClipboard = allowsClipboard
-                && self.shouldAttemptClipboardSelectionFallback(for: event)
+                && self.shouldAttemptClipboardSelectionFallback(for: event, upLocation: mouseLocation)
 
             // Clipboard fallback after a failed AX read covers apps that
             // expose a text-area-ish AX role (so `preferClipboard` is false)
@@ -2775,8 +2779,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         screenshotPanelSide = nil
     }
 
-    private func shouldAttemptClipboardSelectionFallback(for event: NSEvent) -> Bool {
-        guard isDragSelectionGesture(event) else {
+    private func shouldAttemptClipboardSelectionFallback(for event: NSEvent, upLocation: NSPoint) -> Bool {
+        guard isDragSelectionGesture(event, upLocation: upLocation) else {
             return false
         }
 
@@ -2792,7 +2796,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return true
         }
 
-        return isDragSelectionGesture(event)
+        return isDragSelectionGesture(event, upLocation: NSEvent.mouseLocation)
     }
 
     /// Only a real drag is unambiguous selection intent. A double-click
@@ -2802,7 +2806,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// every navigation double-click. The clipboard fallback is therefore
     /// drag-only; double-click word translation still works wherever AX
     /// exposes the selection.
-    private func isDragSelectionGesture(_ event: NSEvent) -> Bool {
+    /// `upLocation` must be the pointer position captured AT the mouse-up
+    /// event. This runs again inside the 80ms-delayed read, and reading
+    /// `NSEvent.mouseLocation` there instead measured wherever the cursor
+    /// had flicked to after the click — a stationary double-click followed
+    /// by a quick mouse move read as a ≥15pt "drag" and beeped via the
+    /// clipboard fallback's ⌘C.
+    private func isDragSelectionGesture(_ event: NSEvent, upLocation: NSPoint) -> Bool {
         guard event.type == .leftMouseUp else {
             return false
         }
@@ -2821,9 +2831,34 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return false
         }
 
-        let upLocation = NSEvent.mouseLocation
+        // Moving or resizing a window travels ≥15pt too, but never selects
+        // text — the synthesized ⌘C after dropping a window beeped just like
+        // the drag-and-drop case. During a genuine text-selection drag the
+        // window under the gesture keeps its frame; if it moved or resized,
+        // this was window manipulation.
+        if let windowNumber = lastMouseDownWindowNumber,
+           let startBounds = lastMouseDownWindowBounds,
+           Self.windowBounds(forWindowNumber: windowNumber) != startBounds {
+            return false
+        }
+
         let distance = hypot(upLocation.x - downLocation.x, upLocation.y - downLocation.y)
         return distance >= 15
+    }
+
+    /// Frame of any on-screen window (any app) by window number, in CG
+    /// screen coordinates. Bounds are readable without Screen Recording
+    /// permission — only window *names* are gated.
+    private static func windowBounds(forWindowNumber windowNumber: Int) -> CGRect? {
+        guard let windowID = CGWindowID(exactly: windowNumber), windowID > 0 else {
+            return nil
+        }
+        guard let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
+              let boundsDict = info.first?[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDict) else {
+            return nil
+        }
+        return bounds
     }
 
     private func clearUnreadableSelectionCounter(bundleID: String?) {
