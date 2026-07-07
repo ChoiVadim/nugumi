@@ -9651,6 +9651,7 @@ final class FloatingTranslateButtonView: NSView {
 
     private let actionButton = RightClickableButton()
     private let progressIndicator = NSProgressIndicator()
+    private var glassView: GlassHostView!
     private var currentMode: TranslationMode
     private var isLoading = false
 
@@ -9694,6 +9695,24 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.imageScaling = .scaleProportionallyUpOrDown
         applyScale(Self.restScale, animated: false)
         updateTrackingAreas()
+    }
+
+    // Same rationale as GlassHostView.resizeSubviews: the rapid hover in/out
+    // retargeting of `animator().frame` loses autoresizing deltas and the
+    // inner glass/glyph shrink cumulatively. Lay the chain out absolutely.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        glassView.frame = bounds
+        let content = glassView.contentView
+        actionButton.frame = content.bounds
+        let indicatorSize = progressIndicator.frame.size
+        progressIndicator.frame = NSRect(
+            x: (content.bounds.width - indicatorSize.width) / 2,
+            y: (content.bounds.height - indicatorSize.height) / 2,
+            width: indicatorSize.width,
+            height: indicatorSize.height
+        )
+        // Re-run updateLayer so the shadow ellipse follows the new bounds.
+        needsDisplay = true
     }
 
     override func updateTrackingAreas() {
@@ -9757,6 +9776,7 @@ final class FloatingTranslateButtonView: NSView {
         )
         glass.autoresizingMask = [.width, .height]
         addSubview(glass)
+        glassView = glass
 
         actionButton.target = self
         actionButton.action = #selector(buttonTapped)
@@ -10369,8 +10389,26 @@ enum GlassHostStyle {
     case clear
 }
 
+/// NSVisualEffectView that re-clamps its corner radius on every resize tick.
+/// AppKit's `animator().frame` machinery animates subview sizes with its own
+/// timer, so a radius set once (or at pin time) goes stale mid-animation and a
+/// radius above half the side pinches the mask into a squircle — the floating
+/// button rendered non-circular below full size.
+final class ClampedCornerEffectView: NSVisualEffectView {
+    var desiredCornerRadius: CGFloat = 0
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layer?.cornerRadius = min(
+            desiredCornerRadius,
+            min(newSize.width, newSize.height) / 2
+        )
+    }
+}
+
 final class GlassHostView: NSView {
     let contentView = NSView()
+    private let material = ClampedCornerEffectView()
 
     init(frame: NSRect, cornerRadius: CGFloat, tintColor: NSColor?, style: GlassHostStyle) {
         super.init(frame: frame)
@@ -10381,7 +10419,8 @@ final class GlassHostView: NSView {
         // Keep this compatible with the current public macOS SDK used by CI/release builds.
         // Referencing NSGlassEffectView directly breaks compilation on Xcode versions whose
         // SDK does not yet define that symbol, even inside an #available(macOS 26.0, *) block.
-        let material = NSVisualEffectView(frame: bounds)
+        material.desiredCornerRadius = cornerRadius
+        material.frame = bounds
         material.autoresizingMask = [.width, .height]
         material.material = .hudWindow
         material.blendingMode = .behindWindow
@@ -10395,6 +10434,16 @@ final class GlassHostView: NSView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    // Absolute layout instead of mask-based autoresizing: interrupting an
+    // in-flight `animator().frame` animation drops autoresizing deltas, so
+    // full-bleed subviews drift smaller with every interrupted hover cycle
+    // (the floating button's glass visibly shrank). Pinning to bounds on every
+    // resize is self-healing — any later resize restores exact geometry.
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        material.frame = bounds
+        contentView.frame = material.bounds
     }
 }
 
