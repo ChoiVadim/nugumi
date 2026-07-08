@@ -147,6 +147,40 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertEqual(history.last?.question, "Q\(overflow)")
     }
 
+    func testHistoryStoreRoundTripsWithinMaxAge() throws {
+        let suiteName = "test.askNugumiHistory.roundTrip"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let turns = [AskNugumiTurn(question: "Q1", answer: "A1")]
+        let savedAt = Date(timeIntervalSince1970: 1_000_000)
+
+        AskNugumiHistoryStore.save(turns, defaults: defaults, now: savedAt)
+        let loaded = AskNugumiHistoryStore.load(
+            defaults: defaults,
+            now: savedAt.addingTimeInterval(AskNugumiHistoryStore.maxAge - 1)
+        )
+
+        XCTAssertEqual(loaded, turns)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testHistoryStoreExpiresAfterMaxAge() throws {
+        let suiteName = "test.askNugumiHistory.expiry"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let turns = [AskNugumiTurn(question: "Q1", answer: "A1")]
+        let savedAt = Date(timeIntervalSince1970: 1_000_000)
+
+        AskNugumiHistoryStore.save(turns, defaults: defaults, now: savedAt)
+        let loaded = AskNugumiHistoryStore.load(
+            defaults: defaults,
+            now: savedAt.addingTimeInterval(AskNugumiHistoryStore.maxAge + 1)
+        )
+
+        XCTAssertEqual(loaded, [])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     func testMapsTopLeftNormalizedCoordinateToAppKitScreenPoint() {
         let screenFrame = CGRect(x: 100, y: 200, width: 1000, height: 800)
         let visibleFrame = CGRect(x: 100, y: 200, width: 1000, height: 760)

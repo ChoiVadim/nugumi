@@ -131,13 +131,41 @@ struct AskNugumiResponse: Codable, Equatable {
     }
 }
 
-struct AskNugumiTurn: Equatable {
+struct AskNugumiTurn: Codable, Equatable {
     let question: String
     let answer: String
 }
 
+/// Persists the Ask Nugumi dialog across app launches so follow-up questions
+/// keep their context after a restart. The saved-at clock resets on every save,
+/// so an actively used conversation never expires; after `maxAge` without a new
+/// ask, the next launch starts fresh.
+enum AskNugumiHistoryStore {
+    static let maxAge: TimeInterval = 24 * 60 * 60
+    private static let turnsKey = "askNugumiHistory"
+    private static let savedAtKey = "askNugumiHistorySavedAt"
+
+    static func load(defaults: UserDefaults = .standard, now: Date = Date()) -> [AskNugumiTurn] {
+        let savedAt = defaults.double(forKey: savedAtKey)
+        guard savedAt > 0,
+              now.timeIntervalSince1970 - savedAt < maxAge,
+              let data = defaults.data(forKey: turnsKey),
+              let turns = try? JSONDecoder().decode([AskNugumiTurn].self, from: data)
+        else {
+            return []
+        }
+        return turns
+    }
+
+    static func save(_ turns: [AskNugumiTurn], defaults: UserDefaults = .standard, now: Date = Date()) {
+        guard let data = try? JSONEncoder().encode(turns) else { return }
+        defaults.set(data, forKey: turnsKey)
+        defaults.set(now.timeIntervalSince1970, forKey: savedAtKey)
+    }
+}
+
 enum AskNugumiPromptBuilder {
-    static let maxHistoryTurns = 8
+    static let maxHistoryTurns = 20
 
     static func appending(_ turn: AskNugumiTurn, to history: [AskNugumiTurn]) -> [AskNugumiTurn] {
         let updated = history + [turn]

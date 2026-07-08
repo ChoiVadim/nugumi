@@ -1070,7 +1070,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var askPromptController: AskPromptController?
     private var askNugumiTask: Task<Void, Never>?
     private var askNugumiRequestID: UUID?
-    private var askHistory: [AskNugumiTurn] = []
+    private var askHistory: [AskNugumiTurn] = AskNugumiHistoryStore.load()
     /// Screen capture taken the moment Ask Nugumi is summoned, before the
     /// prompt steals focus. Activating Nugumi deactivates the frontmost app,
     /// which instantly closes its open menus/popovers, so a submit-time
@@ -2031,7 +2031,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     /// Opens the pet prompt input wired to Ask Nugumi. Reused for the initial
     /// shortcut-triggered prompt and for the answer bubble's "continue" button —
-    /// `askHistory` persists across the session so follow-ups keep context.
+    /// `askHistory` persists across launches (see `AskNugumiHistoryStore`) so
+    /// follow-ups keep context.
     @MainActor
     private func presentPetAskPrompt() {
         if petController == nil {
@@ -2089,6 +2090,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         guard !trimmedQuestion.isEmpty, !trimmedAnswer.isEmpty else { return }
         let turn = AskNugumiTurn(question: trimmedQuestion, answer: trimmedAnswer)
         askHistory = AskNugumiPromptBuilder.appending(turn, to: askHistory)
+        AskNugumiHistoryStore.save(askHistory)
         translationHistoryStore.recordAsk(question: trimmedQuestion, answer: trimmedAnswer)
     }
 
