@@ -1060,7 +1060,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     private var translateButtonController: FloatingTranslateButtonController?
     private var floatingLoadingBar: FloatingTranslateButtonController?
-    private var floatingTargetButton: FloatingTranslateButtonController?
     /// Click-through layer with the model's explanation shapes; replaced on
     /// every Ask answer, torn down with the answer UI.
     private var askAnnotationOverlay: AskAnnotationOverlayController?
@@ -1593,8 +1592,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         translateButtonController?.close()
         translateButtonController = nil
-        floatingTargetButton?.close()
-        floatingTargetButton = nil
         closeAskAnnotationOverlay()
         translationPanelController?.close()
         translationPanelController = nil
@@ -1855,12 +1852,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     self.clearAskNugumiRequestIfCurrent(requestID)
                     self.recordAskTurn(question: clean, answer: response.message)
                     controller.showTranslation(response.message, requestID: panelRequestID, isFinal: true)
-                    if let target = response.petTarget {
-                        self.presentFloatingAskTargetPointer(for: target, capture: capture)
-                    } else {
-                        self.floatingTargetButton?.close()
-                        self.floatingTargetButton = nil
-                    }
                     self.presentAskAnnotations(response.annotations, capture: capture)
                 }
             } catch is CancellationError {
@@ -1924,8 +1915,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if self.isAskNugumiRunning { self.cancelAskNugumiRequest() }
                 self.translationPanelController = nil
-                self.floatingTargetButton?.close()
-                self.floatingTargetButton = nil
                 self.closeAskAnnotationOverlay()
                 self.petController?.clearReady()
             }
@@ -1934,42 +1923,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let panelRequestID = controller.showLoading(targetLanguage: targetLanguage)
         controller.showTranslation(response.message, requestID: panelRequestID, isFinal: true)
 
-        if let target = response.petTarget {
-            presentFloatingAskTargetPointer(for: target, capture: capture)
-        } else {
-            floatingTargetButton?.close()
-            floatingTargetButton = nil
-        }
         presentAskAnnotations(response.annotations, capture: capture)
-    }
-
-    @MainActor
-    private func presentFloatingAskTargetPointer(
-        for target: AskNugumiPetTarget,
-        capture: AskNugumiScreenCapture
-    ) {
-        let point = AskNugumiCoordinateMapper.exactScreenPoint(
-            for: target,
-            screenFrame: capture.screenFrame
-        )
-        let button: FloatingTranslateButtonController
-        if let existing = floatingTargetButton {
-            button = existing
-        } else {
-            // Launch the pointer from the pet so it visibly travels from the
-            // character to the target; fall back to the cursor if no pet.
-            let launchPoint = petController?.petAnchorPoint ?? NSEvent.mouseLocation
-            button = FloatingTranslateButtonController(
-                screenPoint: launchPoint,
-                selectedText: "",
-                initialMode: .selection,
-                onTranslate: { _ in },
-                onRewrite: { _ in },
-                onSmartReply: { _ in }
-            )
-            floatingTargetButton = button
-        }
-        button.pointAt(point, visibleFrame: capture.visibleFrame)
     }
 
     /// Replace-on-every-answer semantics: new shapes redraw the layer, an
@@ -2049,21 +2003,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController.onAnswerDismissedByUser = { [weak self] in
             self?.closeAskAnnotationOverlay()
         }
-
-        if let target = response.petTarget {
-            let presentation = AskNugumiPetAnswerTargetPresentationPolicy.presentation(
-                for: target,
-                screenFrame: capture.screenFrame
-            )
-            // The pet stays put; the pixel arrow travels to the target.
-            petController.showAnswer(
-                response.message,
-                emotion: response.emotion,
-                markerTarget: presentation.markerTarget
-            )
-        } else {
-            petController.showAnswer(response.message, emotion: response.emotion)
-        }
+        petController.showAnswer(response.message, emotion: response.emotion)
         presentAskAnnotations(response.annotations, capture: capture)
     }
 
@@ -2113,8 +2053,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         isAskNugumiRunning = false
         petController?.clearThinking()
         petController?.clearPrompt()
-        floatingTargetButton?.close()
-        floatingTargetButton = nil
         hideAskFloatingLoadingBar()
     }
 
@@ -2171,8 +2109,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         askPromptController?.close()
         askPromptController = nil
         petController?.clearPrompt()
-        floatingTargetButton?.close()
-        floatingTargetButton = nil
         closeAskAnnotationOverlay()
         hideAskFloatingLoadingBar()
     }
@@ -6666,14 +6602,6 @@ private final class PetPromptBubbleView: NSView {
     var bubbleFrame: NSRect = .zero {
         didSet { needsDisplay = true }
     }
-    var targetMarkerPoint: NSPoint? {
-        didSet { needsDisplay = true }
-    }
-    /// Direction (radians) the pixel arrow points — pet → destination.
-    var targetMarkerAngle: CGFloat = 0 {
-        didSet { needsDisplay = true }
-    }
-    private var targetMarkerFrame = 0
 
     /// When set, the bubble becomes a drag handle: clicks on the bubble
     /// background (areas not covered by text or buttons) start a drag that
@@ -6687,7 +6615,7 @@ private final class PetPromptBubbleView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Opt-in: stay click-through (current behavior) unless a drag handler
-        // is wired in. Lets targetMarkerView keep its non-interactive behavior.
+        // is wired in.
         guard onDragRequested != nil else { return nil }
         return bounds.contains(point) ? self : nil
     }
@@ -6708,12 +6636,6 @@ private final class PetPromptBubbleView: NSView {
         NSCursor.closedHand.push()
         onDragRequested(startLocation)
         NSCursor.pop()
-    }
-
-    func advanceTargetMarkerBlink() {
-        guard targetMarkerPoint != nil else { return }
-        targetMarkerFrame = (targetMarkerFrame + 1) % 60
-        needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -6764,10 +6686,6 @@ private final class PetPromptBubbleView: NSView {
                 height: unit
             )).fill()
         }
-
-        if let targetMarkerPoint {
-            drawTargetMarker(center: targetMarkerPoint, unit: unit)
-        }
     }
 
     private func drawPixelBubbleBody(in rect: NSRect, unit: CGFloat, color: NSColor) {
@@ -6803,113 +6721,6 @@ private final class PetPromptBubbleView: NSView {
             )).fill()
         }
     }
-
-    // Arrow sprite, pointing +x (right): rectangular stem on the left, a
-    // triangular head tapering to a point on the right. Equal-width rows so
-    // it aligns; '#' = fill. Border is synthesized as a 1-cell outline so the
-    // pixel edge matches the dialog bubble's dark-bordered look.
-    private static let arrowSpriteRows = [
-        "....#...",
-        "....##..",
-        "#######.",
-        "########",
-        "#######.",
-        "....##..",
-        "....#...",
-    ]
-    private static let arrowCoreCell = (col: 1, row: 3) // lighter accent pixel
-
-    private func drawTargetMarker(center: NSPoint, unit: CGFloat) {
-        let isBrightFrame = targetMarkerFrame < 34
-        // Brighter than the old dot, same footprint.
-        let border = NSColor(
-            srgbRed: 0.05, green: 0.24, blue: 0.22,
-            alpha: isBrightFrame ? 0.98 : 0.82
-        )
-        let fill = NSColor(
-            srgbRed: 17.0 / 255.0,
-            green: 118.0 / 255.0,
-            blue: 110.0 / 255.0,
-            alpha: isBrightFrame ? 1.0 : 0.72
-        )
-        let core = NSColor(
-            srgbRed: 0.90, green: 0.98, blue: 0.96,
-            alpha: isBrightFrame ? 0.95 : 0.55
-        )
-        let shadow = NSColor(calibratedWhite: 0.0, alpha: isBrightFrame ? 0.20 : 0.09)
-
-        // Dedicated unit so the arrow keeps the old dot's ~15px footprint
-        // (it must not look bigger) while leaving rotation room in the panel.
-        _ = unit
-        let arrowUnit: CGFloat = 1.8
-
-        guard let context = NSGraphicsContext.current else { return }
-        context.saveGraphicsState()
-        let transform = NSAffineTransform()
-        transform.translateX(by: center.x, yBy: center.y)
-        transform.rotate(byRadians: targetMarkerAngle)
-        transform.concat()
-        // Local space: sprite centered on (0,0), now rotated toward target.
-        drawArrowSprite(unit: arrowUnit, offset: NSPoint(x: arrowUnit, y: -arrowUnit),
-                        border: shadow, fill: shadow, core: shadow)
-        drawArrowSprite(unit: arrowUnit, offset: .zero,
-                        border: border, fill: fill, core: core)
-        context.restoreGraphicsState()
-    }
-
-    private func drawArrowSprite(
-        unit: CGFloat,
-        offset: NSPoint,
-        border: NSColor,
-        fill: NSColor,
-        core: NSColor
-    ) {
-        let rows = Self.arrowSpriteRows
-        let rowCount = rows.count
-        let colCount = rows.map(\.count).max() ?? 0
-        // Center the grid on the origin (sprite center).
-        let centerCol = CGFloat(colCount - 1) / 2
-        let centerRow = CGFloat(rowCount - 1) / 2
-
-        func cell(_ col: Int, _ row: Int) -> NSRect {
-            // Flip row so the grid reads top-to-bottom but draws y-up.
-            NSRect(
-                x: offset.x + (CGFloat(col) - centerCol) * unit,
-                y: offset.y + (centerRow - CGFloat(row)) * unit,
-                width: unit,
-                height: unit
-            )
-        }
-
-        var filled = Set<[Int]>()
-        for (r, line) in rows.enumerated() {
-            for (c, ch) in line.enumerated() where ch == "#" {
-                filled.insert([c, r])
-            }
-        }
-
-        // 1-cell dark outline around the whole shape.
-        border.setFill()
-        let neighbors = [-1, 0, 1]
-        for key in filled {
-            for dx in neighbors {
-                for dy in neighbors where !(dx == 0 && dy == 0) {
-                    let n = [key[0] + dx, key[1] + dy]
-                    if !filled.contains(n) {
-                        NSBezierPath(rect: cell(n[0], n[1])).fill()
-                    }
-                }
-            }
-        }
-
-        // Fill, then the single lighter accent pixel.
-        fill.setFill()
-        for key in filled {
-            NSBezierPath(rect: cell(key[0], key[1])).fill()
-        }
-        core.setFill()
-        NSBezierPath(rect: cell(Self.arrowCoreCell.col, Self.arrowCoreCell.row)).fill()
-    }
 }
 
 @MainActor
@@ -6918,12 +6729,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private let containerView: NSView
     private let promptPanel: NSPanel
     private let promptContainerView: NSView
-    private let targetMarkerPanel: NSPanel
-    private var targetMarkerGlideTimer: Timer?
     private let petView: PetMascotView
     private let appIconView: NSImageView
     private let promptBubbleView: PetPromptBubbleView
-    private let targetMarkerView: PetPromptBubbleView
     private let promptTextField: AskPromptTextField
     private let answerScrollView: NSScrollView
     private let answerTextView: NSTextView
@@ -6961,7 +6769,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var promptBuffer = ""
     private var currentPromptInputLayout = AskNugumiPromptInputMetrics.layout(forContentHeight: 0)
     private var currentAnswerLayout = AskNugumiAnswerBubbleMetrics.layout(forContentHeight: 0)
-    private var currentAnswerMarkerTarget: NSPoint?
     private var pointingTarget: NSPoint?
     private var pendingPointArrival: (() -> Void)?
     private var pointingArrivalFallbackTimer: Timer?
@@ -7032,13 +6839,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
             defer: false
         )
         promptContainerView = NSView(frame: NSRect(origin: .zero, size: initialPromptInputLayout.panelSize))
-        let initialMarkerPanelSize = AskNugumiTargetMarkerMetrics.paddedFrame(centeredAt: .zero).size
-        targetMarkerPanel = PetPanel(
-            contentRect: NSRect(origin: origin, size: initialMarkerPanelSize),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
         petView = PetMascotView(frame: NSRect(
             origin: .zero,
             size: Self.panelSize
@@ -7050,7 +6850,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
             height: Self.appIconSize.height
         ))
         promptBubbleView = PetPromptBubbleView(frame: initialPromptInputLayout.bubbleFrame)
-        targetMarkerView = PetPromptBubbleView(frame: NSRect(origin: .zero, size: initialMarkerPanelSize))
         promptTextField = AskPromptTextField(frame: initialPromptInputLayout.textFrame)
         let initialAnswerLayout = AskNugumiAnswerBubbleMetrics.layout(forContentHeight: 0)
         answerScrollView = NSScrollView(frame: initialAnswerLayout.viewportFrame)
@@ -7080,16 +6879,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptPanel.hidesOnDeactivate = false
         promptPanel.ignoresMouseEvents = false
 
-        targetMarkerPanel.level = .floating
-        targetMarkerPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        InvisibilityState.apply(to: targetMarkerPanel)
-        targetMarkerPanel.isReleasedWhenClosed = false
-        targetMarkerPanel.isOpaque = false
-        targetMarkerPanel.backgroundColor = .clear
-        targetMarkerPanel.hasShadow = false
-        targetMarkerPanel.hidesOnDeactivate = false
-        targetMarkerPanel.ignoresMouseEvents = true
-
         containerView.autoresizingMask = [.width, .height]
         promptContainerView.autoresizingMask = [.width, .height]
         petView.wantsLayer = true
@@ -7111,14 +6900,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptBubbleView.onDragRequested = { [weak self] startLocation in
             self?.beginBubbleDrag(initialMouseLocation: startLocation)
         }
-
-        targetMarkerView.drawsBubble = false
-        targetMarkerView.autoresizingMask = [.width, .height]
-        targetMarkerView.targetMarkerPoint = NSPoint(
-            x: targetMarkerView.bounds.midX,
-            y: targetMarkerView.bounds.midY
-        )
-        targetMarkerPanel.contentView = targetMarkerView
 
         promptTextField.delegate = self
         promptTextField.onEscape = { [weak self] in
@@ -7268,7 +7049,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         cancelPointingAnimation()
         panel.close()
         promptPanel.close()
-        targetMarkerPanel.close()
     }
 
     func showPrompt(
@@ -7288,8 +7068,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isPromptOpen = true
         isPromptLoading = false
         isAnswerOpen = false
-        currentAnswerMarkerTarget = nil
-        hideTargetMarker()
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
         tabInterceptor?.disable()
@@ -7302,7 +7080,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         configurePromptTextFieldForInput()
         renderPromptText()
         promptBubbleView.isError = false
-        promptBubbleView.targetMarkerPoint = nil
         setPromptPlaceholder(Self.promptPlaceholder)
         let presentation = promptPresentationAnchoredToPet(
             size: currentPromptInputLayout.panelSize,
@@ -7337,8 +7114,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isPromptOpen = false
         isPromptLoading = true
         isAnswerOpen = false
-        currentAnswerMarkerTarget = nil
-        hideTargetMarker()
         isThinking = true
         promptTextField.isEnabled = false
         panel.ignoresMouseEvents = false
@@ -7373,15 +7148,12 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isPromptOpen = true
         isPromptLoading = false
         isAnswerOpen = false
-        currentAnswerMarkerTarget = nil
-        hideTargetMarker()
         isThinking = false
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
         promptTextField.isEnabled = true
         configurePromptTextFieldForInput()
         promptBubbleView.isError = true
-        promptBubbleView.targetMarkerPoint = nil
         setPromptPlaceholder(message)
         petView.apply(state: .idle, mode: currentMode)
         refreshPromptInputLayout()
@@ -7430,7 +7202,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         return true
     }
 
-    func showAnswer(_ message: String, emotion: AskNugumiEmotion?, markerTarget: NSPoint? = nil) {
+    func showAnswer(_ message: String, emotion: AskNugumiEmotion?) {
         let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanMessage.isEmpty else { return }
 
@@ -7446,7 +7218,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isPromptOpen = false
         isPromptLoading = false
         isAnswerOpen = true
-        currentAnswerMarkerTarget = nil
         promptBuffer = ""
 
         panel.ignoresMouseEvents = false
@@ -7457,27 +7228,16 @@ final class PetController: NSObject, NSTextFieldDelegate {
         promptBubbleView.isError = false
         configureAnswerTextView(with: cleanMessage)
 
-        let presentation = answerPresentationFrame(
-            for: currentAnswerLayout,
-            markerTarget: markerTarget
+        let presentation = promptPresentationAnchoredToPet(
+            size: currentAnswerLayout.panelSize,
+            bubbleFrame: currentAnswerLayout.bubbleFrame
         )
-        currentAnswerLayout = presentation.layout
         panel.setFrameOrigin(presentation.petOrigin)
-        promptPanel.setFrame(presentation.frame, display: true)
-        currentAnswerMarkerTarget = presentation.markerTarget
+        promptPanel.setFrame(presentation.promptFrame, display: true)
         showPromptViews()
         promptPanel.alphaValue = 1
         show()
         promptPanel.orderFrontRegardless()
-        let petCenter = NSPoint(
-            x: presentation.petOrigin.x + Self.panelSize.width / 2,
-            y: presentation.petOrigin.y + Self.panelSize.height / 2
-        )
-        showTargetMarker(
-            frame: presentation.markerFrame,
-            target: presentation.markerTarget,
-            fromPetCenter: petCenter
-        )
         panel.orderFrontRegardless()
         petView.apply(state: .talking, mode: currentMode, emotion: .neutral)
         petView.onDoubleClick = { [weak self] in
@@ -7486,45 +7246,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         petView.onDragRequested = { [weak self] startLocation in
             self?.beginBubbleDrag(initialMouseLocation: startLocation)
         }
-    }
-
-    func moveToAnswerTarget(
-        _ destination: NSPoint,
-        markerTarget: NSPoint,
-        message: String,
-        emotion: AskNugumiEmotion?
-    ) {
-        let targetOrigin = Self.originNearPoint(destination, size: Self.panelSize)
-        let distance = hypot(targetOrigin.x - panel.frame.origin.x, targetOrigin.y - panel.frame.origin.y)
-        guard distance > Self.pointingArrivalThreshold else {
-            showAnswer(message, emotion: emotion, markerTarget: markerTarget)
-            return
-        }
-
-        cancelPointingAnimation()
-        selectedText = nil
-        onTranslate = nil
-        onRewrite = nil
-        onSmartReply = nil
-        isReadyLockedUntilPanelCloses = false
-        isThinking = false
-        isPromptOpen = false
-        isPromptLoading = false
-        isAnswerOpen = false
-        currentAnswerMarkerTarget = nil
-        hideTargetMarker()
-        panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
-        appIconView.isHidden = true
-        promptPanel.orderOut(nil)
-        pointingTarget = destination
-        pendingPointArrival = { [weak self] in
-            self?.showAnswer(message, emotion: emotion, markerTarget: markerTarget)
-        }
-        schedulePointingArrivalFallback()
-        petView.apply(state: .run, mode: currentMode)
-        show()
     }
 
     private func submitPrompt() {
@@ -7554,8 +7275,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isPromptOpen = false
         isPromptLoading = false
         isAnswerOpen = false
-        currentAnswerMarkerTarget = nil
-        hideTargetMarker()
         onPromptSubmit = nil
         onPromptClose = nil
         promptBuffer = ""
@@ -7609,7 +7328,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         answerScrollView.isHidden = true
         continueButton.isHidden = true
         continueButton.alphaValue = 0
-        hideTargetMarker()
     }
 
     @objc private func continueButtonTapped() {
@@ -7786,109 +7504,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         return (presentation.promptFrame, presentation.petOrigin)
     }
 
-    private func answerPresentationFrame(
-        for layout: AskNugumiAnswerBubbleLayout,
-        markerTarget: NSPoint?
-    ) -> (
-        frame: NSRect,
-        petOrigin: NSPoint,
-        layout: AskNugumiAnswerBubbleLayout,
-        markerFrame: NSRect?,
-        markerTarget: NSPoint?
-    ) {
-        let promptPresentation = promptPresentationAnchoredToPet(
-            size: layout.panelSize,
-            bubbleFrame: layout.bubbleFrame
-        )
-        let markerPresentation = AskNugumiPetAnswerTargetPanelMetrics.presentation(
-            bubblePanelFrame: promptPresentation.promptFrame,
-            markerTarget: markerTarget
-        )
-
-        return (
-            markerPresentation.bubblePanelFrame,
-            promptPresentation.petOrigin,
-            layout,
-            markerPresentation.markerPanelFrame,
-            markerPresentation.localMarkerTarget
-        )
-    }
-
-    private func showTargetMarker(frame: NSRect?, target: NSPoint?, fromPetCenter petCenter: NSPoint) {
-        guard let frame, let target else {
-            hideTargetMarker()
-            return
-        }
-
-        let destCenter = NSPoint(x: frame.midX, y: frame.midY)
-        targetMarkerView.frame = NSRect(origin: .zero, size: frame.size)
-        targetMarkerView.targetMarkerPoint = target
-        targetMarkerView.targetMarkerAngle = atan2(
-            destCenter.y - petCenter.y,
-            destCenter.x - petCenter.x
-        )
-
-        // Launch centered on the pet, then glide to the destination so the
-        // arrow visibly travels from the character to the target.
-        let startFrame = NSRect(
-            x: petCenter.x - frame.width / 2,
-            y: petCenter.y - frame.height / 2,
-            width: frame.width,
-            height: frame.height
-        )
-        targetMarkerPanel.setFrame(startFrame, display: true)
-        targetMarkerPanel.alphaValue = 1
-        targetMarkerPanel.orderFrontRegardless()
-
-        // Constant glide speed: scale duration by distance so the arrow moves at
-        // the same points/sec whether the target is near or far. Floor keeps very
-        // short hops visible; ceiling stops full-screen jumps from dragging.
-        let dx = destCenter.x - petCenter.x
-        let dy = destCenter.y - petCenter.y
-        let distance = hypot(dx, dy)
-        let glideSpeed: CGFloat = 350 // points per second
-        let duration = Double(min(3.5, max(0.8, distance / glideSpeed)))
-
-        // Wiggle: a unit vector perpendicular to the travel direction, swept by a
-        // sine that's zero at both ends — the arrow sways one way then the other
-        // but still launches from the pet and lands dead-on the target. Amplitude
-        // stays small (a gentle, alive drift), the swing count keeps it lively.
-        let perp: (x: CGFloat, y: CGFloat) = distance > 0.001
-            ? (-dy / distance, dx / distance) : (0, 0)
-        let amplitude = min(28, distance * 0.06) // subtle wiggle
-        let swings: CGFloat = 6 // many visible left/right sways
-        let size = frame.size
-        let start = petCenter
-        let begin = CACurrentMediaTime()
-
-        targetMarkerGlideTimer?.invalidate()
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] tick in
-            guard let self else { tick.invalidate(); return }
-            let p = min(1.0, (CACurrentMediaTime() - begin) / max(duration, 0.0001))
-            let eased = 0.5 - 0.5 * cos(p * Double.pi) // ease in/out along the track
-            let lateral = amplitude * CGFloat(sin(p * Double.pi * Double(swings)))
-            let cx = start.x + dx * CGFloat(eased) + perp.x * lateral
-            let cy = start.y + dy * CGFloat(eased) + perp.y * lateral
-            self.targetMarkerPanel.setFrameOrigin(
-                NSPoint(x: cx - size.width / 2, y: cy - size.height / 2)
-            )
-            if p >= 1.0 {
-                tick.invalidate()
-                self.targetMarkerGlideTimer = nil
-                self.targetMarkerPanel.setFrame(frame, display: true) // snap exact
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        targetMarkerGlideTimer = timer
-    }
-
-    private func hideTargetMarker() {
-        targetMarkerGlideTimer?.invalidate()
-        targetMarkerGlideTimer = nil
-        targetMarkerPanel.orderOut(nil)
-        targetMarkerPanel.alphaValue = 1
-    }
-
     private func layoutPromptSubviews() {
         petView.frame = NSRect(origin: .zero, size: Self.panelSize)
         appIconView.frame = NSRect(
@@ -7900,7 +7515,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         if isAnswerOpen {
             promptBubbleView.frame = NSRect(origin: .zero, size: currentAnswerLayout.panelSize)
             promptBubbleView.bubbleFrame = currentAnswerLayout.bubbleFrame
-            promptBubbleView.targetMarkerPoint = nil
             answerScrollView.frame = currentAnswerLayout.viewportFrame
             // The visible bubble border sits 15px in from the sides (5*unit)
             // and 9px up from the bottom (3*unit). Add the SAME gap past each
@@ -7919,7 +7533,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         } else {
             promptBubbleView.frame = NSRect(origin: .zero, size: currentPromptInputLayout.panelSize)
             promptBubbleView.bubbleFrame = currentPromptInputLayout.bubbleFrame
-            promptBubbleView.targetMarkerPoint = nil
             promptTextField.frame = currentPromptInputLayout.textFrame
         }
     }
@@ -8104,10 +7717,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         guard panel.isVisible else { return }
 
         petView.advanceAnimationFrame()
-        if isAnswerOpen {
-            promptBubbleView.advanceTargetMarkerBlink()
-            targetMarkerView.advanceTargetMarkerBlink()
-        }
         if let pointingTarget {
             let targetOrigin = Self.originNearPoint(pointingTarget, size: Self.panelSize)
             let currentOrigin = panel.frame.origin
@@ -9283,60 +8892,6 @@ final class FloatingTranslateButtonController {
         buttonView.setLoading(true)
     }
 
-    func pointAt(_ targetPoint: NSPoint, visibleFrame: NSRect) {
-        let presentation = AskNugumiFloatingTargetPresentationPolicy.presentation(
-            targetPoint: targetPoint,
-            visibleFrame: visibleFrame
-        )
-        panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
-        buttonView.setTargetArrow(angle: presentation.arrowAngleRadians)
-        panel.orderFrontRegardless()
-
-        // Slower glide so the trip from the pet to the target reads clearly,
-        // then a pop on arrival so the destination is unmistakable.
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.42
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(presentation.panelFrame, display: true)
-        }, completionHandler: {
-            // AppKit invokes this on the main thread.
-            MainActor.assumeIsolated { [weak self] in
-                self?.playArrivalPulse()
-            }
-        })
-    }
-
-    /// Quick scale "pop" on the button, centered, after it lands on target.
-    private func playArrivalPulse() {
-        let base = AskNugumiFloatingTargetPresentationPolicy.buttonSize
-        let pad = AskNugumiFloatingTargetPresentationPolicy.shadowPadding
-        let center = pad + base / 2
-        let grownSide = base * 1.3
-        let grown = NSRect(
-            x: center - grownSide / 2,
-            y: center - grownSide / 2,
-            width: grownSide,
-            height: grownSide
-        )
-        let normal = NSRect(x: pad, y: pad, width: base, height: base)
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.12
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            buttonView.animator().frame = grown
-        }, completionHandler: {
-            MainActor.assumeIsolated { [weak self] in
-                guard let self else { return }
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.12
-                    context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                    self.buttonView.animator().frame = normal
-                }
-            }
-        })
-    }
-
     private func toggleMode() {
         currentMode = (currentMode == .smartReply) ? .selection : .smartReply
         buttonView.apply(mode: currentMode)
@@ -10446,17 +10001,6 @@ final class FloatingTranslateButtonView: NSView {
         }
     }
 
-    func setTargetArrow(angle: CGFloat) {
-        isLoading = false
-        progressIndicator.stopAnimation(nil)
-        progressIndicator.isHidden = true
-        actionButton.isHidden = false
-        actionButton.image = Self.targetArrowImage(angle: angle)
-        actionButton.title = ""
-        actionButton.imagePosition = .imageOnly
-        actionButton.toolTip = "Target"
-    }
-
     private func applyModeVisuals() {
         // Render every glyph as an image (not a title/fixed-point symbol) so the
         // hover frame animation can scale it — `imageScaling` stretches it to the
@@ -10512,39 +10056,6 @@ final class FloatingTranslateButtonView: NSView {
 
     @objc private func buttonTapped() {
         onClick?()
-    }
-
-    private static func targetArrowImage(angle: CGFloat) -> NSImage {
-        let imageSize = NSSize(width: 18, height: 18)
-        let image = NSImage(size: imageSize)
-        image.lockFocus()
-        NSGraphicsContext.saveGraphicsState()
-
-        let transform = NSAffineTransform()
-        transform.translateX(by: imageSize.width / 2, yBy: imageSize.height / 2)
-        transform.rotate(byRadians: angle)
-        transform.concat()
-
-        let shaft = NSBezierPath()
-        shaft.lineWidth = 2.2
-        shaft.lineCapStyle = .round
-        shaft.move(to: NSPoint(x: -5.5, y: 0))
-        shaft.line(to: NSPoint(x: 4.3, y: 0))
-        NSColor.white.setStroke()
-        shaft.stroke()
-
-        let head = NSBezierPath()
-        head.move(to: NSPoint(x: 6.2, y: 0))
-        head.line(to: NSPoint(x: 0.6, y: 4.3))
-        head.line(to: NSPoint(x: 0.6, y: -4.3))
-        head.close()
-        NSColor.white.setFill()
-        head.fill()
-
-        NSGraphicsContext.restoreGraphicsState()
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
     }
 }
 
