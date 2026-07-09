@@ -6592,9 +6592,6 @@ enum NugumiFont {
 }
 
 private final class PetPromptBubbleView: NSView {
-    var drawsBubble = true {
-        didSet { needsDisplay = true }
-    }
     var isError = false {
         didSet { needsDisplay = true }
     }
@@ -6666,25 +6663,23 @@ private final class PetPromptBubbleView: NSView {
             ? NSColor(srgbRed: 0.54, green: 0.08, blue: 0.08, alpha: 1.0)
             : NSColor(srgbRed: 0.22, green: 0.27, blue: 0.28, alpha: 1.0)
 
-        if drawsBubble {
-            drawPixelBubbleBody(in: bubbleRect.offsetBy(dx: unit, dy: -unit), unit: unit, color: shadow)
-            let tailAnchor = bubbleRect.minX + 4 * unit
-            drawPixelTail(anchor: tailAnchor, baseY: bubbleRect.minY, unit: unit, color: shadow, offset: NSPoint(x: unit, y: -unit))
-            drawPixelTail(anchor: tailAnchor, baseY: bubbleRect.minY, unit: unit, color: borderDark)
-            drawPixelBubbleBody(in: bubbleRect, unit: unit, color: borderDark)
-            drawPixelBubbleBody(in: bubbleRect.insetBy(dx: unit, dy: unit), unit: unit, color: border)
-            drawPixelBubbleBody(in: bubbleRect.insetBy(dx: unit * 2, dy: unit * 2), unit: unit, color: fill)
+        drawPixelBubbleBody(in: bubbleRect.offsetBy(dx: unit, dy: -unit), unit: unit, color: shadow)
+        let tailAnchor = bubbleRect.minX + 4 * unit
+        drawPixelTail(anchor: tailAnchor, baseY: bubbleRect.minY, unit: unit, color: shadow, offset: NSPoint(x: unit, y: -unit))
+        drawPixelTail(anchor: tailAnchor, baseY: bubbleRect.minY, unit: unit, color: borderDark)
+        drawPixelBubbleBody(in: bubbleRect, unit: unit, color: borderDark)
+        drawPixelBubbleBody(in: bubbleRect.insetBy(dx: unit, dy: unit), unit: unit, color: border)
+        drawPixelBubbleBody(in: bubbleRect.insetBy(dx: unit * 2, dy: unit * 2), unit: unit, color: fill)
 
-            drawPixelTail(anchor: tailAnchor, baseY: bubbleRect.minY, unit: unit, color: fill, offset: NSPoint(x: unit * 2, y: unit * 2))
+        drawPixelTail(anchor: tailAnchor, baseY: bubbleRect.minY, unit: unit, color: fill, offset: NSPoint(x: unit * 2, y: unit * 2))
 
-            highlight.setFill()
-            NSBezierPath(rect: NSRect(
-                x: bubbleRect.minX + 4 * unit,
-                y: bubbleRect.maxY - 4 * unit,
-                width: bubbleRect.width - 8 * unit,
-                height: unit
-            )).fill()
-        }
+        highlight.setFill()
+        NSBezierPath(rect: NSRect(
+            x: bubbleRect.minX + 4 * unit,
+            y: bubbleRect.maxY - 4 * unit,
+            width: bubbleRect.width - 8 * unit,
+            height: unit
+        )).fill()
     }
 
     private func drawPixelBubbleBody(in rect: NSRect, unit: CGFloat, color: NSColor) {
@@ -6769,8 +6764,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var currentPromptInputLayout = AskNugumiPromptInputMetrics.layout(forContentHeight: 0)
     private var currentAnswerLayout = AskNugumiAnswerBubbleMetrics.layout(forContentHeight: 0)
     private var pointingTarget: NSPoint?
-    private var pendingPointArrival: (() -> Void)?
-    private var pointingArrivalFallbackTimer: Timer?
     private var pointingReturnTimer: Timer?
     private var lastCursorLocation = NSEvent.mouseLocation
     private var lastCursorMovementDate = Date.distantPast
@@ -6794,7 +6787,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private static let answerFontSize: CGFloat = 14
     private static let edgeMargin: CGFloat = 6
     private static let pointingArrivalThreshold: CGFloat = 8
-    private static let pointingArrivalFallbackDelay: TimeInterval = 1.6
     private static let textMovementUserInfoKey = "NSTextMovement"
     private static let promptPlaceholder = "Hey, need me?"
     private static let defaultCursorOffset = NSPoint(
@@ -6808,12 +6800,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
 
     var isPromptComposingVisible: Bool {
         isPromptOpen || isPromptLoading
-    }
-
-    /// Screen-space center of the pet panel. The on-screen anchor for
-    /// launching Ask panels from the pet.
-    var petAnchorPoint: NSPoint {
-        NSPoint(x: panel.frame.midX, y: panel.frame.midY)
     }
 
     init(initialMode: TranslationMode) {
@@ -7636,61 +7622,10 @@ final class PetController: NSObject, NSTextFieldDelegate {
         refreshStyleBadge()
     }
 
-    func pointTemporarily(at destination: NSPoint, holdDuration: TimeInterval = 3.0) {
-        pointingReturnTimer?.invalidate()
-        pendingPointArrival = nil
-        pointingTarget = destination
-        selectedText = nil
-        onTranslate = nil
-        onRewrite = nil
-        onSmartReply = nil
-        isReadyLockedUntilPanelCloses = false
-        isThinking = false
-        panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
-        appIconView.isHidden = true
-        petView.apply(state: .run, mode: currentMode)
-        show()
-
-        let timer = Timer(timeInterval: holdDuration, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.pointingTarget = nil
-                self?.pointingReturnTimer = nil
-                self?.refreshStyleBadge()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        pointingReturnTimer = timer
-    }
-
     private func cancelPointingAnimation() {
         pointingReturnTimer?.invalidate()
         pointingReturnTimer = nil
-        pointingArrivalFallbackTimer?.invalidate()
-        pointingArrivalFallbackTimer = nil
         pointingTarget = nil
-        pendingPointArrival = nil
-    }
-
-    private func schedulePointingArrivalFallback() {
-        pointingArrivalFallbackTimer?.invalidate()
-        let timer = Timer(timeInterval: Self.pointingArrivalFallbackDelay, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.completePendingPointArrival()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        pointingArrivalFallbackTimer = timer
-    }
-
-    private func completePendingPointArrival() {
-        guard let pendingPointArrival else { return }
-        pointingArrivalFallbackTimer?.invalidate()
-        pointingArrivalFallbackTimer = nil
-        pointingTarget = nil
-        self.pendingPointArrival = nil
-        pendingPointArrival()
     }
 
     func setActionMode(_ mode: TranslationMode) {
@@ -7727,12 +7662,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
             )
             panel.setFrameOrigin(nextOrigin)
             let distance = hypot(dx, dy)
-            let hasPendingArrival = pendingPointArrival != nil
             let didArrive = distance <= Self.pointingArrivalThreshold
             petView.apply(state: didArrive ? .ready : .run, mode: currentMode)
-            if didArrive, hasPendingArrival {
-                completePendingPointArrival()
-            }
             return
         }
         guard selectedText == nil, !isReadyLockedUntilPanelCloses, !isThinking, !isPromptVisible else {
