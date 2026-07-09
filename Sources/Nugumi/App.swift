@@ -1715,6 +1715,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // the prompt took focus. Submit-time capture is the fallback.
         let preparedCapture = pendingAskNugumiCapture
         pendingAskNugumiCapture = nil
+        // Strokes are consumed here: composited into the capture below, so
+        // the on-screen canvas can come down before the request starts.
+        let strokes = askDrawingOverlay?.strokes ?? []
+        closeAskDrawingOverlay()
+        let question = strokes.isEmpty
+            ? cleanPrompt
+            : cleanPrompt
+                + "\n\n(The red marks on the screenshot are my annotations pointing at what I'm asking about.)"
         askNugumiTask = Task { [weak self] in
             do {
                 let capture: AskNugumiScreenCapture
@@ -1738,6 +1746,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 }
                 try Task.checkCancellation()
 
+                // Compositing decodes + re-encodes a ≤2048 px JPEG; keep it
+                // off the main actor like the capture encode itself.
+                let annotatedCapture = strokes.isEmpty
+                    ? capture
+                    : await Task.detached(priority: .userInitiated) {
+                        capture.annotated(with: strokes)
+                    }.value
+
                 let shouldContinue = await MainActor.run { () -> Bool in
                     guard let self, self.askNugumiRequestID == requestID else {
                         return false
@@ -1751,8 +1767,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 let currentThinkingLevel = await MainActor.run { self?.askNugumiThinkingLevel ?? .high }
                 let response = try await backend.ask(
                     history: history,
-                    question: cleanPrompt,
-                    image: capture.image,
+                    question: question,
+                    image: annotatedCapture.image,
                     thinkingLevel: currentThinkingLevel
                 ) { _ in }
                 try Task.checkCancellation()
@@ -1760,7 +1776,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 await MainActor.run {
                     self?.presentAskNugumiResult(
                         response,
-                        capture: capture,
+                        capture: annotatedCapture,
                         prompt: cleanPrompt,
                         requestID: requestID
                     )
