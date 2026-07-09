@@ -147,6 +147,47 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertEqual(history.last?.question, "Q\(overflow)")
     }
 
+    func testAboutContextAppendsBackgroundWithDisambiguationGuard() {
+        let prompt = UserAboutContext.appending(to: "Base prompt.", about: "I'm a software developer.")
+
+        XCTAssertTrue(prompt.hasPrefix("Base prompt."))
+        XCTAssertTrue(prompt.contains("I'm a software developer."))
+        XCTAssertTrue(prompt.contains("disambiguate terms"))
+        XCTAssertTrue(prompt.contains("Do not change the output's tone, style, language, or format"))
+    }
+
+    func testAboutContextLeavesPromptUntouchedWhenEmpty() {
+        XCTAssertEqual(UserAboutContext.appending(to: "Base prompt.", about: "  \n "), "Base prompt.")
+    }
+
+    func testAboutContextIsCappedAtMaxLength() {
+        let oversized = String(repeating: "x", count: UserAboutContext.maxLength + 500)
+        let prompt = UserAboutContext.appending(to: "Base.", about: oversized)
+
+        XCTAssertTrue(prompt.contains(String(repeating: "x", count: UserAboutContext.maxLength)))
+        XCTAssertFalse(prompt.contains(String(repeating: "x", count: UserAboutContext.maxLength + 1)))
+    }
+
+    func testAskSystemPromptIncludesAboutUser() {
+        let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false, aboutUser: "I'm a PostgreSQL developer.")
+
+        XCTAssertTrue(prompt.contains("Return only JSON"))
+        XCTAssertTrue(prompt.contains("I'm a PostgreSQL developer."))
+    }
+
+    func testTranslationModeSystemPromptIncludesAboutUser() {
+        UserDefaults.standard.set("I'm a software developer.", forKey: UserAboutContext.defaultsKey)
+        defer { UserDefaults.standard.removeObject(forKey: UserAboutContext.defaultsKey) }
+
+        let prompt = TranslationMode.selection.systemPrompt(
+            targetLanguage: TranslationLanguage.defaultLanguage,
+            appCategory: .other,
+            composition: nil
+        )
+
+        XCTAssertTrue(prompt.contains("I'm a software developer."))
+    }
+
     func testHistoryStoreRoundTripsWithinMaxAge() throws {
         let suiteName = "test.askNugumiHistory.roundTrip"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

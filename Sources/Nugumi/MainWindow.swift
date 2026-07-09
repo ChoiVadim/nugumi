@@ -337,12 +337,13 @@ enum EngineSetupFocus: String, CaseIterable, Hashable {
 
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     case home, insights, dictionary, snippets, style, languages, aiEngine, shortcuts
+    case aboutYou
     case settings, help
 
     var id: String { rawValue }
 
     static var primary: [MainWindowSection] {
-        [.home, .insights, .style, .languages, .aiEngine, .dictionary, .snippets]
+        [.home, .insights, .style, .languages, .aiEngine, .aboutYou, .dictionary, .snippets]
     }
     static var secondary: [MainWindowSection] { [.shortcuts, .settings, .help] }
 
@@ -353,6 +354,7 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .dictionary: return "Dictionary"
         case .snippets: return "Snippets"
         case .style: return "Style"
+        case .aboutYou: return "About you"
         case .languages: return "Languages"
         case .aiEngine: return "AI Engine"
         case .shortcuts: return "Shortcuts"
@@ -368,6 +370,7 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .dictionary: return "character.book.closed"
         case .snippets: return "text.badge.plus"
         case .style: return "textformat"
+        case .aboutYou: return "person.crop.circle"
         case .languages: return "globe"
         case .aiEngine: return "cpu"
         case .shortcuts: return "command"

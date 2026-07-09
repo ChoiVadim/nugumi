@@ -196,10 +196,11 @@ Rules:
 - If uncertain about a location, omit `petTarget` and describe what to look for in `message`.
 """
 
-    /// Base prompt, plus the Gen Z styling suffix when the global toggle is on.
-    static func systemPrompt(genZ: Bool) -> String {
-        guard genZ else { return systemPromptBase }
-        return systemPromptBase + "\n\n" + genZSuffix
+    /// Base prompt, plus the Gen Z styling suffix when the global toggle is on,
+    /// plus the user's "About you" background when present.
+    static func systemPrompt(genZ: Bool, aboutUser: String? = nil) -> String {
+        let base = genZ ? systemPromptBase + "\n\n" + genZSuffix : systemPromptBase
+        return UserAboutContext.appending(to: base, about: aboutUser)
     }
 
     /// Gen Z overlay for Ask answers. Ask replies in the question's own language

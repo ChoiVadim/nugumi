@@ -12077,6 +12077,35 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     }
 }
 
+/// User-authored "About you" background appended to every system prompt so the
+/// model picks meanings relevant to this user (e.g. "RLS" → Row-Level Security
+/// for a developer, not Restless Legs Syndrome). Deliberately manual and
+/// transparent — the user writes it in Settings; nothing is auto-learned.
+enum UserAboutContext {
+    static let maxLength = 1000
+    static let defaultsKey = "aboutUserContext"
+
+    static var text: String {
+        get { UserDefaults.standard.string(forKey: defaultsKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
+    }
+
+    /// Appends the background section to a system prompt. Returns the prompt
+    /// unchanged when the user wrote nothing, so empty stays zero-cost.
+    static func appending(to prompt: String, about: String? = nil) -> String {
+        let trimmed = (about ?? text).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return prompt }
+        return prompt + """
+
+
+        Background about the user, in their own words:
+        \(String(trimmed.prefix(maxLength)))
+
+        Use this background only to disambiguate terms and choose the meaning most relevant to this user. Do not change the output's tone, style, language, or format because of it unless it explicitly says to. Never mention this background in the output.
+        """
+    }
+}
+
 enum TranslationMode {
     case selection
     case draftMessage
@@ -12142,7 +12171,7 @@ enum TranslationMode {
         appCategory: AppCategory,
         composition: CompositionSettings?
     ) -> String {
-        switch self {
+        let base: String = switch self {
         case .selection:
             """
             Translate the user's text into plain, accessible \(targetLanguage.promptName) aimed at a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. The goal is to make the content understandable, not to produce a literal word-for-word rendering. This applies whether the source is already in \(targetLanguage.promptName), in another language entirely, or a mix of both.
@@ -12216,6 +12245,7 @@ enum TranslationMode {
             Return only the updated message text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
             """
         }
+        return UserAboutContext.appending(to: base)
     }
 
     private static func glossarySection(for snippets: [Snippet], includeSnippets: Bool) -> String {
