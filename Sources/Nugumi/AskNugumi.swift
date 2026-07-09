@@ -1,24 +1,6 @@
 import CoreGraphics
 import Foundation
 
-enum AskNugumiCoordinateSpace: String, Codable, Equatable {
-    case screenshotNormalized = "screenshot_normalized"
-}
-
-struct AskNugumiPetTarget: Codable, Equatable {
-    let x: Double
-    let y: Double
-    let coordinateSpace: AskNugumiCoordinateSpace
-
-    var isValid: Bool {
-        x.isFinite
-            && y.isFinite
-            && (0...1).contains(x)
-            && (0...1).contains(y)
-            && coordinateSpace == .screenshotNormalized
-    }
-}
-
 enum AskNugumiEmotion: String, Codable, Equatable {
     case neutral
     case happy
@@ -34,10 +16,10 @@ enum AskNugumiAnnotationType: String, Codable, Equatable {
     case label
 }
 
-/// One model-drawn shape over the screenshot, in the same normalized
-/// 0.0–1.0 coordinate space as `AskNugumiPetTarget` (x left-to-right,
-/// y top-to-bottom). Flat optional fields instead of a polymorphic decoder;
-/// `isValid` enforces the per-type contract.
+/// One model-drawn shape over the screenshot, in normalized 0.0–1.0
+/// screenshot coordinates (x left-to-right, y top-to-bottom). Flat
+/// optional fields instead of a polymorphic decoder; `isValid` enforces
+/// the per-type contract.
 struct AskNugumiAnnotation: Codable, Equatable {
     let type: AskNugumiAnnotationType
     // ellipse/rect: center + normalized size
@@ -90,7 +72,6 @@ private struct FailableDecodable<T: Decodable>: Decodable {
 
 struct AskNugumiResponse: Codable, Equatable {
     let message: String
-    let petTarget: AskNugumiPetTarget?
     let emotion: AskNugumiEmotion?
     let annotations: [AskNugumiAnnotation]
 
@@ -106,7 +87,7 @@ struct AskNugumiResponse: Codable, Equatable {
             return decoded
         }
 
-        return AskNugumiResponse(message: trimmed, petTarget: nil, emotion: nil)
+        return AskNugumiResponse(message: trimmed, emotion: nil)
     }
 
     private static func parseJSONResponse(from json: String) -> AskNugumiResponse? {
@@ -117,7 +98,7 @@ struct AskNugumiResponse: Codable, Equatable {
         }
 
         guard !decoded.message.isEmpty else {
-            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+            return AskNugumiResponse(message: "", emotion: nil)
         }
 
         return decoded
@@ -166,7 +147,6 @@ struct AskNugumiResponse: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case message
-        case petTarget
         case emotion
         case annotations
     }
@@ -175,12 +155,10 @@ struct AskNugumiResponse: Codable, Equatable {
 
     init(
         message: String,
-        petTarget: AskNugumiPetTarget?,
         emotion: AskNugumiEmotion?,
         annotations: [AskNugumiAnnotation] = []
     ) {
         self.message = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.petTarget = petTarget?.isValid == true ? petTarget : nil
         self.emotion = emotion
         self.annotations = Array(annotations.filter(\.isValid).prefix(Self.maxAnnotations))
     }
@@ -188,20 +166,18 @@ struct AskNugumiResponse: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let message = try container.decode(String.self, forKey: .message)
-        let petTarget = try? container.decode(AskNugumiPetTarget.self, forKey: .petTarget)
         let emotion = try? container.decode(AskNugumiEmotion.self, forKey: .emotion)
         let annotations = (try? container.decode(
             [FailableDecodable<AskNugumiAnnotation>].self,
             forKey: .annotations
         ))?.compactMap(\.value) ?? []
 
-        self.init(message: message, petTarget: petTarget, emotion: emotion, annotations: annotations)
+        self.init(message: message, emotion: emotion, annotations: annotations)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(message, forKey: .message)
-        try container.encodeIfPresent(petTarget, forKey: .petTarget)
         try container.encodeIfPresent(emotion, forKey: .emotion)
         if !annotations.isEmpty {
             try container.encode(annotations, forKey: .annotations)
@@ -259,23 +235,14 @@ When the user attaches a screenshot, you can see what is currently on their scre
 Return only JSON. Use this default shape:
 {"message":"short helpful answer","emotion":"neutral"}
 
-When a screenshot is attached AND pointing at a specific visible element helps the user, use this shape:
-{"message":"short helpful answer","emotion":"neutral","petTarget":{"x":0.0,"y":0.0,"coordinateSpace":"screenshot_normalized"}}
-
 When a screenshot is attached AND drawing on top of it explains better than words alone, you may also add "annotations" — simple shapes rendered over the user's screen:
 {"message":"short helpful answer","emotion":"neutral","annotations":[{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},{"type":"rect","cx":0.60,"cy":0.20,"w":0.20,"h":0.10},{"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},{"type":"label","x":0.42,"y":0.50,"text":"click here"}]}
 
 Rules:
 - `message` is required and must be useful on its own.
 - `emotion` is optional. Use one of: "neutral", "happy", "surprised", "confused", "concerned".
-- Include `petTarget` only when a screenshot is attached AND the user benefits from the pet pointing at a specific visible location. Never include `petTarget` without a screenshot.
-- When a screenshot is attached, the user message includes a coordinate guide; follow it when computing `petTarget`.
-- `petTarget.x` and `petTarget.y` are normalized 0.0–1.0 across the screenshot (x left-to-right, y top-to-bottom).
-- Aim at the geometric center of the target element, never the top-left of a text label.
-- Use coordinateSpace exactly "screenshot_normalized".
 - Do not click, automate, or claim you took an action.
-- If uncertain about a location, omit `petTarget` and describe what to look for in `message`.
-- `annotations` is optional and only allowed when a screenshot is attached. Shapes use the same normalized 0.0–1.0 screenshot coordinates as `petTarget`.
+- `annotations` is optional and only allowed when a screenshot is attached. Shapes use normalized 0.0–1.0 screenshot coordinates (x left-to-right, y top-to-bottom).
 - `ellipse` and `rect` use the CENTER (`cx`, `cy`) plus width/height fractions (`w`, `h`). `arrow` goes from (`fromX`, `fromY`) to (`toX`, `toY`). `label` anchors its `text` (five words or fewer) at (`x`, `y`).
 - A few precise shapes beat many: circle one element, draw one arrow for a direction or relationship, box one region. Never more than 12 shapes.
 - If uncertain about a location, omit the shape and describe it in `message` instead.
@@ -293,7 +260,7 @@ Rules:
     /// (unknown at prompt-build time), so this stays language-agnostic and leans
     /// on the model's multilingual slang — and must not break the JSON shape.
     private static let genZSuffix = """
-Gen Z mode is ON. Write the `message` field the way a Gen Z native (born ~1997–2012) would actually text it — casual, all-lowercase, ironic and a little deadpan, using the native youth slang of whatever language you are answering in (never switch languages to do it). Keep it short. The #1 rule is restraint: at most 1–2 slang markers — piling it on is the dead giveaway of an adult faking it; when unsure, drop the slang. Write laughter as 💀 or 😭, never 😂. This restyles ONLY the wording inside `message` — keep the JSON shape, field names, and the emotion/petTarget rules above exactly as specified.
+Gen Z mode is ON. Write the `message` field the way a Gen Z native (born ~1997–2012) would actually text it — casual, all-lowercase, ironic and a little deadpan, using the native youth slang of whatever language you are answering in (never switch languages to do it). Keep it short. The #1 rule is restraint: at most 1–2 slang markers — piling it on is the dead giveaway of an adult faking it; when unsure, drop the slang. Write laughter as 💀 or 😭, never 😂. This restyles ONLY the wording inside `message` — keep the JSON shape, field names, and the emotion/annotations rules above exactly as specified.
 """
 
     static func prompt(question: String, hasImage: Bool) -> String {
@@ -307,13 +274,11 @@ Gen Z mode is ON. Write the `message` field the way a Gen Z native (born ~1997�
 User question:
 \(cleanQuestion)
 
-Coordinate guide for petTarget and annotations:
-- x and y are normalized from 0.0 to 1.0 over the attached screenshot. x is the horizontal fraction from the left edge; y is the vertical fraction from the top edge.
-- Aim at the geometric center of the target element's visible bounding box (button, icon, control, or input). Never anchor to the top-left of a text label — in a vertical list of buttons or menu items, a label's top-left sits inside the previous row.
-- For small menu bar or status icons, use the icon glyph's visual center, not the surrounding hit area.
-- Before returning coordinates, identify the target's row/column context in `message` (for example: "the third item in the left sidebar, below New chat and above Artifacts") so you anchor to the correct sibling among visually similar elements.
-- Use coordinateSpace exactly "screenshot_normalized".
-- The same normalized coordinates apply to every `annotations` field (`cx`/`cy`, `fromX`/`fromY`/`toX`/`toY`, `x`/`y`).
+Coordinate guide for annotations:
+- All coordinates (`cx`/`cy`, `fromX`/`fromY`/`toX`/`toY`, `x`/`y`) are normalized from 0.0 to 1.0 over the attached screenshot. x is the horizontal fraction from the left edge; y is the vertical fraction from the top edge.
+- Aim shapes at the geometric center of the target element's visible bounding box (button, icon, control, or input). Never anchor to the top-left of a text label — in a vertical list of buttons or menu items, a label's top-left sits inside the previous row.
+- For small menu bar or status icons, aim at the icon glyph's visual center, not the surrounding hit area.
+- Before choosing coordinates, identify the target's row/column context in `message` (for example: "the third item in the left sidebar, below New chat and above Artifacts") so you anchor to the correct sibling among visually similar elements.
 """
     }
 }
@@ -337,11 +302,6 @@ struct AskNugumiFloatingPromptLayout: Equatable {
     let pillFrame: CGRect
     let textFrame: CGRect
     let cornerRadius: CGFloat
-}
-
-struct AskNugumiFloatingTargetPresentation: Equatable {
-    let panelFrame: CGRect
-    let arrowAngleRadians: CGFloat
 }
 
 struct AskNugumiPetBubblePresentation: Equatable {
@@ -388,71 +348,6 @@ enum AskNugumiFloatingTargetPresentationPolicy {
     static let buttonSize: CGFloat = 30
     static let shadowPadding: CGFloat = 15
     static let totalSize: CGFloat = buttonSize + shadowPadding * 2
-    static let pointerOffset = CGPoint(x: 20, y: -20)
-
-    static func presentation(
-        targetPoint: CGPoint,
-        visibleFrame: CGRect
-    ) -> AskNugumiFloatingTargetPresentation {
-        let desiredCenter = CGPoint(
-            x: targetPoint.x + pointerOffset.x,
-            y: targetPoint.y + pointerOffset.y
-        )
-        let desiredOrigin = CGPoint(
-            x: desiredCenter.x - totalSize / 2,
-            y: desiredCenter.y - totalSize / 2
-        )
-        let origin = clampedOrigin(
-            desiredOrigin,
-            size: CGSize(width: totalSize, height: totalSize),
-            visibleFrame: visibleFrame,
-            edgeMargin: 0
-        )
-        let center = CGPoint(
-            x: origin.x + totalSize / 2,
-            y: origin.y + totalSize / 2
-        )
-        let dx = targetPoint.x - center.x
-        let dy = targetPoint.y - center.y
-        let angle = hypot(dx, dy) > 0.001 ? atan2(dy, dx) : CGFloat.pi / 2
-
-        return AskNugumiFloatingTargetPresentation(
-            panelFrame: CGRect(
-                x: origin.x,
-                y: origin.y,
-                width: totalSize,
-                height: totalSize
-            ),
-            arrowAngleRadians: angle
-        )
-    }
-
-    private static func clampedOrigin(
-        _ origin: CGPoint,
-        size: CGSize,
-        visibleFrame: CGRect,
-        edgeMargin: CGFloat
-    ) -> CGPoint {
-        CGPoint(
-            x: clamped(
-                origin.x,
-                min: visibleFrame.minX + edgeMargin,
-                max: visibleFrame.maxX - size.width - edgeMargin
-            ),
-            y: clamped(
-                origin.y,
-                min: visibleFrame.minY + edgeMargin,
-                max: visibleFrame.maxY - size.height - edgeMargin
-            )
-        )
-    }
-
-    private static func clamped(_ value: CGFloat, min minValue: CGFloat, max maxValue: CGFloat) -> CGFloat {
-        guard minValue <= maxValue else {
-            return (minValue + maxValue) / 2
-        }
-        return Swift.min(Swift.max(value, minValue), maxValue)
-    }
 }
 
 enum AskNugumiPromptInputMetrics {
@@ -534,59 +429,6 @@ enum AskNugumiAnswerBubbleMetrics {
     }
 }
 
-enum AskNugumiTargetMarkerMetrics {
-    static let size: CGFloat = 15
-    static let padding: CGFloat = 6
-
-    static func frame(centeredAt point: CGPoint) -> CGRect {
-        CGRect(
-            x: point.x - size / 2,
-            y: point.y - size / 2,
-            width: size,
-            height: size
-        )
-    }
-
-    static func paddedFrame(centeredAt point: CGPoint) -> CGRect {
-        frame(centeredAt: point).insetBy(dx: -padding, dy: -padding)
-    }
-}
-
-struct AskNugumiPetAnswerTargetPanelPresentation: Equatable {
-    let bubblePanelFrame: CGRect
-    let markerPanelFrame: CGRect?
-    let localMarkerTarget: CGPoint?
-}
-
-enum AskNugumiPetAnswerTargetPanelMetrics {
-    static func presentation(
-        bubblePanelFrame: CGRect,
-        markerTarget: CGPoint?
-    ) -> AskNugumiPetAnswerTargetPanelPresentation {
-        guard let markerTarget else {
-            return AskNugumiPetAnswerTargetPanelPresentation(
-                bubblePanelFrame: bubblePanelFrame,
-                markerPanelFrame: nil,
-                localMarkerTarget: nil
-            )
-        }
-
-        let markerPanelFrame = AskNugumiTargetMarkerMetrics
-            .paddedFrame(centeredAt: markerTarget)
-            .integral
-        let localMarkerTarget = CGPoint(
-            x: markerTarget.x - markerPanelFrame.minX,
-            y: markerTarget.y - markerPanelFrame.minY
-        )
-
-        return AskNugumiPetAnswerTargetPanelPresentation(
-            bubblePanelFrame: bubblePanelFrame,
-            markerPanelFrame: markerPanelFrame,
-            localMarkerTarget: localMarkerTarget
-        )
-    }
-}
-
 enum AskNugumiPetDismissalPolicy {
     static let hitTolerance: CGFloat = 4
 
@@ -598,26 +440,6 @@ enum AskNugumiPetDismissalPolicy {
 enum PetSelectionStatusPolicy {
     static func shouldPreserveCurrentStatus(isThinking: Bool, isPromptVisible: Bool) -> Bool {
         isThinking || isPromptVisible
-    }
-}
-
-struct AskNugumiPetAnswerTargetPresentation: Equatable {
-    let markerTarget: CGPoint
-    let movementTarget: CGPoint?
-}
-
-enum AskNugumiPetAnswerTargetPresentationPolicy {
-    static func presentation(
-        for target: AskNugumiPetTarget,
-        screenFrame: CGRect
-    ) -> AskNugumiPetAnswerTargetPresentation {
-        AskNugumiPetAnswerTargetPresentation(
-            markerTarget: AskNugumiCoordinateMapper.exactScreenPoint(
-                for: target,
-                screenFrame: screenFrame
-            ),
-            movementTarget: nil
-        )
     }
 }
 
@@ -682,17 +504,6 @@ enum AskNugumiPetBubblePresentationMetrics {
 }
 
 enum AskNugumiCoordinateMapper {
-    static func exactScreenPoint(
-        for target: AskNugumiPetTarget,
-        screenFrame: CGRect
-    ) -> CGPoint {
-        exactScreenPoint(
-            normalizedX: target.x,
-            normalizedY: target.y,
-            screenFrame: screenFrame
-        )
-    }
-
     /// Normalized screenshot coordinates (x left-to-right, y top-to-bottom)
     /// to AppKit screen points (y bottom-up), clamped into the frame.
     static func exactScreenPoint(
@@ -733,19 +544,6 @@ enum AskNugumiCoordinateMapper {
             y: center.y - size.height / 2,
             width: size.width,
             height: size.height
-        )
-    }
-
-    static func screenPoint(
-        for target: AskNugumiPetTarget,
-        screenFrame: CGRect,
-        visibleFrame: CGRect
-    ) -> CGPoint {
-        let point = exactScreenPoint(for: target, screenFrame: screenFrame)
-
-        return CGPoint(
-            x: min(max(point.x, visibleFrame.minX), visibleFrame.maxX),
-            y: min(max(point.y, visibleFrame.minY), visibleFrame.maxY)
         )
     }
 }

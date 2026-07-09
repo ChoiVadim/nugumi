@@ -1927,8 +1927,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     /// Replace-on-every-answer semantics: new shapes redraw the layer, an
-    /// empty list clears it — mirroring how the petTarget pointer already
-    /// moves or closes with each answer.
+    /// empty list clears it.
     @MainActor
     private func presentAskAnnotations(
         _ annotations: [AskNugumiAnnotation],
@@ -13011,7 +13010,7 @@ struct OllamaClient: LLMBackend {
 
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+            return AskNugumiResponse(message: "", emotion: nil)
         }
 
         var messages: [ChatMessage] = [
@@ -13236,7 +13235,7 @@ struct OpenAIChatClient: LLMBackend {
 
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+            return AskNugumiResponse(message: "", emotion: nil)
         }
 
         let currentPrompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
@@ -14580,7 +14579,7 @@ struct ClaudeCodeClient: LLMBackend {
         }
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+            return AskNugumiResponse(message: "", emotion: nil)
         }
 
         var messages: [[String: Any]] = []
@@ -15269,7 +15268,7 @@ struct OpenAICodexClient: LLMBackend {
         }
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", petTarget: nil, emotion: nil)
+            return AskNugumiResponse(message: "", emotion: nil)
         }
         let currentPrompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
 

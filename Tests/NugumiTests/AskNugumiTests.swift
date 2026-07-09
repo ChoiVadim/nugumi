@@ -2,32 +2,18 @@ import XCTest
 @testable import Nugumi
 
 final class AskNugumiTests: XCTestCase {
-    func testParsesStrictJSONResponse() throws {
-        let raw = """
-        {"message":"Click Save.","petTarget":{"x":0.82,"y":0.18,"coordinateSpace":"screenshot_normalized"}}
-        """
-
-        let response = AskNugumiResponse.parse(raw)
-
-        XCTAssertEqual(response.message, "Click Save.")
-        XCTAssertEqual(response.petTarget?.x, 0.82)
-        XCTAssertEqual(response.petTarget?.y, 0.18)
-        XCTAssertEqual(response.petTarget?.coordinateSpace, .screenshotNormalized)
-    }
-
     func testExtractsJSONFromFencedResponse() throws {
         let raw = """
         Here is the answer:
         ```json
-        {"message":"Use the button on the right.","petTarget":{"x":0.9,"y":0.5,"coordinateSpace":"screenshot_normalized"}}
+        {"message":"Use the button on the right.","emotion":"happy"}
         ```
         """
 
         let response = AskNugumiResponse.parse(raw)
 
         XCTAssertEqual(response.message, "Use the button on the right.")
-        XCTAssertEqual(response.petTarget?.x, 0.9)
-        XCTAssertEqual(response.petTarget?.y, 0.5)
+        XCTAssertEqual(response.emotion, .happy)
     }
 
     func testParsesOptionalEmotion() {
@@ -39,7 +25,6 @@ final class AskNugumiTests: XCTestCase {
 
         XCTAssertEqual(response.message, "That worked.")
         XCTAssertEqual(response.emotion, .happy)
-        XCTAssertNil(response.petTarget)
     }
 
     func testRejectsUnsupportedEmotion() {
@@ -57,36 +42,12 @@ final class AskNugumiTests: XCTestCase {
         let response = AskNugumiResponse.parse("The save button is at the top right.")
 
         XCTAssertEqual(response.message, "The save button is at the top right.")
-        XCTAssertNil(response.petTarget)
     }
 
     func testBlankDecodedMessageDoesNotFallBackToRawJSON() {
         let response = AskNugumiResponse.parse("{\"message\":\"   \"}")
 
         XCTAssertEqual(response.message, "")
-        XCTAssertNil(response.petTarget)
-    }
-
-    func testRejectsInvalidTargetCoordinates() {
-        let raw = """
-        {"message":"Click there.","petTarget":{"x":1.4,"y":0.2,"coordinateSpace":"screenshot_normalized"}}
-        """
-
-        let response = AskNugumiResponse.parse(raw)
-
-        XCTAssertEqual(response.message, "Click there.")
-        XCTAssertNil(response.petTarget)
-    }
-
-    func testRejectsUnsupportedCoordinateSpace() {
-        let raw = """
-        {"message":"Click there.","petTarget":{"x":0.4,"y":0.2,"coordinateSpace":"screen_pixels"}}
-        """
-
-        let response = AskNugumiResponse.parse(raw)
-
-        XCTAssertEqual(response.message, "Click there.")
-        XCTAssertNil(response.petTarget)
     }
 
     func testPromptWithImageIncludesCoordinateGuide() {
@@ -96,14 +57,13 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertTrue(prompt.contains("normalized from 0.0 to 1.0"))
         XCTAssertTrue(prompt.contains("geometric center"))
         XCTAssertTrue(prompt.contains("Never anchor to the top-left of a text label"))
-        XCTAssertTrue(prompt.contains("screenshot_normalized"))
+        XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
     }
 
     func testPromptWithoutImageOmitsCoordinateGuide() {
         let prompt = AskNugumiPromptBuilder.prompt(question: "What is the capital of Korea?", hasImage: false)
 
         XCTAssertEqual(prompt, "What is the capital of Korea?")
-        XCTAssertFalse(prompt.contains("petTarget"))
         XCTAssertFalse(prompt.contains("normalized"))
         XCTAssertFalse(prompt.contains("screenshot"))
     }
@@ -114,7 +74,8 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertTrue(prompt.contains("desktop assistant"))
         XCTAssertTrue(prompt.contains("When the user attaches a screenshot"))
         XCTAssertTrue(prompt.contains("When no screenshot is attached, answer from general knowledge"))
-        XCTAssertTrue(prompt.contains("Never include `petTarget` without a screenshot"))
+        XCTAssertFalse(prompt.contains("pet" + "Target"))
+        XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
         XCTAssertFalse(prompt.contains("The user will provide a screenshot"))
     }
 
@@ -220,138 +181,6 @@ final class AskNugumiTests: XCTestCase {
 
         XCTAssertEqual(loaded, [])
         defaults.removePersistentDomain(forName: suiteName)
-    }
-
-    func testMapsTopLeftNormalizedCoordinateToAppKitScreenPoint() {
-        let screenFrame = CGRect(x: 100, y: 200, width: 1000, height: 800)
-        let visibleFrame = CGRect(x: 100, y: 200, width: 1000, height: 760)
-        let target = AskNugumiPetTarget(
-            x: 0.25,
-            y: 0.10,
-            coordinateSpace: .screenshotNormalized
-        )
-
-        let point = AskNugumiCoordinateMapper.screenPoint(
-            for: target,
-            screenFrame: screenFrame,
-            visibleFrame: visibleFrame
-        )
-
-        XCTAssertEqual(point.x, 350, accuracy: 0.001)
-        XCTAssertEqual(point.y, 920, accuracy: 0.001)
-    }
-
-    func testClampsMappedCoordinateToVisibleFrame() {
-        let screenFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        let visibleFrame = CGRect(x: 50, y: 40, width: 900, height: 700)
-        let target = AskNugumiPetTarget(
-            x: 1.0,
-            y: 1.0,
-            coordinateSpace: .screenshotNormalized
-        )
-
-        let point = AskNugumiCoordinateMapper.screenPoint(
-            for: target,
-            screenFrame: screenFrame,
-            visibleFrame: visibleFrame
-        )
-
-        XCTAssertEqual(point.x, 950, accuracy: 0.001)
-        XCTAssertEqual(point.y, 40, accuracy: 0.001)
-    }
-
-    func testExactScreenPointKeepsMenuBarCoordinatesForTargetMarker() {
-        let screenFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        let visibleFrame = CGRect(x: 0, y: 0, width: 1000, height: 760)
-        let target = AskNugumiPetTarget(
-            x: 0.5,
-            y: 0.0,
-            coordinateSpace: .screenshotNormalized
-        )
-
-        let movementPoint = AskNugumiCoordinateMapper.screenPoint(
-            for: target,
-            screenFrame: screenFrame,
-            visibleFrame: visibleFrame
-        )
-        let markerPoint = AskNugumiCoordinateMapper.exactScreenPoint(
-            for: target,
-            screenFrame: screenFrame
-        )
-
-        XCTAssertEqual(movementPoint.y, 760, accuracy: 0.001)
-        XCTAssertEqual(markerPoint.y, 800, accuracy: 0.001)
-    }
-
-    func testAnswerTargetPresentationKeepsPetStillAndShowsExactMarker() {
-        let screenFrame = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        let target = AskNugumiPetTarget(
-            x: 0.82,
-            y: 0.18,
-            coordinateSpace: .screenshotNormalized
-        )
-
-        let presentation = AskNugumiPetAnswerTargetPresentationPolicy.presentation(
-            for: target,
-            screenFrame: screenFrame
-        )
-
-        XCTAssertNil(presentation.movementTarget)
-        XCTAssertEqual(presentation.markerTarget.x, 820, accuracy: 0.001)
-        XCTAssertEqual(presentation.markerTarget.y, 656, accuracy: 0.001)
-    }
-
-    func testTargetMarkerFrameCentersOnExactPoint() {
-        let point = CGPoint(x: 128, y: 64)
-        let frame = AskNugumiTargetMarkerMetrics.frame(centeredAt: point)
-
-        XCTAssertEqual(frame.midX, point.x, accuracy: 0.001)
-        XCTAssertEqual(frame.midY, point.y, accuracy: 0.001)
-        XCTAssertEqual(frame.width, AskNugumiTargetMarkerMetrics.size)
-        XCTAssertEqual(frame.height, AskNugumiTargetMarkerMetrics.size)
-    }
-
-    func testAnswerTargetMarkerUsesSeparatePanelWithoutExpandingBubblePanel() {
-        let bubblePanelFrame = CGRect(x: 40, y: 86, width: 300, height: 136)
-        let markerTarget = CGPoint(x: 48, y: 48)
-
-        let presentation = AskNugumiPetAnswerTargetPanelMetrics.presentation(
-            bubblePanelFrame: bubblePanelFrame,
-            markerTarget: markerTarget
-        )
-
-        XCTAssertEqual(presentation.bubblePanelFrame, bubblePanelFrame)
-        guard let markerPanelFrame = presentation.markerPanelFrame,
-              let localMarkerTarget = presentation.localMarkerTarget
-        else {
-            return XCTFail("Expected a separate marker panel.")
-        }
-        XCTAssertEqual(markerPanelFrame.midX, markerTarget.x, accuracy: 0.001)
-        XCTAssertEqual(markerPanelFrame.midY, markerTarget.y, accuracy: 0.001)
-        XCTAssertEqual(localMarkerTarget.x, markerPanelFrame.width / 2, accuracy: 0.001)
-        XCTAssertEqual(localMarkerTarget.y, markerPanelFrame.height / 2, accuracy: 0.001)
-    }
-
-    func testFloatingTargetPresentationPlacesButtonNearTargetAndPointsArrowBack() {
-        let presentation = AskNugumiFloatingTargetPresentationPolicy.presentation(
-            targetPoint: CGPoint(x: 500, y: 500),
-            visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 800)
-        )
-
-        XCTAssertEqual(presentation.panelFrame.midX, 520, accuracy: 0.001)
-        XCTAssertEqual(presentation.panelFrame.midY, 480, accuracy: 0.001)
-        XCTAssertEqual(presentation.arrowAngleRadians, 3 * .pi / 4, accuracy: 0.001)
-    }
-
-    func testFloatingTargetPresentationClampsButtonButKeepsArrowPointingToExactTarget() {
-        let presentation = AskNugumiFloatingTargetPresentationPolicy.presentation(
-            targetPoint: CGPoint(x: 990, y: 10),
-            visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 800)
-        )
-
-        XCTAssertLessThanOrEqual(presentation.panelFrame.maxX, 1000 + 0.001)
-        XCTAssertGreaterThanOrEqual(presentation.panelFrame.minY, 0 - 0.001)
-        XCTAssertEqual(presentation.arrowAngleRadians, -.pi / 4, accuracy: 0.001)
     }
 
     func testPetPromptDismissesOnlyWhenClickTargetsPet() {

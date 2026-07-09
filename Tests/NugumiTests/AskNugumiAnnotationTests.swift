@@ -84,7 +84,6 @@ final class AskNugumiAnnotationTests: XCTestCase {
     func testRoundTripPreservesValidAnnotations() throws {
         let original = AskNugumiResponse(
             message: "look",
-            petTarget: nil,
             emotion: .happy,
             annotations: [
                 AskNugumiAnnotation(
@@ -150,24 +149,15 @@ final class AskNugumiAnnotationTests: XCTestCase {
         XCTAssertEqual(rect.height, 60, accuracy: 0.001)
     }
 
-    func testPetTargetMappingStillDelegatesUnchanged() {
-        let target = AskNugumiPetTarget(x: 0.25, y: 0.10, coordinateSpace: .screenshotNormalized)
-        let viaTarget = AskNugumiCoordinateMapper.exactScreenPoint(for: target, screenFrame: frame)
-        let viaRaw = AskNugumiCoordinateMapper.exactScreenPoint(
-            normalizedX: 0.25, normalizedY: 0.10, screenFrame: frame
-        )
-        XCTAssertEqual(viaTarget, viaRaw)
-    }
-
     func testSystemPromptTeachesAnnotations() {
         let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
         XCTAssertTrue(prompt.contains("\"annotations\""))
         XCTAssertTrue(prompt.contains("\"type\":\"ellipse\""))
         XCTAssertTrue(prompt.contains("\"type\":\"arrow\""))
         XCTAssertTrue(prompt.contains("erased with every new answer"))
-        // petTarget contract untouched.
-        XCTAssertTrue(prompt.contains("screenshot_normalized"))
-        XCTAssertTrue(prompt.contains("petTarget"))
+        // The pointer field is gone: annotations are the only pointing mechanism.
+        XCTAssertFalse(prompt.contains("pet" + "Target"))
+        XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
     }
 
     func testCoordinateGuideCoversAnnotations() {
