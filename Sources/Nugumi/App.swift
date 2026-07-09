@@ -16623,6 +16623,13 @@ extension NugumiApp: SettingsHost {
             cleanupLevel = level
             updateMenuState()
         case .setGenZMode(let enabled):
+            if genZModeEnabled != enabled {
+                // Replayed Ask turns are few-shot style examples: history written
+                // in the old register overrides the new system prompt, so a
+                // style flip must start the Ask conversation fresh.
+                askHistory = []
+                AskNugumiHistoryStore.save(askHistory)
+            }
             genZModeEnabled = enabled
             updateMenuState()
         case .setLaunchAtLogin(let enabled):
