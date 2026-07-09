@@ -9487,6 +9487,7 @@ final class AskDrawingOverlayController {
         var strokes: [[NSPoint]] = [] {
             didSet { needsDisplay = true }
         }
+        private(set) var strokeDates: [Date] = []
         private var activeStroke: [NSPoint] = []
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -9522,9 +9523,18 @@ final class AskDrawingOverlayController {
             // harmless and never leave a dot on the screenshot.
             if activeStroke.count > 1 {
                 strokes.append(activeStroke)
+                strokeDates.append(Date())
             }
             activeStroke = []
             needsDisplay = true
+        }
+
+        func removeLastStroke() {
+            guard !strokes.isEmpty else { return }
+            strokes.removeLast()
+            if !strokeDates.isEmpty {
+                strokeDates.removeLast()
+            }
         }
 
         override func draw(_ dirtyRect: NSRect) {
@@ -9547,6 +9557,7 @@ final class AskDrawingOverlayController {
     private let canvas: StrokeCanvasView
     private let screenFrame: NSRect
     private var undoKeyMonitor: Any?
+    private var lastTextEditAt: Date?
     private var didClose = false
 
     var window: NSWindow { panel }
@@ -9599,19 +9610,71 @@ final class AskDrawingOverlayController {
         panel.close()
     }
 
-    // ⌘Z anywhere while the Ask UI is open removes the last stroke. A local
-    // monitor works for both the pill and the pet prompt (whichever is key)
-    // without touching their text fields; when there are no strokes the
-    // event passes through to the field's own undo.
+    enum UndoTarget: Equatable {
+        case textField
+        case stroke
+    }
+
+    /// Chronological ⌘Z arbitration between the prompt's text field and the
+    /// stroke canvas: undo whatever the user touched last, and fall back to
+    /// strokes once the field's undo stack is exhausted.
+    static func undoTarget(
+        lastStrokeAt: Date?,
+        lastTextEditAt: Date?,
+        textCanUndo: Bool
+    ) -> UndoTarget {
+        guard let lastStrokeAt else { return .textField }
+        if let lastTextEditAt, lastTextEditAt > lastStrokeAt, textCanUndo {
+            return .textField
+        }
+        return .stroke
+    }
+
+    /// Keystrokes that plausibly edit the prompt text (typing, delete,
+    /// paste/cut) — used only to order text edits against strokes for ⌘Z.
+    /// Caret movement also stamps here; that skews arbitration toward the
+    /// field the user is actively in, which is the intuitive outcome.
+    private static func isTextEditKeystroke(
+        _ event: NSEvent,
+        modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard NSApp.keyWindow?.firstResponder is NSTextView else { return false }
+        if modifiers == .command {
+            let key = event.charactersIgnoringModifiers
+            return key == "v" || key == "x"
+        }
+        guard modifiers.subtracting([.shift, .option]).isEmpty else { return false }
+        return event.charactersIgnoringModifiers?.isEmpty == false
+    }
+
+    // ⌘Z anywhere while the Ask UI is open undoes the user's most recent
+    // action: a stroke on the canvas or an edit in the prompt field,
+    // whichever came last. A local monitor works for both the pill and the
+    // pet prompt (whichever is key); non-⌘Z keystrokes are only observed to
+    // timestamp text edits and always pass through.
     private func installUndoKeyMonitor() {
         undoKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers == "z",
-                  !self.canvas.strokes.isEmpty
-            else { return event }
-            self.canvas.strokes.removeLast()
-            return nil
+            guard let self else { return event }
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isUndo = modifiers == .command && event.charactersIgnoringModifiers == "z"
+            guard isUndo else {
+                if Self.isTextEditKeystroke(event, modifiers: modifiers) {
+                    self.lastTextEditAt = Date()
+                }
+                return event
+            }
+            let textView = NSApp.keyWindow?.firstResponder as? NSTextView
+            switch Self.undoTarget(
+                lastStrokeAt: self.canvas.strokeDates.last,
+                lastTextEditAt: self.lastTextEditAt,
+                textCanUndo: textView?.undoManager?.canUndo == true
+            ) {
+            case .stroke:
+                self.canvas.removeLastStroke()
+                return nil
+            case .textField:
+                return event
+            }
         }
     }
 }

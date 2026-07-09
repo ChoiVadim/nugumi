@@ -120,4 +120,64 @@ final class AskNugumiDrawingTests: XCTestCase {
         XCTAssertGreaterThan(bottom.greenComponent, 0.85, "y-flipped mapping would draw here")
         XCTAssertGreaterThan(bottom.redComponent, 0.85)
     }
+
+    @MainActor
+    func testUndoTargetWithNoStrokesPassesToTextField() {
+        XCTAssertEqual(
+            AskDrawingOverlayController.undoTarget(
+                lastStrokeAt: nil,
+                lastTextEditAt: Date(timeIntervalSinceReferenceDate: 100),
+                textCanUndo: true
+            ),
+            .textField
+        )
+    }
+
+    @MainActor
+    func testUndoTargetPrefersStrokeWhenStrokeIsNewer() {
+        XCTAssertEqual(
+            AskDrawingOverlayController.undoTarget(
+                lastStrokeAt: Date(timeIntervalSinceReferenceDate: 200),
+                lastTextEditAt: Date(timeIntervalSinceReferenceDate: 100),
+                textCanUndo: true
+            ),
+            .stroke
+        )
+    }
+
+    @MainActor
+    func testUndoTargetPrefersTextWhenEditIsNewerAndUndoable() {
+        XCTAssertEqual(
+            AskDrawingOverlayController.undoTarget(
+                lastStrokeAt: Date(timeIntervalSinceReferenceDate: 100),
+                lastTextEditAt: Date(timeIntervalSinceReferenceDate: 200),
+                textCanUndo: true
+            ),
+            .textField
+        )
+    }
+
+    @MainActor
+    func testUndoTargetFallsBackToStrokeWhenTextUndoExhausted() {
+        XCTAssertEqual(
+            AskDrawingOverlayController.undoTarget(
+                lastStrokeAt: Date(timeIntervalSinceReferenceDate: 100),
+                lastTextEditAt: Date(timeIntervalSinceReferenceDate: 200),
+                textCanUndo: false
+            ),
+            .stroke
+        )
+    }
+
+    @MainActor
+    func testUndoTargetWithStrokesAndNoTextEditsUndoesStroke() {
+        XCTAssertEqual(
+            AskDrawingOverlayController.undoTarget(
+                lastStrokeAt: Date(timeIntervalSinceReferenceDate: 100),
+                lastTextEditAt: nil,
+                textCanUndo: false
+            ),
+            .stroke
+        )
+    }
 }
