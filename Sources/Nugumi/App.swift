@@ -9415,6 +9415,150 @@ enum SelfActivationGuard {
     static var isSuppressing: Bool { Date() < suppressUntil }
 }
 
+/// Transparent, non-activating overlay that covers the captured screen while
+/// the Ask Nugumi prompt is open. Mouse drags become freehand red strokes;
+/// at submit they are composited into the pending screen capture. The panel
+/// never becomes key, so typing stays in the prompt field the whole time.
+@MainActor
+final class AskDrawingOverlayController {
+    private final class OverlayPanel: NSPanel {
+        override var canBecomeKey: Bool { false }
+        override var canBecomeMain: Bool { false }
+    }
+
+    private final class StrokeCanvasView: NSView {
+        var strokes: [[NSPoint]] = [] {
+            didSet { needsDisplay = true }
+        }
+        private var activeStroke: [NSPoint] = []
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        // Cursor rects only apply to the key window and this panel is never
+        // key, so the crosshair needs an always-active tracking area instead.
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(
+                rect: bounds,
+                options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            ))
+        }
+
+        override func cursorUpdate(with event: NSEvent) {
+            NSCursor.crosshair.set()
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            activeStroke = [convert(event.locationInWindow, from: nil)]
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            activeStroke.append(convert(event.locationInWindow, from: nil))
+            needsDisplay = true
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            // A plain click (no drag) draws nothing — stray clicks stay
+            // harmless and never leave a dot on the screenshot.
+            if activeStroke.count > 1 {
+                strokes.append(activeStroke)
+            }
+            activeStroke = []
+            needsDisplay = true
+        }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.systemRed.setStroke()
+            for stroke in strokes + [activeStroke] where stroke.count > 1 {
+                let path = NSBezierPath()
+                path.lineWidth = 4
+                path.lineCapStyle = .round
+                path.lineJoinStyle = .round
+                path.move(to: stroke[0])
+                for point in stroke.dropFirst() {
+                    path.line(to: point)
+                }
+                path.stroke()
+            }
+        }
+    }
+
+    private let panel: OverlayPanel
+    private let canvas: StrokeCanvasView
+    private let screenFrame: NSRect
+    private var undoKeyMonitor: Any?
+    private var didClose = false
+
+    var window: NSWindow { panel }
+
+    /// Committed strokes in AppKit global (screen) coordinates — the exact
+    /// input `AskNugumiScreenCapture.annotated(with:)` expects.
+    var strokes: [[NSPoint]] {
+        canvas.strokes.map { stroke in
+            stroke.map { NSPoint(x: $0.x + screenFrame.minX, y: $0.y + screenFrame.minY) }
+        }
+    }
+
+    init(screenFrame: NSRect) {
+        self.screenFrame = screenFrame
+        canvas = StrokeCanvasView(frame: NSRect(origin: .zero, size: screenFrame.size))
+        panel = OverlayPanel(
+            contentRect: screenFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        // One notch below .floating so the Ask pill and pet panels (both
+        // .floating) stay clickable above the canvas.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        // Strokes must never leak into a screen capture — they are
+        // composited into the image at submit instead.
+        panel.sharingType = .none
+        // Explicit `false` opts out of AppKit's per-pixel transparency hit
+        // test: a fully clear window must still receive drawing drags.
+        panel.ignoresMouseEvents = false
+        panel.contentView = canvas
+        panel.orderFrontRegardless()
+        installUndoKeyMonitor()
+    }
+
+    /// Idempotent: every Ask teardown path calls this, some more than once.
+    func close() {
+        guard !didClose else { return }
+        didClose = true
+        if let undoKeyMonitor {
+            NSEvent.removeMonitor(undoKeyMonitor)
+            self.undoKeyMonitor = nil
+        }
+        panel.close()
+    }
+
+    // ⌘Z anywhere while the Ask UI is open removes the last stroke. A local
+    // monitor works for both the pill and the pet prompt (whichever is key)
+    // without touching their text fields; when there are no strokes the
+    // event passes through to the field's own undo.
+    private func installUndoKeyMonitor() {
+        undoKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers == "z",
+                  !self.canvas.strokes.isEmpty
+            else { return event }
+            self.canvas.strokes.removeLast()
+            return nil
+        }
+    }
+}
+
 @MainActor
 final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate {
     private static let textMovementUserInfoKey = "NSTextMovement"
