@@ -27,10 +27,69 @@ enum AskNugumiEmotion: String, Codable, Equatable {
     case concerned
 }
 
+enum AskNugumiAnnotationType: String, Codable, Equatable {
+    case ellipse
+    case rect
+    case arrow
+    case label
+}
+
+/// One model-drawn shape over the screenshot, in the same normalized
+/// 0.0–1.0 coordinate space as `AskNugumiPetTarget` (x left-to-right,
+/// y top-to-bottom). Flat optional fields instead of a polymorphic decoder;
+/// `isValid` enforces the per-type contract.
+struct AskNugumiAnnotation: Codable, Equatable {
+    let type: AskNugumiAnnotationType
+    // ellipse/rect: center + normalized size
+    let cx: Double?
+    let cy: Double?
+    let w: Double?
+    let h: Double?
+    // arrow
+    let fromX: Double?
+    let fromY: Double?
+    let toX: Double?
+    let toY: Double?
+    // label
+    let x: Double?
+    let y: Double?
+    let text: String?
+
+    var isValid: Bool {
+        switch type {
+        case .ellipse, .rect:
+            guard let cx, let cy, let w, let h else { return false }
+            return [cx, cy, w, h].allSatisfy(\.isFinite)
+                && (0...1).contains(cx) && (0...1).contains(cy)
+                && w > 0 && w <= 1 && h > 0 && h <= 1
+        case .arrow:
+            guard let fromX, let fromY, let toX, let toY else { return false }
+            return [fromX, fromY, toX, toY].allSatisfy { $0.isFinite && (0...1).contains($0) }
+        case .label:
+            guard let x, let y, let text else { return false }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return x.isFinite && y.isFinite
+                && (0...1).contains(x) && (0...1).contains(y)
+                && !trimmed.isEmpty && trimmed.count <= 60
+        }
+    }
+}
+
+/// Wrapper that turns a per-element decode failure into `nil` instead of
+/// failing the whole array — weak local models emit partially-broken shapes.
+private struct FailableDecodable<T: Decodable>: Decodable {
+    let value: T?
+
+    init(from decoder: Decoder) {
+        value = try? T(from: decoder)
+    }
+}
+
 struct AskNugumiResponse: Codable, Equatable {
     let message: String
     let petTarget: AskNugumiPetTarget?
     let emotion: AskNugumiEmotion?
+    let annotations: [AskNugumiAnnotation]
 
     static func parse(_ raw: String) -> AskNugumiResponse {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,12 +165,21 @@ struct AskNugumiResponse: Codable, Equatable {
         case message
         case petTarget
         case emotion
+        case annotations
     }
 
-    init(message: String, petTarget: AskNugumiPetTarget?, emotion: AskNugumiEmotion?) {
+    static let maxAnnotations = 12
+
+    init(
+        message: String,
+        petTarget: AskNugumiPetTarget?,
+        emotion: AskNugumiEmotion?,
+        annotations: [AskNugumiAnnotation] = []
+    ) {
         self.message = message.trimmingCharacters(in: .whitespacesAndNewlines)
         self.petTarget = petTarget?.isValid == true ? petTarget : nil
         self.emotion = emotion
+        self.annotations = Array(annotations.filter(\.isValid).prefix(Self.maxAnnotations))
     }
 
     init(from decoder: Decoder) throws {
@@ -119,8 +187,12 @@ struct AskNugumiResponse: Codable, Equatable {
         let message = try container.decode(String.self, forKey: .message)
         let petTarget = try? container.decode(AskNugumiPetTarget.self, forKey: .petTarget)
         let emotion = try? container.decode(AskNugumiEmotion.self, forKey: .emotion)
+        let annotations = (try? container.decode(
+            [FailableDecodable<AskNugumiAnnotation>].self,
+            forKey: .annotations
+        ))?.compactMap(\.value) ?? []
 
-        self.init(message: message, petTarget: petTarget, emotion: emotion)
+        self.init(message: message, petTarget: petTarget, emotion: emotion, annotations: annotations)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -128,6 +200,9 @@ struct AskNugumiResponse: Codable, Equatable {
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(petTarget, forKey: .petTarget)
         try container.encodeIfPresent(emotion, forKey: .emotion)
+        if !annotations.isEmpty {
+            try container.encode(annotations, forKey: .annotations)
+        }
     }
 }
 
