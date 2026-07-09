@@ -1076,6 +1076,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// which instantly closes its open menus/popovers, so a submit-time
     /// capture can never see them. Consumed by `submitAskNugumiPrompt`.
     private var pendingAskNugumiCapture: AskNugumiScreenCapture?
+    /// Draw-anywhere canvas over the captured screen; alive while the Ask
+    /// prompt is open, consumed (strokes → image) at submit.
+    private var askDrawingOverlay: AskDrawingOverlayController?
     private var isScreenshotTranslationRunning = false
     private var isAskNugumiRunning = false
     /// True while a cloud sign-in flow (ChatGPT or Claude) is on screen.
@@ -1597,6 +1600,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.pendingAskNugumiCapture = await self.captureScreenBeforeAskPromptTakesFocus()
                 self.presentPetAskPrompt()
+                self.presentAskDrawingOverlay()
             }
             return
         }
@@ -1610,6 +1614,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.askPromptController = nil
                 self.pendingAskNugumiCapture = nil
+                self.closeAskDrawingOverlay()
                 if self.isAskNugumiRunning {
                     self.cancelAskNugumiRequest()
                 }
@@ -1624,6 +1629,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             self.pendingAskNugumiCapture = await self.captureScreenBeforeAskPromptTakesFocus()
             guard self.askPromptController === controller else { return }
             controller.show()
+            self.presentAskDrawingOverlay()
         }
     }
 
@@ -1635,6 +1641,29 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         let sharingSnapshot = Self.hideAppWindowsFromScreenCapture()
         defer { Self.restoreAppWindowSharing(sharingSnapshot) }
         return try? await ScreenshotCapture.captureActiveScreen(containing: NSEvent.mouseLocation)
+    }
+
+    /// Shows the transparent drawing canvas over the screen that was just
+    /// captured (falling back to the cursor's screen if capture failed).
+    /// Clicks that land on it become strokes, so the prompt's outside-click
+    /// dismissal is exempted for this window.
+    @MainActor
+    private func presentAskDrawingOverlay() {
+        askDrawingOverlay?.close()
+        askDrawingOverlay = nil
+        let frame = pendingAskNugumiCapture?.screenFrame
+            ?? NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }?.frame
+            ?? NSScreen.main?.frame
+        guard let frame else { return }
+        let overlay = AskDrawingOverlayController(screenFrame: frame)
+        askDrawingOverlay = overlay
+        askPromptController?.drawingOverlayWindow = overlay.window
+    }
+
+    @MainActor
+    private func closeAskDrawingOverlay() {
+        askDrawingOverlay?.close()
+        askDrawingOverlay = nil
     }
 
     @MainActor
@@ -2048,6 +2077,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             onClose: { [weak self] in
                 guard let self else { return }
                 self.pendingAskNugumiCapture = nil
+                self.closeAskDrawingOverlay()
                 if self.isAskNugumiRunning {
                     self.cancelAskNugumiRequest()
                 }
@@ -2064,6 +2094,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.pendingAskNugumiCapture = await self.captureScreenBeforeAskPromptTakesFocus()
             self.presentPetAskPrompt()
+            self.presentAskDrawingOverlay()
         }
     }
 
@@ -2075,6 +2106,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             cancelAskNugumiRequest()
         }
         pendingAskNugumiCapture = nil
+        closeAskDrawingOverlay()
         askPromptController?.close()
         askPromptController = nil
         petController?.clearPrompt()
@@ -9571,6 +9603,9 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     private var isSubmitting = false
     private var globalOutsideClickMonitor: Any?
     private var localOutsideClickMonitor: Any?
+    /// While the drawing overlay is up, clicks landing on it are strokes,
+    /// not dismissals.
+    weak var drawingOverlayWindow: NSWindow?
 
     var isVisible: Bool { panel.isVisible }
 
@@ -9802,6 +9837,10 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
 
     private func closeIfClickIsOutside(_ event: NSEvent) {
         guard panel.isVisible else {
+            return
+        }
+
+        if let drawingOverlayWindow, event.window === drawingOverlayWindow {
             return
         }
 
