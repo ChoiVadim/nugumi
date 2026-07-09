@@ -9463,6 +9463,219 @@ enum SelfActivationGuard {
     static var isSuppressing: Bool { Date() < suppressUntil }
 }
 
+/// Click-through overlay that renders the model's explanation shapes
+/// (`annotations` in the Ask response) over the captured screen. Purely
+/// visual: it never takes mouse or keyboard input, so the user keeps
+/// working "through" it. Every answer replaces the whole layer.
+@MainActor
+final class AskAnnotationOverlayController {
+    private final class AnnotationPanel: NSPanel {
+        override var canBecomeKey: Bool { false }
+        override var canBecomeMain: Bool { false }
+
+        // Blanket updates (InvisibilityState.applyToAllOpenWindows, sharing
+        // snapshot/restore) must never make the annotation layer capturable:
+        // clamp every assignment to .none. The super call is load-bearing —
+        // an empty setter would never push .none to the window server at all.
+        override var sharingType: NSWindow.SharingType {
+            get { super.sharingType }
+            set { super.sharingType = .none }
+        }
+    }
+
+    private final class AnnotationCanvasView: NSView {
+        var screenFrame: NSRect = .zero
+        var annotations: [AskNugumiAnnotation] = [] {
+            didSet { needsDisplay = true }
+        }
+
+        private static let strokeWidth: CGFloat = 3
+        private static let haloWidth: CGFloat = 5.5
+        private static let haloColor = NSColor.white.withAlphaComponent(0.9)
+
+        override func draw(_ dirtyRect: NSRect) {
+            for annotation in annotations {
+                switch annotation.type {
+                case .ellipse:
+                    if let rect = localRect(for: annotation) {
+                        strokeWithHalo(NSBezierPath(ovalIn: rect))
+                    }
+                case .rect:
+                    if let rect = localRect(for: annotation) {
+                        strokeWithHalo(NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6))
+                    }
+                case .arrow:
+                    drawArrow(annotation)
+                case .label:
+                    drawLabel(annotation)
+                }
+            }
+        }
+
+        // Window covers `screenFrame`, so view-local = screen − frame origin.
+        private func localPoint(_ screenPoint: CGPoint) -> CGPoint {
+            CGPoint(x: screenPoint.x - screenFrame.minX, y: screenPoint.y - screenFrame.minY)
+        }
+
+        private func localRect(for annotation: AskNugumiAnnotation) -> CGRect? {
+            guard let cx = annotation.cx, let cy = annotation.cy,
+                  let w = annotation.w, let h = annotation.h
+            else { return nil }
+            let screenRect = AskNugumiCoordinateMapper.screenRect(
+                centerX: cx,
+                centerY: cy,
+                normalizedWidth: w,
+                normalizedHeight: h,
+                screenFrame: screenFrame
+            )
+            return CGRect(
+                origin: localPoint(screenRect.origin),
+                size: screenRect.size
+            )
+        }
+
+        private func strokeWithHalo(_ path: NSBezierPath) {
+            path.lineWidth = Self.haloWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            Self.haloColor.setStroke()
+            path.stroke()
+            path.lineWidth = Self.strokeWidth
+            NSColor.nugumiAccent.setStroke()
+            path.stroke()
+        }
+
+        private func drawArrow(_ annotation: AskNugumiAnnotation) {
+            guard let fromX = annotation.fromX, let fromY = annotation.fromY,
+                  let toX = annotation.toX, let toY = annotation.toY
+            else { return }
+            let from = localPoint(AskNugumiCoordinateMapper.exactScreenPoint(
+                normalizedX: fromX, normalizedY: fromY, screenFrame: screenFrame
+            ))
+            let to = localPoint(AskNugumiCoordinateMapper.exactScreenPoint(
+                normalizedX: toX, normalizedY: toY, screenFrame: screenFrame
+            ))
+
+            let angle = atan2(to.y - from.y, to.x - from.x)
+            let headLength: CGFloat = 14
+            let headWidth: CGFloat = 11
+            let shaftEnd = CGPoint(
+                x: to.x - cos(angle) * headLength,
+                y: to.y - sin(angle) * headLength
+            )
+
+            let shaft = NSBezierPath()
+            shaft.move(to: from)
+            shaft.line(to: shaftEnd)
+            strokeWithHalo(shaft)
+
+            let perpendicular = CGPoint(x: -sin(angle), y: cos(angle))
+            let head = NSBezierPath()
+            head.move(to: to)
+            head.line(to: CGPoint(
+                x: shaftEnd.x + perpendicular.x * headWidth / 2,
+                y: shaftEnd.y + perpendicular.y * headWidth / 2
+            ))
+            head.line(to: CGPoint(
+                x: shaftEnd.x - perpendicular.x * headWidth / 2,
+                y: shaftEnd.y - perpendicular.y * headWidth / 2
+            ))
+            head.close()
+            head.lineWidth = 2.5
+            Self.haloColor.setStroke()
+            head.stroke()
+            NSColor.nugumiAccent.setFill()
+            head.fill()
+        }
+
+        private func drawLabel(_ annotation: AskNugumiAnnotation) {
+            guard let x = annotation.x, let y = annotation.y,
+                  let text = annotation.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty
+            else { return }
+            let anchor = localPoint(AskNugumiCoordinateMapper.exactScreenPoint(
+                normalizedX: x, normalizedY: y, screenFrame: screenFrame
+            ))
+
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: NSColor.white
+            ]
+            let string = NSAttributedString(string: text, attributes: attributes)
+            let textSize = string.size()
+            let paddingX: CGFloat = 8
+            let paddingY: CGFloat = 4
+            var pill = CGRect(
+                x: anchor.x - textSize.width / 2 - paddingX,
+                y: anchor.y - textSize.height / 2 - paddingY,
+                width: textSize.width + paddingX * 2,
+                height: textSize.height + paddingY * 2
+            )
+            // Keep the pill on screen even for edge anchors.
+            pill.origin.x = min(max(pill.origin.x, 2), bounds.maxX - pill.width - 2)
+            pill.origin.y = min(max(pill.origin.y, 2), bounds.maxY - pill.height - 2)
+
+            let background = NSBezierPath(
+                roundedRect: pill,
+                xRadius: pill.height / 2,
+                yRadius: pill.height / 2
+            )
+            background.lineWidth = 2
+            Self.haloColor.setStroke()
+            background.stroke()
+            NSColor.nugumiAccent.setFill()
+            background.fill()
+            string.draw(at: CGPoint(
+                x: pill.midX - textSize.width / 2,
+                y: pill.midY - textSize.height / 2
+            ))
+        }
+    }
+
+    private let panel: AnnotationPanel
+    private let canvas: AnnotationCanvasView
+    private var didClose = false
+
+    let screenFrame: NSRect
+
+    init(screenFrame: NSRect) {
+        self.screenFrame = screenFrame
+        canvas = AnnotationCanvasView(frame: NSRect(origin: .zero, size: screenFrame.size))
+        canvas.screenFrame = screenFrame
+        panel = AnnotationPanel(
+            contentRect: screenFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        // Same shelf as the drawing canvas: below the .floating Ask panels.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.sharingType = .none
+        // Purely visual layer: the user clicks straight through it.
+        panel.ignoresMouseEvents = true
+        panel.contentView = canvas
+        panel.orderFrontRegardless()
+    }
+
+    /// Replaces the whole layer with this answer's shapes.
+    func show(_ annotations: [AskNugumiAnnotation]) {
+        canvas.annotations = annotations
+    }
+
+    /// Idempotent: teardown paths overlap.
+    func close() {
+        guard !didClose else { return }
+        didClose = true
+        panel.close()
+    }
+}
+
 /// Transparent, non-activating overlay that covers the captured screen while
 /// the Ask Nugumi prompt is open. Mouse drags become freehand red strokes;
 /// at submit they are composited into the pending screen capture. The panel
