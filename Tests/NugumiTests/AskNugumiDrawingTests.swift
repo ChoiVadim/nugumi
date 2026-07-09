@@ -101,4 +101,23 @@ final class AskNugumiDrawingTests: XCTestCase {
         let center = bitmap.colorAt(x: 20, y: 20)!
         XCTAssertGreaterThan(center.greenComponent, 0.85, "single point must not draw")
     }
+
+    func testAnnotatedPreservesVerticalOrientation() {
+        // Stroke near the TOP of the screen (AppKit y-up: y=70 of 80) must
+        // land near the TOP of the image. NSBitmapImageRep.colorAt(x:y:)
+        // addresses pixels from the top-left, so image-top means small y.
+        let capture = makeWhiteCapture(
+            pixelSide: 80,
+            screenFrame: CGRect(x: 0, y: 0, width: 80, height: 80)
+        )
+        let stroke = [NSPoint(x: 10, y: 70), NSPoint(x: 70, y: 70)]
+        let bitmap = decode(capture.annotated(with: [stroke]).image)
+        let top = bitmap.colorAt(x: 40, y: 10)!
+        XCTAssertGreaterThan(top.redComponent, 0.7, "stroke must land near the image top")
+        XCTAssertLessThan(top.greenComponent, 0.5)
+        // The mirrored position — where a y-flip regression would draw — stays white.
+        let bottom = bitmap.colorAt(x: 40, y: 70)!
+        XCTAssertGreaterThan(bottom.greenComponent, 0.85, "y-flipped mapping would draw here")
+        XCTAssertGreaterThan(bottom.redComponent, 0.85)
+    }
 }
