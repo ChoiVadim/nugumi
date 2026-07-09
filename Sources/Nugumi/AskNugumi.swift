@@ -259,6 +259,9 @@ Return only JSON. Use this default shape:
 When a screenshot is attached AND pointing at a specific visible element helps the user, use this shape:
 {"message":"short helpful answer","emotion":"neutral","petTarget":{"x":0.0,"y":0.0,"coordinateSpace":"screenshot_normalized"}}
 
+When a screenshot is attached AND drawing on top of it explains better than words alone, you may also add "annotations" — simple shapes rendered over the user's screen:
+{"message":"short helpful answer","emotion":"neutral","annotations":[{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},{"type":"rect","cx":0.60,"cy":0.20,"w":0.20,"h":0.10},{"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},{"type":"label","x":0.42,"y":0.50,"text":"click here"}]}
+
 Rules:
 - `message` is required and must be useful on its own.
 - `emotion` is optional. Use one of: "neutral", "happy", "surprised", "confused", "concerned".
@@ -269,6 +272,11 @@ Rules:
 - Use coordinateSpace exactly "screenshot_normalized".
 - Do not click, automate, or claim you took an action.
 - If uncertain about a location, omit `petTarget` and describe what to look for in `message`.
+- `annotations` is optional and only allowed when a screenshot is attached. Shapes use the same normalized 0.0–1.0 screenshot coordinates as `petTarget`.
+- `ellipse` and `rect` use the CENTER (`cx`, `cy`) plus width/height fractions (`w`, `h`). `arrow` goes from (`fromX`, `fromY`) to (`toX`, `toY`). `label` anchors its `text` (five words or fewer) at (`x`, `y`).
+- A few precise shapes beat many: circle one element, draw one arrow for a direction or relationship, box one region. Never more than 12 shapes.
+- If uncertain about a location, omit the shape and describe it in `message` instead.
+- Your previous annotations are erased with every new answer. To keep pointing at something across a follow-up, include its shapes again.
 """
 
     /// Base prompt, plus the Gen Z styling suffix when the global toggle is on,
@@ -296,12 +304,13 @@ Gen Z mode is ON. Write the `message` field the way a Gen Z native (born ~1997�
 User question:
 \(cleanQuestion)
 
-Coordinate guide for petTarget:
+Coordinate guide for petTarget and annotations:
 - x and y are normalized from 0.0 to 1.0 over the attached screenshot. x is the horizontal fraction from the left edge; y is the vertical fraction from the top edge.
 - Aim at the geometric center of the target element's visible bounding box (button, icon, control, or input). Never anchor to the top-left of a text label — in a vertical list of buttons or menu items, a label's top-left sits inside the previous row.
 - For small menu bar or status icons, use the icon glyph's visual center, not the surrounding hit area.
 - Before returning coordinates, identify the target's row/column context in `message` (for example: "the third item in the left sidebar, below New chat and above Artifacts") so you anchor to the correct sibling among visually similar elements.
 - Use coordinateSpace exactly "screenshot_normalized".
+- The same normalized coordinates apply to every `annotations` field (`cx`/`cy`, `fromX`/`fromY`/`toX`/`toY`, `x`/`y`).
 """
     }
 }

@@ -151,4 +151,24 @@ final class AskNugumiAnnotationTests: XCTestCase {
         )
         XCTAssertEqual(viaTarget, viaRaw)
     }
+
+    func testSystemPromptTeachesAnnotations() {
+        let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
+        XCTAssertTrue(prompt.contains("\"annotations\""))
+        XCTAssertTrue(prompt.contains("\"type\":\"ellipse\""))
+        XCTAssertTrue(prompt.contains("\"type\":\"arrow\""))
+        XCTAssertTrue(prompt.contains("erased with every new answer"))
+        // petTarget contract untouched.
+        XCTAssertTrue(prompt.contains("screenshot_normalized"))
+        XCTAssertTrue(prompt.contains("petTarget"))
+    }
+
+    func testCoordinateGuideCoversAnnotations() {
+        let withImage = AskNugumiPromptBuilder.prompt(question: "where?", hasImage: true)
+        XCTAssertTrue(withImage.contains("annotations"))
+
+        let withoutImage = AskNugumiPromptBuilder.prompt(question: "where?", hasImage: false)
+        XCTAssertFalse(withoutImage.contains("annotations"))
+        XCTAssertEqual(withoutImage, "where?")
+    }
 }
