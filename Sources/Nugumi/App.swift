@@ -9472,6 +9472,15 @@ final class AskDrawingOverlayController {
     private final class OverlayPanel: NSPanel {
         override var canBecomeKey: Bool { false }
         override var canBecomeMain: Bool { false }
+
+        // Blanket updates (InvisibilityState.applyToAllOpenWindows, sharing
+        // snapshot/restore) must never make the stroke canvas capturable:
+        // clamp every assignment to .none. The super call is load-bearing —
+        // an empty setter would never push .none to the window server at all.
+        override var sharingType: NSWindow.SharingType {
+            get { super.sharingType }
+            set { super.sharingType = .none }
+        }
     }
 
     private final class StrokeCanvasView: NSView {
