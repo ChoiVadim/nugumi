@@ -64,7 +64,10 @@ struct AskNugumiAnnotation: Codable, Equatable {
                 && w > 0 && w <= 1 && h > 0 && h <= 1
         case .arrow:
             guard let fromX, let fromY, let toX, let toY else { return false }
-            return [fromX, fromY, toX, toY].allSatisfy { $0.isFinite && (0...1).contains($0) }
+            let inRange = [fromX, fromY, toX, toY].allSatisfy { $0.isFinite && (0...1).contains($0) }
+            // A zero-length arrow has no direction; atan2(0,0) would render a
+            // meaningless right-pointing stub. ~0.001 normalized ≈ a few px.
+            return inRange && hypot(toX - fromX, toY - fromY) > 0.001
         case .label:
             guard let x, let y, let text else { return false }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

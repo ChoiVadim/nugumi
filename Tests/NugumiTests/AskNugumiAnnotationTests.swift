@@ -59,6 +59,13 @@ final class AskNugumiAnnotationTests: XCTestCase {
         XCTAssertEqual(response.annotations[0].type, .arrow)
     }
 
+    func testZeroLengthArrowIsDropped() {
+        let response = parse("""
+        [{"type":"arrow","fromX":0.5,"fromY":0.5,"toX":0.5,"toY":0.5}]
+        """)
+        XCTAssertEqual(response.annotations, [])
+    }
+
     func testLabelLongerThan60CharactersIsDropped() {
         let longText = String(repeating: "a", count: 61)
         let response = parse(

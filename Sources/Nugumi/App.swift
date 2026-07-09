@@ -2082,6 +2082,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             askPromptController?.close()
             askPromptController = nil
             petController?.clearPrompt()
+            closeAskAnnotationOverlay()
             presentScreenshotTranslationError(screenshotError)
             return
         }
@@ -2091,6 +2092,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             askPromptController?.close()
             askPromptController = nil
             petController?.clearPrompt()
+            closeAskAnnotationOverlay()
             return
         }
         analyticsClient.track(.errorOccurred, properties: [
@@ -9718,9 +9720,12 @@ final class AskAnnotationOverlayController {
         panel.orderFrontRegardless()
     }
 
-    /// Replaces the whole layer with this answer's shapes.
+    /// Replaces the whole layer with this answer's shapes. Re-ordering front
+    /// keeps replace semantics robust if another same-level window appeared
+    /// since init.
     func show(_ annotations: [AskNugumiAnnotation]) {
         canvas.annotations = annotations
+        panel.orderFrontRegardless()
     }
 
     /// Idempotent: teardown paths overlap.
