@@ -156,6 +156,7 @@ final class AskNugumiAnnotationTests: XCTestCase {
         XCTAssertTrue(prompt.contains("\"type\":\"arrow\""))
         XCTAssertTrue(prompt.contains("erased with every new answer"))
         // The pointer field is gone: annotations are the only pointing mechanism.
+        // (Literals split so this file passes the repo-wide tombstone grep for the removed field names.)
         XCTAssertFalse(prompt.contains("pet" + "Target"))
         XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
     }

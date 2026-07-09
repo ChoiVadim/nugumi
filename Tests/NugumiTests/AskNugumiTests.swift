@@ -57,6 +57,7 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertTrue(prompt.contains("normalized from 0.0 to 1.0"))
         XCTAssertTrue(prompt.contains("geometric center"))
         XCTAssertTrue(prompt.contains("Never anchor to the top-left of a text label"))
+        // (Literals split so this file passes the repo-wide tombstone grep for the removed field names.)
         XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
     }
 
@@ -74,6 +75,7 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertTrue(prompt.contains("desktop assistant"))
         XCTAssertTrue(prompt.contains("When the user attaches a screenshot"))
         XCTAssertTrue(prompt.contains("When no screenshot is attached, answer from general knowledge"))
+        // (Literals split so this file passes the repo-wide tombstone grep for the removed field names.)
         XCTAssertFalse(prompt.contains("pet" + "Target"))
         XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
         XCTAssertFalse(prompt.contains("The user will provide a screenshot"))

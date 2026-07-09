@@ -6810,8 +6810,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isPromptOpen || isPromptLoading
     }
 
-    /// Screen-space center of the pet panel. The floating target pointer
-    /// launches from here so it visibly travels from the character.
+    /// Screen-space center of the pet panel. The on-screen anchor for
+    /// launching Ask panels from the pet.
     var petAnchorPoint: NSPoint {
         NSPoint(x: panel.frame.midX, y: panel.frame.midY)
     }
@@ -7938,12 +7938,12 @@ final class PetController: NSObject, NSTextFieldDelegate {
     /// Drag the dialog bubble — and the pet with it — by tracking mouse
     /// movement until the user releases the button. Runs a synchronous event
     /// loop because that's the Cocoa-blessed way to handle window drag from a
-    /// view's mouseDown. The target marker is intentionally NOT translated:
-    /// it anchors to whatever on-screen object the answer is about, so the
-    /// user can drag the bubble to a readable spot without the pointer
-    /// losing its target. The caller supplies the initial screen-space mouse
-    /// location captured at mouseDown so drag-vs-click detection upstream
-    /// doesn't shift the anchor.
+    /// view's mouseDown. Annotation coordinates remain fixed to their screen
+    /// positions so they anchor to whatever on-screen objects the answer
+    /// describes, allowing the user to drag the bubble to a readable spot
+    /// without losing visual reference. The caller supplies the initial
+    /// screen-space mouse location captured at mouseDown so drag-vs-click
+    /// detection upstream doesn't shift the anchor.
     private func beginBubbleDrag(initialMouseLocation: NSPoint) {
         let initialPetOrigin = panel.frame.origin
         let initialPromptOrigin = promptPanel.frame.origin
