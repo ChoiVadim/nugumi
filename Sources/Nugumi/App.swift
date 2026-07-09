@@ -1061,6 +1061,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var translateButtonController: FloatingTranslateButtonController?
     private var floatingLoadingBar: FloatingTranslateButtonController?
     private var floatingTargetButton: FloatingTranslateButtonController?
+    /// Click-through layer with the model's explanation shapes; replaced on
+    /// every Ask answer, torn down with the answer UI.
+    private var askAnnotationOverlay: AskAnnotationOverlayController?
     /// Round loading bubble shown in place of the Ask Nugumi pill while a
     /// question is in flight. Unlike the pill, it has no outside-click
     /// monitors, so clicking elsewhere can't dismiss the in-flight request.
@@ -1592,6 +1595,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         translateButtonController = nil
         floatingTargetButton?.close()
         floatingTargetButton = nil
+        closeAskAnnotationOverlay()
         translationPanelController?.close()
         translationPanelController = nil
 
@@ -1857,6 +1861,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         self.floatingTargetButton?.close()
                         self.floatingTargetButton = nil
                     }
+                    self.presentAskAnnotations(response.annotations, capture: capture)
                 }
             } catch is CancellationError {
                 await MainActor.run { self?.clearAskNugumiRequestIfCurrent(requestID) }
@@ -1921,6 +1926,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 self.translationPanelController = nil
                 self.floatingTargetButton?.close()
                 self.floatingTargetButton = nil
+                self.closeAskAnnotationOverlay()
                 self.petController?.clearReady()
             }
         )
@@ -1934,6 +1940,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             floatingTargetButton?.close()
             floatingTargetButton = nil
         }
+        presentAskAnnotations(response.annotations, capture: capture)
     }
 
     @MainActor
@@ -1963,6 +1970,34 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             floatingTargetButton = button
         }
         button.pointAt(point, visibleFrame: capture.visibleFrame)
+    }
+
+    /// Replace-on-every-answer semantics: new shapes redraw the layer, an
+    /// empty list clears it — mirroring how the petTarget pointer already
+    /// moves or closes with each answer.
+    @MainActor
+    private func presentAskAnnotations(
+        _ annotations: [AskNugumiAnnotation],
+        capture: AskNugumiScreenCapture
+    ) {
+        guard !annotations.isEmpty else {
+            closeAskAnnotationOverlay()
+            return
+        }
+        if let existing = askAnnotationOverlay, existing.screenFrame == capture.screenFrame {
+            existing.show(annotations)
+        } else {
+            askAnnotationOverlay?.close()
+            let overlay = AskAnnotationOverlayController(screenFrame: capture.screenFrame)
+            overlay.show(annotations)
+            askAnnotationOverlay = overlay
+        }
+    }
+
+    @MainActor
+    private func closeAskAnnotationOverlay() {
+        askAnnotationOverlay?.close()
+        askAnnotationOverlay = nil
     }
 
     /// Brings up the round loading bubble centered on the pill's old
@@ -2008,6 +2043,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         guard let petController else { return }
+        // The pet's own answer-dismiss gesture (click/double-click/Escape)
+        // has no other route to the app delegate — see
+        // `PetController.onAnswerDismissedByUser`.
+        petController.onAnswerDismissedByUser = { [weak self] in
+            self?.closeAskAnnotationOverlay()
+        }
 
         if let target = response.petTarget {
             let presentation = AskNugumiPetAnswerTargetPresentationPolicy.presentation(
@@ -2023,6 +2064,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         } else {
             petController.showAnswer(response.message, emotion: response.emotion)
         }
+        presentAskAnnotations(response.annotations, capture: capture)
     }
 
     @MainActor
@@ -2094,6 +2136,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.pendingAskNugumiCapture = nil
                 self.closeAskDrawingOverlay()
+                self.closeAskAnnotationOverlay()
                 if self.isAskNugumiRunning {
                     self.cancelAskNugumiRequest()
                 }
@@ -2128,6 +2171,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController?.clearPrompt()
         floatingTargetButton?.close()
         floatingTargetButton = nil
+        closeAskAnnotationOverlay()
         hideAskFloatingLoadingBar()
     }
 
@@ -6894,6 +6938,13 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var onPromptSubmit: ((String) -> Void)?
     private var onPromptClose: (() -> Void)?
     var onContinue: (() -> Void)?
+    /// Fires when the user dismisses an open ANSWER bubble themselves (click
+    /// on the pet, double-click, or Escape) — `onPromptClose` is nilled out
+    /// by `showAnswer`, so this is the only signal the app delegate gets for
+    /// that gesture. Used to tear down UI the delegate layered on top of the
+    /// answer (e.g. the Ask annotation overlay), which PetController has no
+    /// reference to itself.
+    var onAnswerDismissedByUser: (() -> Void)?
     private var currentMode: TranslationMode
     private var isReadyLockedUntilPanelCloses = false
     private var isThinking = false
@@ -7487,8 +7538,12 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private func closePromptFromUser() {
         guard isPromptVisible else { return }
         let onClose = onPromptClose
+        let wasAnswerOpen = isAnswerOpen
         clearPrompt(animate: true)
         onClose?()
+        if wasAnswerOpen {
+            onAnswerDismissedByUser?()
+        }
     }
 
     private func clearPrompt(animate: Bool) {
