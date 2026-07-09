@@ -100,4 +100,55 @@ final class AskNugumiAnnotationTests: XCTestCase {
         XCTAssertEqual(response.annotations, [])
         XCTAssertEqual(response.message, "ok")
     }
+
+    // Non-zero-origin frame (second monitor) + asymmetric y so a y-flip
+    // regression fails loudly: normalized y is top-to-bottom, AppKit y is
+    // bottom-up.
+    private let frame = CGRect(x: 100, y: 200, width: 400, height: 300)
+
+    func testExactScreenPointMapsAsymmetricPoint() {
+        let point = AskNugumiCoordinateMapper.exactScreenPoint(
+            normalizedX: 0.25,
+            normalizedY: 0.10,
+            screenFrame: frame
+        )
+        // x: 100 + 0.25 * 400 = 200. y: near the TOP of the screen →
+        // AppKit y near maxY: 500 - 0.10 * 300 = 470 (a flip would give 230).
+        XCTAssertEqual(point.x, 200, accuracy: 0.001)
+        XCTAssertEqual(point.y, 470, accuracy: 0.001)
+    }
+
+    func testExactScreenPointClampsToFrame() {
+        let point = AskNugumiCoordinateMapper.exactScreenPoint(
+            normalizedX: 1.0,
+            normalizedY: 0.0,
+            screenFrame: frame
+        )
+        XCTAssertEqual(point.x, frame.maxX, accuracy: 0.001)
+        XCTAssertEqual(point.y, frame.maxY, accuracy: 0.001)
+    }
+
+    func testScreenRectCentersOnMappedPoint() {
+        let rect = AskNugumiCoordinateMapper.screenRect(
+            centerX: 0.5,
+            centerY: 0.25,
+            normalizedWidth: 0.1,
+            normalizedHeight: 0.2,
+            screenFrame: frame
+        )
+        // Center: x = 300, y = 500 - 0.25*300 = 425. Size: 40 × 60.
+        XCTAssertEqual(rect.midX, 300, accuracy: 0.001)
+        XCTAssertEqual(rect.midY, 425, accuracy: 0.001)
+        XCTAssertEqual(rect.width, 40, accuracy: 0.001)
+        XCTAssertEqual(rect.height, 60, accuracy: 0.001)
+    }
+
+    func testPetTargetMappingStillDelegatesUnchanged() {
+        let target = AskNugumiPetTarget(x: 0.25, y: 0.10, coordinateSpace: .screenshotNormalized)
+        let viaTarget = AskNugumiCoordinateMapper.exactScreenPoint(for: target, screenFrame: frame)
+        let viaRaw = AskNugumiCoordinateMapper.exactScreenPoint(
+            normalizedX: 0.25, normalizedY: 0.10, screenFrame: frame
+        )
+        XCTAssertEqual(viaTarget, viaRaw)
+    }
 }

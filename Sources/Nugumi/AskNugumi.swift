@@ -674,12 +674,53 @@ enum AskNugumiCoordinateMapper {
         for target: AskNugumiPetTarget,
         screenFrame: CGRect
     ) -> CGPoint {
-        let mappedX = screenFrame.minX + target.x * screenFrame.width
-        let mappedY = screenFrame.maxY - target.y * screenFrame.height
+        exactScreenPoint(
+            normalizedX: target.x,
+            normalizedY: target.y,
+            screenFrame: screenFrame
+        )
+    }
+
+    /// Normalized screenshot coordinates (x left-to-right, y top-to-bottom)
+    /// to AppKit screen points (y bottom-up), clamped into the frame.
+    static func exactScreenPoint(
+        normalizedX: Double,
+        normalizedY: Double,
+        screenFrame: CGRect
+    ) -> CGPoint {
+        let mappedX = screenFrame.minX + CGFloat(normalizedX) * screenFrame.width
+        let mappedY = screenFrame.maxY - CGFloat(normalizedY) * screenFrame.height
 
         return CGPoint(
             x: min(max(mappedX, screenFrame.minX), screenFrame.maxX),
             y: min(max(mappedY, screenFrame.minY), screenFrame.maxY)
+        )
+    }
+
+    /// Center-based normalized rect (as emitted in `annotations`) to an
+    /// AppKit screen rect. The center is clamped into the frame; the size
+    /// is a direct fraction of the frame.
+    static func screenRect(
+        centerX: Double,
+        centerY: Double,
+        normalizedWidth: Double,
+        normalizedHeight: Double,
+        screenFrame: CGRect
+    ) -> CGRect {
+        let center = exactScreenPoint(
+            normalizedX: centerX,
+            normalizedY: centerY,
+            screenFrame: screenFrame
+        )
+        let size = CGSize(
+            width: CGFloat(normalizedWidth) * screenFrame.width,
+            height: CGFloat(normalizedHeight) * screenFrame.height
+        )
+        return CGRect(
+            x: center.x - size.width / 2,
+            y: center.y - size.height / 2,
+            width: size.width,
+            height: size.height
         )
     }
 
