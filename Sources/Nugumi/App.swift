@@ -5862,6 +5862,75 @@ struct AskNugumiScreenCapture {
     let visibleFrame: CGRect
 }
 
+extension AskNugumiScreenCapture {
+    /// Burns user-drawn strokes (AppKit global screen points) into the
+    /// screenshot as red marks so the vision model can see what the user is
+    /// pointing at. Best-effort: any decode/encode failure returns `self`
+    /// unannotated — the request is never blocked on annotation.
+    func annotated(with strokes: [[NSPoint]]) -> AskNugumiScreenCapture {
+        guard strokes.contains(where: { $0.count > 1 }),
+              screenFrame.width > 0, screenFrame.height > 0,
+              let cgImage = NSBitmapImageRep(data: image.data)?.cgImage
+        else { return self }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else { return self }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        // AppKit global coordinates and CGContext both use a bottom-left
+        // origin, so the mapping is pure scale + offset — no y flip.
+        let scaleX = CGFloat(width) / screenFrame.width
+        let scaleY = CGFloat(height) / screenFrame.height
+        context.setStrokeColor(CGColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 1))
+        // 4 pt on screen scaled to image pixels, floored so marks stay
+        // visible on screenshots downscaled to the 2048 px vision edge.
+        context.setLineWidth(max(3, 4 * scaleX))
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+
+        for stroke in strokes where stroke.count > 1 {
+            let mapped = stroke.map { point in
+                CGPoint(
+                    x: (point.x - screenFrame.minX) * scaleX,
+                    y: (point.y - screenFrame.minY) * scaleY
+                )
+            }
+            let path = CGMutablePath()
+            path.move(to: mapped[0])
+            for point in mapped.dropFirst() {
+                path.addLine(to: point)
+            }
+            context.addPath(path)
+            context.strokePath()
+        }
+
+        guard let composited = context.makeImage() else { return self }
+        let bitmap = NSBitmapImageRep(cgImage: composited)
+        let jpegProps: [NSBitmapImageRep.PropertyKey: Any] = [.compressionFactor: 0.85]
+        guard let jpeg = bitmap.representation(using: .jpeg, properties: jpegProps)
+        else { return self }
+
+        return AskNugumiScreenCapture(
+            image: ImageInput(data: jpeg, mediaType: "image/jpeg"),
+            imagePixelSize: imagePixelSize,
+            screenFrame: screenFrame,
+            visibleFrame: visibleFrame
+        )
+    }
+}
+
 enum ScreenshotCapture {
     @MainActor
     static func captureActiveScreen(containing point: NSPoint = NSEvent.mouseLocation) async throws -> AskNugumiScreenCapture {
