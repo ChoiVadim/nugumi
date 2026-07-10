@@ -1967,7 +1967,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             initialMode: .selection,
             onTranslate: { _ in },
             onRewrite: { _ in },
-            onSmartReply: { _ in }
+            onSmartReply: { _ in },
+            onAsk: {}
         )
         bar.show()
         bar.setLoading()
@@ -3035,6 +3036,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     panelSide: panelSide,
                     restoresReadyOnUserDismiss: true
                 )
+            },
+            onAsk: { [weak self] in
+                self?.startAskNugumiPrompt()
             }
         )
 
@@ -4091,7 +4095,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     initialMode: .selection,
                     onTranslate: { _ in },
                     onRewrite: { _ in },
-                    onSmartReply: { _ in }
+                    onSmartReply: { _ in },
+                    onAsk: {}
                 )
                 bar.show()
             }
@@ -9125,8 +9130,8 @@ final class FloatingTranslateButtonController {
     private let onRewrite: (String) -> Void
     private let onSmartReply: (String) -> Void
     private let buttonView: FloatingTranslateButtonView
-    private var currentMode: TranslationMode
-    private var tabInterceptor: TabKeyInterceptor?
+    private let onAsk: () -> Void
+    private var radialMenu: RadialActionMenuController?
 
     init(
         screenPoint: NSPoint,
@@ -9134,13 +9139,14 @@ final class FloatingTranslateButtonController {
         initialMode: TranslationMode,
         onTranslate: @escaping (String) -> Void,
         onRewrite: @escaping (String) -> Void,
-        onSmartReply: @escaping (String) -> Void
+        onSmartReply: @escaping (String) -> Void,
+        onAsk: @escaping () -> Void
     ) {
         self.selectedText = selectedText
         self.onTranslate = onTranslate
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
-        self.currentMode = initialMode
+        self.onAsk = onAsk
 
         let buttonSize = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         let shadowPadding = AskNugumiFloatingTargetPresentationPolicy.shadowPadding
@@ -9173,56 +9179,59 @@ final class FloatingTranslateButtonController {
         panel.contentView = container
 
         buttonView.onClick = { [weak self] in
-            guard let self else { return }
-            self.invokeCurrentMode()
-        }
-        buttonView.onRightClick = { [weak self] in
-            self?.invokeRewriteMode()
+            self?.toggleRadialMenu()
         }
     }
 
     func show() {
         panel.orderFrontRegardless()
         buttonView.enableHoverScaling()
-        let interceptor = TabKeyInterceptor { [weak self] in
-            self?.toggleMode()
-        }
-        tabInterceptor = interceptor
-        interceptor.enable()
     }
 
     func close() {
-        tabInterceptor?.disable()
-        tabInterceptor = nil
+        radialMenu?.close()
+        radialMenu = nil
         panel.close()
     }
 
     func setLoading() {
         panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
+        radialMenu?.close()
+        radialMenu = nil
         buttonView.setLoading(true)
     }
 
-    private func toggleMode() {
-        currentMode = (currentMode == .smartReply) ? .selection : .smartReply
-        buttonView.apply(mode: currentMode)
-    }
-
-    private func invokeCurrentMode() {
-        switch currentMode {
-        case .selection, .revise, .reviseMessage:
-            onTranslate(selectedText)
-        case .draftMessage:
-            onRewrite(selectedText)
-        case .smartReply:
-            onSmartReply(selectedText)
+    private func toggleRadialMenu() {
+        if let radialMenu {
+            radialMenu.close()
+            self.radialMenu = nil
+            return
         }
+        let menu = RadialActionMenuController(
+            centeredOn: buttonCenterInScreen(),
+            ignoring: panel,
+            onSelect: { [weak self] action in
+                guard let self else { return }
+                self.radialMenu = nil
+                switch action {
+                case .explain: self.onTranslate(self.selectedText)
+                case .rewrite: self.onRewrite(self.selectedText)
+                case .reply: self.onSmartReply(self.selectedText)
+                case .ask: self.onAsk()
+                }
+            },
+            onDismiss: { [weak self] in
+                self?.radialMenu = nil
+            }
+        )
+        radialMenu = menu
+        menu.show()
     }
 
-    private func invokeRewriteMode() {
-        guard currentMode == .selection else { return }
-        onRewrite(selectedText)
+    private func buttonCenterInScreen() -> NSPoint {
+        let frameInWindow = buttonView.convert(buttonView.bounds, to: nil)
+        let screenRect = panel.convertToScreen(frameInWindow)
+        return NSPoint(x: screenRect.midX, y: screenRect.midY)
     }
 }
 
@@ -10267,14 +10276,7 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.image = Self.glyphImage(for: currentMode)
         actionButton.title = ""
         actionButton.imagePosition = .imageOnly
-        switch currentMode {
-        case .selection, .revise, .reviseMessage:
-            actionButton.toolTip = "Translate selection - right-click to Rewrite, Tab to switch to Reply"
-        case .draftMessage:
-            actionButton.toolTip = "Rewrite my text - Tab to switch to Reply"
-        case .smartReply:
-            actionButton.toolTip = "Generate reply - Tab to switch back"
-        }
+        actionButton.toolTip = "Choose an action"
     }
 
     /// A mode's glyph centered in a button-sized canvas with baked-in padding, so
