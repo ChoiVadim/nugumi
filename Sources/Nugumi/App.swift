@@ -8753,6 +8753,84 @@ final class PetMascotView: NSView {
     }
 }
 
+/// Actions offered by the radial menu that opens around the floating bar /
+/// pet. Labels avoid "translate" wording deliberately — house copy rule.
+enum RadialAction: CaseIterable {
+    case explain
+    case rewrite
+    case reply
+    case ask
+
+    var label: String {
+        switch self {
+        case .explain: return "Explain"
+        case .rewrite: return "Rewrite"
+        case .reply: return "Reply"
+        case .ask: return "Ask"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .explain: return "sparkles"
+        case .rewrite: return "pencil.line"
+        case .reply: return "arrowshape.turn.up.left"
+        case .ask: return "questionmark.bubble"
+        }
+    }
+}
+
+/// Pure geometry for the radial menu: where the four buttons sit around the
+/// anchor and how the ring shifts to stay on screen. Kept free of AppKit
+/// state so it is unit-testable.
+enum RadialMenuLayoutPolicy {
+    static let ringRadius: CGFloat = 64
+    static let buttonDiameter: CGFloat = 44
+    /// Room around the ring so hover labels under the buttons stay inside
+    /// the panel.
+    static let panelPadding: CGFloat = 28
+
+    static var panelSide: CGFloat {
+        (ringRadius + buttonDiameter / 2 + panelPadding) * 2
+    }
+
+    /// Offsets from the panel center, one per `RadialAction.allCases` entry:
+    /// explain on top, rewrite left, reply right, ask at the bottom.
+    static func buttonCenters() -> [CGPoint] {
+        [
+            CGPoint(x: 0, y: ringRadius),
+            CGPoint(x: -ringRadius, y: 0),
+            CGPoint(x: ringRadius, y: 0),
+            CGPoint(x: 0, y: -ringRadius),
+        ]
+    }
+
+    /// Panel frame centered on `anchor`, shifted (not shrunk) to stay inside
+    /// the screen. The bar/pet itself does not move; near edges the ring is
+    /// simply off-center around it.
+    static func panelFrame(anchor: NSPoint, screenVisibleFrame: NSRect) -> NSRect {
+        var frame = NSRect(
+            x: anchor.x - panelSide / 2,
+            y: anchor.y - panelSide / 2,
+            width: panelSide,
+            height: panelSide
+        )
+        if frame.minX < screenVisibleFrame.minX {
+            frame.origin.x = screenVisibleFrame.minX
+        }
+        if frame.maxX > screenVisibleFrame.maxX {
+            frame.origin.x = screenVisibleFrame.maxX - frame.width
+        }
+        if frame.minY < screenVisibleFrame.minY {
+            frame.origin.y = screenVisibleFrame.minY
+        }
+        if frame.maxY > screenVisibleFrame.maxY {
+            frame.origin.y = screenVisibleFrame.maxY - frame.height
+        }
+        return frame
+    }
+}
+
 @MainActor
 final class FloatingTranslateButtonController {
     private let panel: NSPanel
