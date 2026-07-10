@@ -1646,8 +1646,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
     /// Shows the transparent drawing canvas over the screen that was just
     /// captured (falling back to the cursor's screen if capture failed).
-    /// Clicks that land on it become strokes, so the prompt's outside-click
-    /// dismissal is exempted for this window.
+    /// Clicks on it become strokes; the Ask pill never dismisses on outside
+    /// clicks — only Esc or the shortcut toggle close it.
     @MainActor
     private func presentAskDrawingOverlay() {
         askDrawingOverlay?.close()
@@ -1656,9 +1656,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             ?? NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }?.frame
             ?? NSScreen.main?.frame
         guard let frame else { return }
-        let overlay = AskDrawingOverlayController(screenFrame: frame)
-        askDrawingOverlay = overlay
-        askPromptController?.drawingOverlayWindow = overlay.window
+        askDrawingOverlay = AskDrawingOverlayController(screenFrame: frame)
     }
 
     @MainActor
@@ -1696,13 +1694,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         // Hide the wide "Ask Nugumi" pill and surface the round loading bar
-        // instead. The pill's outside-click monitors close the panel on any
-        // background click, which currently kills in-flight requests; the
-        // small loading bar has `ignoresMouseEvents = true` and no global
-        // click monitors, so the user can click anywhere without losing
-        // the answer. If the request fails, `AskPromptController.showError`
-        // calls `panel.makeKeyAndOrderFront` and the pill reappears with
-        // the error text.
+        // instead — a compact "in flight" indicator that never intercepts
+        // clicks (`ignoresMouseEvents = true`). If the request fails,
+        // `AskPromptController.showError` calls `panel.makeKeyAndOrderFront`
+        // and the pill reappears with the error text.
         if selectionDisplayMode != .pet, let prompt = askPromptController {
             let pillCenter = prompt.panelCenter
             prompt.hidePanel()
@@ -9481,11 +9476,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     private let onClose: () -> Void
     private var didClose = false
     private var isSubmitting = false
-    private var globalOutsideClickMonitor: Any?
-    private var localOutsideClickMonitor: Any?
-    /// While the drawing overlay is up, clicks landing on it are strokes,
-    /// not dismissals.
-    weak var drawingOverlayWindow: NSWindow?
 
     var isVisible: Bool { panel.isVisible }
 
@@ -9536,7 +9526,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         SelfActivationGuard.activate()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(textField)
-        installOutsideClickMonitors()
     }
 
     func setLoading() {
@@ -9546,10 +9535,8 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         setPlaceholder("Looking...")
     }
 
-    /// Visually removes the pill while keeping the controller (and its
-    /// outside-click monitors) alive. `closeIfClickIsOutside` bails on
-    /// `panel.isVisible`, so clicks become no-ops until `showError` brings
-    /// the panel back via `makeKeyAndOrderFront`.
+    /// Visually removes the pill while keeping the controller alive, so
+    /// `showError` can bring it back via `makeKeyAndOrderFront`.
     func hidePanel() {
         panel.orderOut(nil)
     }
@@ -9567,7 +9554,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     func close() {
         guard !didClose else { return }
         didClose = true
-        removeOutsideClickMonitors()
         panel.close()
         onClose()
     }
@@ -9576,17 +9562,7 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         Task { @MainActor [weak self] in
             guard let self, !self.didClose else { return }
             self.didClose = true
-            self.removeOutsideClickMonitors()
             self.onClose()
-        }
-    }
-
-    deinit {
-        if let globalOutsideClickMonitor {
-            NSEvent.removeMonitor(globalOutsideClickMonitor)
-        }
-        if let localOutsideClickMonitor {
-            NSEvent.removeMonitor(localOutsideClickMonitor)
         }
     }
 
@@ -9685,51 +9661,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
 
     private func textMovement(from notification: Notification) -> Int? {
         notification.userInfo?[Self.textMovementUserInfoKey] as? Int
-    }
-
-    private func installOutsideClickMonitors() {
-        guard globalOutsideClickMonitor == nil, localOutsideClickMonitor == nil else {
-            return
-        }
-
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        globalOutsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.closeIfClickIsOutside(event)
-        }
-
-        localOutsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.closeIfClickIsOutside(event)
-            return event
-        }
-    }
-
-    private func removeOutsideClickMonitors() {
-        if let globalOutsideClickMonitor {
-            NSEvent.removeMonitor(globalOutsideClickMonitor)
-            self.globalOutsideClickMonitor = nil
-        }
-
-        if let localOutsideClickMonitor {
-            NSEvent.removeMonitor(localOutsideClickMonitor)
-            self.localOutsideClickMonitor = nil
-        }
-    }
-
-    private func closeIfClickIsOutside(_ event: NSEvent) {
-        guard panel.isVisible else {
-            return
-        }
-
-        if let drawingOverlayWindow, event.window === drawingOverlayWindow {
-            return
-        }
-
-        let screenPoint = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
-        guard !panel.frame.insetBy(dx: -4, dy: -4).contains(screenPoint) else {
-            return
-        }
-
-        close()
     }
 
     private static func origin(near point: NSPoint, size: NSSize) -> NSPoint {
