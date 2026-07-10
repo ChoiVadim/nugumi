@@ -8861,7 +8861,9 @@ final class RadialActionMenuController {
             container.addSubview(bubble)
             button.onHoverChange = { [weak bubble] hovered in
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.15
+                    // Ease the bubble in gently; hide fast so it never lags
+                    // behind the cursor leaving the button.
+                    context.duration = hovered ? 0.3 : 0.15
                     bubble?.animator().alphaValue = hovered ? 1 : 0
                 }
             }
