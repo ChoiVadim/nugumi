@@ -221,7 +221,7 @@ git commit -m "Add RadialAction and RadialMenuLayoutPolicy with layout tests"
 - Consumes: `RadialAction`, `RadialMenuLayoutPolicy` (Task 1); existing `InvisibilityState.apply(to:)`, `kVK_Escape` (already imported via Carbon.HIToolbox — used elsewhere in the file).
 - Produces (Tasks 3–4 rely on):
   - `@MainActor final class RadialActionMenuController`
-  - `init(centeredOn anchor: NSPoint, onSelect: @escaping (RadialAction) -> Void, onDismiss: @escaping () -> Void)`
+  - `init(centeredOn anchor: NSPoint, ignoring presenterWindow: NSWindow?, onSelect: @escaping (RadialAction) -> Void, onDismiss: @escaping () -> Void)` — `presenterWindow` is the bar/pet panel; clicks in it are left to the presenter's own toggle handler
   - `func show()`
   - `func close()` — silent teardown, does NOT call `onDismiss` (for presenter-initiated toggle/select paths)
   - `onDismiss` fires only for self-initiated closes: outside click, Escape, empty-backdrop click.
@@ -239,6 +239,10 @@ Insert below `RadialMenuLayoutPolicy`:
 @MainActor
 final class RadialActionMenuController {
     private let panel: NSPanel
+    /// The bar/pet panel that opened the menu. Its clicks are exempt from
+    /// the local dismiss monitor — the presenter's click handler owns the
+    /// toggle, and dismissing here first would make that handler reopen.
+    private weak var presenterWindow: NSWindow?
     private let onSelect: (RadialAction) -> Void
     private let onDismiss: () -> Void
     private var buttons: [RadialMenuButtonView] = []
@@ -247,9 +251,11 @@ final class RadialActionMenuController {
 
     init(
         centeredOn anchor: NSPoint,
+        ignoring presenterWindow: NSWindow?,
         onSelect: @escaping (RadialAction) -> Void,
         onDismiss: @escaping () -> Void
     ) {
+        self.presenterWindow = presenterWindow
         self.onSelect = onSelect
         self.onDismiss = onDismiss
 
@@ -345,14 +351,27 @@ final class RadialActionMenuController {
 
     /// The panel is non-activating and never key, so Escape needs both a
     /// local monitor (Nugumi frontmost) and a global one (another app
-    /// frontmost — observed, not consumed). Global mouse clicks land in
-    /// other apps; clicks on Nugumi's own bar/pet toggle via their handlers.
+    /// frontmost — observed, not consumed). Mouse clicks: the global monitor
+    /// covers other apps, the local one covers Nugumi's own windows — except
+    /// the menu itself and the presenting bar/pet, whose click handler owns
+    /// the toggle.
     private func installDismissMonitors() {
+        guard dismissMonitors.isEmpty else { return }
         var monitors: [Any?] = []
         monitors.append(NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.dismiss() }
+        })
+        monitors.append(NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            guard let self,
+                  event.window !== self.panel,
+                  event.window !== self.presenterWindow
+            else { return event }
+            Task { @MainActor [weak self] in self?.dismiss() }
+            return event
         })
         monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == UInt16(kVK_Escape) else { return event }
@@ -378,6 +397,10 @@ private final class RadialMenuBackdropView: NSView {
     var onEmptyClick: (() -> Void)?
 
     override func mouseDown(with event: NSEvent) {
+        onEmptyClick?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
         onEmptyClick?()
     }
 }
@@ -620,6 +643,7 @@ with:
         }
         let menu = RadialActionMenuController(
             centeredOn: buttonCenterInScreen(),
+            ignoring: panel,
             onSelect: { [weak self] action in
                 guard let self else { return }
                 self.radialMenu = nil
@@ -800,6 +824,7 @@ Also add the same two lines to `close()` (the method that invalidates timers and
         guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
         let menu = RadialActionMenuController(
             centeredOn: petCenterInScreen(),
+            ignoring: panel,
             onSelect: { [weak self] action in
                 guard let self else { return }
                 self.radialMenu = nil
