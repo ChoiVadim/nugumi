@@ -28,7 +28,24 @@ in a second coordinate space; explicitly out of scope here.
 
 ## Response schema (`Sources/Nugumi/AskNugumi.swift`)
 
-New optional field on `AskNugumiResponse`:
+> **Protocol v2 (amended 2026-07-10, supersedes the JSON envelope below).**
+> Asking the model for multi-line markdown inside a JSON string field made
+> the two goals fight: strict JSON flattened the text, good markdown broke
+> the JSON (the model split its output and the shapes leaked into the
+> visible answer). The wire format is now **plain markdown answer text +
+> one trailing fenced ` ```annotations ` block containing a bare JSON array
+> of shapes**. Parser precedence: (1) trailing fence — qualifies by info
+> string `annotations`, or by payload actually decoding to valid shapes
+> (including a ` ```json ` fence wrapping `{"annotations": [...]}`); an
+> `annotations`-labeled fence is stripped from the visible message even
+> when its JSON is broken (the machine block is never shown); user-facing
+> code fences never qualify; (2) legacy whole/embedded `{"message": ...}`
+> JSON object, kept as a fallback for models that still answer in the
+> retired shape; (3) plain text. `emotion` is retired from the protocol
+> entirely (schema field deleted; stray keys ignored; the pet answers with
+> its default face). Validation (per-shape `isValid`, cap 12) is unchanged.
+
+Retired v1 envelope (kept for historical context):
 
 ```json
 {

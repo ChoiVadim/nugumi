@@ -2001,7 +2001,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // plain text so list markers survive and `**`/`|` never leak raw.
         petController.showAnswer(
             TranslationContentView.flattenedMarkdown(response.message),
-            emotion: response.emotion
+            emotion: nil
         )
         presentAskAnnotations(response.annotations, capture: capture)
     }
@@ -12917,7 +12917,7 @@ struct OllamaClient: LLMBackend {
 
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", emotion: nil)
+            return AskNugumiResponse(message: "")
         }
 
         var messages: [ChatMessage] = [
@@ -13142,7 +13142,7 @@ struct OpenAIChatClient: LLMBackend {
 
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", emotion: nil)
+            return AskNugumiResponse(message: "")
         }
 
         let currentPrompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
@@ -14486,7 +14486,7 @@ struct ClaudeCodeClient: LLMBackend {
         }
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", emotion: nil)
+            return AskNugumiResponse(message: "")
         }
 
         var messages: [[String: Any]] = []
@@ -15175,7 +15175,7 @@ struct OpenAICodexClient: LLMBackend {
         }
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanQuestion.isEmpty else {
-            return AskNugumiResponse(message: "", emotion: nil)
+            return AskNugumiResponse(message: "")
         }
         let currentPrompt = AskNugumiPromptBuilder.prompt(question: cleanQuestion, hasImage: image != nil)
 

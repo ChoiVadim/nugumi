@@ -72,12 +72,20 @@ private struct FailableDecodable<T: Decodable>: Decodable {
 
 struct AskNugumiResponse: Codable, Equatable {
     let message: String
-    let emotion: AskNugumiEmotion?
     let annotations: [AskNugumiAnnotation]
 
     static func parse(_ raw: String) -> AskNugumiResponse {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Preferred protocol: a markdown answer with one trailing fenced
+        // annotations block. Human text and machine block never share an
+        // encoding, so neither can corrupt the other.
+        if let split = splitAnnotationsFence(from: trimmed) {
+            return AskNugumiResponse(message: split.message, annotations: split.annotations)
+        }
+
+        // Legacy fallbacks: a whole-string or embedded {"message": ...}
+        // object, for models that still answer in the retired JSON shape.
         if let decoded = parseJSONResponse(from: trimmed) {
             return decoded
         }
@@ -87,7 +95,63 @@ struct AskNugumiResponse: Codable, Equatable {
             return decoded
         }
 
-        return AskNugumiResponse(message: trimmed, emotion: nil)
+        return AskNugumiResponse(message: trimmed)
+    }
+
+    /// Detects the trailing machine block. A fenced block qualifies when its
+    /// info string is `annotations`, or when its payload actually decodes to
+    /// shapes (models sometimes label the block ```json — or wrap the array
+    /// in an {"annotations": ...} object). An `annotations`-labeled block is
+    /// stripped from the visible message even when its JSON is broken: the
+    /// machine block must never be shown to the user. Ordinary user-facing
+    /// code fences don't qualify and stay in the message untouched.
+    private static func splitAnnotationsFence(
+        from text: String
+    ) -> (message: String, annotations: [AskNugumiAnnotation])? {
+        let pattern = "```([A-Za-z]*)[ \\t]*\\n([\\s\\S]*?)\\n?```"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard let match = matches.last else { return nil }
+
+        let info = ns.substring(with: match.range(at: 1)).lowercased()
+        let payload = ns.substring(with: match.range(at: 2))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let decoded = decodeAnnotationsPayload(payload)
+
+        guard info == "annotations" || decoded?.isEmpty == false else {
+            return nil
+        }
+
+        let message = ns.replacingCharacters(in: match.range, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (message, decoded ?? [])
+    }
+
+    /// Lenient decode of the fence payload: a bare shape array, or an object
+    /// wrapping one under an "annotations" key (stray keys ignored). Returns
+    /// nil when the payload isn't annotations-shaped at all, so unrelated
+    /// JSON in a user-facing code example never gets swallowed.
+    private static func decodeAnnotationsPayload(_ payload: String) -> [AskNugumiAnnotation]? {
+        guard let data = payload.data(using: .utf8) else { return nil }
+        let decoder = JSONDecoder()
+
+        let items: [FailableDecodable<AskNugumiAnnotation>]?
+        if let array = try? decoder.decode([FailableDecodable<AskNugumiAnnotation>].self, from: data) {
+            items = array
+        } else if let wrapper = try? decoder.decode(AnnotationsWrapper.self, from: data) {
+            items = wrapper.annotations
+        } else {
+            items = nil
+        }
+
+        guard let items else { return nil }
+        let valid = items.compactMap(\.value).filter(\.isValid)
+        return valid.isEmpty ? nil : valid
+    }
+
+    private struct AnnotationsWrapper: Decodable {
+        let annotations: [FailableDecodable<AskNugumiAnnotation>]?
     }
 
     private static func parseJSONResponse(from json: String) -> AskNugumiResponse? {
@@ -98,7 +162,7 @@ struct AskNugumiResponse: Codable, Equatable {
         }
 
         guard !decoded.message.isEmpty else {
-            return AskNugumiResponse(message: "", emotion: nil)
+            return AskNugumiResponse(message: "")
         }
 
         return decoded
@@ -147,7 +211,6 @@ struct AskNugumiResponse: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case message
-        case emotion
         case annotations
     }
 
@@ -155,30 +218,26 @@ struct AskNugumiResponse: Codable, Equatable {
 
     init(
         message: String,
-        emotion: AskNugumiEmotion?,
         annotations: [AskNugumiAnnotation] = []
     ) {
         self.message = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.emotion = emotion
         self.annotations = Array(annotations.filter(\.isValid).prefix(Self.maxAnnotations))
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let message = try container.decode(String.self, forKey: .message)
-        let emotion = try? container.decode(AskNugumiEmotion.self, forKey: .emotion)
         let annotations = (try? container.decode(
             [FailableDecodable<AskNugumiAnnotation>].self,
             forKey: .annotations
         ))?.compactMap(\.value) ?? []
 
-        self.init(message: message, emotion: emotion, annotations: annotations)
+        self.init(message: message, annotations: annotations)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(message, forKey: .message)
-        try container.encodeIfPresent(emotion, forKey: .emotion)
         if !annotations.isEmpty {
             try container.encode(annotations, forKey: .annotations)
         }
@@ -232,22 +291,27 @@ You are Nugumi, a concise and helpful desktop assistant. Answer the user's quest
 
 When the user attaches a screenshot, you can see what is currently on their screen and answer about it. When no screenshot is attached, answer from general knowledge.
 
-Return only JSON. Use this default shape:
-{"message":"short helpful answer","emotion":"neutral"}
+Write the answer as plain text, not JSON. Markdown is welcome when structure genuinely helps: "-" bullets or numbered lists for steps, **bold** for the key term or the direct answer, a small table for comparisons. Keep it concise and scannable — plain prose for one-sentence answers, never headings.
 
-When a screenshot is attached AND drawing on top of it explains better than words alone, you may also add "annotations" — simple shapes rendered over the user's screen:
-{"message":"short helpful answer","emotion":"neutral","annotations":[{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},{"type":"rect","cx":0.60,"cy":0.20,"w":0.20,"h":0.10},{"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},{"type":"label","x":0.42,"y":0.50,"text":"click here"}]}
+When a screenshot is attached AND drawing on top of it explains better than words alone, append exactly one fenced block at the very end of the answer, after a blank line:
 
-Rules:
-- `message` is required and must be useful on its own.
-- `message` may use Markdown when structure genuinely helps: "-" bullets or numbered lists for steps, **bold** for the key term or the direct answer, a small table for comparisons. Keep it concise and scannable — plain prose for one-sentence answers, never headings.
-- `emotion` is optional. Use one of: "neutral", "happy", "surprised", "confused", "concerned".
-- Do not click, automate, or claim you took an action.
-- `annotations` is optional and only allowed when a screenshot is attached. Shapes use normalized 0.0–1.0 screenshot coordinates (x left-to-right, y top-to-bottom).
-- `ellipse` and `rect` use the CENTER (`cx`, `cy`) plus width/height fractions (`w`, `h`). `arrow` goes from (`fromX`, `fromY`) to (`toX`, `toY`). `label` anchors its `text` (five words or fewer) at (`x`, `y`).
-- A few precise shapes beat many: circle one element, draw one arrow for a direction or relationship, box one region. Never more than 12 shapes.
-- If uncertain about a location, omit the shape and describe it in `message` instead.
+```annotations
+[{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},
+ {"type":"rect","cx":0.60,"cy":0.20,"w":0.20,"h":0.10},
+ {"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},
+ {"type":"label","x":0.42,"y":0.50,"text":"click here"}]
+```
+
+Annotation rules:
+- The block contains ONLY a JSON array — double quotes, no comments, nothing after the closing fence. It is machine-read and never shown to the user; the answer text must stand on its own without it.
+- Coordinates are normalized 0.0–1.0 over the screenshot: x left-to-right, y top-to-bottom.
+- "ellipse" and "rect" take the CENTER ("cx", "cy") plus width/height fractions ("w", "h"). "arrow" goes from ("fromX", "fromY") to ("toX", "toY"). "label" anchors its "text" (five words or fewer) at ("x", "y").
+- A few precise shapes beat many: circle one element, draw one arrow per direction or relationship, box one region. Never more than 12 shapes.
+- If uncertain about a location, skip the shape and describe it in words instead.
 - Your previous annotations are erased with every new answer. To keep pointing at something across a follow-up, include its shapes again.
+- Never add the block when no screenshot is attached.
+
+Do not click, automate, or claim you took an action.
 """
 
     /// Base prompt, plus the Gen Z styling suffix when the global toggle is on,
@@ -259,9 +323,9 @@ Rules:
 
     /// Gen Z overlay for Ask answers. Ask replies in the question's own language
     /// (unknown at prompt-build time), so this stays language-agnostic and leans
-    /// on the model's multilingual slang — and must not break the JSON shape.
+    /// on the model's multilingual slang — and must not break the answer format.
     private static let genZSuffix = """
-Gen Z mode is ON. Write the `message` field the way a Gen Z native (born ~1997–2012) would actually text it — casual, all-lowercase, ironic and a little deadpan, using the native youth slang of whatever language you are answering in (never switch languages to do it). Keep it short. The #1 rule is restraint: at most 1–2 slang markers — piling it on is the dead giveaway of an adult faking it; when unsure, drop the slang. Write laughter as 💀 or 😭, never 😂. This restyles ONLY the wording inside `message` — keep the JSON shape, field names, and the emotion/annotations rules above exactly as specified.
+Gen Z mode is ON. Write the answer text the way a Gen Z native (born ~1997–2012) would actually text it — casual, all-lowercase, ironic and a little deadpan, using the native youth slang of whatever language you are answering in (never switch languages to do it). Keep it short. The #1 rule is restraint: at most 1–2 slang markers — piling it on is the dead giveaway of an adult faking it; when unsure, drop the slang. Write laughter as 💀 or 😭, never 😂. This restyles ONLY the answer wording — keep the annotations block format and its rules above exactly as specified.
 """
 
     static func prompt(question: String, hasImage: Bool) -> String {

@@ -13,10 +13,11 @@ final class AskNugumiTests: XCTestCase {
         let response = AskNugumiResponse.parse(raw)
 
         XCTAssertEqual(response.message, "Use the button on the right.")
-        XCTAssertEqual(response.emotion, .happy)
     }
 
-    func testParsesOptionalEmotion() {
+    func testIgnoresStrayLegacyKeysInJSON() {
+        // Older models may still emit retired fields; they must be ignored,
+        // never break message extraction.
         let raw = """
         {"message":"That worked.","emotion":"happy"}
         """
@@ -24,18 +25,6 @@ final class AskNugumiTests: XCTestCase {
         let response = AskNugumiResponse.parse(raw)
 
         XCTAssertEqual(response.message, "That worked.")
-        XCTAssertEqual(response.emotion, .happy)
-    }
-
-    func testRejectsUnsupportedEmotion() {
-        let raw = """
-        {"message":"I am not sure.","emotion":"sleepy"}
-        """
-
-        let response = AskNugumiResponse.parse(raw)
-
-        XCTAssertEqual(response.message, "I am not sure.")
-        XCTAssertNil(response.emotion)
     }
 
     func testFallsBackToPlainMessageForNonJSON() {
@@ -83,8 +72,18 @@ final class AskNugumiTests: XCTestCase {
 
     func testSystemPromptAllowsMarkdownInMessage() {
         let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
-        XCTAssertTrue(prompt.contains("may use Markdown"))
+        XCTAssertTrue(prompt.contains("Markdown is welcome"))
         XCTAssertTrue(prompt.contains("numbered lists for steps"))
+    }
+
+    func testSystemPromptUsesPlainTextPlusAnnotationsFenceProtocol() {
+        let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
+        XCTAssertTrue(prompt.contains("plain text, not JSON"))
+        XCTAssertTrue(prompt.contains("```annotations"))
+        XCTAssertFalse(prompt.contains("Return only JSON"))
+        XCTAssertFalse(prompt.contains("emotion"))
+        // Gen Z suffix must not resurrect the retired protocol either.
+        XCTAssertFalse(AskNugumiPromptBuilder.systemPrompt(genZ: true).contains("emotion"))
     }
 
     @MainActor
@@ -150,7 +149,7 @@ final class AskNugumiTests: XCTestCase {
     func testAskSystemPromptIncludesAboutUser() {
         let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false, aboutUser: "I'm a PostgreSQL developer.")
 
-        XCTAssertTrue(prompt.contains("Return only JSON"))
+        XCTAssertTrue(prompt.contains("desktop assistant"))
         XCTAssertTrue(prompt.contains("I'm a PostgreSQL developer."))
     }
 

@@ -84,7 +84,6 @@ final class AskNugumiAnnotationTests: XCTestCase {
     func testRoundTripPreservesValidAnnotations() throws {
         let original = AskNugumiResponse(
             message: "look",
-            emotion: .happy,
             annotations: [
                 AskNugumiAnnotation(
                     type: .arrow,
@@ -97,6 +96,75 @@ final class AskNugumiAnnotationTests: XCTestCase {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AskNugumiResponse.self, from: data)
         XCTAssertEqual(decoded, original)
+    }
+
+    // MARK: - Protocol v2: markdown body + trailing ```annotations fence
+
+    func testParsesProseWithTrailingAnnotationsFence() {
+        let raw = """
+        The **peak** is on the right.
+
+        ```annotations
+        [{"type":"ellipse","cx":0.9,"cy":0.3,"w":0.05,"h":0.09},
+         {"type":"label","x":0.86,"y":0.27,"text":"peak"}]
+        ```
+        """
+        let response = AskNugumiResponse.parse(raw)
+        XCTAssertEqual(response.message, "The **peak** is on the right.")
+        XCTAssertEqual(response.annotations.count, 2)
+        XCTAssertEqual(response.annotations[0].type, .ellipse)
+        XCTAssertEqual(response.annotations[1].text, "peak")
+    }
+
+    func testParsesJsonInfoFenceCarryingAnnotations() {
+        // Regression: models sometimes wrap the shapes in a ```json fence
+        // with an {"annotations": ...} object and stray legacy keys.
+        let raw = """
+        Answer text here.
+
+        ```json
+        {"annotations":[{"type":"ellipse","cx":0.916,"cy":0.335,"w":0.05,"h":0.09}],"emotion":"happy"}
+        ```
+        """
+        let response = AskNugumiResponse.parse(raw)
+        XCTAssertEqual(response.message, "Answer text here.")
+        XCTAssertEqual(response.annotations.count, 1)
+    }
+
+    func testStripsBrokenAnnotationsFenceFromMessage() {
+        // Deterministic backstop: the machine block is never shown to the
+        // user, even when its JSON is unparseable.
+        let raw = """
+        Text.
+
+        ```annotations
+        [{"type":"ellipse", broken
+        ```
+        """
+        let response = AskNugumiResponse.parse(raw)
+        XCTAssertEqual(response.message, "Text.")
+        XCTAssertEqual(response.annotations, [])
+    }
+
+    func testLeavesUserFacingCodeFenceAlone() {
+        let raw = """
+        Use this:
+
+        ```swift
+        print("hi")
+        ```
+        """
+        let response = AskNugumiResponse.parse(raw)
+        XCTAssertEqual(response.annotations, [])
+        XCTAssertTrue(response.message.contains("print(\"hi\")"))
+        XCTAssertTrue(response.message.contains("```swift"))
+    }
+
+    func testLegacyJSONObjectStillParses() {
+        let raw = "{\"message\":\"legacy\",\"annotations\":[{\"type\":\"rect\",\"cx\":0.5,\"cy\":0.5,\"w\":0.1,\"h\":0.1}]}"
+        let response = AskNugumiResponse.parse(raw)
+        XCTAssertEqual(response.message, "legacy")
+        XCTAssertEqual(response.annotations.count, 1)
     }
 
     func testMalformedAnnotationsFieldFallsBackToEmpty() {
@@ -151,7 +219,7 @@ final class AskNugumiAnnotationTests: XCTestCase {
 
     func testSystemPromptTeachesAnnotations() {
         let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
-        XCTAssertTrue(prompt.contains("\"annotations\""))
+        XCTAssertTrue(prompt.contains("```annotations"))
         XCTAssertTrue(prompt.contains("\"type\":\"ellipse\""))
         XCTAssertTrue(prompt.contains("\"type\":\"arrow\""))
         XCTAssertTrue(prompt.contains("erased with every new answer"))
