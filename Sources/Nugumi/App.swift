@@ -8709,7 +8709,7 @@ enum RadialAction: CaseIterable {
 
     var symbolName: String {
         switch self {
-        case .explain: return "sparkles"
+        case .explain: return "text.magnifyingglass"
         case .rewrite: return "pencil.line"
         case .reply: return "arrowshape.turn.up.left"
         case .ask: return "questionmark.bubble"
@@ -8831,7 +8831,7 @@ final class RadialActionMenuController {
             }
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,
-                y: panelCenter.y + offset.y - button.frame.height / 2
+                y: panelCenter.y + offset.y - button.frame.height / 2 - button.circleCenterOffsetY
             ))
             container.addSubview(button)
             buttons.append(button)
@@ -8870,7 +8870,7 @@ final class RadialActionMenuController {
             let target = button.frame
             button.frame = NSRect(
                 x: container.bounds.midX - target.width / 2,
-                y: container.bounds.midY - target.height / 2,
+                y: container.bounds.midY - target.height / 2 - button.circleCenterOffsetY,
                 width: target.width,
                 height: target.height
             )
@@ -8953,6 +8953,13 @@ private final class RadialMenuButtonView: NSView {
     private let labelField: NSTextField
     private var trackingArea: NSTrackingArea?
 
+    /// The visible circle sits above the view's own center — the bottom label
+    /// reserve pushes it up — so ring layout must place the CIRCLE's center,
+    /// not the view's, on the ring point.
+    var circleCenterOffsetY: CGFloat {
+        circleView.frame.midY - bounds.midY
+    }
+
     init(action: RadialAction, onPick: @escaping (RadialAction) -> Void) {
         self.action = action
         self.onPick = onPick
@@ -8990,6 +8997,9 @@ private final class RadialMenuButtonView: NSView {
         )
         iconView.contentTintColor = .labelColor
         iconView.imageAlignment = .alignCenter
+        // Natural symbol size, dead-center: proportional-down fitting can
+        // nudge the glyph a point off-center when the fitted size rounds.
+        iconView.imageScaling = .scaleNone
         iconView.frame = circleView.bounds
         iconView.autoresizingMask = [.width, .height]
         circleView.addSubview(iconView)
@@ -9138,6 +9148,7 @@ final class FloatingTranslateButtonController {
         if let radialMenu {
             radialMenu.close()
             self.radialMenu = nil
+            buttonView.setMenuOpen(false)
             return
         }
         let menu = RadialActionMenuController(
@@ -9146,6 +9157,7 @@ final class FloatingTranslateButtonController {
             onSelect: { [weak self] action in
                 guard let self else { return }
                 self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
                 switch action {
                 case .explain: self.onTranslate(self.selectedText)
                 case .rewrite: self.onRewrite(self.selectedText)
@@ -9154,11 +9166,14 @@ final class FloatingTranslateButtonController {
                 }
             },
             onDismiss: { [weak self] in
-                self?.radialMenu = nil
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
             }
         )
         radialMenu = menu
         menu.show()
+        buttonView.setMenuOpen(true)
     }
 
     private func buttonCenterInScreen() -> NSPoint {
@@ -10196,38 +10211,51 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.toolTip = "Choose an action"
     }
 
+    /// While the radial menu is open the bar is its close affordance — the
+    /// glyph flips to an ✕ so the second click reads as "close", not "act".
+    func setMenuOpen(_ open: Bool) {
+        guard !isLoading else { return }
+        if open {
+            actionButton.image = Self.glyphImage(symbolName: "xmark")
+            actionButton.toolTip = "Close"
+        } else {
+            applyModeVisuals()
+        }
+    }
+
     /// A mode's glyph centered in a button-sized canvas with baked-in padding, so
     /// `imageScaling` shrinks/grows it proportionally as the button frame animates.
     private static func glyphImage(for mode: TranslationMode) -> NSImage {
+        let name: String
+        switch mode {
+        case .selection, .revise, .reviseMessage:
+            // Sparkles = "actions live here": a click opens the radial menu
+            // now, not a single default mode.
+            name = "sparkles"
+        case .draftMessage:
+            name = "text.insert"
+        case .smartReply:
+            name = "bubble.left.fill"
+        }
+        return glyphImage(symbolName: name)
+    }
+
+    private static func glyphImage(symbolName: String) -> NSImage {
         let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            switch mode {
-            case .selection, .revise, .reviseMessage:
-                let style = NSMutableParagraphStyle()
-                style.alignment = .center
-                let text = NSAttributedString(string: "あ", attributes: [
-                    .font: NSFont.systemFont(ofSize: 17, weight: .semibold),
-                    .foregroundColor: NSColor.white,
-                    .paragraphStyle: style,
-                ])
-                let size = text.size()
-                text.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
-            case .draftMessage, .smartReply:
-                let name = mode == .draftMessage ? "text.insert" : "bubble.left.fill"
-                let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
-                guard let symbol = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                    .withSymbolConfiguration(config) else { return false }
-                let target = NSRect(
-                    x: rect.midX - symbol.size.width / 2,
-                    y: rect.midY - symbol.size.height / 2,
-                    width: symbol.size.width,
-                    height: symbol.size.height
-                )
-                symbol.draw(in: target)
-                // Template symbols draw as black; tint the drawn glyph white.
-                NSColor.white.set()
-                target.fill(using: .sourceAtop)
-            }
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+            guard let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) else { return false }
+            let target = NSRect(
+                x: rect.midX - symbol.size.width / 2,
+                y: rect.midY - symbol.size.height / 2,
+                width: symbol.size.width,
+                height: symbol.size.height
+            )
+            symbol.draw(in: target)
+            // Template symbols draw as black; tint the drawn glyph white.
+            NSColor.white.set()
+            target.fill(using: .sourceAtop)
             return true
         }
     }
