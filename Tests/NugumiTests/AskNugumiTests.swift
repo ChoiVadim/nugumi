@@ -81,6 +81,22 @@ final class AskNugumiTests: XCTestCase {
         XCTAssertFalse(prompt.contains("The user will provide a screenshot"))
     }
 
+    func testSystemPromptAllowsMarkdownInMessage() {
+        let prompt = AskNugumiPromptBuilder.systemPrompt(genZ: false)
+        XCTAssertTrue(prompt.contains("may use Markdown"))
+        XCTAssertTrue(prompt.contains("numbered lists for steps"))
+    }
+
+    @MainActor
+    func testFlattenedMarkdownStripsSyntaxKeepsText() {
+        let flat = TranslationContentView.flattenedMarkdown(
+            "**Bold** term\n- first step\n- second step"
+        )
+        XCTAssertFalse(flat.contains("**"), "emphasis syntax must be resolved")
+        XCTAssertTrue(flat.contains("first step"))
+        XCTAssertTrue(flat.contains("second step"))
+    }
+
     func testAppendingTurnGrowsHistoryUpToCap() {
         var history: [AskNugumiTurn] = []
         for index in 1...3 {

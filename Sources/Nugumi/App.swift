@@ -2002,7 +2002,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         petController.onAnswerDismissedByUser = { [weak self] in
             self?.closeAskAnnotationOverlay()
         }
-        petController.showAnswer(response.message, emotion: response.emotion)
+        // The pixel-font bubble can't render rich text — resolve markdown to
+        // plain text so list markers survive and `**`/`|` never leak raw.
+        petController.showAnswer(
+            TranslationContentView.flattenedMarkdown(response.message),
+            emotion: response.emotion
+        )
         presentAskAnnotations(response.annotations, capture: capture)
     }
 
@@ -11209,6 +11214,17 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         storage.addLayoutManager(layoutManager)
         layoutManager.ensureLayout(for: container)
         return ceil(layoutManager.usedRect(for: container).height)
+    }
+
+    /// Markdown resolved to plain text (list markers survive as glyphs,
+    /// emphasis/table syntax is consumed) — for surfaces that can't render
+    /// rich text, like the pet's pixel-font answer bubble.
+    static func flattenedMarkdown(_ text: String) -> String {
+        renderedMarkdownText(
+            text,
+            font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
+            color: .white
+        ).string
     }
 
     /// Block-level markdown: paragraphs, ATX headers, bullet/numbered lists, and
