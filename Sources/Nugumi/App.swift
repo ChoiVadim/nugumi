@@ -9014,15 +9014,6 @@ final class AskAnnotationOverlayController {
     private final class AnnotationPanel: NSPanel {
         override var canBecomeKey: Bool { false }
         override var canBecomeMain: Bool { false }
-
-        // Blanket updates (InvisibilityState.applyToAllOpenWindows, sharing
-        // snapshot/restore) must never make the annotation layer capturable:
-        // clamp every assignment to .none. The super call is load-bearing —
-        // an empty setter would never push .none to the window server at all.
-        override var sharingType: NSWindow.SharingType {
-            get { super.sharingType }
-            set { super.sharingType = .none }
-        }
     }
 
     private final class AnnotationCanvasView: NSView {
@@ -9036,6 +9027,20 @@ final class AskAnnotationOverlayController {
         private static let haloColor = NSColor.white.withAlphaComponent(0.9)
 
         override func draw(_ dirtyRect: NSRect) {
+            guard !annotations.isEmpty,
+                  let context = NSGraphicsContext.current?.cgContext
+            else { return }
+            // A soft drop shadow lifts the shapes off busy or light
+            // backgrounds. The transparency layer makes the halo+stroke
+            // composite cast one shadow as a unit instead of every stroke
+            // shadowing its neighbors.
+            context.saveGState()
+            context.setShadow(
+                offset: CGSize(width: 0, height: -2),
+                blur: 8,
+                color: NSColor.black.withAlphaComponent(0.6).cgColor
+            )
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
             for annotation in annotations {
                 switch annotation.type {
                 case .ellipse:
@@ -9052,6 +9057,8 @@ final class AskAnnotationOverlayController {
                     drawLabel(annotation)
                 }
             }
+            context.endTransparencyLayer()
+            context.restoreGState()
         }
 
         // Window covers `screenFrame`, so view-local = screen − frame origin.
@@ -9198,7 +9205,11 @@ final class AskAnnotationOverlayController {
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
-        panel.sharingType = .none
+        // Capturable on purpose: annotations should survive into the user's
+        // own screenshots. Nugumi's own follow-up captures still exclude this
+        // layer via the capture-time sharing snapshot (which force-sets .none
+        // and restores), and invisibility mode applies like any other window.
+        InvisibilityState.apply(to: panel)
         // Purely visual layer: the user clicks straight through it.
         panel.ignoresMouseEvents = true
         panel.contentView = canvas
