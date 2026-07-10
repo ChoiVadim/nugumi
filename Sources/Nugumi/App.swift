@@ -9167,7 +9167,15 @@ private final class RadialMenuButtonView: NSView {
     }
 
     private func setHovered(_ hovered: Bool) {
-        iconView.contentTintColor = hovered ? .nugumiAccent : .labelColor
+        // Invert the glass against the system theme on hover — light glass in
+        // dark mode, dark in light mode. The icon's labelColor re-resolves
+        // under the overridden appearance by itself, so it flips too.
+        if hovered {
+            let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            circleView.appearance = NSAppearance(named: isDark ? .aqua : .darkAqua)
+        } else {
+            circleView.appearance = nil
+        }
         onHoverChange?(hovered)
     }
 }
