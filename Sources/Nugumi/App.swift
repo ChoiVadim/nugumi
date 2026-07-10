@@ -8910,7 +8910,35 @@ final class RadialActionMenuController {
         guard !didClose else { return }
         didClose = true
         removeDismissMonitors()
-        panel.close()
+        // Mirror the open animation: buttons collapse back into the center.
+        // The panel dies in the completion and is captured strongly, so the
+        // teardown outlives self (presenters drop their reference right after
+        // calling close). Mouse events stop immediately — the buttons are
+        // already dead, only their ghosts animate.
+        panel.ignoresMouseEvents = true
+        let panel = self.panel
+        guard let container = panel.contentView else {
+            panel.close()
+            return
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            for button in buttons {
+                button.animator().frame = NSRect(
+                    x: container.bounds.midX - button.frame.width / 2,
+                    y: container.bounds.midY - button.frame.height / 2,
+                    width: button.frame.width,
+                    height: button.frame.height
+                )
+                button.animator().alphaValue = 0
+            }
+            for bubble in container.subviews where bubble is RadialMenuLabelBubbleView {
+                bubble.animator().alphaValue = 0
+            }
+        }, completionHandler: {
+            panel.close()
+        })
     }
 
     private func dismiss() {
@@ -10163,6 +10191,8 @@ final class FloatingTranslateButtonView: NSView {
     private var glassView: GlassHostView!
     private var currentMode: TranslationMode
     private var isLoading = false
+    private var isMenuOpen = false
+    private var isHovered = false
 
     private var hoverTrackingArea: NSTrackingArea?
     private var hoverScalingEnabled = false
@@ -10241,13 +10271,22 @@ final class FloatingTranslateButtonView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        refreshCloseTint()
         guard hoverScalingEnabled, !isLoading else { return }
         applyScale(1.0, animated: true)
     }
 
     override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        refreshCloseTint()
         guard hoverScalingEnabled, !isLoading else { return }
         applyScale(Self.restScale, animated: true)
+    }
+
+    private func refreshCloseTint() {
+        guard isMenuOpen, !isLoading else { return }
+        actionButton.image = Self.closeGlyphImage(hovered: isHovered)
     }
 
     /// Resizes the whole button via its frame — the only resize an
@@ -10348,14 +10387,40 @@ final class FloatingTranslateButtonView: NSView {
     }
 
     /// While the radial menu is open the bar is its close affordance — the
-    /// glyph flips to an ✕ so the second click reads as "close", not "act".
+    /// glyph flips to an ✕ so the second click reads as "close", not "act",
+    /// and hovering it turns the whole button red (destructive affordance).
     func setMenuOpen(_ open: Bool) {
         guard !isLoading else { return }
+        isMenuOpen = open
         if open {
-            actionButton.image = Self.glyphImage(symbolName: "xmark")
+            actionButton.image = Self.closeGlyphImage(hovered: isHovered)
             actionButton.toolTip = "Close"
         } else {
             applyModeVisuals()
+        }
+    }
+
+    /// Plain white ✕ at rest; a solid red disc with a dark ✕ on hover. The
+    /// disc is drawn opaque, so the ✕ is tinted via a palette symbol config —
+    /// the sourceAtop trick in `glyphImage(symbolName:)` only works on a
+    /// transparent canvas.
+    private static func closeGlyphImage(hovered: Bool) -> NSImage {
+        guard hovered else { return glyphImage(symbolName: "xmark") }
+        let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor.systemRed.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+                .applying(.init(paletteColors: [NSColor.black.withAlphaComponent(0.8)]))
+            guard let symbol = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) else { return false }
+            symbol.draw(in: NSRect(
+                x: rect.midX - symbol.size.width / 2,
+                y: rect.midY - symbol.size.height / 2,
+                width: symbol.size.width,
+                height: symbol.size.height
+            ))
+            return true
         }
     }
 
