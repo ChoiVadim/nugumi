@@ -6353,75 +6353,6 @@ final class ScreenshotDragTracker {
     }
 }
 
-final class TabKeyInterceptor {
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private let onTab: @MainActor () -> Void
-
-    init(onTab: @escaping @MainActor () -> Void) {
-        self.onTab = onTab
-    }
-
-    func enable() {
-        guard eventTap == nil else { return }
-
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
-
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: { _, type, event, userInfo in
-                guard let userInfo, type == .keyDown else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-                guard keyCode == Int64(kVK_Tab) else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let modifierMask: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
-                guard event.flags.intersection(modifierMask).isEmpty else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let interceptor = Unmanaged<TabKeyInterceptor>.fromOpaque(userInfo).takeUnretainedValue()
-                Task { @MainActor in
-                    interceptor.onTab()
-                }
-                return nil
-            },
-            userInfo: selfPointer
-        ) else {
-            return
-        }
-
-        eventTap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        runLoopSource = source
-        CGEvent.tapEnable(tap: tap, enable: true)
-    }
-
-    func disable() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        }
-        runLoopSource = nil
-        eventTap = nil
-    }
-
-    deinit {
-        disable()
-    }
-}
-
 final class CommandCopyInterceptor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -8062,7 +7993,6 @@ final class PetMascotView: NSView {
 
     var onClick: (() -> Void)?
     var onDoubleClick: (() -> Void)?
-    var onRightClick: (() -> Void)?
     var onDragRequested: ((NSPoint) -> Void)?
     var allowsClickWhenNotReady = false
 
@@ -8132,11 +8062,6 @@ final class PetMascotView: NSView {
 
         guard state == .ready || allowsClickWhenNotReady else { return }
         onClick?()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        guard state == .ready else { return }
-        onRightClick?()
     }
 
     func apply(state: State, mode: TranslationMode, emotion: AskNugumiEmotion = .neutral) {
@@ -10065,18 +9990,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     }
 }
 
-private final class RightClickableButton: NSButton {
-    var onRightClick: (() -> Void)?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        onRightClick?()
-    }
-}
-
 private final class FirstMouseButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
@@ -10086,9 +9999,8 @@ private final class FirstMouseButton: NSButton {
 @MainActor
 final class FloatingTranslateButtonView: NSView {
     var onClick: (() -> Void)?
-    var onRightClick: (() -> Void)?
 
-    private let actionButton = RightClickableButton()
+    private let actionButton = NSButton()
     private let progressIndicator = NSProgressIndicator()
     private var glassView: GlassHostView!
     private var currentMode: TranslationMode
@@ -10219,9 +10131,6 @@ final class FloatingTranslateButtonView: NSView {
 
         actionButton.target = self
         actionButton.action = #selector(buttonTapped)
-        actionButton.onRightClick = { [weak self] in
-            self?.onRightClick?()
-        }
         actionButton.frame = bounds
         actionButton.autoresizingMask = [.width, .height]
         actionButton.isBordered = false
