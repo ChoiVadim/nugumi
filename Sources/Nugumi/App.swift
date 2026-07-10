@@ -8831,6 +8831,269 @@ enum RadialMenuLayoutPolicy {
     }
 }
 
+/// The ring of action buttons that opens around the floating bar / pet.
+/// Purely presentational: owns one transparent panel, reports the picked
+/// action via `onSelect`, and calls `onDismiss` when it closed itself
+/// (outside click, Escape, empty-area click). The presenter owns the
+/// toggle state and calls `close()` for its own teardown paths.
+@MainActor
+final class RadialActionMenuController {
+    private let panel: NSPanel
+    private let onSelect: (RadialAction) -> Void
+    private let onDismiss: () -> Void
+    private var buttons: [RadialMenuButtonView] = []
+    private var dismissMonitors: [Any] = []
+    private var didClose = false
+
+    init(
+        centeredOn anchor: NSPoint,
+        onSelect: @escaping (RadialAction) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.onSelect = onSelect
+        self.onDismiss = onDismiss
+
+        let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
+        let frame = RadialMenuLayoutPolicy.panelFrame(
+            anchor: anchor,
+            screenVisibleFrame: screen?.visibleFrame
+                ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        panel = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        InvisibilityState.apply(to: panel)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = false
+
+        let container = RadialMenuBackdropView(
+            frame: NSRect(origin: .zero, size: frame.size)
+        )
+        container.onEmptyClick = { [weak self] in self?.dismiss() }
+
+        let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
+        for (action, offset) in zip(RadialAction.allCases, RadialMenuLayoutPolicy.buttonCenters()) {
+            let button = RadialMenuButtonView(action: action) { [weak self] picked in
+                self?.finish(with: picked)
+            }
+            button.setFrameOrigin(NSPoint(
+                x: panelCenter.x + offset.x - button.frame.width / 2,
+                y: panelCenter.y + offset.y - button.frame.height / 2
+            ))
+            container.addSubview(button)
+            buttons.append(button)
+        }
+        panel.contentView = container
+    }
+
+    func show() {
+        panel.orderFrontRegardless()
+        animateButtonsIn()
+        installDismissMonitors()
+    }
+
+    func close() {
+        guard !didClose else { return }
+        didClose = true
+        removeDismissMonitors()
+        panel.close()
+    }
+
+    private func dismiss() {
+        guard !didClose else { return }
+        close()
+        onDismiss()
+    }
+
+    private func finish(with action: RadialAction) {
+        guard !didClose else { return }
+        close()
+        onSelect(action)
+    }
+
+    private func animateButtonsIn() {
+        guard let container = panel.contentView else { return }
+        for button in buttons {
+            let target = button.frame
+            button.frame = NSRect(
+                x: container.bounds.midX - target.width / 2,
+                y: container.bounds.midY - target.height / 2,
+                width: target.width,
+                height: target.height
+            )
+            button.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                // Same springy overshoot as the bar's hover scale.
+                context.timingFunction = CAMediaTimingFunction(
+                    controlPoints: 0.34, 1.45, 0.5, 1
+                )
+                button.animator().frame = target
+                button.animator().alphaValue = 1
+            }
+        }
+    }
+
+    /// The panel is non-activating and never key, so Escape needs both a
+    /// local monitor (Nugumi frontmost) and a global one (another app
+    /// frontmost — observed, not consumed). Global mouse clicks land in
+    /// other apps; clicks on Nugumi's own bar/pet toggle via their handlers.
+    private func installDismissMonitors() {
+        var monitors: [Any?] = []
+        monitors.append(NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.dismiss() }
+        })
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == UInt16(kVK_Escape) else { return event }
+            Task { @MainActor [weak self] in self?.dismiss() }
+            return nil
+        })
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == UInt16(kVK_Escape) else { return }
+            Task { @MainActor [weak self] in self?.dismiss() }
+        })
+        dismissMonitors = monitors.compactMap { $0 }
+    }
+
+    private func removeDismissMonitors() {
+        dismissMonitors.forEach(NSEvent.removeMonitor)
+        dismissMonitors = []
+    }
+}
+
+/// Transparent backdrop behind the ring buttons. A click that lands on it —
+/// rather than on a button — dismisses the menu.
+private final class RadialMenuBackdropView: NSView {
+    var onEmptyClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onEmptyClick?()
+    }
+}
+
+/// One circular glass button on the ring: SF Symbol icon, hover tint, and a
+/// small label that fades in under the circle on hover.
+private final class RadialMenuButtonView: NSView {
+    private let action: RadialAction
+    private let onPick: (RadialAction) -> Void
+    private let circleView = NSVisualEffectView()
+    private let iconView = NSImageView()
+    private let labelField: NSTextField
+    private var trackingArea: NSTrackingArea?
+
+    init(action: RadialAction, onPick: @escaping (RadialAction) -> Void) {
+        self.action = action
+        self.onPick = onPick
+        self.labelField = NSTextField(labelWithString: action.label)
+
+        let diameter = RadialMenuLayoutPolicy.buttonDiameter
+        let labelHeight: CGFloat = 16
+        // Wider and taller than the circle so the hover label fits.
+        super.init(frame: NSRect(
+            x: 0, y: 0,
+            width: diameter + 28,
+            height: diameter + labelHeight + 4
+        ))
+        wantsLayer = true
+
+        circleView.material = .hudWindow
+        circleView.state = .active
+        circleView.blendingMode = .behindWindow
+        circleView.wantsLayer = true
+        circleView.layer?.cornerRadius = diameter / 2
+        circleView.layer?.masksToBounds = true
+        circleView.frame = NSRect(
+            x: (bounds.width - diameter) / 2,
+            y: labelHeight + 4,
+            width: diameter,
+            height: diameter
+        )
+        addSubview(circleView)
+
+        iconView.image = NSImage(
+            systemSymbolName: action.symbolName,
+            accessibilityDescription: action.label
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        )
+        iconView.contentTintColor = .labelColor
+        iconView.imageAlignment = .alignCenter
+        iconView.frame = circleView.bounds
+        iconView.autoresizingMask = [.width, .height]
+        circleView.addSubview(iconView)
+
+        labelField.font = .systemFont(ofSize: 11, weight: .medium)
+        labelField.textColor = .labelColor
+        labelField.alignment = .center
+        labelField.sizeToFit()
+        labelField.frame = NSRect(
+            x: (bounds.width - labelField.frame.width) / 2,
+            y: 0,
+            width: labelField.frame.width,
+            height: labelHeight
+        )
+        labelField.alphaValue = 0
+        addSubview(labelField)
+
+        toolTip = action.label
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    // Swallow mouseDown: unhandled it would bubble up the responder chain to
+    // the backdrop, whose mouseDown dismisses the menu before mouseUp lands.
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(location) else { return }
+        onPick(action)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        iconView.contentTintColor = hovered ? .nugumiAccent : .labelColor
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            labelField.animator().alphaValue = hovered ? 1 : 0
+        }
+    }
+}
+
 @MainActor
 final class FloatingTranslateButtonController {
     private let panel: NSPanel
