@@ -8770,29 +8770,17 @@ enum RadialMenuLayoutPolicy {
         return offset.x < 0 ? .left : .right
     }
 
-    /// Panel frame centered on `anchor`, shifted (not shrunk) to stay inside
-    /// the screen. The bar/pet itself does not move; near edges the ring is
-    /// simply off-center around it.
-    static func panelFrame(anchor: NSPoint, screenVisibleFrame: NSRect) -> NSRect {
-        var frame = NSRect(
+    /// Panel frame centered on `anchor` — always. Deliberately no screen-edge
+    /// clamping: near an edge part of the ring may fall off-screen (Logi
+    /// Options+ behaves the same), but the ring never detaches from the
+    /// button, which read as worse than a clipped button.
+    static func panelFrame(anchor: NSPoint) -> NSRect {
+        NSRect(
             x: anchor.x - panelSide / 2,
             y: anchor.y - panelSide / 2,
             width: panelSide,
             height: panelSide
         )
-        if frame.minX < screenVisibleFrame.minX {
-            frame.origin.x = screenVisibleFrame.minX
-        }
-        if frame.maxX > screenVisibleFrame.maxX {
-            frame.origin.x = screenVisibleFrame.maxX - frame.width
-        }
-        if frame.minY < screenVisibleFrame.minY {
-            frame.origin.y = screenVisibleFrame.minY
-        }
-        if frame.maxY > screenVisibleFrame.maxY {
-            frame.origin.y = screenVisibleFrame.maxY - frame.height
-        }
-        return frame
     }
 }
 
@@ -8825,12 +8813,7 @@ final class RadialActionMenuController {
         self.onSelect = onSelect
         self.onDismiss = onDismiss
 
-        let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
-        let frame = RadialMenuLayoutPolicy.panelFrame(
-            anchor: anchor,
-            screenVisibleFrame: screen?.visibleFrame
-                ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        )
+        let frame = RadialMenuLayoutPolicy.panelFrame(anchor: anchor)
 
         panel = NSPanel(
             contentRect: frame,
@@ -9985,7 +9968,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
 
     func show() {
         textField.stringValue = ""
-        refreshPromptLayout()
         textField.isEnabled = true
         SelfActivationGuard.activate()
         panel.makeKeyAndOrderFront(nil)
@@ -9996,7 +9978,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         panel.sharingType = .none
         textField.isEnabled = false
         textField.stringValue = ""
-        refreshPromptLayout()
         setPlaceholder("Looking...")
     }
 
@@ -10010,7 +9991,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         isSubmitting = false
         textField.isEnabled = true
         textField.stringValue = ""
-        refreshPromptLayout()
         setPlaceholder(message)
         SelfActivationGuard.activate()
         panel.makeKeyAndOrderFront(nil)
@@ -10078,15 +10058,14 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         textField.drawsBackground = false
         textField.backgroundColor = .clear
         textField.focusRingType = .none
-        textField.usesSingleLineMode = false
-        textField.maximumNumberOfLines = 0
-        textField.cell?.wraps = true
-        textField.cell?.isScrollable = false
-        textField.cell?.lineBreakMode = .byWordWrapping
+        textField.usesSingleLineMode = true
+        textField.maximumNumberOfLines = 1
+        textField.cell?.wraps = false
+        textField.cell?.isScrollable = true
+        textField.cell?.lineBreakMode = .byTruncatingTail
         textField.translatesAutoresizingMaskIntoConstraints = false
         glass.addSubview(textField)
 
-        let verticalInset = (layout.pillFrame.height - layout.textFrame.height) / 2
         NSLayoutConstraint.activate([
             textField.leadingAnchor.constraint(
                 equalTo: glass.leadingAnchor,
@@ -10096,70 +10075,12 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
                 equalTo: glass.trailingAnchor,
                 constant: -(layout.pillFrame.maxX - layout.textFrame.maxX)
             ),
-            // Pinned top+bottom (not centerY) so the field tracks the pill as
-            // multi-line input grows it.
-            textField.topAnchor.constraint(equalTo: glass.topAnchor, constant: verticalInset),
-            textField.bottomAnchor.constraint(equalTo: glass.bottomAnchor, constant: -verticalInset)
+            // Intrinsic height + centerY keeps the text optically centered in
+            // the capsule (a fixed-height cell draws its baseline high).
+            textField.centerYAnchor.constraint(equalTo: glass.centerYAnchor)
         ])
 
         panel.contentView = rootView
-    }
-
-    /// Shift+Enter inserts a line break instead of submitting — same
-    /// interception point as the pet prompt: AppKit routes Enter to
-    /// `insertNewline:` through this delegate callback before ending editing.
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard control === textField,
-              commandSelector == #selector(NSResponder.insertNewline(_:)),
-              NSApp.currentEvent?.modifierFlags.contains(.shift) == true
-        else {
-            return false
-        }
-        textView.insertNewlineIgnoringFieldEditor(self)
-        return true
-    }
-
-    func controlTextDidChange(_ notification: Notification) {
-        refreshPromptLayout()
-    }
-
-    /// Grows/shrinks the pill to fit the text, keeping the TOP edge anchored
-    /// (the pill was placed relative to the invocation point) and clamping so
-    /// the bottom never leaves the screen.
-    private func refreshPromptLayout() {
-        let layout = AskNugumiFloatingPromptMetrics.layout(
-            forContentHeight: promptContentHeight(for: textField.stringValue)
-        )
-        var frame = panel.frame
-        let delta = layout.panelSize.height - frame.height
-        guard abs(delta) > 0.5 else { return }
-        frame.origin.y -= delta
-        frame.size = layout.panelSize
-        let visibleFrame = NSScreen.visibleFrame(containing: NSPoint(x: frame.midX, y: frame.maxY))
-        let bottomLimit = visibleFrame.minY + AskNugumiFloatingPromptMetrics.edgeMargin
-        if frame.minY < bottomLimit {
-            frame.origin.y = bottomLimit
-        }
-        panel.setFrame(frame, display: true)
-    }
-
-    private func promptContentHeight(for text: String) -> CGFloat {
-        guard !text.isEmpty else { return 0 }
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = .byWordWrapping
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: textField.font ?? NSFont.systemFont(ofSize: 14, weight: .regular),
-            .paragraphStyle: paragraphStyle,
-        ]
-        let boundingRect = (text as NSString).boundingRect(
-            with: NSSize(
-                width: AskNugumiFloatingPromptMetrics.layout.textFrame.width,
-                height: .greatestFiniteMagnitude
-            ),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attributes
-        )
-        return ceil(boundingRect.height) + 2
     }
 
     private func submit() {

@@ -39,8 +39,9 @@ onDismiss: () -> Void)` plus `close()`. `RadialAction` is a small enum
   `InvisibilityState.apply(to:)` — same config as the sibling panels, so the
   menu stays out of screenshots in invisibility mode.
 - Layout: 4 circular buttons on a ring (~64 pt radius) around the anchor at
-  fixed angles. Near screen edges the whole ring shifts to stay inside
-  `visibleFrame` (the bar/pet itself does not move).
+  fixed angles. The ring is ALWAYS centered on the bar/pet — no screen-edge
+  clamping (amended 2026-07-10 after QA: a ring detached from its button read
+  worse than a partially off-screen ring; Logi Options+ behaves the same).
 - Center: **no ✕ button** — the existing bar/pet stays visible underneath and
   a second click on it toggles the menu closed.
 - Visual: circular glass buttons (`NSVisualEffectView`), SF Symbol icons,
@@ -79,7 +80,8 @@ onDismiss: () -> Void)` plus `close()`. `RadialAction` is a small enum
 
 ## Edge cases
 
-- **Screen edges:** ring clamps into `visibleFrame`.
+- **Screen edges:** no clamping — the ring stays centered on the button and
+  may partially fall off-screen (amended 2026-07-10).
 - **Loading:** the bar/pet already sets `ignoresMouseEvents` while a request
   is in flight, so the menu cannot open mid-request.
 - **Selection loss:** `selectedText` is captured when the bar appears; the
