@@ -4166,7 +4166,25 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         Task { [weak self] in
             do {
-                let screenshotURL = try await ScreenshotCapture.captureInteractiveArea()
+                // Nugumi's own UI must never end up in the OCR shot — the
+                // annotation layer is deliberately screenshot-capturable now,
+                // and its text labels would pollute recognition. sharingType
+                // only affects captures, so nothing visibly changes on screen.
+                let sharingSnapshot = await MainActor.run {
+                    Self.hideAppWindowsFromScreenCapture()
+                }
+                let screenshotURL: URL
+                do {
+                    screenshotURL = try await ScreenshotCapture.captureInteractiveArea()
+                } catch {
+                    await MainActor.run {
+                        Self.restoreAppWindowSharing(sharingSnapshot)
+                    }
+                    throw error
+                }
+                await MainActor.run {
+                    Self.restoreAppWindowSharing(sharingSnapshot)
+                }
                 defer {
                     try? FileManager.default.removeItem(at: screenshotURL)
                 }

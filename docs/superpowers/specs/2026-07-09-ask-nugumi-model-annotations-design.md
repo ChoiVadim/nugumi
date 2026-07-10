@@ -84,9 +84,17 @@ but purely visual:
 
 - Transparent borderless non-activating `NSPanel` covering the capture's
   `screenFrame`; never key/main; level `.floating - 1`;
-  `.canJoinAllSpaces, .fullScreenAuxiliary`; `sharingType` clamped to `.none`
-  via the setter-override pattern (the super-delegating clamp, never an
-  empty setter).
+  `.canJoinAllSpaces, .fullScreenAuxiliary`.
+- Capture visibility (amended 2026-07-10, maintainer decision): the layer is
+  deliberately screenshot-capturable — `InvisibilityState.apply(to:)` like
+  any other window (`.readOnly` normally, `.none` in invisibility mode) — so
+  the model's shapes survive into the user's own Cmd+Shift+3/4 screenshots
+  and screen sharing. Nugumi's own captures still never see it: the Ask
+  capture paths wrap in `hideAppWindowsFromScreenCapture()` snapshot/restore,
+  and the area screenshot-translation capture wraps in the same helper so
+  annotation text labels cannot pollute OCR. (The original design clamped
+  `sharingType` to `.none`; superseded by this amendment.) All shapes cast
+  one soft drop shadow via a single transparency layer.
 - **Click-through:** `ignoresMouseEvents = true`. No event monitors, no
   cursor changes — the user keeps working through the overlay.
 - Style: `nugumiAccent` strokes (~3 pt) with a white halo (wider white
