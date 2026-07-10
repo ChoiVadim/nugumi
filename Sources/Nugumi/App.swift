@@ -10467,7 +10467,9 @@ final class FloatingTranslateButtonView: NSView {
         guard hovered else { return glyphImage(symbolName: "xmark") }
         let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            NSColor.systemRed.setFill()
+            // Translucent so the glass underneath shows through — a solid
+            // red disc read too loud.
+            NSColor.systemRed.withAlphaComponent(0.55).setFill()
             NSBezierPath(ovalIn: rect).fill()
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .bold)
                 .applying(.init(paletteColors: [NSColor.black.withAlphaComponent(0.8)]))
