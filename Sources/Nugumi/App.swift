@@ -10000,7 +10000,7 @@ private final class FirstMouseButton: NSButton {
 final class FloatingTranslateButtonView: NSView {
     var onClick: (() -> Void)?
 
-    private let actionButton = NSButton()
+    private let actionButton = FirstMouseButton()
     private let progressIndicator = NSProgressIndicator()
     private var glassView: GlassHostView!
     private var currentMode: TranslationMode
