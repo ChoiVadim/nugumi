@@ -24,8 +24,8 @@ what a plain click does.
   | **Reply** | `.smartReply` |
   | **Ask** | `startAskNugumiPrompt()` |
 - Applies to **both surfaces** (floating bar and pet) — one shared component.
-- Legacy gestures and the default-mode setting are **deleted**, not kept as
-  shortcuts.
+- Legacy click gestures are **deleted**, not kept as shortcuts. The "Main
+  mode" setting stays (see Deletions — it drives more than the click).
 
 ## Architecture
 
@@ -68,11 +68,14 @@ onDismiss: () -> Void)` plus `close()`. `RadialAction` is a small enum
 - `onRightClick` handlers + `invokeRewriteMode` (both controllers).
 - `TabKeyInterceptor` wiring + `toggleMode()` in `TranslateButtonController`
   and the pet's Tab handling; delete the class if no other users remain.
-- `FloatingButtonDefaultMode` enum, `floatingDefaultMode` accessor, the
-  status-bar menu item (`MenuItemTag.floatingDefaultMode`), the
-  `"floatingButtonDefaultMode"` defaults key (including the reset-settings
-  list), and `makeStatusBarIcon(for:)`'s dependence on it.
-- Tooltip strings teaching right-click/Tab gestures.
+- **NOT** `FloatingButtonDefaultMode` ("Main mode"): investigation showed it
+  also drives the global translate-or-reply shortcut, screenshot-area
+  semantics, status-bar menu item titles, and the status-bar icon — deleting
+  it would change shortcut behavior, which is out of scope. It stays; only
+  the bar/pet click stops depending on it (the click opens the menu
+  regardless of Main mode).
+- Tooltip strings teaching right-click/Tab gestures (replaced with
+  "Choose an action").
 
 ## Edge cases
 
