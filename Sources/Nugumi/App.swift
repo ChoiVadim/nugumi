@@ -1967,7 +1967,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             initialMode: .selection,
             onTranslate: { _ in },
             onRewrite: { _ in },
-            onSmartReply: { _ in }
+            onSmartReply: { _ in },
+            onAsk: {}
         )
         bar.show()
         bar.setLoading()
@@ -2996,6 +2997,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         keepPetReadyUntilPanelCloses: true,
                         restoresReadyOnUserDismiss: true
                     )
+                },
+                onAsk: { [weak self] in
+                    self?.startAskNugumiPrompt()
                 }
             )
             return
@@ -3035,6 +3039,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     panelSide: panelSide,
                     restoresReadyOnUserDismiss: true
                 )
+            },
+            onAsk: { [weak self] in
+                self?.startAskNugumiPrompt()
             }
         )
 
@@ -4091,7 +4098,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     initialMode: .selection,
                     onTranslate: { _ in },
                     onRewrite: { _ in },
-                    onSmartReply: { _ in }
+                    onSmartReply: { _ in },
+                    onAsk: {}
                 )
                 bar.show()
             }
@@ -6345,75 +6353,6 @@ final class ScreenshotDragTracker {
     }
 }
 
-final class TabKeyInterceptor {
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private let onTab: @MainActor () -> Void
-
-    init(onTab: @escaping @MainActor () -> Void) {
-        self.onTab = onTab
-    }
-
-    func enable() {
-        guard eventTap == nil else { return }
-
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
-        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
-
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: { _, type, event, userInfo in
-                guard let userInfo, type == .keyDown else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-                guard keyCode == Int64(kVK_Tab) else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let modifierMask: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
-                guard event.flags.intersection(modifierMask).isEmpty else {
-                    return Unmanaged.passUnretained(event)
-                }
-
-                let interceptor = Unmanaged<TabKeyInterceptor>.fromOpaque(userInfo).takeUnretainedValue()
-                Task { @MainActor in
-                    interceptor.onTab()
-                }
-                return nil
-            },
-            userInfo: selfPointer
-        ) else {
-            return
-        }
-
-        eventTap = tap
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
-        runLoopSource = source
-        CGEvent.tapEnable(tap: tap, enable: true)
-    }
-
-    func disable() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        }
-        runLoopSource = nil
-        eventTap = nil
-    }
-
-    deinit {
-        disable()
-    }
-}
-
 final class CommandCopyInterceptor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -6752,7 +6691,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var trackingTimer: Timer?
     private var throwTimer: Timer?
     private var throwVelocity: NSPoint = .zero
-    private var tabInterceptor: TabKeyInterceptor?
+    private var onAsk: (() -> Void)?
+    private var radialMenu: RadialActionMenuController?
     private var selectedText: String?
     private var onTranslate: ((String) -> Void)?
     private var onRewrite: ((String) -> Void)?
@@ -6973,10 +6913,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
                 self.closePromptFromUser()
                 return
             }
-            self.invokeCurrentMode()
-        }
-        petView.onRightClick = { [weak self] in
-            self?.invokeRewriteMode()
+            self.toggleRadialMenu()
         }
 
         refreshStyleBadge()
@@ -7040,6 +6977,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     func close() {
+        radialMenu?.close()
+        radialMenu = nil
         if let workspaceObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
             self.workspaceObserver = nil
@@ -7058,11 +6997,14 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onSubmit: @escaping (String) -> Void,
         onClose: @escaping () -> Void
     ) {
+        radialMenu?.close()
+        radialMenu = nil
         cancelPointingAnimation()
         selectedText = nil
         self.onTranslate = nil
         self.onRewrite = nil
         self.onSmartReply = nil
+        self.onAsk = nil
         onPromptSubmit = onSubmit
         onPromptClose = onClose
         currentMode = .draftMessage
@@ -7073,8 +7015,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isAnswerOpen = false
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         appIconView.isHidden = true
         petView.apply(state: .idle, mode: currentMode)
 
@@ -7206,6 +7146,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     func showAnswer(_ message: String, emotion: AskNugumiEmotion?) {
+        radialMenu?.close()
+        radialMenu = nil
         let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanMessage.isEmpty else { return }
 
@@ -7214,6 +7156,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         onPromptSubmit = nil
         onPromptClose = nil
         isReadyLockedUntilPanelCloses = false
@@ -7225,8 +7168,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
 
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         appIconView.isHidden = true
         promptBubbleView.isError = false
         configureAnswerTextView(with: cleanMessage)
@@ -7545,7 +7486,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         initialMode: TranslationMode,
         onTranslate: @escaping (String) -> Void,
         onRewrite: @escaping (String) -> Void,
-        onSmartReply: @escaping (String) -> Void
+        onSmartReply: @escaping (String) -> Void,
+        onAsk: @escaping () -> Void
     ) {
         // Don't yank the pet back to "ready" while Ask is open (input, loading,
         // or answer) — a casual selection in another app should leave the
@@ -7556,22 +7498,28 @@ final class PetController: NSObject, NSTextFieldDelegate {
         ) else {
             return
         }
+        // A stale ring can still reference the previous selection's closures
+        // if a new one arrives while it's open — tear it down before rearming.
+        radialMenu?.close()
+        radialMenu = nil
         clearPrompt(animate: true)
         cancelPointingAnimation()
         self.selectedText = selectedText
         self.onTranslate = onTranslate
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
+        self.onAsk = onAsk
         currentMode = initialMode
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = false
         petView.apply(state: .ready, mode: currentMode)
         appIconView.isHidden = true
-        enableTabInterceptor()
         show()
     }
 
     func holdReadyUntilPanelCloses(mode: TranslationMode? = nil) {
+        radialMenu?.close()
+        radialMenu = nil
         cancelPointingAnimation()
         if let mode {
             currentMode = mode
@@ -7580,10 +7528,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         isReadyLockedUntilPanelCloses = true
         panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         petView.apply(state: .ready, mode: currentMode)
         appIconView.isHidden = true
     }
@@ -7593,20 +7540,23 @@ final class PetController: NSObject, NSTextFieldDelegate {
             isThinking: isThinking,
             isPromptVisible: isPromptVisible
         ) else { return }
+        radialMenu?.close()
+        radialMenu = nil
         cancelPointingAnimation()
         selectedText = nil
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         petView.apply(state: .idle, mode: currentMode)
         refreshStyleBadge()
     }
 
     func showThinking() {
+        radialMenu?.close()
+        radialMenu = nil
         if isPromptOpen {
             clearPrompt(animate: false)
         }
@@ -7616,11 +7566,10 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = !isPromptLoading
         petView.allowsClickWhenNotReady = isPromptLoading
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         appIconView.isHidden = true
         petView.apply(state: .thinking, mode: currentMode)
         petView.onDragRequested = { [weak self] startLocation in
@@ -7769,40 +7718,41 @@ final class PetController: NSObject, NSTextFieldDelegate {
         petView.apply(state: cursorMovedRecently ? .run : .idle, mode: currentMode)
     }
 
-    private func enableTabInterceptor() {
-        tabInterceptor?.disable()
-        let interceptor = TabKeyInterceptor { [weak self] in
-            self?.toggleMode()
+    private func toggleRadialMenu() {
+        if let radialMenu {
+            radialMenu.close()
+            self.radialMenu = nil
+            return
         }
-        tabInterceptor = interceptor
-        interceptor.enable()
+        // Same gate the old direct invocation had: the ring only makes sense
+        // while a selection is armed.
+        guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
+        let menu = RadialActionMenuController(
+            centeredOn: petCenterInScreen(),
+            ignoring: panel,
+            onSelect: { [weak self] action in
+                guard let self else { return }
+                self.radialMenu = nil
+                guard let selectedText = self.selectedText else { return }
+                switch action {
+                case .explain: self.onTranslate?(selectedText)
+                case .rewrite: self.onRewrite?(selectedText)
+                case .reply: self.onSmartReply?(selectedText)
+                case .ask: self.onAsk?()
+                }
+            },
+            onDismiss: { [weak self] in
+                self?.radialMenu = nil
+            }
+        )
+        radialMenu = menu
+        menu.show()
     }
 
-    private func toggleMode() {
-        currentMode = currentMode == .smartReply ? .selection : .smartReply
-        petView.apply(state: selectedText == nil && !isReadyLockedUntilPanelCloses ? .idle : .ready, mode: currentMode)
-    }
-
-    private func invokeCurrentMode() {
-        guard let selectedText, !isReadyLockedUntilPanelCloses else { return }
-
-        switch currentMode {
-        case .selection, .revise, .reviseMessage:
-            onTranslate?(selectedText)
-        case .draftMessage:
-            onRewrite?(selectedText)
-        case .smartReply:
-            onSmartReply?(selectedText)
-        }
-    }
-
-    private func invokeRewriteMode() {
-        guard let selectedText,
-              !isReadyLockedUntilPanelCloses,
-              currentMode == .selection
-        else { return }
-
-        onRewrite?(selectedText)
+    private func petCenterInScreen() -> NSPoint {
+        let frameInWindow = petView.convert(petView.bounds, to: nil)
+        let screenRect = panel.convertToScreen(frameInWindow)
+        return NSPoint(x: screenRect.midX, y: screenRect.midY)
     }
 
     private static func originNearCursor(for cursor: NSPoint, size: NSSize, offset: NSPoint) -> NSPoint {
@@ -8049,7 +7999,6 @@ final class PetMascotView: NSView {
 
     var onClick: (() -> Void)?
     var onDoubleClick: (() -> Void)?
-    var onRightClick: (() -> Void)?
     var onDragRequested: ((NSPoint) -> Void)?
     var allowsClickWhenNotReady = false
 
@@ -8119,11 +8068,6 @@ final class PetMascotView: NSView {
 
         guard state == .ready || allowsClickWhenNotReady else { return }
         onClick?()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        guard state == .ready else { return }
-        onRightClick?()
     }
 
     func apply(state: State, mode: TranslationMode, emotion: AskNugumiEmotion = .neutral) {
@@ -8735,20 +8679,378 @@ final class PetMascotView: NSView {
         case .idle, .run:
             return "Nugumi pet"
         case .ready:
-            switch mode {
-            case .selection, .revise, .reviseMessage:
-                return "Translate selection - right-click to Rewrite, Tab to switch to Reply"
-            case .draftMessage:
-                return "Rewrite my text - Tab to switch to Reply"
-            case .smartReply:
-                return "Generate reply - Tab to switch back"
-            }
+            return "Choose an action"
         case .thinking:
             return "Thinking…"
         case .talking:
             return "Double-click to close"
         case .flying:
             return "Weeee!"
+        }
+    }
+}
+
+/// Actions offered by the radial menu that opens around the floating bar /
+/// pet. Labels avoid "translate" wording deliberately — house copy rule.
+enum RadialAction: CaseIterable {
+    case explain
+    case rewrite
+    case reply
+    case ask
+
+    var label: String {
+        switch self {
+        case .explain: return "Explain"
+        case .rewrite: return "Rewrite"
+        case .reply: return "Reply"
+        case .ask: return "Ask"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .explain: return "sparkles"
+        case .rewrite: return "pencil.line"
+        case .reply: return "arrowshape.turn.up.left"
+        case .ask: return "questionmark.bubble"
+        }
+    }
+}
+
+/// Pure geometry for the radial menu: where the four buttons sit around the
+/// anchor and how the ring shifts to stay on screen. Kept free of AppKit
+/// state so it is unit-testable.
+enum RadialMenuLayoutPolicy {
+    static let ringRadius: CGFloat = 64
+    static let buttonDiameter: CGFloat = 44
+    /// Room around the ring so hover labels under the buttons stay inside
+    /// the panel.
+    static let panelPadding: CGFloat = 28
+
+    static var panelSide: CGFloat {
+        (ringRadius + buttonDiameter / 2 + panelPadding) * 2
+    }
+
+    /// Offsets from the panel center, one per `RadialAction.allCases` entry:
+    /// explain on top, rewrite left, reply right, ask at the bottom.
+    static func buttonCenters() -> [CGPoint] {
+        [
+            CGPoint(x: 0, y: ringRadius),
+            CGPoint(x: -ringRadius, y: 0),
+            CGPoint(x: ringRadius, y: 0),
+            CGPoint(x: 0, y: -ringRadius),
+        ]
+    }
+
+    /// Panel frame centered on `anchor`, shifted (not shrunk) to stay inside
+    /// the screen. The bar/pet itself does not move; near edges the ring is
+    /// simply off-center around it.
+    static func panelFrame(anchor: NSPoint, screenVisibleFrame: NSRect) -> NSRect {
+        var frame = NSRect(
+            x: anchor.x - panelSide / 2,
+            y: anchor.y - panelSide / 2,
+            width: panelSide,
+            height: panelSide
+        )
+        if frame.minX < screenVisibleFrame.minX {
+            frame.origin.x = screenVisibleFrame.minX
+        }
+        if frame.maxX > screenVisibleFrame.maxX {
+            frame.origin.x = screenVisibleFrame.maxX - frame.width
+        }
+        if frame.minY < screenVisibleFrame.minY {
+            frame.origin.y = screenVisibleFrame.minY
+        }
+        if frame.maxY > screenVisibleFrame.maxY {
+            frame.origin.y = screenVisibleFrame.maxY - frame.height
+        }
+        return frame
+    }
+}
+
+/// The ring of action buttons that opens around the floating bar / pet.
+/// Purely presentational: owns one transparent panel, reports the picked
+/// action via `onSelect`, and calls `onDismiss` when it closed itself
+/// (outside click, Escape, empty-area click). The presenter owns the
+/// toggle state and calls `close()` for its own teardown paths.
+@MainActor
+final class RadialActionMenuController {
+    private let panel: NSPanel
+    /// The bar/pet panel that opened the menu. Its clicks are exempt from
+    /// the local dismiss monitor: if a click reaches the presenter (past the
+    /// menu's own backdrop), its handler must see the menu still open and
+    /// toggle it — dismissing here first would make that handler reopen.
+    private weak var presenterWindow: NSWindow?
+    private let onSelect: (RadialAction) -> Void
+    private let onDismiss: () -> Void
+    private var buttons: [RadialMenuButtonView] = []
+    private var dismissMonitors: [Any] = []
+    private var didClose = false
+
+    init(
+        centeredOn anchor: NSPoint,
+        ignoring presenterWindow: NSWindow?,
+        onSelect: @escaping (RadialAction) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.presenterWindow = presenterWindow
+        self.onSelect = onSelect
+        self.onDismiss = onDismiss
+
+        let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.main
+        let frame = RadialMenuLayoutPolicy.panelFrame(
+            anchor: anchor,
+            screenVisibleFrame: screen?.visibleFrame
+                ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        panel = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        InvisibilityState.apply(to: panel)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.ignoresMouseEvents = false
+
+        let container = RadialMenuBackdropView(
+            frame: NSRect(origin: .zero, size: frame.size)
+        )
+        container.onEmptyClick = { [weak self] in self?.dismiss() }
+
+        let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
+        for (action, offset) in zip(RadialAction.allCases, RadialMenuLayoutPolicy.buttonCenters()) {
+            let button = RadialMenuButtonView(action: action) { [weak self] picked in
+                self?.finish(with: picked)
+            }
+            button.setFrameOrigin(NSPoint(
+                x: panelCenter.x + offset.x - button.frame.width / 2,
+                y: panelCenter.y + offset.y - button.frame.height / 2
+            ))
+            container.addSubview(button)
+            buttons.append(button)
+        }
+        panel.contentView = container
+    }
+
+    func show() {
+        panel.orderFrontRegardless()
+        animateButtonsIn()
+        installDismissMonitors()
+    }
+
+    func close() {
+        guard !didClose else { return }
+        didClose = true
+        removeDismissMonitors()
+        panel.close()
+    }
+
+    private func dismiss() {
+        guard !didClose else { return }
+        close()
+        onDismiss()
+    }
+
+    private func finish(with action: RadialAction) {
+        guard !didClose else { return }
+        close()
+        onSelect(action)
+    }
+
+    private func animateButtonsIn() {
+        guard let container = panel.contentView else { return }
+        for button in buttons {
+            let target = button.frame
+            button.frame = NSRect(
+                x: container.bounds.midX - target.width / 2,
+                y: container.bounds.midY - target.height / 2,
+                width: target.width,
+                height: target.height
+            )
+            button.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                // Same springy overshoot as the bar's hover scale.
+                context.timingFunction = CAMediaTimingFunction(
+                    controlPoints: 0.34, 1.45, 0.5, 1
+                )
+                button.animator().frame = target
+                button.animator().alphaValue = 1
+            }
+        }
+    }
+
+    /// The panel is non-activating and never key, so Escape needs both a
+    /// local monitor (Nugumi frontmost) and a global one (another app
+    /// frontmost — observed, not consumed). Mouse clicks: the global monitor
+    /// covers other apps, the local one covers Nugumi's own windows — except
+    /// the menu itself and the presenting bar/pet, whose click handler owns
+    /// the toggle.
+    private func installDismissMonitors() {
+        guard dismissMonitors.isEmpty else { return }
+        var monitors: [Any?] = []
+        monitors.append(NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.dismiss() }
+        })
+        monitors.append(NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            guard let self,
+                  event.window !== self.panel,
+                  event.window !== self.presenterWindow
+            else { return event }
+            Task { @MainActor [weak self] in self?.dismiss() }
+            return event
+        })
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == UInt16(kVK_Escape) else { return event }
+            Task { @MainActor [weak self] in self?.dismiss() }
+            return nil
+        })
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == UInt16(kVK_Escape) else { return }
+            Task { @MainActor [weak self] in self?.dismiss() }
+        })
+        dismissMonitors = monitors.compactMap { $0 }
+    }
+
+    private func removeDismissMonitors() {
+        dismissMonitors.forEach(NSEvent.removeMonitor)
+        dismissMonitors = []
+    }
+}
+
+/// Transparent backdrop behind the ring buttons. A click that lands on it —
+/// rather than on a button — dismisses the menu.
+private final class RadialMenuBackdropView: NSView {
+    var onEmptyClick: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onEmptyClick?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onEmptyClick?()
+    }
+}
+
+/// One circular glass button on the ring: SF Symbol icon, hover tint, and a
+/// small label that fades in under the circle on hover.
+private final class RadialMenuButtonView: NSView {
+    private let action: RadialAction
+    private let onPick: (RadialAction) -> Void
+    private let circleView = NSVisualEffectView()
+    private let iconView = NSImageView()
+    private let labelField: NSTextField
+    private var trackingArea: NSTrackingArea?
+
+    init(action: RadialAction, onPick: @escaping (RadialAction) -> Void) {
+        self.action = action
+        self.onPick = onPick
+        self.labelField = NSTextField(labelWithString: action.label)
+
+        let diameter = RadialMenuLayoutPolicy.buttonDiameter
+        let labelHeight: CGFloat = 16
+        // Wider and taller than the circle so the hover label fits.
+        super.init(frame: NSRect(
+            x: 0, y: 0,
+            width: diameter + 28,
+            height: diameter + labelHeight + 4
+        ))
+        wantsLayer = true
+
+        circleView.material = .hudWindow
+        circleView.state = .active
+        circleView.blendingMode = .behindWindow
+        circleView.wantsLayer = true
+        circleView.layer?.cornerRadius = diameter / 2
+        circleView.layer?.masksToBounds = true
+        circleView.frame = NSRect(
+            x: (bounds.width - diameter) / 2,
+            y: labelHeight + 4,
+            width: diameter,
+            height: diameter
+        )
+        addSubview(circleView)
+
+        iconView.image = NSImage(
+            systemSymbolName: action.symbolName,
+            accessibilityDescription: action.label
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        )
+        iconView.contentTintColor = .labelColor
+        iconView.imageAlignment = .alignCenter
+        iconView.frame = circleView.bounds
+        iconView.autoresizingMask = [.width, .height]
+        circleView.addSubview(iconView)
+
+        labelField.font = .systemFont(ofSize: 11, weight: .medium)
+        labelField.textColor = .labelColor
+        labelField.alignment = .center
+        labelField.sizeToFit()
+        labelField.frame = NSRect(
+            x: (bounds.width - labelField.frame.width) / 2,
+            y: 0,
+            width: labelField.frame.width,
+            height: labelHeight
+        )
+        labelField.alphaValue = 0
+        addSubview(labelField)
+
+        toolTip = action.label
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    // Swallow mouseDown: unhandled it would bubble up the responder chain to
+    // the backdrop, whose mouseDown dismisses the menu before mouseUp lands.
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(location) else { return }
+        onPick(action)
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        iconView.contentTintColor = hovered ? .nugumiAccent : .labelColor
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            labelField.animator().alphaValue = hovered ? 1 : 0
         }
     }
 }
@@ -8761,8 +9063,8 @@ final class FloatingTranslateButtonController {
     private let onRewrite: (String) -> Void
     private let onSmartReply: (String) -> Void
     private let buttonView: FloatingTranslateButtonView
-    private var currentMode: TranslationMode
-    private var tabInterceptor: TabKeyInterceptor?
+    private let onAsk: () -> Void
+    private var radialMenu: RadialActionMenuController?
 
     init(
         screenPoint: NSPoint,
@@ -8770,13 +9072,14 @@ final class FloatingTranslateButtonController {
         initialMode: TranslationMode,
         onTranslate: @escaping (String) -> Void,
         onRewrite: @escaping (String) -> Void,
-        onSmartReply: @escaping (String) -> Void
+        onSmartReply: @escaping (String) -> Void,
+        onAsk: @escaping () -> Void
     ) {
         self.selectedText = selectedText
         self.onTranslate = onTranslate
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
-        self.currentMode = initialMode
+        self.onAsk = onAsk
 
         let buttonSize = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         let shadowPadding = AskNugumiFloatingTargetPresentationPolicy.shadowPadding
@@ -8809,56 +9112,59 @@ final class FloatingTranslateButtonController {
         panel.contentView = container
 
         buttonView.onClick = { [weak self] in
-            guard let self else { return }
-            self.invokeCurrentMode()
-        }
-        buttonView.onRightClick = { [weak self] in
-            self?.invokeRewriteMode()
+            self?.toggleRadialMenu()
         }
     }
 
     func show() {
         panel.orderFrontRegardless()
         buttonView.enableHoverScaling()
-        let interceptor = TabKeyInterceptor { [weak self] in
-            self?.toggleMode()
-        }
-        tabInterceptor = interceptor
-        interceptor.enable()
     }
 
     func close() {
-        tabInterceptor?.disable()
-        tabInterceptor = nil
+        radialMenu?.close()
+        radialMenu = nil
         panel.close()
     }
 
     func setLoading() {
         panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
+        radialMenu?.close()
+        radialMenu = nil
         buttonView.setLoading(true)
     }
 
-    private func toggleMode() {
-        currentMode = (currentMode == .smartReply) ? .selection : .smartReply
-        buttonView.apply(mode: currentMode)
-    }
-
-    private func invokeCurrentMode() {
-        switch currentMode {
-        case .selection, .revise, .reviseMessage:
-            onTranslate(selectedText)
-        case .draftMessage:
-            onRewrite(selectedText)
-        case .smartReply:
-            onSmartReply(selectedText)
+    private func toggleRadialMenu() {
+        if let radialMenu {
+            radialMenu.close()
+            self.radialMenu = nil
+            return
         }
+        let menu = RadialActionMenuController(
+            centeredOn: buttonCenterInScreen(),
+            ignoring: panel,
+            onSelect: { [weak self] action in
+                guard let self else { return }
+                self.radialMenu = nil
+                switch action {
+                case .explain: self.onTranslate(self.selectedText)
+                case .rewrite: self.onRewrite(self.selectedText)
+                case .reply: self.onSmartReply(self.selectedText)
+                case .ask: self.onAsk()
+                }
+            },
+            onDismiss: { [weak self] in
+                self?.radialMenu = nil
+            }
+        )
+        radialMenu = menu
+        menu.show()
     }
 
-    private func invokeRewriteMode() {
-        guard currentMode == .selection else { return }
-        onRewrite(selectedText)
+    private func buttonCenterInScreen() -> NSPoint {
+        let frameInWindow = buttonView.convert(buttonView.bounds, to: nil)
+        let screenRect = panel.convertToScreen(frameInWindow)
+        return NSPoint(x: screenRect.midX, y: screenRect.midY)
     }
 }
 
@@ -9691,18 +9997,6 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     }
 }
 
-private final class RightClickableButton: NSButton {
-    var onRightClick: (() -> Void)?
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        onRightClick?()
-    }
-}
-
 private final class FirstMouseButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
@@ -9712,9 +10006,8 @@ private final class FirstMouseButton: NSButton {
 @MainActor
 final class FloatingTranslateButtonView: NSView {
     var onClick: (() -> Void)?
-    var onRightClick: (() -> Void)?
 
-    private let actionButton = RightClickableButton()
+    private let actionButton = FirstMouseButton()
     private let progressIndicator = NSProgressIndicator()
     private var glassView: GlassHostView!
     private var currentMode: TranslationMode
@@ -9845,9 +10138,6 @@ final class FloatingTranslateButtonView: NSView {
 
         actionButton.target = self
         actionButton.action = #selector(buttonTapped)
-        actionButton.onRightClick = { [weak self] in
-            self?.onRightClick?()
-        }
         actionButton.frame = bounds
         actionButton.autoresizingMask = [.width, .height]
         actionButton.isBordered = false
@@ -9903,14 +10193,7 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.image = Self.glyphImage(for: currentMode)
         actionButton.title = ""
         actionButton.imagePosition = .imageOnly
-        switch currentMode {
-        case .selection, .revise, .reviseMessage:
-            actionButton.toolTip = "Translate selection - right-click to Rewrite, Tab to switch to Reply"
-        case .draftMessage:
-            actionButton.toolTip = "Rewrite my text - Tab to switch to Reply"
-        case .smartReply:
-            actionButton.toolTip = "Generate reply - Tab to switch back"
-        }
+        actionButton.toolTip = "Choose an action"
     }
 
     /// A mode's glyph centered in a button-sized canvas with baked-in padding, so

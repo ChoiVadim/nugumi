@@ -41,7 +41,7 @@ struct FeatureTourStep {
                 body: "Stuck on a word or a sentence? Nugumi explains it in simple words - and you can keep asking.",
                 steps: [
                     "Select the text you don't get.",
-                    "Click the Nugumi that pops up next to it.",
+                    "Click the Nugumi that pops up and pick Explain.",
                     "Read the answer. Ask more if you want.",
                 ],
                 videoURL: videoURL(named: "understand", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4")
@@ -52,7 +52,7 @@ struct FeatureTourStep {
                 steps: [
                     "Write your message.",
                     "Select it.",
-                    "Right-click the Nugumi that pops up.",
+                    "Click the Nugumi that pops up and pick Rewrite.",
                 ],
                 videoURL: videoURL(named: "fix", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")
             ),
@@ -61,8 +61,8 @@ struct FeatureTourStep {
                 body: "Nugumi reads the message you got and writes the reply for you.",
                 steps: [
                     "Select the message you got.",
-                    "Nugumi pops up - press Tab to switch to reply.",
-                    "Click Nugumi.",
+                    "Click the Nugumi that pops up.",
+                    "Pick Reply.",
                 ],
                 videoURL: videoURL(named: "reply", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")
             )
