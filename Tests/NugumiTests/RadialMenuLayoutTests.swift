@@ -48,6 +48,13 @@ final class RadialMenuLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxY, 900)
     }
 
+    func testLabelPlacementMatchesRingSide() {
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 0, y: 64)), .top)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: -64, y: 0)), .left)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 64, y: 0)), .right)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 0, y: -64)), .bottom)
+    }
+
     func testEveryActionHasLabelAndSymbol() {
         for action in RadialAction.allCases {
             XCTAssertFalse(action.label.isEmpty)

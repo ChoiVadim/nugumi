@@ -8690,6 +8690,25 @@ final class PetMascotView: NSView {
     }
 }
 
+/// Where a ring button's hover bubble sits relative to its circle. Also
+/// names the bubble edge carrying the tail via `opposite`.
+enum RadialMenuLabelPlacement {
+    case top
+    case left
+    case right
+    case bottom
+
+    /// The facing edge — a bubble ABOVE the circle points its tail DOWN.
+    var opposite: RadialMenuLabelPlacement {
+        switch self {
+        case .top: return .bottom
+        case .bottom: return .top
+        case .left: return .right
+        case .right: return .left
+        }
+    }
+}
+
 /// Actions offered by the radial menu that opens around the floating bar /
 /// pet. Labels avoid "translate" wording deliberately — house copy rule.
 enum RadialAction: CaseIterable {
@@ -8723,9 +8742,9 @@ enum RadialAction: CaseIterable {
 enum RadialMenuLayoutPolicy {
     static let ringRadius: CGFloat = 64
     static let buttonDiameter: CGFloat = 44
-    /// Room around the ring so hover labels under the buttons stay inside
-    /// the panel.
-    static let panelPadding: CGFloat = 28
+    /// Room around the ring for the hover label bubbles that sit outside it
+    /// (worst case: a side bubble's full width plus tail and gap).
+    static let panelPadding: CGFloat = 72
 
     static var panelSide: CGFloat {
         (ringRadius + buttonDiameter / 2 + panelPadding) * 2
@@ -8740,6 +8759,15 @@ enum RadialMenuLayoutPolicy {
             CGPoint(x: ringRadius, y: 0),
             CGPoint(x: 0, y: -ringRadius),
         ]
+    }
+
+    /// Which side of the ring an offset points to — that button's hover
+    /// bubble sits on the same side, outside the ring, tail toward the circle.
+    static func labelPlacement(for offset: CGPoint) -> RadialMenuLabelPlacement {
+        if abs(offset.y) >= abs(offset.x) {
+            return offset.y >= 0 ? .top : .bottom
+        }
+        return offset.x < 0 ? .left : .right
     }
 
     /// Panel frame centered on `anchor`, shifted (not shrunk) to stay inside
@@ -8831,12 +8859,62 @@ final class RadialActionMenuController {
             }
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,
-                y: panelCenter.y + offset.y - button.frame.height / 2 - button.circleCenterOffsetY
+                y: panelCenter.y + offset.y - button.frame.height / 2
             ))
             container.addSubview(button)
             buttons.append(button)
+
+            let placement = RadialMenuLayoutPolicy.labelPlacement(for: offset)
+            let bubble = RadialMenuLabelBubbleView(
+                text: action.label,
+                tailEdge: placement.opposite
+            )
+            bubble.setFrameOrigin(Self.bubbleOrigin(
+                for: placement,
+                buttonFrame: button.frame,
+                bubbleSize: bubble.frame.size
+            ))
+            bubble.alphaValue = 0
+            container.addSubview(bubble)
+            button.onHoverChange = { [weak bubble] hovered in
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.15
+                    bubble?.animator().alphaValue = hovered ? 1 : 0
+                }
+            }
         }
         panel.contentView = container
+    }
+
+    private static let bubbleGap: CGFloat = 4
+
+    private static func bubbleOrigin(
+        for placement: RadialMenuLabelPlacement,
+        buttonFrame: NSRect,
+        bubbleSize: NSSize
+    ) -> NSPoint {
+        switch placement {
+        case .top:
+            return NSPoint(
+                x: buttonFrame.midX - bubbleSize.width / 2,
+                y: buttonFrame.maxY + bubbleGap
+            )
+        case .bottom:
+            return NSPoint(
+                x: buttonFrame.midX - bubbleSize.width / 2,
+                y: buttonFrame.minY - bubbleGap - bubbleSize.height
+            )
+        case .left:
+            return NSPoint(
+                x: buttonFrame.minX - bubbleGap - bubbleSize.width,
+                y: buttonFrame.midY - bubbleSize.height / 2
+            )
+        case .right:
+            return NSPoint(
+                x: buttonFrame.maxX + bubbleGap,
+                y: buttonFrame.midY - bubbleSize.height / 2
+            )
+        }
     }
 
     func show() {
@@ -8870,7 +8948,7 @@ final class RadialActionMenuController {
             let target = button.frame
             button.frame = NSRect(
                 x: container.bounds.midX - target.width / 2,
-                y: container.bounds.midY - target.height / 2 - button.circleCenterOffsetY,
+                y: container.bounds.midY - target.height / 2,
                 width: target.width,
                 height: target.height
             )
@@ -8950,29 +9028,18 @@ private final class RadialMenuButtonView: NSView {
     private let onPick: (RadialAction) -> Void
     private let circleView = NSVisualEffectView()
     private let iconView = NSImageView()
-    private let labelField: NSTextField
     private var trackingArea: NSTrackingArea?
 
-    /// The visible circle sits above the view's own center — the bottom label
-    /// reserve pushes it up — so ring layout must place the CIRCLE's center,
-    /// not the view's, on the ring point.
-    var circleCenterOffsetY: CGFloat {
-        circleView.frame.midY - bounds.midY
-    }
+    /// Fired on hover in/out — the controller shows the label bubble, which
+    /// lives outside this view so the ring hit-areas stay circle-sized.
+    var onHoverChange: ((Bool) -> Void)?
 
     init(action: RadialAction, onPick: @escaping (RadialAction) -> Void) {
         self.action = action
         self.onPick = onPick
-        self.labelField = NSTextField(labelWithString: action.label)
 
         let diameter = RadialMenuLayoutPolicy.buttonDiameter
-        let labelHeight: CGFloat = 16
-        // Wider and taller than the circle so the hover label fits.
-        super.init(frame: NSRect(
-            x: 0, y: 0,
-            width: diameter + 28,
-            height: diameter + labelHeight + 4
-        ))
+        super.init(frame: NSRect(x: 0, y: 0, width: diameter, height: diameter))
         wantsLayer = true
 
         circleView.material = .hudWindow
@@ -8981,12 +9048,7 @@ private final class RadialMenuButtonView: NSView {
         circleView.wantsLayer = true
         circleView.layer?.cornerRadius = diameter / 2
         circleView.layer?.masksToBounds = true
-        circleView.frame = NSRect(
-            x: (bounds.width - diameter) / 2,
-            y: labelHeight + 4,
-            width: diameter,
-            height: diameter
-        )
+        circleView.frame = bounds
         addSubview(circleView)
 
         iconView.image = NSImage(
@@ -9003,21 +9065,6 @@ private final class RadialMenuButtonView: NSView {
         iconView.frame = circleView.bounds
         iconView.autoresizingMask = [.width, .height]
         circleView.addSubview(iconView)
-
-        labelField.font = .systemFont(ofSize: 11, weight: .medium)
-        labelField.textColor = .labelColor
-        labelField.alignment = .center
-        labelField.sizeToFit()
-        labelField.frame = NSRect(
-            x: (bounds.width - labelField.frame.width) / 2,
-            y: 0,
-            width: labelField.frame.width,
-            height: labelHeight
-        )
-        labelField.alphaValue = 0
-        addSubview(labelField)
-
-        toolTip = action.label
     }
 
     required init?(coder: NSCoder) {
@@ -9058,10 +9105,105 @@ private final class RadialMenuButtonView: NSView {
 
     private func setHovered(_ hovered: Bool) {
         iconView.contentTintColor = hovered ? .nugumiAccent : .labelColor
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
-            labelField.animator().alphaValue = hovered ? 1 : 0
+        onHoverChange?(hovered)
+    }
+}
+
+/// Logi-style callout for a ring button's hover label: solid rounded rect
+/// plus a small tail pointing back at the circle. Deliberately fixed white
+/// with black text — the old translucent in-panel label was unreadable on
+/// busy or dark backgrounds, and a solid callout reads on any of them.
+private final class RadialMenuLabelBubbleView: NSView {
+    private static let tailLength: CGFloat = 6
+    private static let tailHalfWidth: CGFloat = 5
+    private static let hPad: CGFloat = 9
+    private static let vPad: CGFloat = 5
+    private static let corner: CGFloat = 9
+    private static let textAttributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+        .foregroundColor: NSColor.black,
+    ]
+
+    private let text: String
+    /// The bubble edge carrying the tail — the edge that faces the circle.
+    private let tailEdge: RadialMenuLabelPlacement
+
+    init(text: String, tailEdge: RadialMenuLabelPlacement) {
+        self.text = text
+        self.tailEdge = tailEdge
+
+        let textSize = (text as NSString).size(withAttributes: Self.textAttributes)
+        var size = NSSize(
+            width: ceil(textSize.width) + Self.hPad * 2,
+            height: ceil(textSize.height) + Self.vPad * 2
+        )
+        switch tailEdge {
+        case .left, .right: size.width += Self.tailLength
+        case .top, .bottom: size.height += Self.tailLength
         }
+        super.init(frame: NSRect(origin: .zero, size: size))
+
+        wantsLayer = true
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.25
+        layer?.shadowRadius = 4
+        layer?.shadowOffset = CGSize(width: 0, height: -1)
+        layer?.masksToBounds = false
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // The tail is drawn outside the body but inside the frame — the body
+        // rect cedes `tailLength` on the tail edge.
+        var body = bounds
+        switch tailEdge {
+        case .left:
+            body.origin.x += Self.tailLength
+            body.size.width -= Self.tailLength
+        case .right:
+            body.size.width -= Self.tailLength
+        case .bottom:
+            body.origin.y += Self.tailLength
+            body.size.height -= Self.tailLength
+        case .top:
+            body.size.height -= Self.tailLength
+        }
+
+        let path = NSBezierPath(roundedRect: body, xRadius: Self.corner, yRadius: Self.corner)
+        let tail = NSBezierPath()
+        let length = Self.tailLength
+        let half = Self.tailHalfWidth
+        switch tailEdge {
+        case .left:
+            tail.move(to: NSPoint(x: body.minX, y: body.midY - half))
+            tail.line(to: NSPoint(x: body.minX - length, y: body.midY))
+            tail.line(to: NSPoint(x: body.minX, y: body.midY + half))
+        case .right:
+            tail.move(to: NSPoint(x: body.maxX, y: body.midY - half))
+            tail.line(to: NSPoint(x: body.maxX + length, y: body.midY))
+            tail.line(to: NSPoint(x: body.maxX, y: body.midY + half))
+        case .bottom:
+            tail.move(to: NSPoint(x: body.midX - half, y: body.minY))
+            tail.line(to: NSPoint(x: body.midX, y: body.minY - length))
+            tail.line(to: NSPoint(x: body.midX + half, y: body.minY))
+        case .top:
+            tail.move(to: NSPoint(x: body.midX - half, y: body.maxY))
+            tail.line(to: NSPoint(x: body.midX, y: body.maxY + length))
+            tail.line(to: NSPoint(x: body.midX + half, y: body.maxY))
+        }
+        tail.close()
+        path.append(tail)
+
+        NSColor.white.setFill()
+        path.fill()
+
+        (text as NSString).draw(
+            at: NSPoint(x: body.minX + Self.hPad, y: body.minY + Self.vPad),
+            withAttributes: Self.textAttributes
+        )
     }
 }
 
