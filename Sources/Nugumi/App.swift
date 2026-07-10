@@ -8792,6 +8792,10 @@ enum RadialMenuLayoutPolicy {
 @MainActor
 final class RadialActionMenuController {
     private let panel: NSPanel
+    /// Hover over the ring's center (the bar/pet under the ✕). The presenter
+    /// subscribes to drive its close-button hover tint — its own tracking
+    /// area is occluded by this panel while the ring is open.
+    var onCenterHoverChange: ((Bool) -> Void)?
     /// The bar/pet panel that opened the menu. Its clicks are exempt from
     /// the local dismiss monitor: if a click reaches the presenter (past the
     /// menu's own backdrop), its handler must see the menu still open and
@@ -8834,6 +8838,16 @@ final class RadialActionMenuController {
             frame: NSRect(origin: .zero, size: frame.size)
         )
         container.onEmptyClick = { [weak self] in self?.dismiss() }
+        container.onCenterHoverChange = { [weak self] hovered in
+            self?.onCenterHoverChange?(hovered)
+        }
+        let centerDiameter = RadialMenuLayoutPolicy.buttonDiameter
+        container.trackCenterHover(in: NSRect(
+            x: frame.width / 2 - centerDiameter / 2,
+            y: frame.height / 2 - centerDiameter / 2,
+            width: centerDiameter,
+            height: centerDiameter
+        ))
 
         let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
         for (action, offset) in zip(RadialAction.allCases, RadialMenuLayoutPolicy.buttonCenters()) {
@@ -9032,9 +9046,34 @@ private final class RadialMenuPanel: NSPanel {
 }
 
 /// Transparent backdrop behind the ring buttons. A click that lands on it —
-/// rather than on a button — dismisses the menu.
+/// rather than on a button — dismisses the menu. It also tracks hover over
+/// the ring's center: the panel occludes the presenter's own tracking area,
+/// so the bar underneath cannot see those hovers itself.
 private final class RadialMenuBackdropView: NSView {
     var onEmptyClick: (() -> Void)?
+    var onCenterHoverChange: ((Bool) -> Void)?
+    private var centerTrackingArea: NSTrackingArea?
+
+    func trackCenterHover(in rect: NSRect) {
+        if let centerTrackingArea {
+            removeTrackingArea(centerTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: rect,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self
+        )
+        addTrackingArea(area)
+        centerTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onCenterHoverChange?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onCenterHoverChange?(false)
+    }
 
     override func mouseDown(with event: NSEvent) {
         onEmptyClick?()
@@ -9337,6 +9376,9 @@ final class FloatingTranslateButtonController {
                 self.buttonView.setMenuOpen(false)
             }
         )
+        menu.onCenterHoverChange = { [weak self] hovered in
+            self?.buttonView.setCloseHovered(hovered)
+        }
         radialMenu = menu
         menu.show()
         buttonView.setMenuOpen(true)
@@ -10194,7 +10236,7 @@ final class FloatingTranslateButtonView: NSView {
     private var currentMode: TranslationMode
     private var isLoading = false
     private var isMenuOpen = false
-    private var isHovered = false
+    private var isCloseHovered = false
 
     private var hoverTrackingArea: NSTrackingArea?
     private var hoverScalingEnabled = false
@@ -10273,22 +10315,15 @@ final class FloatingTranslateButtonView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        refreshCloseTint()
         guard hoverScalingEnabled, !isLoading else { return }
         applyScale(1.0, animated: true)
     }
 
     override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        refreshCloseTint()
-        guard hoverScalingEnabled, !isLoading else { return }
+        // The ring panel covering the bar fires a synthetic exit the moment
+        // it opens; keep the close button full-size while the ring is up.
+        guard hoverScalingEnabled, !isLoading, !isMenuOpen else { return }
         applyScale(Self.restScale, animated: true)
-    }
-
-    private func refreshCloseTint() {
-        guard isMenuOpen, !isLoading else { return }
-        actionButton.image = Self.closeGlyphImage(hovered: isHovered)
     }
 
     /// Resizes the whole button via its frame — the only resize an
@@ -10395,11 +10430,25 @@ final class FloatingTranslateButtonView: NSView {
         guard !isLoading else { return }
         isMenuOpen = open
         if open {
-            actionButton.image = Self.closeGlyphImage(hovered: isHovered)
+            // The click that opened the menu happened on this button, so
+            // the cursor starts on the ✕ — red right away.
+            isCloseHovered = true
+            actionButton.image = Self.closeGlyphImage(hovered: true)
             actionButton.toolTip = "Close"
         } else {
+            isCloseHovered = false
+            applyScale(Self.restScale, animated: true)
             applyModeVisuals()
         }
+    }
+
+    /// Hover over the ring's center, reported by the menu overlay — its
+    /// panel occludes this view's own tracking area while the ring is open,
+    /// so the bar cannot see these hovers itself.
+    func setCloseHovered(_ hovered: Bool) {
+        guard isMenuOpen, isCloseHovered != hovered else { return }
+        isCloseHovered = hovered
+        actionButton.image = Self.closeGlyphImage(hovered: hovered)
     }
 
     /// Plain white ✕ at rest; a solid red disc with a dark ✕ on hover. The
