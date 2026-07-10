@@ -2997,6 +2997,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                         keepPetReadyUntilPanelCloses: true,
                         restoresReadyOnUserDismiss: true
                     )
+                },
+                onAsk: { [weak self] in
+                    self?.startAskNugumiPrompt()
                 }
             )
             return
@@ -6757,7 +6760,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var trackingTimer: Timer?
     private var throwTimer: Timer?
     private var throwVelocity: NSPoint = .zero
-    private var tabInterceptor: TabKeyInterceptor?
+    private var onAsk: (() -> Void)?
+    private var radialMenu: RadialActionMenuController?
     private var selectedText: String?
     private var onTranslate: ((String) -> Void)?
     private var onRewrite: ((String) -> Void)?
@@ -6978,10 +6982,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
                 self.closePromptFromUser()
                 return
             }
-            self.invokeCurrentMode()
-        }
-        petView.onRightClick = { [weak self] in
-            self?.invokeRewriteMode()
+            self.toggleRadialMenu()
         }
 
         refreshStyleBadge()
@@ -7045,6 +7046,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     func close() {
+        radialMenu?.close()
+        radialMenu = nil
         if let workspaceObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver)
             self.workspaceObserver = nil
@@ -7068,6 +7071,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         self.onTranslate = nil
         self.onRewrite = nil
         self.onSmartReply = nil
+        self.onAsk = nil
         onPromptSubmit = onSubmit
         onPromptClose = onClose
         currentMode = .draftMessage
@@ -7078,8 +7082,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
         isAnswerOpen = false
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         appIconView.isHidden = true
         petView.apply(state: .idle, mode: currentMode)
 
@@ -7219,6 +7221,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         onPromptSubmit = nil
         onPromptClose = nil
         isReadyLockedUntilPanelCloses = false
@@ -7230,8 +7233,6 @@ final class PetController: NSObject, NSTextFieldDelegate {
 
         panel.ignoresMouseEvents = false
         petView.allowsClickWhenNotReady = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         appIconView.isHidden = true
         promptBubbleView.isError = false
         configureAnswerTextView(with: cleanMessage)
@@ -7550,7 +7551,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         initialMode: TranslationMode,
         onTranslate: @escaping (String) -> Void,
         onRewrite: @escaping (String) -> Void,
-        onSmartReply: @escaping (String) -> Void
+        onSmartReply: @escaping (String) -> Void,
+        onAsk: @escaping () -> Void
     ) {
         // Don't yank the pet back to "ready" while Ask is open (input, loading,
         // or answer) — a casual selection in another app should leave the
@@ -7561,18 +7563,22 @@ final class PetController: NSObject, NSTextFieldDelegate {
         ) else {
             return
         }
+        // A stale ring can still reference the previous selection's closures
+        // if a new one arrives while it's open — tear it down before rearming.
+        radialMenu?.close()
+        radialMenu = nil
         clearPrompt(animate: true)
         cancelPointingAnimation()
         self.selectedText = selectedText
         self.onTranslate = onTranslate
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
+        self.onAsk = onAsk
         currentMode = initialMode
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = false
         petView.apply(state: .ready, mode: currentMode)
         appIconView.isHidden = true
-        enableTabInterceptor()
         show()
     }
 
@@ -7585,10 +7591,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         isReadyLockedUntilPanelCloses = true
         panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         petView.apply(state: .ready, mode: currentMode)
         appIconView.isHidden = true
     }
@@ -7598,20 +7603,23 @@ final class PetController: NSObject, NSTextFieldDelegate {
             isThinking: isThinking,
             isPromptVisible: isPromptVisible
         ) else { return }
+        radialMenu?.close()
+        radialMenu = nil
         cancelPointingAnimation()
         selectedText = nil
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = true
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         petView.apply(state: .idle, mode: currentMode)
         refreshStyleBadge()
     }
 
     func showThinking() {
+        radialMenu?.close()
+        radialMenu = nil
         if isPromptOpen {
             clearPrompt(animate: false)
         }
@@ -7621,11 +7629,10 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate = nil
         onRewrite = nil
         onSmartReply = nil
+        onAsk = nil
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = !isPromptLoading
         petView.allowsClickWhenNotReady = isPromptLoading
-        tabInterceptor?.disable()
-        tabInterceptor = nil
         appIconView.isHidden = true
         petView.apply(state: .thinking, mode: currentMode)
         petView.onDragRequested = { [weak self] startLocation in
@@ -7774,40 +7781,41 @@ final class PetController: NSObject, NSTextFieldDelegate {
         petView.apply(state: cursorMovedRecently ? .run : .idle, mode: currentMode)
     }
 
-    private func enableTabInterceptor() {
-        tabInterceptor?.disable()
-        let interceptor = TabKeyInterceptor { [weak self] in
-            self?.toggleMode()
+    private func toggleRadialMenu() {
+        if let radialMenu {
+            radialMenu.close()
+            self.radialMenu = nil
+            return
         }
-        tabInterceptor = interceptor
-        interceptor.enable()
+        // Same gate the old direct invocation had: the ring only makes sense
+        // while a selection is armed.
+        guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
+        let menu = RadialActionMenuController(
+            centeredOn: petCenterInScreen(),
+            ignoring: panel,
+            onSelect: { [weak self] action in
+                guard let self else { return }
+                self.radialMenu = nil
+                guard let selectedText = self.selectedText else { return }
+                switch action {
+                case .explain: self.onTranslate?(selectedText)
+                case .rewrite: self.onRewrite?(selectedText)
+                case .reply: self.onSmartReply?(selectedText)
+                case .ask: self.onAsk?()
+                }
+            },
+            onDismiss: { [weak self] in
+                self?.radialMenu = nil
+            }
+        )
+        radialMenu = menu
+        menu.show()
     }
 
-    private func toggleMode() {
-        currentMode = currentMode == .smartReply ? .selection : .smartReply
-        petView.apply(state: selectedText == nil && !isReadyLockedUntilPanelCloses ? .idle : .ready, mode: currentMode)
-    }
-
-    private func invokeCurrentMode() {
-        guard let selectedText, !isReadyLockedUntilPanelCloses else { return }
-
-        switch currentMode {
-        case .selection, .revise, .reviseMessage:
-            onTranslate?(selectedText)
-        case .draftMessage:
-            onRewrite?(selectedText)
-        case .smartReply:
-            onSmartReply?(selectedText)
-        }
-    }
-
-    private func invokeRewriteMode() {
-        guard let selectedText,
-              !isReadyLockedUntilPanelCloses,
-              currentMode == .selection
-        else { return }
-
-        onRewrite?(selectedText)
+    private func petCenterInScreen() -> NSPoint {
+        let frameInWindow = petView.convert(petView.bounds, to: nil)
+        let screenRect = panel.convertToScreen(frameInWindow)
+        return NSPoint(x: screenRect.midX, y: screenRect.midY)
     }
 
     private static func originNearCursor(for cursor: NSPoint, size: NSSize, offset: NSPoint) -> NSPoint {
@@ -8740,14 +8748,7 @@ final class PetMascotView: NSView {
         case .idle, .run:
             return "Nugumi pet"
         case .ready:
-            switch mode {
-            case .selection, .revise, .reviseMessage:
-                return "Translate selection - right-click to Rewrite, Tab to switch to Reply"
-            case .draftMessage:
-                return "Rewrite my text - Tab to switch to Reply"
-            case .smartReply:
-                return "Generate reply - Tab to switch back"
-            }
+            return "Choose an action"
         case .thinking:
             return "Thinking…"
         case .talking:
