@@ -8815,7 +8815,7 @@ final class RadialActionMenuController {
 
         let frame = RadialMenuLayoutPolicy.panelFrame(anchor: anchor)
 
-        panel = NSPanel(
+        panel = RadialMenuPanel(
             contentRect: frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -8987,6 +8987,17 @@ final class RadialActionMenuController {
     private func removeDismissMonitors() {
         dismissMonitors.forEach(NSEvent.removeMonitor)
         dismissMonitors = []
+    }
+}
+
+/// Panel that may hang off the screen edges. AppKit's default
+/// `constrainFrameRect` silently pulls windows below the menu bar and back
+/// onto the screen at the top/left — which detached the ring from its button
+/// there while the bottom/right edges worked. The ring must stay centered on
+/// the button even when part of it is off-screen.
+private final class RadialMenuPanel: NSPanel {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
     }
 }
 
