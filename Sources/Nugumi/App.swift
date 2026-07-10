@@ -6997,6 +6997,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onSubmit: @escaping (String) -> Void,
         onClose: @escaping () -> Void
     ) {
+        radialMenu?.close()
+        radialMenu = nil
         cancelPointingAnimation()
         selectedText = nil
         self.onTranslate = nil
@@ -7144,6 +7146,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     func showAnswer(_ message: String, emotion: AskNugumiEmotion?) {
+        radialMenu?.close()
+        radialMenu = nil
         let cleanMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanMessage.isEmpty else { return }
 
@@ -7514,6 +7518,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     func holdReadyUntilPanelCloses(mode: TranslationMode? = nil) {
+        radialMenu?.close()
+        radialMenu = nil
         cancelPointingAnimation()
         if let mode {
             currentMode = mode
@@ -8771,8 +8777,9 @@ enum RadialMenuLayoutPolicy {
 final class RadialActionMenuController {
     private let panel: NSPanel
     /// The bar/pet panel that opened the menu. Its clicks are exempt from
-    /// the local dismiss monitor — the presenter's click handler owns the
-    /// toggle, and dismissing here first would make that handler reopen.
+    /// the local dismiss monitor: if a click reaches the presenter (past the
+    /// menu's own backdrop), its handler must see the menu still open and
+    /// toggle it — dismissing here first would make that handler reopen.
     private weak var presenterWindow: NSWindow?
     private let onSelect: (RadialAction) -> Void
     private let onDismiss: () -> Void
