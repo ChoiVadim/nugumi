@@ -376,9 +376,6 @@ struct AskNugumiPetBubblePresentation: Equatable {
 
 enum AskNugumiFloatingPromptMetrics {
     static let pillSize = CGSize(width: 260, height: 46)
-    /// Ceiling for multi-line growth (~4 lines). Past it the field clips,
-    /// same trade-off as the pet prompt's maximumPanelHeight.
-    static let maximumPillHeight: CGFloat = 130
     static let shadowMargin: CGFloat = 14
     static let edgeMargin: CGFloat = 12
     static let textHorizontalInset: CGFloat = 22
@@ -386,37 +383,21 @@ enum AskNugumiFloatingPromptMetrics {
     static let cornerRadius: CGFloat = pillSize.height / 2
 
     static var layout: AskNugumiFloatingPromptLayout {
-        layout(forContentHeight: 0)
-    }
-
-    /// Shift+Enter makes the input multi-line; the pill grows to fit while
-    /// keeping the single-line capsule's padding above and below the text.
-    static func layout(forContentHeight contentHeight: CGFloat) -> AskNugumiFloatingPromptLayout {
-        let verticalPadding = pillSize.height - textFieldHeight
-        let sanitizedContentHeight = contentHeight.isFinite
-            ? max(1, ceil(contentHeight))
-            : textFieldHeight
-        let textHeight = min(
-            max(textFieldHeight, sanitizedContentHeight),
-            maximumPillHeight - verticalPadding
-        )
-        let pillHeight = textHeight + verticalPadding
-
         let panelSize = CGSize(
             width: pillSize.width + shadowMargin * 2,
-            height: pillHeight + shadowMargin * 2
+            height: pillSize.height + shadowMargin * 2
         )
         let pillFrame = CGRect(
             x: shadowMargin,
             y: shadowMargin,
             width: pillSize.width,
-            height: pillHeight
+            height: pillSize.height
         )
         let textFrame = CGRect(
             x: pillFrame.minX + textHorizontalInset,
-            y: pillFrame.minY + verticalPadding / 2,
+            y: pillFrame.minY + (pillFrame.height - textFieldHeight) / 2,
             width: pillFrame.width - textHorizontalInset * 2,
-            height: textHeight
+            height: textFieldHeight
         )
 
         return AskNugumiFloatingPromptLayout(
