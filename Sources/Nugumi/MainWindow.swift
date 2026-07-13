@@ -93,7 +93,6 @@ struct SettingsSnapshot {
     var writingToggleAlternate: TranslationLanguage
     var floatingDefaultMode: FloatingButtonDefaultMode
     var selectionDisplayMode: SelectionDisplayMode
-    var replacementMode: ReplacementMode
     var cleanupLevel: CleanupLevel
     var genZMode: Bool = false
     /// The user's saved email voice sample (style reference for the email
@@ -147,7 +146,6 @@ enum SettingsIntent {
     case setWritingToggleAlternate(TranslationLanguage)
     case setFloatingDefaultMode(FloatingButtonDefaultMode)
     case setSelectionDisplayMode(SelectionDisplayMode)
-    case setReplacementMode(ReplacementMode)
     case setCleanupLevel(CleanupLevel)
     case setGenZMode(Bool)
     case setEmailVoiceSample(String)

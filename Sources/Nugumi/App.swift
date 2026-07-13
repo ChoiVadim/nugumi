@@ -33,7 +33,6 @@ private enum MenuItemTag: Int {
     case writingStyle = 117
     case cleanupLevel = 118
     case snippets = 119
-    case replacementMode = 120
     case keyboardShortcuts = 121
     case translateOrReplySelection = 122
     case resetSettings = 123
@@ -505,25 +504,6 @@ enum SelectionDisplayMode: String, CaseIterable {
         case .floatingBar: return "Display: floating bar"
         case .pet: return "Display: pet mode"
         case .off: return "Display: off"
-        }
-    }
-}
-
-enum ReplacementMode: String, CaseIterable {
-    case instantInsert
-    case showPanel
-
-    var menuTitle: String {
-        switch self {
-        case .instantInsert: return "Insert without preview"
-        case .showPanel: return "Show preview panel"
-        }
-    }
-
-    var settingsTitle: String {
-        switch self {
-        case .instantInsert: return "Replace action: insert without preview"
-        case .showPanel: return "Replace action: show preview panel"
         }
     }
 }
@@ -1214,8 +1194,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
     private var selectionDisplayMode: SelectionDisplayMode {
         get {
-            let raw = UserDefaults.standard.string(forKey: "selectionDisplayMode") ?? SelectionDisplayMode.pet.rawValue
-            return SelectionDisplayMode(rawValue: raw) ?? .pet
+            let raw = UserDefaults.standard.string(forKey: "selectionDisplayMode") ?? SelectionDisplayMode.floatingBar.rawValue
+            return SelectionDisplayMode(rawValue: raw) ?? .floatingBar
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "selectionDisplayMode")
@@ -1327,16 +1307,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var customStyleInstruction: String {
         get { UserDefaults.standard.string(forKey: "customStyleInstructionV1") ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: "customStyleInstructionV1") }
-    }
-
-    private var replacementMode: ReplacementMode {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "replacementMode") ?? ReplacementMode.instantInsert.rawValue
-            return ReplacementMode(rawValue: raw) ?? .instantInsert
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: "replacementMode")
-        }
     }
 
     private var invisibilityModeEnabled: Bool {
@@ -3070,10 +3040,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         let language = draftTargetLanguage
-        switch replacementMode {
-        case .instantInsert:
+        switch selectionReader.focusedElementEditability() {
+        case .editable, .unknown:
+            // .unknown inserts: in AX-broken apps (KakaoTalk) the blind
+            // Cmd+V has always worked, and a panel here would regress them.
             runInstantTranslation(cleanedDraft, language: language, near: screenPoint)
-        case .showPanel:
+        case .notEditable:
             translateButtonController?.close()
             translateButtonController = nil
             translate(
@@ -3104,6 +3076,24 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         keepPetReadyUntilPanelCloses: Bool = false,
         restoresReadyOnUserDismiss: Bool = false
     ) {
+        // .unknown pastes blind, exactly like rewrite: broken-AX chat apps
+        // (Telegram, KakaoTalk) route Cmd+V to their compose box regardless
+        // of focus, and the result is in history either way. .notEditable
+        // means AX is healthy and focus sits outside any field (the message
+        // list) — hunt for the compose box; a window without one panels.
+        let insertsDirectly: Bool
+        switch selectionReader.focusedElementEditability() {
+        case .editable, .unknown:
+            insertsDirectly = true
+        case .notEditable:
+            insertsDirectly = selectionReader.focusEditableComposeField()
+        }
+        if insertsDirectly {
+            lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            runInstantTranslation(text, language: draftTargetLanguage, near: screenPoint, mode: .smartReply)
+            return
+        }
+
         translate(
             text,
             near: screenPoint,
@@ -4012,7 +4002,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func runInstantTranslation(_ text: String, language: TranslationLanguage, near screenPoint: NSPoint) {
+    private func runInstantTranslation(
+        _ text: String,
+        language: TranslationLanguage,
+        near screenPoint: NSPoint,
+        mode: TranslationMode = .draftMessage
+    ) {
         if let setupError = translationErrorIfBootstrapNeedsSetup() {
             handleTranslationFailure(setupError)
             return
@@ -4028,7 +4023,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
 
         let currentThinkingLevel = textThinkingLevel
         let currentAppCategory = AppCategoryClassifier.frontmostCategory()
-        let currentComposition = compositionSettings(for: .draftMessage, appCategory: currentAppCategory)
+        let currentComposition = compositionSettings(for: mode, appCategory: currentAppCategory)
+        let usageKind: UsageStatsEventKind = mode == .smartReply ? .smartReply : .draftMessage
 
         let loadingBar = showInstantTranslationLoading(near: screenPoint)
 
@@ -4039,16 +4035,16 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     text,
                     images: [],
                     to: language,
-                    mode: .draftMessage,
+                    mode: mode,
                     appCategory: currentAppCategory,
                     composition: currentComposition,
                     thinkingLevel: currentThinkingLevel
                 ) { _ in }
                 await MainActor.run {
                     guard let self else { return }
-                    self.recordTranslation(source: text, result: translated, kind: .draftMessage, targetLanguage: language)
+                    self.recordTranslation(source: text, result: translated, kind: usageKind, targetLanguage: language)
                     self.analyticsClient.trackCompletedUsage(
-                        kind: .draftMessage,
+                        kind: usageKind,
                         targetLanguageID: language.id,
                         modelID: self.textModelID
                     )
@@ -4063,7 +4059,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     if !routedToOnboarding {
                         self.analyticsClient.track(.errorOccurred, properties: [
                             "error_type": Self.analyticsErrorType(error),
-                            "error_context": "instant_rewrite"
+                            "error_context": mode == .smartReply ? "instant_reply" : "instant_rewrite"
                         ])
                         self.presentSelectionTranslationError(
                             error.localizedDescription,
@@ -5410,6 +5406,172 @@ final class SelectionReader {
 
             completion(SelectedTextContext(text: selectedText, selectionRect: nil))
         }
+    }
+
+    enum FocusedEditability {
+        case editable
+        case notEditable
+        /// AX gave us nothing usable (no focused element, or no readable
+        /// roles anywhere in the chain) — the KakaoTalk case. Callers must
+        /// not treat this as "not editable": rewrite keeps its blind paste
+        /// there, reply keeps its panel.
+        case unknown
+    }
+
+    /// Editability of the element a synthesized Cmd+V would paste into.
+    /// Focus, not mouse position, decides the paste target — chat apps keep
+    /// keyboard focus in the compose box even while text elsewhere is
+    /// mouse-selected.
+    func focusedElementEditability() -> FocusedEditability {
+        guard let element = focusedElement() else {
+            return .unknown
+        }
+
+        var sawAnyRole = false
+        var currentElement: AXUIElement? = element
+        for _ in 0..<6 {
+            guard let element = currentElement else { break }
+
+            if let role = role(of: element) {
+                sawAnyRole = true
+                if Self.editableTextRoles.contains(role) {
+                    return .editable
+                }
+            }
+
+            currentElement = parent(of: element)
+        }
+
+        return sawAnyRole ? .notEditable : .unknown
+    }
+
+    /// Reply's insert gate. Rewrite can trust the focused element (the
+    /// selection lives inside the field being rewritten), but for reply the
+    /// user selects the *incoming* message, which drags AX focus onto the
+    /// message list. So when focus isn't editable, hunt for the compose
+    /// field in the focused window and focus it so a synthesized Cmd+V
+    /// lands there. False = no field could be found and focused.
+    func focusEditableComposeField() -> Bool {
+        if focusedElementEditability() == .editable {
+            return true
+        }
+
+        guard let field = bottomMostEditableField() else {
+            return false
+        }
+
+        return AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success
+    }
+
+    /// Bounded breadth-first hunt for a writable text field in the frontmost
+    /// app's focused window. Among candidates the bottom-most wins: compose
+    /// boxes sit at the bottom of every chat window, and this keeps a top
+    /// search bar (Slack) from swallowing the paste.
+    private func bottomMostEditableField() -> AXUIElement? {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            return nil
+        }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowValue: CFTypeRef?
+        let windowResult = AXUIElementCopyAttributeValue(
+            appElement,
+            kAXFocusedWindowAttribute as CFString,
+            &windowValue
+        )
+        guard windowResult == .success,
+              let windowValue,
+              CFGetTypeID(windowValue) == AXUIElementGetTypeID()
+        else {
+            return nil
+        }
+
+        // ponytail: 250-node budget — every attribute read is an IPC
+        // roundtrip, and compose fields sit shallow in the tree; deep
+        // message lists don't deserve a full walk.
+        var queue: [AXUIElement] = [windowValue as! AXUIElement]
+        var visited = 0
+        var best: (element: AXUIElement, y: CGFloat)?
+        while !queue.isEmpty, visited < 250 {
+            let element = queue.removeFirst()
+            visited += 1
+
+            let role = role(of: element)
+            if role == kAXTextAreaRole as String || role == kAXTextFieldRole as String {
+                // NSSearchField reports AXTextField + this subrole.
+                if subrole(of: element) != "AXSearchField" {
+                    // AX coordinates are top-left origin: bottom-most = max y.
+                    let y = position(of: element)?.y ?? -.greatestFiniteMagnitude
+                    if best == nil || y > best!.y {
+                        best = (element, y)
+                    }
+                }
+                continue
+            }
+
+            // Never descend into toolbars: a browser's URL bar is an
+            // AXTextField too, and a reply must not land there.
+            if role == kAXToolbarRole as String {
+                continue
+            }
+
+            queue.append(contentsOf: children(of: element))
+        }
+
+        return best?.element
+    }
+
+    private func subrole(of element: AXUIElement) -> String? {
+        var subroleValue: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            kAXSubroleAttribute as CFString,
+            &subroleValue
+        )
+
+        guard result == .success else {
+            return nil
+        }
+
+        return subroleValue as? String
+    }
+
+    private func children(of element: AXUIElement) -> [AXUIElement] {
+        var childrenValue: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            kAXChildrenAttribute as CFString,
+            &childrenValue
+        )
+
+        guard result == .success, let children = childrenValue as? [AXUIElement] else {
+            return []
+        }
+
+        return children
+    }
+
+    private func position(of element: AXUIElement) -> CGPoint? {
+        var positionValue: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            kAXPositionAttribute as CFString,
+            &positionValue
+        )
+
+        guard result == .success,
+              let positionValue,
+              CFGetTypeID(positionValue) == AXValueGetTypeID()
+        else {
+            return nil
+        }
+
+        var point = CGPoint.zero
+        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &point) else {
+            return nil
+        }
+
+        return point
     }
 
     func isLikelyEditableElementAtMouseLocation() -> Bool {
@@ -16764,7 +16926,6 @@ extension NugumiApp: SettingsHost {
             writingToggleAlternate: writingToggleAlternate,
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
-            replacementMode: replacementMode,
             cleanupLevel: cleanupLevel,
             genZMode: genZModeEnabled,
             emailVoiceSample: emailVoiceSample,
@@ -16879,9 +17040,6 @@ extension NugumiApp: SettingsHost {
         case .setSelectionDisplayMode(let mode):
             selectionDisplayMode = mode
             applySelectionDisplayMode()
-        case .setReplacementMode(let mode):
-            replacementMode = mode
-            updateMenuState()
         case .setCleanupLevel(let level):
             cleanupLevel = level
             updateMenuState()

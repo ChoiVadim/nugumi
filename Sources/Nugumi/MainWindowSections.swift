@@ -2070,13 +2070,6 @@ struct BehaviorSection: View {
                                    selection: bridge.binding(\.selectionDisplayMode) { .setSelectionDisplayMode($0) },
                                    label: { $0.menuTitle })
                     }
-                    Divider().background(FlowTheme.hairline)
-                    SettingRow("Replace action",
-                               subtitle: "How a rewrite lands back in your text field.") {
-                        PillPicker(options: ReplacementMode.allCases,
-                                   selection: bridge.binding(\.replacementMode) { .setReplacementMode($0) },
-                                   label: { $0 == .instantInsert ? "Instant" : "Preview" })
-                    }
                 }
             }
 

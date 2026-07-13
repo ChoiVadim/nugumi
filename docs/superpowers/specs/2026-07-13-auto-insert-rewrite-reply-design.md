@@ -12,12 +12,14 @@
 
 At trigger time (before the LLM call), check via Accessibility whether the **focused** element — the element a synthesized Cmd+V would paste into — is editable. Three outcomes:
 
-|             | `editable`                | `notEditable` | `unknown` (AX unreadable, e.g. KakaoTalk)                                         |
-| ----------- | ------------------------- | ------------- | --------------------------------------------------------------------------------- |
-| **Rewrite** | insert in place           | show panel    | **insert** (preserves current blind-paste behavior)                               |
-| **Reply**   | insert into focused field | show panel    | **panel** (preserves current behavior; reply must never be lost to a blind paste) |
+|             | `editable`                | `notEditable`                                                                     | `unknown` (AX unreadable, e.g. KakaoTalk)           |
+| ----------- | ------------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **Rewrite** | insert in place           | show panel                                                                        | **insert** (preserves current blind-paste behavior) |
+| **Reply**   | insert into focused field | find + focus the compose field in the focused window, insert; panel if none found | **insert** (blind paste, same as rewrite)           |
 
-The asymmetry on `unknown` keeps both modes behaving exactly as today in AX-broken apps — zero regression in KakaoTalk, the canonical test case.
+**Amendment 1 (same day):** the focused element alone is the wrong gate for reply — selecting the incoming message moves AX focus onto the message list. `SelectionReader.focusEditableComposeField()` backs the `notEditable` case: a bounded (250-node) breadth-first walk of the frontmost app's focused window collects `AXTextArea`/`AXTextField` candidates (skipping `AXSearchField` subroles and whole `AXToolbar` subtrees — a browser's URL bar is an `AXTextField`), picks the bottom-most (compose boxes live at the bottom; search bars at the top), and focuses it via `kAXFocusedAttribute` so the synthesized Cmd+V lands there. Any failure → panel.
+
+**Amendment 2 (same day):** reply's `unknown` case now blind-pastes, symmetric with rewrite. Field evidence (Telegram): the app reports no readable AX focus at all (`unknown`) yet routes Cmd+V to its compose box regardless of focus — the same property that makes rewrite's blind paste work in KakaoTalk. Panelling on `unknown` made reply dead in exactly the apps where insertion works best. The reply is recorded to history before pasting, so a paste that lands nowhere is still recoverable.
 
 The `replacementMode` setting is **removed entirely**; behavior is always automatic.
 
