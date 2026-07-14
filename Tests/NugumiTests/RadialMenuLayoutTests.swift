@@ -38,6 +38,10 @@ final class RadialMenuLayoutTests: XCTestCase {
         XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: -64, y: 0)), .left)
         XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 64, y: 0)), .right)
         XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 0, y: -64)), .bottom)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 45, y: 45)), .topRight)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: -45, y: 45)), .topLeft)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: 45, y: -45)), .bottomRight)
+        XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: -45, y: -45)), .bottomLeft)
     }
 
     func testEveryActionHasLabelAndSymbol() {

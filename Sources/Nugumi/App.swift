@@ -2417,20 +2417,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// The Nugumi pixel character with no background, rendered in its own colours
     /// (so the eyes and nose stay visible — a template would flatten it to a blob).
     private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
-        let renderSize = NSSize(width: 42, height: 34)
-        let mascot = PetMascotView(frame: NSRect(origin: .zero, size: renderSize))
-        mascot.wantsLayer = false  // draw straight via draw(_:) so off-window cacheDisplay is reliable
-        mascot.apply(state: .idle, mode: mode.translationMode)
-        guard let rep = mascot.bitmapImageRepForCachingDisplay(in: mascot.bounds) else {
-            return NSApp.applicationIconImage
-        }
-        mascot.cacheDisplay(in: mascot.bounds, to: rep)
-
-        let targetHeight: CGFloat = 20
-        let image = NSImage(size: NSSize(width: renderSize.width * targetHeight / renderSize.height, height: targetHeight))
-        image.addRepresentation(rep)
-        image.isTemplate = false
-        return image
+        PetMascotView.markImage(height: 20, mode: mode.translationMode) ?? NSApp.applicationIconImage
     }
 
     private func refreshStatusBarIcon() {
@@ -8852,21 +8839,52 @@ final class PetMascotView: NSView {
     }
 }
 
+extension PetMascotView {
+    /// The mascot rendered into a standalone image — the app's mark on
+    /// surfaces that can't host a live view (menu bar, floating button).
+    @MainActor
+    static func markImage(height: CGFloat, mode: TranslationMode = .selection) -> NSImage? {
+        let renderSize = NSSize(width: 42, height: 34)
+        let mascot = PetMascotView(frame: NSRect(origin: .zero, size: renderSize))
+        mascot.wantsLayer = false  // draw straight via draw(_:) so off-window cacheDisplay is reliable
+        mascot.apply(state: .idle, mode: mode)
+        guard let rep = mascot.bitmapImageRepForCachingDisplay(in: mascot.bounds) else {
+            return nil
+        }
+        mascot.cacheDisplay(in: mascot.bounds, to: rep)
+
+        let image = NSImage(size: NSSize(width: renderSize.width * height / renderSize.height, height: height))
+        image.addRepresentation(rep)
+        image.isTemplate = false
+        return image
+    }
+}
+
 /// Where a ring button's hover bubble sits relative to its circle. Also
-/// names the bubble edge carrying the tail via `opposite`.
+/// names the bubble edge (or corner, for diagonals) carrying the tail via
+/// `opposite`.
 enum RadialMenuLabelPlacement {
     case top
     case left
     case right
     case bottom
+    case topLeft
+    case topRight
+    case bottomLeft
+    case bottomRight
 
-    /// The facing edge — a bubble ABOVE the circle points its tail DOWN.
+    /// The facing edge — a bubble ABOVE the circle points its tail DOWN,
+    /// a bubble to the TOP-RIGHT points its tail from its BOTTOM-LEFT corner.
     var opposite: RadialMenuLabelPlacement {
         switch self {
         case .top: return .bottom
         case .bottom: return .top
         case .left: return .right
         case .right: return .left
+        case .topLeft: return .bottomRight
+        case .topRight: return .bottomLeft
+        case .bottomLeft: return .topRight
+        case .bottomRight: return .topLeft
         }
     }
 }
@@ -8912,24 +8930,92 @@ enum RadialMenuLayoutPolicy {
         (ringRadius + buttonDiameter / 2 + panelPadding) * 2
     }
 
-    /// Offsets from the panel center, one per `RadialAction.allCases` entry:
-    /// explain on top, rewrite left, reply right, ask at the bottom.
+    /// Offsets from the panel center, one per `RadialAction.allCases` entry.
+    /// All four actions sit on the right-side arc — reply top-right, explain
+    /// right, ask bottom-right, rewrite at the bottom — leaving the left arc
+    /// free for future actions.
     static func buttonCenters() -> [CGPoint] {
-        [
-            CGPoint(x: 0, y: ringRadius),
-            CGPoint(x: -ringRadius, y: 0),
+        let diagonal = ringRadius * sqrt(0.5)
+        return [
             CGPoint(x: ringRadius, y: 0),
             CGPoint(x: 0, y: -ringRadius),
+            CGPoint(x: diagonal, y: diagonal),
+            CGPoint(x: diagonal, y: -diagonal),
         ]
     }
 
-    /// Which side of the ring an offset points to — that button's hover
-    /// bubble sits on the same side, outside the ring, tail toward the circle.
+    /// Which of the eight ring directions an offset points to — that
+    /// button's hover bubble continues radially outward on the same side
+    /// (Logi Options+ style), tail back toward the circle.
     static func labelPlacement(for offset: CGPoint) -> RadialMenuLabelPlacement {
-        if abs(offset.y) >= abs(offset.x) {
-            return offset.y >= 0 ? .top : .bottom
+        // Snap the offset's angle to the nearest 45° sector.
+        let sector = Int((atan2(offset.y, offset.x) / .pi * 4).rounded())
+        switch sector {
+        case 0: return .right
+        case 1: return .topRight
+        case 2: return .top
+        case 3: return .topLeft
+        case -1: return .bottomRight
+        case -2: return .bottom
+        case -3: return .bottomLeft
+        default: return .left
         }
-        return offset.x < 0 ? .left : .right
+    }
+
+    static let bubbleGap: CGFloat = 4
+
+    /// Where a hover bubble's frame starts so it sits outside the ring on
+    /// the button's side, tail toward the circle. For diagonals the bubble's
+    /// near corner (where its tail lives) anchors just off the circle's
+    /// edge along the same diagonal.
+    static func bubbleOrigin(
+        for placement: RadialMenuLabelPlacement,
+        buttonFrame: NSRect,
+        bubbleSize: NSSize
+    ) -> NSPoint {
+        let diagonalInset = (buttonFrame.width / 2 + bubbleGap) * sqrt(0.5)
+        switch placement {
+        case .top:
+            return NSPoint(
+                x: buttonFrame.midX - bubbleSize.width / 2,
+                y: buttonFrame.maxY + bubbleGap
+            )
+        case .bottom:
+            return NSPoint(
+                x: buttonFrame.midX - bubbleSize.width / 2,
+                y: buttonFrame.minY - bubbleGap - bubbleSize.height
+            )
+        case .left:
+            return NSPoint(
+                x: buttonFrame.minX - bubbleGap - bubbleSize.width,
+                y: buttonFrame.midY - bubbleSize.height / 2
+            )
+        case .right:
+            return NSPoint(
+                x: buttonFrame.maxX + bubbleGap,
+                y: buttonFrame.midY - bubbleSize.height / 2
+            )
+        case .topRight:
+            return NSPoint(
+                x: buttonFrame.midX + diagonalInset,
+                y: buttonFrame.midY + diagonalInset
+            )
+        case .topLeft:
+            return NSPoint(
+                x: buttonFrame.midX - diagonalInset - bubbleSize.width,
+                y: buttonFrame.midY + diagonalInset
+            )
+        case .bottomRight:
+            return NSPoint(
+                x: buttonFrame.midX + diagonalInset,
+                y: buttonFrame.midY - diagonalInset - bubbleSize.height
+            )
+        case .bottomLeft:
+            return NSPoint(
+                x: buttonFrame.midX - diagonalInset - bubbleSize.width,
+                y: buttonFrame.midY - diagonalInset - bubbleSize.height
+            )
+        }
     }
 
     /// Panel frame centered on `anchor` — always. Deliberately no screen-edge
@@ -9028,7 +9114,7 @@ final class RadialActionMenuController {
                 text: action.label,
                 tailEdge: placement.opposite
             )
-            bubble.setFrameOrigin(Self.bubbleOrigin(
+            bubble.setFrameOrigin(RadialMenuLayoutPolicy.bubbleOrigin(
                 for: placement,
                 buttonFrame: button.frame,
                 bubbleSize: bubble.frame.size
@@ -9045,37 +9131,6 @@ final class RadialActionMenuController {
             }
         }
         panel.contentView = container
-    }
-
-    private static let bubbleGap: CGFloat = 4
-
-    private static func bubbleOrigin(
-        for placement: RadialMenuLabelPlacement,
-        buttonFrame: NSRect,
-        bubbleSize: NSSize
-    ) -> NSPoint {
-        switch placement {
-        case .top:
-            return NSPoint(
-                x: buttonFrame.midX - bubbleSize.width / 2,
-                y: buttonFrame.maxY + bubbleGap
-            )
-        case .bottom:
-            return NSPoint(
-                x: buttonFrame.midX - bubbleSize.width / 2,
-                y: buttonFrame.minY - bubbleGap - bubbleSize.height
-            )
-        case .left:
-            return NSPoint(
-                x: buttonFrame.minX - bubbleGap - bubbleSize.width,
-                y: buttonFrame.midY - bubbleSize.height / 2
-            )
-        case .right:
-            return NSPoint(
-                x: buttonFrame.maxX + bubbleGap,
-                y: buttonFrame.midY - bubbleSize.height / 2
-            )
-        }
     }
 
     func show() {
@@ -9346,7 +9401,7 @@ private final class RadialMenuButtonView: NSView {
 /// plus a small tail pointing back at the circle. Deliberately fixed white
 /// with black text — the old translucent in-panel label was unreadable on
 /// busy or dark backgrounds, and a solid callout reads on any of them.
-private final class RadialMenuLabelBubbleView: NSView {
+final class RadialMenuLabelBubbleView: NSView {
     private static let tailLength: CGFloat = 6
     private static let tailHalfWidth: CGFloat = 5
     private static let hPad: CGFloat = 9
@@ -9371,8 +9426,14 @@ private final class RadialMenuLabelBubbleView: NSView {
             height: ceil(textSize.height) + Self.vPad * 2
         )
         switch tailEdge {
-        case .left, .right: size.width += Self.tailLength
-        case .top, .bottom: size.height += Self.tailLength
+        case .left, .right:
+            size.width += Self.tailLength
+        case .top, .bottom:
+            size.height += Self.tailLength
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            // A corner tail pokes out along both axes.
+            size.width += Self.tailLength
+            size.height += Self.tailLength
         }
         super.init(frame: NSRect(origin: .zero, size: size))
 
@@ -9403,12 +9464,30 @@ private final class RadialMenuLabelBubbleView: NSView {
             body.size.height -= Self.tailLength
         case .top:
             body.size.height -= Self.tailLength
+        case .bottomLeft:
+            body.origin.x += Self.tailLength
+            body.size.width -= Self.tailLength
+            body.origin.y += Self.tailLength
+            body.size.height -= Self.tailLength
+        case .bottomRight:
+            body.size.width -= Self.tailLength
+            body.origin.y += Self.tailLength
+            body.size.height -= Self.tailLength
+        case .topLeft:
+            body.origin.x += Self.tailLength
+            body.size.width -= Self.tailLength
+            body.size.height -= Self.tailLength
+        case .topRight:
+            body.size.width -= Self.tailLength
+            body.size.height -= Self.tailLength
         }
 
         let path = NSBezierPath(roundedRect: body, xRadius: Self.corner, yRadius: Self.corner)
         let tail = NSBezierPath()
         let length = Self.tailLength
         let half = Self.tailHalfWidth
+        // Corner tails: the base chord spans the rounded corner (radius
+        // `corner` along each edge), the tip pokes diagonally outward.
         switch tailEdge {
         case .left:
             tail.move(to: NSPoint(x: body.minX, y: body.midY - half))
@@ -9426,12 +9505,31 @@ private final class RadialMenuLabelBubbleView: NSView {
             tail.move(to: NSPoint(x: body.midX - half, y: body.maxY))
             tail.line(to: NSPoint(x: body.midX, y: body.maxY + length))
             tail.line(to: NSPoint(x: body.midX + half, y: body.maxY))
+        case .bottomLeft:
+            tail.move(to: NSPoint(x: body.minX, y: body.minY + Self.corner))
+            tail.line(to: NSPoint(x: body.minX - length, y: body.minY - length))
+            tail.line(to: NSPoint(x: body.minX + Self.corner, y: body.minY))
+        case .bottomRight:
+            tail.move(to: NSPoint(x: body.maxX - Self.corner, y: body.minY))
+            tail.line(to: NSPoint(x: body.maxX + length, y: body.minY - length))
+            tail.line(to: NSPoint(x: body.maxX, y: body.minY + Self.corner))
+        case .topLeft:
+            tail.move(to: NSPoint(x: body.minX, y: body.maxY - Self.corner))
+            tail.line(to: NSPoint(x: body.minX - length, y: body.maxY + length))
+            tail.line(to: NSPoint(x: body.minX + Self.corner, y: body.maxY))
+        case .topRight:
+            tail.move(to: NSPoint(x: body.maxX - Self.corner, y: body.maxY))
+            tail.line(to: NSPoint(x: body.maxX + length, y: body.maxY + length))
+            tail.line(to: NSPoint(x: body.maxX, y: body.maxY - Self.corner))
         }
         tail.close()
-        path.append(tail)
 
+        // Fill the two shapes separately: a corner tail overlaps the body's
+        // rounded-corner bulge, and appending into one path punches an
+        // even-odd hole exactly there (the dark sliver bug).
         NSColor.white.setFill()
         path.fill()
+        tail.fill()
 
         (text as NSString).draw(
             at: NSPoint(x: body.minX + Self.hPad, y: body.minY + Self.vPad),
@@ -10653,15 +10751,35 @@ final class FloatingTranslateButtonView: NSView {
         let name: String
         switch mode {
         case .selection, .revise, .reviseMessage:
-            // Sparkles = "actions live here": a click opens the radial menu
-            // now, not a single default mode.
-            name = "sparkles"
+            // The mascot, not a generic sparkles glyph: the button that
+            // opens the radial menu wears the app's own mark.
+            return mascotGlyphImage()
         case .draftMessage:
             name = "text.insert"
         case .smartReply:
             name = "bubble.left.fill"
         }
         return glyphImage(symbolName: name)
+    }
+
+    /// The mascot centered in a button-sized canvas, same baked-in padding
+    /// contract as `glyphImage(symbolName:)` so frame animations scale it.
+    /// The mascot renders once up front — the drawing handler can re-run at
+    /// draw time and must not build views.
+    private static func mascotGlyphImage() -> NSImage {
+        guard let mark = PetMascotView.markImage(height: 18) else {
+            return glyphImage(symbolName: "sparkles")
+        }
+        let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            mark.draw(in: NSRect(
+                x: rect.midX - mark.size.width / 2,
+                y: rect.midY - mark.size.height / 2,
+                width: mark.size.width,
+                height: mark.size.height
+            ))
+            return true
+        }
     }
 
     private static func glyphImage(symbolName: String) -> NSImage {
