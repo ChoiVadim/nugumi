@@ -2595,7 +2595,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             // a selection gesture, surface the permission request — throttled so
             // we never spam System Settings on repeated drags / stray gestures.
             if selectionDisplayMode != .off,
-               isLikelySelectionGesture(event),
+               isLikelySelectionGesture(event, upLocation: NSEvent.mouseLocation),
                NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
                 let now = Date()
                 if lastAccessibilitySelectionPromptAt.map({ now.timeIntervalSince($0) > 15 }) ?? true {
@@ -2633,7 +2633,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // the user may have switched apps during the 80ms+AX-read window, and
         // we want to attribute the unreadable-selection signal to the app
         // where the drag actually happened.
-        let isDragGesture = isDragSelectionGesture(event, upLocation: mouseLocation)
+        let isSelectionGesture = isLikelySelectionGesture(event, upLocation: mouseLocation)
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let frontmostBundleID = frontmostApp?.bundleIdentifier
         let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
@@ -2669,7 +2669,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             // a stray click would synthesize Cmd+C for nothing.
             self.selectionReader.readSelectedTextContext(
                 preferClipboard: preferClipboard,
-                allowClipboardFallback: isDragGesture && allowsClipboard,
+                allowClipboardFallback: isSelectionGesture && allowsClipboard,
                 pasteboardBaseline: self.lastMouseDownPasteboardChangeCount
             ) { [weak self] selection in
                 guard let self else { return }
@@ -2677,7 +2677,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 guard let selection, !selection.text.isEmpty else {
                     // Don't count Finder marquee drags as "app blocks text
                     // access" — they never had text to begin with.
-                    if isDragGesture && allowsClipboard {
+                    if isSelectionGesture && allowsClipboard {
                         self.noteUnreadableSelection(
                             bundleID: frontmostBundleID,
                             appName: frontmostAppName
@@ -2692,7 +2692,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 // The app exposed *some* selection text — even if we end up
                 // discarding it as not meaningful below, that's a "user
                 // selected garbage" case, not an "app blocks access" case.
-                if isDragGesture {
+                if isSelectionGesture {
                     self.clearUnreadableSelectionCounter(bundleID: frontmostBundleID)
                 }
 
@@ -2769,14 +2769,21 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     private func shouldAttemptClipboardSelectionFallback(for event: NSEvent, upLocation: NSPoint) -> Bool {
-        guard isDragSelectionGesture(event, upLocation: upLocation) else {
+        guard isLikelySelectionGesture(event, upLocation: upLocation) else {
             return false
         }
 
         return !selectionReader.isLikelyEditableElementAtMouseLocation()
     }
 
-    private func isLikelySelectionGesture(_ event: NSEvent) -> Bool {
+    /// Drag OR double-click. Double-click selects a word in text but
+    /// *activates* rows/folders/chats elsewhere, and in AX-opaque apps
+    /// (KakaoTalk) there is no pre-flight signal to tell the cases apart —
+    /// so a navigation double-click there beeps via the synthesized ⌘C.
+    /// Vadim accepted that trade-off on 2026-07-16 (reversing the
+    /// 2026-07-03 drag-only decision) so double-click word lookup works
+    /// in AX-opaque apps again.
+    private func isLikelySelectionGesture(_ event: NSEvent, upLocation: NSPoint) -> Bool {
         guard event.type == .leftMouseUp else {
             return false
         }
@@ -2785,16 +2792,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return true
         }
 
-        return isDragSelectionGesture(event, upLocation: NSEvent.mouseLocation)
+        return isDragSelectionGesture(event, upLocation: upLocation)
     }
 
-    /// Only a real drag is unambiguous selection intent. A double-click
-    /// selects a word in text but *activates* everything else — folders,
-    /// chat rows, list items — and in AX-opaque apps (KakaoTalk) there is
-    /// no way to tell which happened, so a blind synthesized ⌘C beeps on
-    /// every navigation double-click. The clipboard fallback is therefore
-    /// drag-only; double-click word translation still works wherever AX
-    /// exposes the selection.
+    /// A real drag: ≥15pt of travel with no refuting signal (drag-and-drop
+    /// session, window move/resize).
     /// `upLocation` must be the pointer position captured AT the mouse-up
     /// event. This runs again inside the 80ms-delayed read, and reading
     /// `NSEvent.mouseLocation` there instead measured wherever the cursor
