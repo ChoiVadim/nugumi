@@ -41,7 +41,8 @@ Run (outside the repo, in a scratch dir):
 ```bash
 git clone --depth 1 https://github.com/sqlcipher/sqlcipher.git
 cd sqlcipher
-./configure --with-crypto-lib=commoncrypto \
+# NOTE: SQLCipher 3.53.x removed --with-crypto-lib; crypto is chosen via CFLAGS.
+./configure \
   CFLAGS="-DSQLITE_HAS_CODEC -DSQLCIPHER_CRYPTO_CC" \
   LDFLAGS="-framework Security -framework Foundation"
 make sqlite3.c            # produces sqlite3.c (amalgamation) + sqlite3.h
@@ -81,6 +82,9 @@ Add to `targets:` (before the Nugumi target) and add the dependency:
     cSettings: [
         .define("SQLITE_HAS_CODEC"),
         .define("SQLCIPHER_CRYPTO_CC"),
+        // Required by SQLCipher 3.53.x — it #errors without these three.
+        .define("SQLITE_EXTRA_INIT", to: "sqlcipher_extra_init"),
+        .define("SQLITE_EXTRA_SHUTDOWN", to: "sqlcipher_extra_shutdown"),
         .define("SQLITE_TEMP_STORE", to: "2"),
         .define("NDEBUG"),
         .headerSearchPath("include")
