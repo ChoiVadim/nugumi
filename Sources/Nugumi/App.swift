@@ -3419,8 +3419,10 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
+        let persistsHistory = recordsHistory && mode != .summarizeChat
+
         if useCache, let cachedTranslation = translationCache.translation(for: text, targetLanguage: language, thinkingLevel: thinkingLevel) {
-            if recordsHistory {
+            if persistsHistory {
                 recordTranslation(source: text, result: cachedTranslation, kind: usageKind, targetLanguage: language)
             }
             analyticsClient.trackCompletedUsage(
@@ -3452,7 +3454,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     if useCache {
                         self.translationCache.store(translated, for: text, targetLanguage: language, thinkingLevel: thinkingLevel)
                     }
-                    if recordsHistory {
+                    if persistsHistory {
                         self.recordTranslation(source: text, result: translated, kind: usageKind, targetLanguage: language)
                     }
                     self.analyticsClient.trackCompletedUsage(
