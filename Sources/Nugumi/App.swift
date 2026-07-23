@@ -3072,9 +3072,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             let lines = try archive.messages(chatID: chat.id, limit: count)
             let transcript = ChatTranscript.format(lines, maxMessages: count, tokenBudget: 12_000)
 
-            // Nothing leaves the device on local Ollama — only a non-Ollama
-            // (cloud) backend needs the one-time consent gate.
-            if !(currentBackend is OllamaClient), !SummaryConsent.accepted {
+            // Nothing leaves the device only when running a genuinely local
+            // Ollama model — an Ollama-hosted cloud model (e.g.
+            // gpt-oss:120b-cloud) still routes through OllamaClient but
+            // executes on Ollama's cloud infra, so it needs the gate too.
+            let runsTrulyLocally = (currentBackend is OllamaClient) && !LLMModel.option(id: textModelID).isCloud
+            if !runsTrulyLocally, !SummaryConsent.accepted {
                 guard presentSummaryCloudConsentAlert() else { return }
                 SummaryConsent.accepted = true
             }
