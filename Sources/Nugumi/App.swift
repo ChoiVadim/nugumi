@@ -2918,6 +2918,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
 
         let primaryMode = floatingDefaultMode.translationMode
+        let summarizeOption = makeSummarizeOption(near: screenPoint, selectionRect: selectionRect, panelSide: panelSide)
 
         if selectionDisplayMode == .pet {
             if petController == nil {
@@ -2959,7 +2960,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 },
                 onAsk: { [weak self] in
                     self?.startAskNugumiPrompt()
-                }
+                },
+                summarizeOption: summarizeOption
             )
             return
         }
@@ -3001,11 +3003,98 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             },
             onAsk: { [weak self] in
                 self?.startAskNugumiPrompt()
-            }
+            },
+            summarizeOption: summarizeOption
         )
 
         translateButtonController = controller
         controller.show()
+    }
+
+    /// AX title of the frontmost app's focused window (best-effort; nil on
+    /// any AX failure — the caller falls back to the most-recent chat).
+    @MainActor
+    private func focusedWindowTitle(pid: pid_t) -> String? {
+        let appEl = AXUIElementCreateApplication(pid)
+        var win: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &win) == .success,
+              let winEl = win, CFGetTypeID(winEl) == AXUIElementGetTypeID() else { return nil }
+        var title: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(winEl as! AXUIElement, kAXTitleAttribute as CFString, &title) == .success
+        else { return nil }
+        return title as? String
+    }
+
+    /// Non-nil only when the frontmost app is a supported messenger
+    /// (currently KakaoTalk) — drives the ring's contextual "Summarize"
+    /// button in both `showTranslateButton` arming sites.
+    @MainActor
+    private func makeSummarizeOption(
+        near screenPoint: NSPoint,
+        selectionRect: NSRect?,
+        panelSide: TranslationPanelController.Side
+    ) -> RingSummarizeOption? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let open = ChatArchiveFactory.archive(forFrontmostBundleID: app.bundleIdentifier) else { return nil }
+        let title = focusedWindowTitle(pid: app.processIdentifier)
+        let icon = app.icon ?? NSImage(systemSymbolName: "bubble.left.and.bubble.right", accessibilityDescription: nil) ?? NSImage()
+        let label = app.localizedName ?? "chat"
+        return RingSummarizeOption(appLabel: label, appIcon: icon) { [weak self] count in
+            self?.runChatSummary(
+                open: open,
+                windowTitle: title,
+                count: count,
+                near: screenPoint,
+                selectionRect: selectionRect,
+                panelSide: panelSide
+            )
+        }
+    }
+
+    /// Opens the chat archive, matches the frontmost chat by window title
+    /// (falling back to the most-recently active chat), fetches up to
+    /// `count` messages, and panels the summary through the existing
+    /// `translate(...)` path with `.summarizeChat`. Never crashes — any
+    /// `ChatArchiveError` (or other failure) is surfaced via
+    /// `presentChatSummaryError`.
+    @MainActor
+    private func runChatSummary(
+        open: @escaping () throws -> ChatArchive,
+        windowTitle: String?,
+        count: Int,
+        near screenPoint: NSPoint,
+        selectionRect: NSRect?,
+        panelSide: TranslationPanelController.Side
+    ) {
+        do {
+            let archive = try open()
+            let (chat, _) = try archive.chat(forWindowTitle: windowTitle)
+            let lines = try archive.messages(chatID: chat.id, limit: count)
+            let transcript = ChatTranscript.format(lines, maxMessages: count, tokenBudget: 12_000)
+            translate(
+                transcript,
+                near: screenPoint,
+                mode: .summarizeChat,
+                useCache: false,
+                selectionRect: selectionRect,
+                panelSide: panelSide,
+                keepPetReadyUntilPanelCloses: true,
+                restoresReadyOnUserDismiss: true
+            )
+        } catch {
+            presentChatSummaryError(error)
+        }
+    }
+
+    /// Surfaces a chat-summary failure. `handleTranslationFailure` only
+    /// recognizes `TranslationError` (it's the setup/auth-recovery path for
+    /// the translation backends), so a `ChatArchiveError` here falls through
+    /// to the same plain-message alert the rest of the app already uses for
+    /// "nothing to act on" failures (`presentSelectionTranslationError`).
+    @MainActor
+    private func presentChatSummaryError(_ error: Error) {
+        let message = (error as? ChatArchiveError)?.description ?? error.localizedDescription
+        presentSelectionTranslationError(message, title: "Couldn't summarize chat")
     }
 
     @MainActor
@@ -6848,6 +6937,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var onTranslate: ((String) -> Void)?
     private var onRewrite: ((String) -> Void)?
     private var onSmartReply: ((String) -> Void)?
+    private var summarizeOption: RingSummarizeOption?
     private var onPromptSubmit: ((String) -> Void)?
     private var onPromptClose: (() -> Void)?
     var onContinue: (() -> Void)?
@@ -7156,6 +7246,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         self.onRewrite = nil
         self.onSmartReply = nil
         self.onAsk = nil
+        summarizeOption = nil
         onPromptSubmit = onSubmit
         onPromptClose = onClose
         currentMode = .draftMessage
@@ -7308,6 +7399,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onRewrite = nil
         onSmartReply = nil
         onAsk = nil
+        summarizeOption = nil
         onPromptSubmit = nil
         onPromptClose = nil
         isReadyLockedUntilPanelCloses = false
@@ -7638,7 +7730,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onTranslate: @escaping (String) -> Void,
         onRewrite: @escaping (String) -> Void,
         onSmartReply: @escaping (String) -> Void,
-        onAsk: @escaping () -> Void
+        onAsk: @escaping () -> Void,
+        summarizeOption: RingSummarizeOption? = nil
     ) {
         // Don't yank the pet back to "ready" while Ask is open (input, loading,
         // or answer) — a casual selection in another app should leave the
@@ -7660,6 +7753,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
         self.onAsk = onAsk
+        self.summarizeOption = summarizeOption
         currentMode = initialMode
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = false
@@ -7680,6 +7774,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onRewrite = nil
         onSmartReply = nil
         onAsk = nil
+        summarizeOption = nil
         isReadyLockedUntilPanelCloses = true
         panel.ignoresMouseEvents = true
         petView.apply(state: .ready, mode: currentMode)
@@ -7699,6 +7794,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onRewrite = nil
         onSmartReply = nil
         onAsk = nil
+        summarizeOption = nil
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = true
         petView.apply(state: .idle, mode: currentMode)
@@ -7718,6 +7814,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onRewrite = nil
         onSmartReply = nil
         onAsk = nil
+        summarizeOption = nil
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = !isPromptLoading
         petView.allowsClickWhenNotReady = isPromptLoading
@@ -7878,7 +7975,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         // Same gate the old direct invocation had: the ring only makes sense
         // while a selection is armed.
         guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
-        let items: [RingItem] = [
+        var items: [RingItem] = [
             .symbol("text.magnifyingglass", label: "Explain") { [weak self] in
                 guard let self, let t = self.selectedText else { return }
                 self.radialMenu = nil
@@ -7900,6 +7997,37 @@ final class PetController: NSObject, NSTextFieldDelegate {
                 self.onAsk?()
             },
         ]
+        if let opt = summarizeOption {
+            items.append(RingItem(label: "Summarize \(opt.appLabel)", image: opt.appIcon) { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.presentCountLayer(opt)
+            })
+        }
+        let menu = RadialActionMenuController(
+            centeredOn: petCenterInScreen(),
+            ignoring: panel,
+            items: items,
+            onDismiss: { [weak self] in
+                self?.radialMenu = nil
+            }
+        )
+        radialMenu = menu
+        menu.show()
+    }
+
+    /// Second-layer ring: after picking "Summarize <app>", morphs into a
+    /// 50/100/200/Max count picker centered on the same pet anchor. Picking a
+    /// count hands off to the coordinator-owned `opt.run(_:)`.
+    private func presentCountLayer(_ opt: RingSummarizeOption) {
+        let choices: [(String, Int)] = [("50", 50), ("100", 100), ("200", 200), ("Max", 1000)]
+        let items: [RingItem] = choices.map { (label, n) in
+            RingItem(label: label, image: RingCountBadge.image(label)) { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                opt.run(n)
+            }
+        }
         let menu = RadialActionMenuController(
             centeredOn: petCenterInScreen(),
             ignoring: panel,
@@ -8922,6 +9050,37 @@ struct RingItem {
     }
 }
 
+/// Contextual ring entry that opens the chat-summary count layer. Non-nil
+/// only when the frontmost app is a supported messenger (KakaoTalk) — see
+/// `NugumiApp.makeSummarizeOption`. `run` is coordinator-owned: it opens the
+/// chat archive, matches the frontmost chat, fetches messages, and panels
+/// the summary through the existing `translate(...)` path.
+struct RingSummarizeOption {
+    let appLabel: String            // e.g. "KakaoTalk"
+    let appIcon: NSImage
+    let run: (_ count: Int) -> Void
+}
+
+/// Renders a small text badge (e.g. "50", "Max") as an `NSImage` for the
+/// count-layer ring buttons, which otherwise expect an SF Symbol image.
+enum RingCountBadge {
+    static func image(_ text: String) -> NSImage {
+        let size = NSSize(width: 24, height: 24)
+        let img = NSImage(size: size)
+        img.lockFocus()
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: text.count > 2 ? 9 : 11, weight: .semibold),
+            .foregroundColor: NSColor.labelColor
+        ]
+        let s = text as NSString
+        let r = s.boundingRect(with: size, options: [], attributes: attrs)
+        s.draw(at: NSPoint(x: (size.width - r.width) / 2, y: (size.height - r.height) / 2), withAttributes: attrs)
+        img.unlockFocus()
+        img.isTemplate = false
+        return img
+    }
+}
+
 /// Pure geometry for the radial menu: where the four buttons sit around the
 /// anchor and how the ring shifts to stay on screen. Kept free of AppKit
 /// state so it is unit-testable.
@@ -9550,6 +9709,7 @@ final class FloatingTranslateButtonController {
     private let onSmartReply: (String) -> Void
     private let buttonView: FloatingTranslateButtonView
     private let onAsk: () -> Void
+    private let summarizeOption: RingSummarizeOption?
     private var radialMenu: RadialActionMenuController?
 
     init(
@@ -9559,13 +9719,15 @@ final class FloatingTranslateButtonController {
         onTranslate: @escaping (String) -> Void,
         onRewrite: @escaping (String) -> Void,
         onSmartReply: @escaping (String) -> Void,
-        onAsk: @escaping () -> Void
+        onAsk: @escaping () -> Void,
+        summarizeOption: RingSummarizeOption? = nil
     ) {
         self.selectedText = selectedText
         self.onTranslate = onTranslate
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
         self.onAsk = onAsk
+        self.summarizeOption = summarizeOption
 
         let buttonSize = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         let shadowPadding = AskNugumiFloatingTargetPresentationPolicy.shadowPadding
@@ -9627,7 +9789,7 @@ final class FloatingTranslateButtonController {
             buttonView.setMenuOpen(false)
             return
         }
-        let items: [RingItem] = [
+        var items: [RingItem] = [
             .symbol("text.magnifyingglass", label: "Explain") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
@@ -9653,6 +9815,45 @@ final class FloatingTranslateButtonController {
                 self.onAsk()
             },
         ]
+        if let opt = summarizeOption {
+            items.append(RingItem(label: "Summarize \(opt.appLabel)", image: opt.appIcon) { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.presentCountLayer(opt)
+            })
+        }
+        let menu = RadialActionMenuController(
+            centeredOn: buttonCenterInScreen(),
+            ignoring: panel,
+            items: items,
+            onDismiss: { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+            }
+        )
+        menu.onCenterHoverChange = { [weak self] hovered in
+            self?.buttonView.setCloseHovered(hovered)
+        }
+        radialMenu = menu
+        menu.show()
+        buttonView.setMenuOpen(true)
+    }
+
+    /// Second-layer ring: after picking "Summarize <app>", morphs into a
+    /// 50/100/200/Max count picker centered on the same button anchor.
+    /// Picking a count hands off to the coordinator-owned `opt.run(_:)`.
+    private func presentCountLayer(_ opt: RingSummarizeOption) {
+        let choices: [(String, Int)] = [("50", 50), ("100", 100), ("200", 200), ("Max", 1000)]
+        let items: [RingItem] = choices.map { (label, n) in
+            RingItem(label: label, image: RingCountBadge.image(label)) { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                opt.run(n)
+            }
+        }
         let menu = RadialActionMenuController(
             centeredOn: buttonCenterInScreen(),
             ignoring: panel,

@@ -271,6 +271,23 @@ enum ChatArchiveFactory {
     }
 }
 
+extension ChatArchive {
+    /// The chat whose title matches the frontmost window title, else the most
+    /// recently-active chat. Returns (chat, matchedByTitle).
+    func chat(forWindowTitle title: String?, fallbackLimit: Int = 30) throws -> (ChatSummary, Bool) {
+        let chats = try recentChats(limit: fallbackLimit)
+        guard !chats.isEmpty else { throw ChatArchiveError.emptyChat }
+        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty {
+            let needle = title.trimmingCharacters(in: .whitespaces).lowercased()
+            if let hit = chats.first(where: {
+                let t = $0.title.lowercased()
+                return !t.isEmpty && (needle.contains(t) || t.contains(needle))
+            }) { return (hit, true) }
+        }
+        return (chats[0], false)
+    }
+}
+
 enum ChatTranscript {
     /// Newest `maxMessages`, then trim from the oldest end to fit a rough
     /// token budget (~4 chars/token). Output is oldest → newest, "Sender: text".
