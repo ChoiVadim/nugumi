@@ -168,3 +168,105 @@ enum KakaoUserID {
         return ordered
     }
 }
+
+struct ChatSummary { let id: Int64; let title: String; let lastActivity: Date? }
+struct ChatLine { let sender: String; let text: String; let date: Date }
+
+protocol ChatArchive {
+    var appLabel: String { get }
+    func recentChats(limit: Int) throws -> [ChatSummary]
+    func messages(chatID: Int64, limit: Int) throws -> [ChatLine]
+}
+
+final class KakaoArchive: ChatArchive {
+    let appLabel = "KakaoTalk"
+    private let db: SQLCipherDatabase
+
+    init(db: SQLCipherDatabase) { self.db = db }
+
+    static func open() throws -> KakaoArchive {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let container = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: container) else {
+            throw ChatArchiveError.fullDiskAccessMissing
+        }
+        let uuid = try KakaoKeyDerivation.platformUUID()
+
+        // Gather candidate user ids from both preference plists.
+        var prefs: [String: Any] = [:]
+        let prefDir = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Preferences"
+        // Swift disallows an unparenthesized trailing closure directly in a for-in
+        // sequence expression, so the .filter/.map chain is hoisted out first.
+        let extraPlists = ((try? FileManager.default.contentsOfDirectory(atPath: prefDir)) ?? [])
+            .filter { $0.hasPrefix("com.kakao.KakaoTalkMac.") && $0.hasSuffix(".plist") }
+            .map { "\(prefDir)/\($0)" }
+        for path in [
+            "\(home)/Library/Preferences/com.kakao.KakaoTalkMac.plist",
+            "\(prefDir)/com.kakao.KakaoTalkMac.plist"
+        ] + extraPlists {
+            if let d = NSDictionary(contentsOfFile: path) as? [String: Any] { prefs.merge(d) { a, _ in a } }
+        }
+        let candidates = KakaoUserID.candidates(from: prefs)
+        guard !candidates.isEmpty else { throw ChatArchiveError.kakaoUserIdNotFound }
+
+        // Try each candidate: its derived filename must exist AND its key must open the DB.
+        for userId in candidates {
+            let name = KakaoKeyDerivation.databaseName(userId: userId, uuid: uuid)
+            let dbPath = files.contains(name) ? "\(container)/\(name)"
+                       : files.contains("\(name).db") ? "\(container)/\(name).db" : nil
+            guard let dbPath else { continue }
+            let key = KakaoKeyDerivation.secureKey(userId: userId, uuid: uuid)
+            if let db = SQLCipherDatabase(path: dbPath, passphrase: key) {
+                return KakaoArchive(db: db)
+            }
+        }
+        throw ChatArchiveError.databaseOpenFailed
+    }
+
+    func recentChats(limit: Int) throws -> [ChatSummary] {
+        let sql = """
+            SELECT r.chatId, r.chatName, r.lastUpdatedAt,
+                   COALESCE(u.displayName, u.friendNickName, u.nickName)
+            FROM NTChatRoom r
+            LEFT JOIN NTUser u ON r.directChatMemberUserId = u.userId AND u.linkId = 0
+            ORDER BY r.lastUpdatedAt DESC
+            LIMIT ?
+            """
+        return db.query(sql, [Int64(limit)]).compactMap { row in
+            guard case .int(let id) = row[0] else { return nil }
+            let group = { if case .text(let t) = row[1] { return t } else { return "" } }()
+            let direct = { if case .text(let t) = row[3] { return t } else { return "" } }()
+            let title = group.isEmpty ? (direct.isEmpty ? "Chat \(id)" : direct) : group
+            let ts: Date? = { if case .int(let s) = row[2], s > 0 { return Date(timeIntervalSince1970: Double(s)) } else { return nil } }()
+            return ChatSummary(id: id, title: title, lastActivity: ts)
+        }
+    }
+
+    func messages(chatID: Int64, limit: Int) throws -> [ChatLine] {
+        let sql = """
+            SELECT COALESCE(u.displayName, u.friendNickName, u.nickName, 'Unknown'),
+                   m.message, m.sentAt
+            FROM NTChatMessage m
+            LEFT JOIN NTUser u ON m.authorId = u.userId AND u.linkId = 0
+            WHERE m.chatId = ? AND m.message IS NOT NULL AND m.message <> ''
+            ORDER BY m.sentAt DESC
+            LIMIT ?
+            """
+        let rows = db.query(sql, [chatID, Int64(limit)])
+        let lines: [ChatLine] = rows.compactMap { row in
+            guard case .text(let text) = row[1] else { return nil }
+            let sender = { if case .text(let s) = row[0] { return s } else { return "Unknown" } }()
+            let date = { if case .int(let s) = row[2] { return Date(timeIntervalSince1970: Double(s)) } else { return Date(timeIntervalSince1970: 0) } }()
+            return ChatLine(sender: sender, text: text, date: date)
+        }
+        if lines.isEmpty { throw ChatArchiveError.emptyChat }
+        return lines.reversed()   // query is newest-first; return oldest → newest
+    }
+}
+
+enum ChatArchiveFactory {
+    static func archive(forFrontmostBundleID id: String?) -> (() throws -> ChatArchive)? {
+        guard id == "com.kakao.KakaoTalkMac" else { return nil }
+        return { try KakaoArchive.open() }
+    }
+}
