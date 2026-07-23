@@ -7878,20 +7878,32 @@ final class PetController: NSObject, NSTextFieldDelegate {
         // Same gate the old direct invocation had: the ring only makes sense
         // while a selection is armed.
         guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
+        let items: [RingItem] = [
+            .symbol("text.magnifyingglass", label: "Explain") { [weak self] in
+                guard let self, let t = self.selectedText else { return }
+                self.radialMenu = nil
+                self.onTranslate?(t)
+            },
+            .symbol("pencil.line", label: "Rewrite") { [weak self] in
+                guard let self, let t = self.selectedText else { return }
+                self.radialMenu = nil
+                self.onRewrite?(t)
+            },
+            .symbol("arrowshape.turn.up.left", label: "Reply") { [weak self] in
+                guard let self, let t = self.selectedText else { return }
+                self.radialMenu = nil
+                self.onSmartReply?(t)
+            },
+            .symbol("questionmark.bubble", label: "Ask") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.onAsk?()
+            },
+        ]
         let menu = RadialActionMenuController(
             centeredOn: petCenterInScreen(),
             ignoring: panel,
-            onSelect: { [weak self] action in
-                guard let self else { return }
-                self.radialMenu = nil
-                guard let selectedText = self.selectedText else { return }
-                switch action {
-                case .explain: self.onTranslate?(selectedText)
-                case .rewrite: self.onRewrite?(selectedText)
-                case .reply: self.onSmartReply?(selectedText)
-                case .ask: self.onAsk?()
-                }
-            },
+            items: items,
             onDismiss: { [weak self] in
                 self?.radialMenu = nil
             }
@@ -8891,30 +8903,22 @@ enum RadialMenuLabelPlacement {
     }
 }
 
-/// Actions offered by the radial menu that opens around the floating bar /
-/// pet. Labels avoid "translate" wording deliberately — house copy rule.
-enum RadialAction: CaseIterable {
-    case explain
-    case rewrite
-    case reply
-    case ask
+/// One button on the radial menu that opens around the floating bar / pet:
+/// an image (SF Symbol or, for contextual entries, an app icon), a hover
+/// label, and the action to run when picked. Labels avoid "translate"
+/// wording deliberately — house copy rule.
+struct RingItem {
+    let label: String
+    let image: NSImage
+    let handler: () -> Void
 
-    var label: String {
-        switch self {
-        case .explain: return "Explain"
-        case .rewrite: return "Rewrite"
-        case .reply: return "Reply"
-        case .ask: return "Ask"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .explain: return "text.magnifyingglass"
-        case .rewrite: return "pencil.line"
-        case .reply: return "arrowshape.turn.up.left"
-        case .ask: return "questionmark.bubble"
-        }
+    /// Builds a ring item from an SF Symbol, applying the same fixed
+    /// size/weight the ring has always rendered its glyphs at.
+    static func symbol(_ name: String, label: String, handler: @escaping () -> Void) -> RingItem {
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: label)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
+            ?? NSImage()
+        return RingItem(label: label, image: img, handler: handler)
     }
 }
 
@@ -8932,18 +8936,22 @@ enum RadialMenuLayoutPolicy {
         (ringRadius + buttonDiameter / 2 + panelPadding) * 2
     }
 
-    /// Offsets from the panel center, one per `RadialAction.allCases` entry.
-    /// All four actions sit on the right-side arc — reply top-right, explain
-    /// right, ask bottom-right, rewrite at the bottom — leaving the left arc
-    /// free for future actions.
-    static func buttonCenters() -> [CGPoint] {
+    /// `count` evenly-spaced positions. 1–4 keep the original right/bottom arc
+    /// order (reply top-right, explain right, ask bottom-right, rewrite bottom);
+    /// extra items fill the free left arc counter-clockwise.
+    static func buttonCenters(count: Int) -> [CGPoint] {
         let diagonal = ringRadius * sqrt(0.5)
-        return [
+        let base: [CGPoint] = [
             CGPoint(x: ringRadius, y: 0),
             CGPoint(x: 0, y: -ringRadius),
             CGPoint(x: diagonal, y: diagonal),
             CGPoint(x: diagonal, y: -diagonal),
+            CGPoint(x: -ringRadius, y: 0),           // left  (5th: summarize)
+            CGPoint(x: 0, y: ringRadius),            // top
+            CGPoint(x: -diagonal, y: diagonal),      // top-left
+            CGPoint(x: -diagonal, y: -diagonal)      // bottom-left
         ]
+        return Array(base.prefix(count))
     }
 
     /// Which of the eight ring directions an offset points to — that
@@ -9051,7 +9059,7 @@ final class RadialActionMenuController {
     /// menu's own backdrop), its handler must see the menu still open and
     /// toggle it — dismissing here first would make that handler reopen.
     private weak var presenterWindow: NSWindow?
-    private let onSelect: (RadialAction) -> Void
+    private let items: [RingItem]
     private let onDismiss: () -> Void
     private var buttons: [RadialMenuButtonView] = []
     private var dismissMonitors: [Any] = []
@@ -9060,11 +9068,11 @@ final class RadialActionMenuController {
     init(
         centeredOn anchor: NSPoint,
         ignoring presenterWindow: NSWindow?,
-        onSelect: @escaping (RadialAction) -> Void,
+        items: [RingItem],
         onDismiss: @escaping () -> Void
     ) {
         self.presenterWindow = presenterWindow
-        self.onSelect = onSelect
+        self.items = items
         self.onDismiss = onDismiss
 
         let frame = RadialMenuLayoutPolicy.panelFrame(anchor: anchor)
@@ -9100,9 +9108,9 @@ final class RadialActionMenuController {
         ))
 
         let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
-        for (action, offset) in zip(RadialAction.allCases, RadialMenuLayoutPolicy.buttonCenters()) {
-            let button = RadialMenuButtonView(action: action) { [weak self] picked in
-                self?.finish(with: picked)
+        for (item, offset) in zip(items, RadialMenuLayoutPolicy.buttonCenters(count: items.count)) {
+            let button = RadialMenuButtonView(image: item.image) { [weak self] in
+                self?.finish(with: item)
             }
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,
@@ -9113,7 +9121,7 @@ final class RadialActionMenuController {
 
             let placement = RadialMenuLayoutPolicy.labelPlacement(for: offset)
             let bubble = RadialMenuLabelBubbleView(
-                text: action.label,
+                text: item.label,
                 tailEdge: placement.opposite
             )
             bubble.setFrameOrigin(RadialMenuLayoutPolicy.bubbleOrigin(
@@ -9182,10 +9190,10 @@ final class RadialActionMenuController {
         onDismiss()
     }
 
-    private func finish(with action: RadialAction) {
+    private func finish(with item: RingItem) {
         guard !didClose else { return }
         close()
-        onSelect(action)
+        item.handler()
     }
 
     private func animateButtonsIn() {
@@ -9306,8 +9314,7 @@ private final class RadialMenuBackdropView: NSView {
 /// One circular glass button on the ring: SF Symbol icon, hover tint, and a
 /// small label that fades in under the circle on hover.
 private final class RadialMenuButtonView: NSView {
-    private let action: RadialAction
-    private let onPick: (RadialAction) -> Void
+    private let onPick: () -> Void
     private let circleView = NSVisualEffectView()
     private let iconView = NSImageView()
     private var trackingArea: NSTrackingArea?
@@ -9316,8 +9323,7 @@ private final class RadialMenuButtonView: NSView {
     /// lives outside this view so the ring hit-areas stay circle-sized.
     var onHoverChange: ((Bool) -> Void)?
 
-    init(action: RadialAction, onPick: @escaping (RadialAction) -> Void) {
-        self.action = action
+    init(image: NSImage, onPick: @escaping () -> Void) {
         self.onPick = onPick
 
         let diameter = RadialMenuLayoutPolicy.buttonDiameter
@@ -9333,12 +9339,7 @@ private final class RadialMenuButtonView: NSView {
         circleView.frame = bounds
         addSubview(circleView)
 
-        iconView.image = NSImage(
-            systemSymbolName: action.symbolName,
-            accessibilityDescription: action.label
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
-        )
+        iconView.image = image
         iconView.contentTintColor = .labelColor
         iconView.imageAlignment = .alignCenter
         // Natural symbol size, dead-center: proportional-down fitting can
@@ -9382,7 +9383,7 @@ private final class RadialMenuButtonView: NSView {
     override func mouseUp(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
         guard bounds.contains(location) else { return }
-        onPick(action)
+        onPick()
     }
 
     private func setHovered(_ hovered: Bool) {
@@ -9626,20 +9627,36 @@ final class FloatingTranslateButtonController {
             buttonView.setMenuOpen(false)
             return
         }
-        let menu = RadialActionMenuController(
-            centeredOn: buttonCenterInScreen(),
-            ignoring: panel,
-            onSelect: { [weak self] action in
+        let items: [RingItem] = [
+            .symbol("text.magnifyingglass", label: "Explain") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.buttonView.setMenuOpen(false)
-                switch action {
-                case .explain: self.onTranslate(self.selectedText)
-                case .rewrite: self.onRewrite(self.selectedText)
-                case .reply: self.onSmartReply(self.selectedText)
-                case .ask: self.onAsk()
-                }
+                self.onTranslate(self.selectedText)
             },
+            .symbol("pencil.line", label: "Rewrite") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.onRewrite(self.selectedText)
+            },
+            .symbol("arrowshape.turn.up.left", label: "Reply") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.onSmartReply(self.selectedText)
+            },
+            .symbol("questionmark.bubble", label: "Ask") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.onAsk()
+            },
+        ]
+        let menu = RadialActionMenuController(
+            centeredOn: buttonCenterInScreen(),
+            ignoring: panel,
+            items: items,
             onDismiss: { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
