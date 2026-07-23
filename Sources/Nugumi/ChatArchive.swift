@@ -142,3 +142,29 @@ final class SQLCipherDatabase {
         return rows
     }
 }
+
+enum KakaoUserID {
+    /// Ordered candidate user ids parsed from KakaoTalk's preferences.
+    /// Direct keys first, then ids embedded in window-frame / transparency keys.
+    static func candidates(from prefs: [String: Any]) -> [Int] {
+        var ordered: [Int] = []
+        func add(_ v: Int) { if v > 0, !ordered.contains(v) { ordered.append(v) } }
+
+        for key in ["userId", "user_id", "KAKAO_USER_ID", "userID"] {
+            if let n = prefs[key] as? Int { add(n) }
+            else if let s = prefs[key] as? String, let n = Int(s) { add(n) }
+        }
+        // Ids embedded in dynamic key names, e.g.
+        // "NSWindow Frame FSChatWindowFrame_<id>" / "FSChatWindowTransparency<id>".
+        let patterns = [#"FSChatWindowFrame_(\d+)"#, #"FSChatWindowTransparency(\d+)"#]
+        for key in prefs.keys {
+            for p in patterns {
+                if let r = key.range(of: p, options: .regularExpression) {
+                    let digits = key[r].filter { $0.isNumber }
+                    if let n = Int(digits) { add(n) }
+                }
+            }
+        }
+        return ordered
+    }
+}
