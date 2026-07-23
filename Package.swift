@@ -14,10 +14,29 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.7.0")
     ],
     targets: [
+        .target(
+            name: "CSQLCipher",
+            path: "Sources/CSQLCipher",
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("SQLITE_HAS_CODEC"),
+                .define("SQLCIPHER_CRYPTO_CC"),
+                .define("SQLITE_EXTRA_INIT", to: "sqlcipher_extra_init"),
+                .define("SQLITE_EXTRA_SHUTDOWN", to: "sqlcipher_extra_shutdown"),
+                .define("SQLITE_TEMP_STORE", to: "2"),
+                .define("NDEBUG"),
+                .headerSearchPath("include")
+            ],
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedFramework("Foundation")
+            ]
+        ),
         .executableTarget(
             name: "Nugumi",
             dependencies: [
-                .product(name: "Sparkle", package: "Sparkle")
+                .product(name: "Sparkle", package: "Sparkle"),
+                "CSQLCipher"
             ],
             resources: [
                 .process("Resources")
