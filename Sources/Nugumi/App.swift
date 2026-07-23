@@ -3057,6 +3057,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// `translate(...)` path with `.summarizeChat`. Never crashes — any
     /// `ChatArchiveError` (or other failure) is surfaced via
     /// `presentChatSummaryError`.
+    ///
+    /// `open()` (ioreg + PBKDF2 + SQLCipher's own KDF) and the SQL reads can
+    /// take several hundred ms to ~1s on a real KakaoTalk DB, so that whole
+    /// local pipeline runs off the main thread in a detached task. Only the
+    /// consent alert, `translate(...)`, and error presentation stay on the
+    /// main actor.
     @MainActor
     private func runChatSummary(
         open: @escaping () throws -> ChatArchive,
@@ -3066,34 +3072,39 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         selectionRect: NSRect?,
         panelSide: TranslationPanelController.Side
     ) {
-        do {
-            let archive = try open()
-            let (chat, _) = try archive.chat(forWindowTitle: windowTitle)
-            let lines = try archive.messages(chatID: chat.id, limit: count)
-            let transcript = ChatTranscript.format(lines, maxMessages: count, tokenBudget: 12_000)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let transcript = try await Task.detached(priority: .userInitiated) { () throws -> String in
+                    let archive = try open()
+                    let (chat, _) = try archive.chat(forWindowTitle: windowTitle)
+                    let lines = try archive.messages(chatID: chat.id, limit: count)
+                    return ChatTranscript.format(lines, maxMessages: count, tokenBudget: 12_000)
+                }.value
 
-            // Nothing leaves the device only when running a genuinely local
-            // Ollama model — an Ollama-hosted cloud model (e.g.
-            // gpt-oss:120b-cloud) still routes through OllamaClient but
-            // executes on Ollama's cloud infra, so it needs the gate too.
-            let runsTrulyLocally = (currentBackend is OllamaClient) && !LLMModel.option(id: textModelID).isCloud
-            if !runsTrulyLocally, !SummaryConsent.accepted {
-                guard presentSummaryCloudConsentAlert() else { return }
-                SummaryConsent.accepted = true
+                // Nothing leaves the device only when running a genuinely local
+                // Ollama model — an Ollama-hosted cloud model (e.g.
+                // gpt-oss:120b-cloud) still routes through OllamaClient but
+                // executes on Ollama's cloud infra, so it needs the gate too.
+                let runsTrulyLocally = (self.currentBackend is OllamaClient) && !LLMModel.option(id: self.textModelID).isCloud
+                if !runsTrulyLocally, !SummaryConsent.accepted {
+                    guard self.presentSummaryCloudConsentAlert() else { return }
+                    SummaryConsent.accepted = true
+                }
+
+                self.translate(
+                    transcript,
+                    near: screenPoint,
+                    mode: .summarizeChat,
+                    useCache: false,
+                    selectionRect: selectionRect,
+                    panelSide: panelSide,
+                    keepPetReadyUntilPanelCloses: true,
+                    restoresReadyOnUserDismiss: true
+                )
+            } catch {
+                self.presentChatSummaryError(error)
             }
-
-            translate(
-                transcript,
-                near: screenPoint,
-                mode: .summarizeChat,
-                useCache: false,
-                selectionRect: selectionRect,
-                panelSide: panelSide,
-                keepPetReadyUntilPanelCloses: true,
-                restoresReadyOnUserDismiss: true
-            )
-        } catch {
-            presentChatSummaryError(error)
         }
     }
 
@@ -3264,7 +3275,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             onFollowUp: { [weak self] instruction in
                 self?.reviseCurrentPanel(
                     instruction: instruction,
-                    reviseMode: mode == .selection ? .revise : .reviseMessage,
+                    reviseMode: (mode == .selection || mode == .summarizeChat) ? .revise : .reviseMessage,
                     usageKind: usageKind
                 )
             },
