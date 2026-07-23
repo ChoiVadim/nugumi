@@ -3071,6 +3071,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             let (chat, _) = try archive.chat(forWindowTitle: windowTitle)
             let lines = try archive.messages(chatID: chat.id, limit: count)
             let transcript = ChatTranscript.format(lines, maxMessages: count, tokenBudget: 12_000)
+
+            // Nothing leaves the device on local Ollama — only a non-Ollama
+            // (cloud) backend needs the one-time consent gate.
+            if !(currentBackend is OllamaClient), !SummaryConsent.accepted {
+                guard presentSummaryCloudConsentAlert() else { return }
+                SummaryConsent.accepted = true
+            }
+
             translate(
                 transcript,
                 near: screenPoint,
@@ -3084,6 +3092,22 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         } catch {
             presentChatSummaryError(error)
         }
+    }
+
+    /// One-time modal consent gate shown before the first cloud-backend chat
+    /// summary. Returns `true` if the user chose to continue (caller
+    /// proceeds and persists the choice); `false` means abort — the caller
+    /// must not run the summary. Blocking `runModal()` on the main thread
+    /// mirrors the existing `contactSupport()` alert pattern.
+    @MainActor
+    private func presentSummaryCloudConsentAlert() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Send this chat to your AI provider?"
+        alert.informativeText = "Chat contents — including messages from other people — will be sent to your selected AI provider to generate this summary."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// Surfaces a chat-summary failure. `handleTranslationFailure` only
@@ -13969,6 +13993,20 @@ struct ImageInput {
 
     var base64String: String { data.base64EncodedString() }
     var openAIDataURI: String { "data:\(mediaType);base64,\(base64String)" }
+}
+
+/// One-time acknowledgement that a chat summary sent through a cloud backend
+/// leaves the device (and may include other people's messages). Local Ollama
+/// summaries never consult this — nothing leaves the machine. Persisted so
+/// the modal only shows once per install, not once per summary.
+enum SummaryConsent {
+    private static let key = "summary.cloudConsentAccepted"
+    static var accepted: Bool {
+        get { value(forKey: key) }
+        set { set(newValue, forKey: key) }
+    }
+    static func value(forKey k: String) -> Bool { UserDefaults.standard.bool(forKey: k) }
+    static func set(_ v: Bool, forKey k: String) { UserDefaults.standard.set(v, forKey: k) }
 }
 
 protocol LLMBackend {
