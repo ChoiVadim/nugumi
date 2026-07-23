@@ -4205,7 +4205,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     case .smartReply:
                         usageKind = .smartReply
                         language = self.draftTargetLanguage
-                    case .selection, .draftMessage, .revise, .reviseMessage:
+                    case .selection, .draftMessage, .revise, .reviseMessage, .summarizeChat:
                         usageKind = .screenArea
                         language = self.targetLanguage
                     }
@@ -8635,7 +8635,7 @@ final class PetMascotView: NSView {
 
     private func drawPixelActionBadge() {
         switch mode {
-        case .selection, .revise, .reviseMessage:
+        case .selection, .revise, .reviseMessage, .summarizeChat:
             drawTranslateBadge()
         case .draftMessage:
             drawRewriteBadge()
@@ -10752,7 +10752,7 @@ final class FloatingTranslateButtonView: NSView {
     private static func glyphImage(for mode: TranslationMode) -> NSImage {
         let name: String
         switch mode {
-        case .selection, .revise, .reviseMessage:
+        case .selection, .revise, .reviseMessage, .summarizeChat:
             // The mascot, not a generic sparkles glyph: the button that
             // opens the radial menu wears the app's own mark.
             return mascotGlyphImage()
@@ -13003,10 +13003,14 @@ enum TranslationMode {
     /// reply) and `.draftMessage` (a polished draft). Keeps composition (writing
     /// style/voice). Panel-only, never a pet/mascot surface.
     case reviseMessage
+    /// Summarizes a chat transcript (see `ChatTranscript.format`) into a
+    /// TL;DR + key points + action items. Read-only, no composition settings.
+    /// Panel-only, never a pet/mascot surface.
+    case summarizeChat
 
     var usesCompositionSettings: Bool {
         switch self {
-        case .selection, .revise:
+        case .selection, .revise, .summarizeChat:
             return false
         case .draftMessage, .smartReply, .reviseMessage:
             return true
@@ -13019,6 +13023,8 @@ enum TranslationMode {
             return nil
         case .smartReply, .reviseMessage:
             return "Reply"
+        case .summarizeChat:
+            return "Summary"
         }
     }
 
@@ -13032,6 +13038,8 @@ enum TranslationMode {
             return "Thinking"
         case .revise, .reviseMessage:
             return "Revising"
+        case .summarizeChat:
+            return "Summarizing"
         }
     }
 
@@ -13128,6 +13136,15 @@ enum TranslationMode {
             Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
 
             Return only the updated message text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
+            """
+        case .summarizeChat:
+            """
+            You are given a chat transcript as "Sender: message" lines, oldest first. \
+            Write a concise summary in \(targetLanguage.promptName): a one-line TL;DR, \
+            then a short bulleted list of the key points and decisions, then any action \
+            items or open questions addressed to the reader. Preserve names, dates, \
+            numbers, and links exactly. Do not invent anything not in the transcript. \
+            Return only the summary — no preamble, no quotes.
             """
         }
         return UserAboutContext.appending(to: base)
@@ -13855,7 +13872,7 @@ struct OllamaClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage:
+        case .revise, .reviseMessage, .summarizeChat:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -14120,7 +14137,7 @@ struct OpenAIChatClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage:
+        case .revise, .reviseMessage, .summarizeChat:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -15301,7 +15318,7 @@ struct ClaudeCodeClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage:
+        case .revise, .reviseMessage, .summarizeChat:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -15974,7 +15991,7 @@ struct OpenAICodexClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage:
+        case .revise, .reviseMessage, .summarizeChat:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text

@@ -270,3 +270,17 @@ enum ChatArchiveFactory {
         return { try KakaoArchive.open() }
     }
 }
+
+enum ChatTranscript {
+    /// Newest `maxMessages`, then trim from the oldest end to fit a rough
+    /// token budget (~4 chars/token). Output is oldest → newest, "Sender: text".
+    static func format(_ lines: [ChatLine], maxMessages: Int, tokenBudget: Int) -> String {
+        let kept = Array(lines.suffix(maxMessages))
+        var rendered = kept.map { "\($0.sender): \($0.text)" }
+        let budgetChars = tokenBudget * 4
+        while rendered.count > 1, rendered.joined(separator: "\n").count > budgetChars {
+            rendered.removeFirst()   // drop oldest first
+        }
+        return rendered.joined(separator: "\n")
+    }
+}
