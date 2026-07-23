@@ -386,11 +386,10 @@ enum SQLValue: Equatable { case int(Int64); case text(String); case null }
 
 final class SQLCipherDatabase {
     private var db: OpaquePointer?
-    private static let TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     init?(path: String, passphrase: String?) {
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
-            sqlite3_close(db); return nil
+            sqlite3_close(db); db = nil; return nil
         }
         if let passphrase {
             // Try SQLCipher compatibility 3 then 4 (older vs newer KakaoTalk builds).
@@ -400,7 +399,7 @@ final class SQLCipherDatabase {
                 _ = exec("PRAGMA key='\(passphrase)'")
                 if exec("SELECT count(*) FROM sqlite_master") { opened = true; break }
             }
-            guard opened else { sqlite3_close(db); return nil }
+            guard opened else { sqlite3_close(db); db = nil; return nil }
         }
     }
 
