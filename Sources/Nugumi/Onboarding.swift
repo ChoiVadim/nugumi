@@ -8,12 +8,31 @@ import SwiftUI
 enum PermissionKind {
     case accessibility
     case screenRecording
+    case fullDiskAccess
 
     var analyticsValue: String {
         switch self {
         case .accessibility: return "accessibility"
         case .screenRecording: return "screen_recording"
+        case .fullDiskAccess: return "full_disk_access"
         }
+    }
+}
+
+// MARK: - Full Disk Access probe
+
+/// No macOS API reports Full Disk Access status directly. Probe by attempting
+/// to list the KakaoTalk container (what the chat-summary feature actually
+/// needs to read): success ⇒ granted, failure ⇒ missing.
+enum FullDiskAccessProbe {
+    static func isGranted() -> Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let container = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac"
+        // If KakaoTalk isn't installed, fall back to a generic TCC-gated path.
+        let probe = FileManager.default.fileExists(atPath: container)
+            ? container
+            : "\(home)/Library/Application Support/com.apple.TCC"
+        return (try? FileManager.default.contentsOfDirectory(atPath: probe)) != nil
     }
 }
 
@@ -167,6 +186,9 @@ final class OnboardingModel: ObservableObject {
     var pageDidChange: ((Page) -> Void)?
     @Published var axTrusted = AXIsProcessTrusted()
     @Published var scrTrusted = CGPreflightScreenCaptureAccess()
+    /// Full Disk Access is optional — unlike `axTrusted`/`scrTrusted`, nothing
+    /// in this model ever gates first-run completion or auto-advance on it.
+    @Published var fdaGranted = FullDiskAccessProbe.isGranted()
 
     /// Set by the window controller.
     var requestClose: (() -> Void)?
@@ -235,17 +257,23 @@ final class OnboardingModel: ObservableObject {
     var nextPermission: PermissionKind? {
         if !axTrusted { return .accessibility }
         if !scrTrusted { return .screenRecording }
+        if !fdaGranted { return .fullDiskAccess }
         return nil
     }
 
     func refreshPermissions() {
         let ax = AXIsProcessTrusted()
         let scr = CGPreflightScreenCaptureAccess()
+        let fda = FullDiskAccessProbe.isGranted()
         if ax != axTrusted { axTrusted = ax }
         if scr != scrTrusted { scrTrusted = scr }
+        if fda != fdaGranted { fdaGranted = fda }
 
-        // First-run auto-advance once both permissions land; review mode stays
-        // put so the user can see (and revisit) the granted state.
+        // First-run auto-advance once both REQUIRED permissions land; review
+        // mode stays put so the user can see (and revisit) the granted state.
+        // Full Disk Access is optional and deliberately excluded here — this
+        // must never wait on it (it has no OS-prompted flow and many users
+        // will simply never grant it).
         if mode == .firstRun, page == .permissions, ax, scr {
             if !Self.mainWindowEverAutoShown {
                 page = .finale
@@ -271,6 +299,8 @@ final class OnboardingModel: ObservableObject {
                 openAccessibilitySettings()
             case .screenRecording:
                 openScreenRecordingSettings()
+            case .fullDiskAccess:
+                openFullDiskAccessSettings()
             case nil:
                 if mode == .replay {
                     page = .finale
@@ -338,6 +368,7 @@ final class OnboardingModel: ObservableObject {
     private func refreshTrustFlags() {
         axTrusted = AXIsProcessTrusted()
         scrTrusted = CGPreflightScreenCaptureAccess()
+        fdaGranted = FullDiskAccessProbe.isGranted()
     }
 
     private func advanceFeature(from index: Int) {
@@ -367,6 +398,19 @@ final class OnboardingModel: ObservableObject {
         _ = AXIsProcessTrustedWithOptions(probe)
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         closeBeforeSystemDialog?()
+        NSWorkspace.shared.open(url)
+    }
+
+    private func openFullDiskAccessSettings() {
+        // Deliberately does NOT call closeBeforeSystemDialog(): that hides the
+        // window in anticipation of a "trust watcher" (App.swift) re-presenting
+        // it once the permission lands — a mechanism that only exists for
+        // Accessibility/Screen Recording. Full Disk Access has no equivalent
+        // watcher and never restarts the app, so closing here would leave
+        // onboarding gone with nothing to bring it back. Instead, leave the
+        // window open — its own 1s poll (refreshPermissions) picks up the
+        // change live once the user flips the toggle in System Settings.
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -406,6 +450,7 @@ final class OnboardingModel: ObservableObject {
             switch nextPermission {
             case .accessibility: return "Step 1 of 2"
             case .screenRecording: return "Step 2 of 2"
+            case .fullDiskAccess: return "Optional"
             case nil: return "Ready"
             }
         case .feature(let index):
@@ -449,6 +494,7 @@ final class OnboardingModel: ObservableObject {
             switch nextPermission {
             case .accessibility: return "Open Accessibility Settings"
             case .screenRecording: return "Allow Screen Capture"
+            case .fullDiskAccess: return "Open Full Disk Access Settings"
             case nil: return "Continue"
             }
         case .feature:
@@ -751,6 +797,15 @@ private struct OnboardingRootView: View {
                                 ? .granted
                                 : (model.nextPermission == .screenRecording ? .active : .waiting)
                         )
+                        PermissionCard(
+                            symbol: "externaldrive.fill.badge.checkmark",
+                            fallbackSymbol: "externaldrive.fill",
+                            title: "Full Disk Access",
+                            detail: "Read your KakaoTalk chat history to summarize it.",
+                            state: model.fdaGranted
+                                ? .granted
+                                : (model.nextPermission == .fullDiskAccess ? .active : .waiting)
+                        )
                     }
                     .frame(maxHeight: .infinity, alignment: .center)
                 case .feature(let index):
@@ -787,7 +842,8 @@ private struct OnboardingRootView: View {
                 PermissionPreviewPanel(
                     active: model.nextPermission ?? .screenRecording,
                     axTrusted: model.axTrusted,
-                    scrTrusted: model.scrTrusted
+                    scrTrusted: model.scrTrusted,
+                    fdaGranted: model.fdaGranted
                 )
             case .feature(let index):
                 FeatureVideoPanel(step: model.steps[index])
@@ -1184,6 +1240,7 @@ private struct PermissionPreviewPanel: View {
     let active: PermissionKind
     let axTrusted: Bool
     let scrTrusted: Bool
+    let fdaGranted: Bool
 
     private static let promptImage = loadOnboardingImage(named: "screen-recording-prompt")
     private static let settingsImage = loadOnboardingImage(named: "screen-recording-settings")
@@ -1191,10 +1248,10 @@ private struct PermissionPreviewPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Spacer(minLength: 0)
-            if active == .accessibility {
-                // No stock macOS dialog for Accessibility — Nugumi registers
-                // itself silently at launch and the button opens System
-                // Settings directly. One step only.
+            if active == .accessibility || active == .fullDiskAccess {
+                // No stock macOS dialog for Accessibility or Full Disk Access —
+                // both are silent registrations/manual toggles, so the button
+                // opens System Settings directly. One step only.
                 VStack(alignment: .leading, spacing: 9) {
                     plainCaption("The button opens System Settings - turn Nugumi on in the list.")
                     settingsListPreview
@@ -1222,8 +1279,8 @@ private struct PermissionPreviewPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// The real System Settings screenshot (shared by both permissions — the
-    /// list UI is identical), with the faux list as a fallback.
+    /// The real System Settings screenshot (shared by all three permissions —
+    /// the list UI is identical), with the faux list as a fallback.
     @ViewBuilder
     private var settingsListPreview: some View {
         if let settings = Self.settingsImage {
@@ -1235,8 +1292,16 @@ private struct PermissionPreviewPanel: View {
         } else {
             FauxSettingsList(
                 active: active,
-                nugumiEnabled: active == .accessibility ? axTrusted : scrTrusted
+                nugumiEnabled: currentlyEnabled
             )
+        }
+    }
+
+    private var currentlyEnabled: Bool {
+        switch active {
+        case .accessibility: return axTrusted
+        case .screenRecording: return scrTrusted
+        case .fullDiskAccess: return fdaGranted
         }
     }
 
