@@ -89,3 +89,57 @@ enum KakaoKeyDerivation {
         return hex(pbkdf2(password: Data(String(hawawa.reversed()).utf8), salt: Data(salt.utf8)))
     }
 }
+
+enum SQLValue: Equatable { case int(Int64); case text(String); case null }
+
+final class SQLCipherDatabase {
+    private var db: OpaquePointer?
+    private static let TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+    init?(path: String, passphrase: String?) {
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db); return nil
+        }
+        if let passphrase {
+            // Try SQLCipher compatibility 3 then 4 (older vs newer KakaoTalk builds).
+            var opened = false
+            for compat in [3, 4] {
+                _ = exec("PRAGMA cipher_default_compatibility = \(compat)")
+                _ = exec("PRAGMA key='\(passphrase)'")
+                if exec("SELECT count(*) FROM sqlite_master") { opened = true; break }
+            }
+            guard opened else { sqlite3_close(db); return nil }
+        }
+    }
+
+    deinit { sqlite3_close(db) }
+
+    @discardableResult
+    private func exec(_ sql: String) -> Bool {
+        sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
+    }
+
+    func query(_ sql: String, _ binds: [Int64] = []) -> [[SQLValue]] {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        for (i, b) in binds.enumerated() { sqlite3_bind_int64(stmt, Int32(i + 1), b) }
+        var rows: [[SQLValue]] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let n = sqlite3_column_count(stmt)
+            var row: [SQLValue] = []
+            for c in 0..<n {
+                switch sqlite3_column_type(stmt, c) {
+                case SQLITE_INTEGER: row.append(.int(sqlite3_column_int64(stmt, c)))
+                case SQLITE_NULL:    row.append(.null)
+                default:
+                    if let cstr = sqlite3_column_text(stmt, c) {
+                        row.append(.text(String(cString: cstr)))
+                    } else { row.append(.null) }
+                }
+            }
+            rows.append(row)
+        }
+        return rows
+    }
+}
