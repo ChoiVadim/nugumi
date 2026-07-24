@@ -532,6 +532,11 @@ struct TranslationLanguage: Equatable {
     }
 }
 
+/// Launch-at-login via the native ServiceManagement API (macOS 13+). The app
+/// bundle registers *itself* as the login item — no separate helper target.
+/// Callers MUST gate on `isRunningFromAppBundle`: `SMAppService` is meaningless
+/// under `swift run` (no bundle) and the registration would point at the
+/// transient `.build` binary.
 enum LaunchAtLogin {
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
 
