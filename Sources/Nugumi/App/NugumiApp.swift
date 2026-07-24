@@ -15,7 +15,7 @@ import Vision
 @main
 @MainActor
 final class NugumiApp: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem?
+    var statusItem: NSStatusItem?
     private var mouseMonitor: Any?
     private var keyboardMonitor: Any?
     private var lastLeftMouseDownLocation: NSPoint?
@@ -72,7 +72,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// monitors, so clicking elsewhere can't dismiss the in-flight request.
     private var askFloatingLoadingBar: FloatingTranslateButtonController?
     private var petController: PetController?
-    private var translationPanelController: TranslationPanelController?
+    var translationPanelController: TranslationPanelController?
     private var askPromptController: AskPromptController?
     private var askNugumiTask: Task<Void, Never>?
     private var askNugumiRequestID: UUID?
@@ -97,7 +97,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var screenshotPanelSide: TranslationPanelController.Side?
     private var screenshotDragTracker: ScreenshotDragTracker?
     private var globalHotKeys: [GlobalHotKey] = []
-    private lazy var liveTranslationController: LiveTranslationController = {
+    lazy var liveTranslationController: LiveTranslationController = {
         let controller = LiveTranslationController()
         controller.onMissingAPIKey = { [weak self] in self?.presentLiveTranslationAPIKeyAlert() }
         controller.onMicrophonePermissionDenied = { [weak self] in self?.presentMicrophonePermissionAlert() }
@@ -118,7 +118,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
         return controller
     }()
-    private lazy var dictationController: DictationController = {
+    lazy var dictationController: DictationController = {
         let controller = DictationController()
         controller.onMissingAPIKey = { [weak self] in self?.presentLiveTranslationAPIKeyAlert(feature: "Dictation") }
         controller.onMicrophonePermissionDenied = { [weak self] in self?.presentMicrophonePermissionAlert() }
@@ -139,7 +139,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         models: LLMModel.ollamaModels
     )
     private var snippetsWindowController: SnippetsWindowController?
-    private var mainWindowController: MainWindowController?
+    var mainWindowController: MainWindowController?
     /// Ollama model whose pull the user kicked off from the AI Engine setup card.
     /// When it finishes we promote it to the everyday-text default once, mirroring
     /// the retired onboarding window's `onOllamaReady` behavior.
@@ -168,7 +168,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private var isRunningFromAppBundle: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
     }
-    private var targetLanguage: TranslationLanguage {
+    var targetLanguage: TranslationLanguage {
         get {
             TranslationLanguage.language(
                 id: UserDefaults.standard.string(forKey: "targetLanguageID") ?? TranslationLanguage.defaultLanguage.id
@@ -178,7 +178,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(newValue.id, forKey: "targetLanguageID")
         }
     }
-    private var draftTargetLanguage: TranslationLanguage {
+    var draftTargetLanguage: TranslationLanguage {
         get {
             TranslationLanguage.language(
                 id: UserDefaults.standard.string(forKey: "draftTargetLanguageID") ?? TranslationLanguage.defaultDraftLanguage.id
@@ -192,7 +192,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// to. The toggle swaps this with `draftTargetLanguage`, so the configured
     /// pair is always {writing language, alternate} — the writing language side
     /// is the live target, only this one is user-selectable.
-    private var writingToggleAlternate: TranslationLanguage {
+    var writingToggleAlternate: TranslationLanguage {
         get {
             if let id = UserDefaults.standard.string(forKey: "writingToggleAlternateID") {
                 return TranslationLanguage.language(id: id)
@@ -341,7 +341,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         set { UserDefaults.standard.set(newValue, forKey: "customStyleInstructionV1") }
     }
 
-    private var invisibilityModeEnabled: Bool {
+    var invisibilityModeEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: InvisibilityState.defaultsKey) }
         set { UserDefaults.standard.set(newValue, forKey: InvisibilityState.defaultsKey) }
     }
@@ -570,7 +570,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
+    func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
         GlobalShortcutStore.shortcut(for: action)
     }
 
@@ -1293,93 +1293,6 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             // user was signed in, killing requests pre-flight.
             return provider.hasCredentials ? nil : .invalidAPIKey(provider)
         }
-    }
-
-    @objc private func toggleInvisibilityMode() {
-        let now = !invisibilityModeEnabled
-        invisibilityModeEnabled = now
-        statusItem?.isVisible = !now
-        InvisibilityState.applyToAllOpenWindows()
-        updateMenuState()
-        if now && !UserDefaults.standard.bool(forKey: InvisibilityState.firstRunShownKey) {
-            showInvisibilityFirstRunDialog()
-            UserDefaults.standard.set(true, forKey: InvisibilityState.firstRunShownKey)
-        }
-    }
-
-    private func showInvisibilityFirstRunDialog() {
-        let chord = shortcut(for: .toggleInvisibility).displayString
-        NSApp.activate(ignoringOtherApps: true)
-        _ = NugumiAlertController(
-            title: "Invisibility mode is on",
-            message: "Nugumi is now hidden from screenshots and screen sharing, and the menu-bar icon is gone. Press \(chord) anywhere to bring it back.",
-            primaryButtonTitle: "Got it"
-        ).showModal()
-    }
-
-    /// Flips the writing (draft) language with the configured alternate, swapping
-    /// the two so the pair {writing language, alternate} is preserved each toggle.
-    @objc private func toggleWritingLanguageAction() {
-        let previous = draftTargetLanguage
-        let next = writingToggleAlternate
-        draftTargetLanguage = next
-        writingToggleAlternate = previous
-        translationPanelController?.close()
-        translationPanelController = nil
-        updateMenuState()
-        mainWindowController?.bridge.refreshFromHost()
-        LanguageToggleHUD.shared.show(text: "Writing in \(next.displayName)")
-    }
-
-    @MainActor
-    @objc private func toggleLiveTranslationFromMenu() {
-        toggleLiveTranslation()
-    }
-
-    /// Live translation runs exclusively on OpenAI's realtime model, so it is
-    /// gated on an OpenAI API key regardless of which provider the rest of the
-    /// app uses. A missing/empty key surfaces `presentLiveTranslationAPIKeyAlert`
-    /// via the controller's `onMissingAPIKey` hook before any capture starts.
-    @MainActor
-    private func toggleLiveTranslation() {
-        liveTranslationController.toggle(
-            apiKey: KeychainStore.apiKey(for: .openAI),
-            targetLanguage: targetLanguage
-        )
-    }
-
-    /// Dictation shares live translation's OpenAI realtime dependency (and
-    /// its key gate + mic-permission alerts).
-    @MainActor
-    private func toggleDictation() {
-        dictationController.toggle(apiKey: KeychainStore.apiKey(for: .openAI))
-    }
-
-    @MainActor
-    private func presentLiveTranslationAPIKeyAlert(feature: String = "Live translation") {
-        NSApp.activate(ignoringOtherApps: true)
-        let response = NugumiAlertController(
-            title: "OpenAI API key required",
-            message: "\(feature) runs on OpenAI's realtime model. Add an OpenAI API key under AI Engine → API key models, then try again.",
-            primaryButtonTitle: "Open AI Engine",
-            secondaryButtonTitle: "Cancel"
-        ).showModal()
-        guard response == .alertFirstButtonReturn else { return }
-        presentMainWindow(section: .aiEngine)
-    }
-
-    @MainActor
-    private func presentMicrophonePermissionAlert() {
-        NSApp.activate(ignoringOtherApps: true)
-        let response = NugumiAlertController(
-            title: "Microphone access needed",
-            message: "Live captions listen to your microphone. Allow access under System Settings → Privacy & Security → Microphone, then start again.",
-            primaryButtonTitle: "Open Settings",
-            secondaryButtonTitle: "Cancel"
-        ).showModal()
-        guard response == .alertFirstButtonReturn else { return }
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
-        NSWorkspace.shared.open(url)
     }
 
     private func setupBootstrap() {
@@ -3128,7 +3041,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         ]
     }
 
-    private func updateMenuState() {
+    func updateMenuState() {
         guard let menu = statusItem?.menu else {
             return
         }
@@ -3226,7 +3139,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// is also the entry point for "setup" — the AI Engine section now hosts the
     /// full backend setup flow that used to live in a standalone window.
     @MainActor
-    private func presentMainWindow(section: MainWindowSection? = nil) {
+    func presentMainWindow(section: MainWindowSection? = nil) {
         let controller: MainWindowController
         if let mainWindowController {
             controller = mainWindowController
