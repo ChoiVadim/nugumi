@@ -9,15 +9,17 @@ enum ChatArchiveError: Error, CustomStringConvertible {
     case databaseOpenFailed
     case emptyChat
     case chatNotMatched
+    case telegramLocked
 
     var description: String {
         switch self {
         case .fullDiskAccessMissing: return "Grant Full Disk Access to summarize chats."
         case .kakaoUserIdNotFound:   return "Couldn't read KakaoTalk account data."
-        case .databaseNotFound:      return "Couldn't find the KakaoTalk chat database."
+        case .databaseNotFound:      return "Couldn't find the chat database."
         case .databaseOpenFailed:    return "Couldn't open the chat database (it may have updated)."
         case .emptyChat:             return "No messages to summarize in this chat."
         case .chatNotMatched:        return "Couldn't tell which chat is open."
+        case .telegramLocked:        return "Couldn't unlock Telegram data — a Telegram passcode may be set."
         }
     }
 }
@@ -90,7 +92,11 @@ enum KakaoKeyDerivation {
     }
 }
 
-enum SQLValue: Equatable { case int(Int64); case text(String); case null }
+enum SQLValue: Equatable { case int(Int64); case text(String); case blob([UInt8]); case null }
+
+/// A bound parameter — int for Kakao's `chatId`/limits, blob for Telegram's
+/// 20-byte message-key range bounds.
+enum SQLBind { case int(Int64); case blob([UInt8]) }
 
 final class SQLCipherDatabase {
     private var db: OpaquePointer?
@@ -111,6 +117,22 @@ final class SQLCipherDatabase {
         }
     }
 
+    /// Telegram-macOS Postbox: SQLCipher v4 with a 32-byte plaintext header, so
+    /// the salt can't be read from the file — the raw key and salt are both
+    /// supplied, `key` first (it initializes the codec) then the header size.
+    /// Opened READ-ONLY in place: WAL mode lets us read concurrently with the
+    /// running app and see its latest committed state. (Copying the live,
+    /// actively-appended `-wal` raced Telegram and produced a torn snapshot
+    /// SQLCipher rejected — surfacing as a spurious "locked" error.)
+    init?(telegramDB path: String, keyHex: String, saltHex: String) {
+        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(db); db = nil; return nil
+        }
+        _ = exec("PRAGMA key=\"x'\(keyHex)\(saltHex)'\"")
+        _ = exec("PRAGMA cipher_plaintext_header_size = 32")
+        guard exec("SELECT count(*) FROM sqlite_master") else { sqlite3_close(db); db = nil; return nil }
+    }
+
     deinit { sqlite3_close(db) }
 
     @discardableResult
@@ -119,10 +141,22 @@ final class SQLCipherDatabase {
     }
 
     func query(_ sql: String, _ binds: [Int64] = []) -> [[SQLValue]] {
+        query(sql, binds.map { SQLBind.int($0) })
+    }
+
+    func query(_ sql: String, _ binds: [SQLBind]) -> [[SQLValue]] {
+        // SQLite must copy blob binds — the source [UInt8] is transient.
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
-        for (i, b) in binds.enumerated() { sqlite3_bind_int64(stmt, Int32(i + 1), b) }
+        for (i, b) in binds.enumerated() {
+            let idx = Int32(i + 1)
+            switch b {
+            case .int(let v): sqlite3_bind_int64(stmt, idx, v)
+            case .blob(let bytes): sqlite3_bind_blob(stmt, idx, bytes, Int32(bytes.count), transient)
+            }
+        }
         var rows: [[SQLValue]] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             let n = sqlite3_column_count(stmt)
@@ -131,6 +165,11 @@ final class SQLCipherDatabase {
                 switch sqlite3_column_type(stmt, c) {
                 case SQLITE_INTEGER: row.append(.int(sqlite3_column_int64(stmt, c)))
                 case SQLITE_NULL:    row.append(.null)
+                case SQLITE_BLOB:
+                    if let p = sqlite3_column_blob(stmt, c) {
+                        let len = Int(sqlite3_column_bytes(stmt, c))
+                        row.append(.blob([UInt8](UnsafeRawBufferPointer(start: p, count: len))))
+                    } else { row.append(.blob([])) }
                 default:
                     if let cstr = sqlite3_column_text(stmt, c) {
                         row.append(.text(String(cString: cstr)))
@@ -154,6 +193,13 @@ enum KakaoUserID {
             if let n = prefs[key] as? Int { add(n) }
             else if let s = prefs[key] as? String, let n = Int(s) { add(n) }
         }
+        // `AlertKakaoIDsList` holds account/friend ids (kakaocli's candidate source).
+        if let list = prefs["AlertKakaoIDsList"] as? [Any] {
+            for item in list {
+                if let n = item as? Int { add(n) }
+                else if let s = item as? String, let n = Int(s) { add(n) }
+            }
+        }
         // Ids embedded in dynamic key names, e.g.
         // "NSWindow Frame FSChatWindowFrame_<id>" / "FSChatWindowTransparency<id>".
         let patterns = [#"FSChatWindowFrame_(\d+)"#, #"FSChatWindowTransparency(\d+)"#]
@@ -166,6 +212,91 @@ enum KakaoUserID {
             }
         }
         return ordered
+    }
+
+    /// The empty-account SHA-512 (`sha512` of no active account) — never brute-force it.
+    private static let emptyAccountRevisionHash =
+        "31bca02094eb78126a517b206a88c73cfa9ec6f704c7030d18212cace820f025f00bf0ea68dbf3f3a5436ca63b53bf7bf80ad8d5de7d8359d0b7fed9dbc3ab99"
+
+    /// Newer KakaoTalk stores the logged-in account's own id ONLY as a SHA-512
+    /// hash in a `DESIGNATEDFRIENDSREVISION:<sha512hex>` preference key. Recover
+    /// it by brute-forcing the preimage (ids are < 1e9), matching kakaocli.
+    /// Cached in UserDefaults per-hash so the multi-second search runs at most
+    /// once per account.
+    static func recoveredIDs(in prefs: [String: Any]) -> [Int] {
+        let prefix = "DESIGNATEDFRIENDSREVISION:"
+        var ids: [Int] = []
+        for key in prefs.keys where key.hasPrefix(prefix) {
+            let hash = String(key.dropFirst(prefix.count)).lowercased()
+            guard hash.count == 128, hash != emptyAccountRevisionHash else { continue }
+            let cacheKey = "nugumi.kakao.uid.\(hash)"
+            if let cached = UserDefaults.standard.object(forKey: cacheKey) as? Int {
+                if cached > 0, !ids.contains(cached) { ids.append(cached) }
+                continue
+            }
+            if let id = bruteForceSHA512Preimage(targetHex: hash) {
+                UserDefaults.standard.set(id, forKey: cacheKey)
+                if !ids.contains(id) { ids.append(id) }
+            }
+        }
+        return ids
+    }
+
+    /// Find `i` in `0..<maxId` where `sha512(decimal(i)) == targetHex`.
+    /// Multi-threaded, allocation-free inner loop; early-exits once found.
+    static func bruteForceSHA512Preimage(targetHex: String, maxId: Int = 1_000_000_000) -> Int? {
+        guard targetHex.count == 128 else { return nil }
+        let chars = Array(targetHex.utf8)
+        func hexVal(_ c: UInt8) -> Int? {
+            switch c {
+            case 0x30...0x39: return Int(c - 0x30)
+            case 0x61...0x66: return Int(c - 0x61 + 10)
+            case 0x41...0x46: return Int(c - 0x41 + 10)
+            default: return nil
+            }
+        }
+        let target = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
+        defer { target.deallocate() }
+        for i in 0..<64 {
+            guard let hi = hexVal(chars[i * 2]), let lo = hexVal(chars[i * 2 + 1]) else { return nil }
+            target[i] = UInt8(hi << 4 | lo)
+        }
+        // Split the range into small blocks handed out by GCD across all cores,
+        // so the block that contains the answer is reached quickly (contiguous
+        // per-core chunks would make the finding core scan its whole chunk alone)
+        // and pending blocks early-exit the moment any core finds it. The inner
+        // loop uses raw pointers — no per-iteration array/closure overhead.
+        let blockSize = 1_000_000
+        let numBlocks = (maxId + blockSize - 1) / blockSize
+        let lock = NSLock()
+        var found: Int?
+        DispatchQueue.concurrentPerform(iterations: numBlocks) { b in
+            lock.lock(); let doneEarly = found != nil; lock.unlock()
+            if doneEarly { return }
+            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: 20)
+            let dig = UnsafeMutablePointer<UInt8>.allocate(capacity: 64)
+            defer { buf.deallocate(); dig.deallocate() }
+            let start = b * blockSize
+            let end = min(start + blockSize, maxId)
+            var i = start
+            while i < end {
+                var len: Int
+                if i == 0 { buf[0] = 48; len = 1 }
+                else {
+                    var x = i, d = 0
+                    while x > 0 { x /= 10; d += 1 }
+                    len = d; x = i; var j = d - 1
+                    while x > 0 { buf[j] = UInt8(48 + x % 10); x /= 10; j -= 1 }
+                }
+                CC_SHA512(buf, CC_LONG(len), dig)
+                if memcmp(dig, target, 64) == 0 {
+                    lock.lock(); if found == nil { found = i }; lock.unlock()
+                    return
+                }
+                i += 1
+            }
+        }
+        return found
     }
 }
 
@@ -184,15 +315,10 @@ final class KakaoArchive: ChatArchive {
 
     init(db: SQLCipherDatabase) { self.db = db }
 
-    static func open() throws -> KakaoArchive {
+    /// Merged contents of KakaoTalk's preference plists — the source for
+    /// candidate/recovered user ids.
+    private static func gatherPrefs() -> [String: Any] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let container = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac"
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: container) else {
-            throw ChatArchiveError.fullDiskAccessMissing
-        }
-        let uuid = try KakaoKeyDerivation.platformUUID()
-
-        // Gather candidate user ids from both preference plists.
         var prefs: [String: Any] = [:]
         let prefDir = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Preferences"
         // Swift disallows an unparenthesized trailing closure directly in a for-in
@@ -206,10 +332,31 @@ final class KakaoArchive: ChatArchive {
         ] + extraPlists {
             if let d = NSDictionary(contentsOfFile: path) as? [String: Any] { prefs.merge(d) { a, _ in a } }
         }
-        let candidates = KakaoUserID.candidates(from: prefs)
+        return prefs
+    }
+
+    /// Runs the (UserDefaults-cached) SHA-512 userId recovery ahead of time so
+    /// the first summary isn't blocked on the multi-second brute force. Safe to
+    /// call repeatedly and off the main thread — a cache hit returns instantly.
+    static func prewarmUserId() {
+        _ = KakaoUserID.recoveredIDs(in: gatherPrefs())
+    }
+
+    static func open() throws -> KakaoArchive {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let container = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: container) else {
+            throw ChatArchiveError.fullDiskAccessMissing
+        }
+        let uuid = try KakaoKeyDerivation.platformUUID()
+
+        let prefs = gatherPrefs()
+        var candidates = KakaoUserID.candidates(from: prefs)
+        // Newer KakaoTalk hides the own id behind a SHA-512 hash — recover it.
+        candidates += KakaoUserID.recoveredIDs(in: prefs).filter { !candidates.contains($0) }
         guard !candidates.isEmpty else { throw ChatArchiveError.kakaoUserIdNotFound }
 
-        // Try each candidate: its derived filename must exist AND its key must open the DB.
+        // Primary path: a candidate's derived filename exists AND its key opens the DB.
         for userId in candidates {
             let name = KakaoKeyDerivation.databaseName(userId: userId, uuid: uuid)
             let dbPath = files.contains(name) ? "\(container)/\(name)"
@@ -218,6 +365,22 @@ final class KakaoArchive: ChatArchive {
             let key = KakaoKeyDerivation.secureKey(userId: userId, uuid: uuid)
             if let db = SQLCipherDatabase(path: dbPath, passphrase: key) {
                 return KakaoArchive(db: db)
+            }
+        }
+
+        // Fallback (matches kakaocli): the derived filename may not match on
+        // newer builds — scan the container for the 78-hex-char DB file, then
+        // try each candidate's key against that one file.
+        if let hex78 = try? NSRegularExpression(pattern: "^[0-9a-f]{78}(\\.db)?$"),
+           let dbFile = files.first(where: {
+               hex78.firstMatch(in: $0, range: NSRange($0.startIndex..., in: $0)) != nil
+           }) {
+            let dbPath = "\(container)/\(dbFile)"
+            for userId in candidates {
+                let key = KakaoKeyDerivation.secureKey(userId: userId, uuid: uuid)
+                if let db = SQLCipherDatabase(path: dbPath, passphrase: key) {
+                    return KakaoArchive(db: db)
+                }
             }
         }
         throw ChatArchiveError.databaseOpenFailed
@@ -266,17 +429,30 @@ final class KakaoArchive: ChatArchive {
 
 enum ChatArchiveFactory {
     static func archive(forFrontmostBundleID id: String?) -> (() throws -> ChatArchive)? {
-        guard id == "com.kakao.KakaoTalkMac" else { return nil }
-        return { try KakaoArchive.open() }
+        switch id {
+        case "com.kakao.KakaoTalkMac":  return { try KakaoArchive.open() }
+        case "ru.keepcoder.Telegram":   return { try TelegramArchive.open() }
+        default:                        return nil
+        }
     }
 }
 
 extension ChatArchive {
-    /// The chat whose title matches the frontmost window title, else the most
-    /// recently-active chat. Returns (chat, matchedByTitle).
-    func chat(forWindowTitle title: String?, fallbackLimit: Int = 30) throws -> (ChatSummary, Bool) {
+    /// Identifies the chat on screen. `ocrCandidates` are strings read from the
+    /// messenger's on-screen header (Telegram, whose window title is useless and
+    /// whose DB has no reliable open-chat pointer) — fuzzy-matched against chat
+    /// names to survive OCR noise. Falls back to window-title matching (Kakao),
+    /// then the most-recently-active chat. Returns (chat, matchedConfidently).
+    func chat(
+        forWindowTitle title: String?,
+        ocrCandidates: [String] = [],
+        fallbackLimit: Int = 30
+    ) throws -> (ChatSummary, Bool) {
         let chats = try recentChats(limit: fallbackLimit)
         guard !chats.isEmpty else { throw ChatArchiveError.emptyChat }
+        if let hit = ChatNameMatch.best(candidates: ocrCandidates, in: chats) {
+            return (hit, true)
+        }
         if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty {
             let needle = title.trimmingCharacters(in: .whitespaces).lowercased()
             if let hit = chats.first(where: {
@@ -285,6 +461,58 @@ extension ChatArchive {
             }) { return (hit, true) }
         }
         return (chats[0], false)
+    }
+}
+
+/// Fuzzy-matches OCR'd header strings to a chat name. OCR of clear UI text is
+/// close but not exact ("LeviosaAI" → "LeviosaAl"), and the candidate set is
+/// small (recent chats), so a normalized edit-distance best-match is both
+/// robust and cheap. The threshold rejects header junk ("8 members", clock).
+enum ChatNameMatch {
+    static func best(candidates: [String], in chats: [ChatSummary], threshold: Double = 0.6) -> ChatSummary? {
+        var bestChat: ChatSummary?
+        var bestScore = threshold
+        for raw in candidates {
+            let cand = normalize(raw)
+            guard cand.count >= 2 else { continue }
+            for chat in chats {
+                let name = normalize(chat.title)
+                guard name.count >= 2 else { continue }
+                let score = similarity(cand, name)
+                if score > bestScore { bestScore = score; bestChat = chat }
+            }
+        }
+        return bestChat
+    }
+
+    static func normalize(_ s: String) -> String {
+        String(s.lowercased().unicodeScalars.filter {
+            CharacterSet.alphanumerics.contains($0) || $0 == " "
+        }).trimmingCharacters(in: .whitespaces)
+    }
+
+    static func similarity(_ a: String, _ b: String) -> Double {
+        if a == b { return 1 }
+        if a.count >= 4, b.count >= 4, (a.contains(b) || b.contains(a)) { return 0.9 }
+        let dist = levenshtein(Array(a), Array(b))
+        let longer = max(a.count, b.count)
+        return longer == 0 ? 0 : 1 - Double(dist) / Double(longer)
+    }
+
+    static func levenshtein(_ a: [Character], _ b: [Character]) -> Int {
+        if a.isEmpty { return b.count }
+        if b.isEmpty { return a.count }
+        var prev = Array(0...b.count)
+        var cur = [Int](repeating: 0, count: b.count + 1)
+        for i in 1...a.count {
+            cur[0] = i
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            }
+            swap(&prev, &cur)
+        }
+        return prev[b.count]
     }
 }
 

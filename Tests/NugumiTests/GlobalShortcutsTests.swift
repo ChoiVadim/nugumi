@@ -120,6 +120,27 @@ final class GlobalShortcutsTests: XCTestCase {
                        "second ⌃ after the window should not fire")
     }
 
+    // Quick menu defaults to the middle mouse button ("Mouse 3") and the
+    // mouse-button kind round-trips through the store's JSON encoding.
+    func testQuickMenuDefaultsToMouse3AndRoundTrips() {
+        let shortcut = GlobalShortcutAction.quickMenu.defaultShortcut
+        XCTAssertEqual(shortcut.kind, .mouseButton)
+        XCTAssertEqual(shortcut.keyCode, 2)
+        XCTAssertEqual(shortcut.displayString, "Mouse 3")
+        XCTAssertTrue(shortcut.isValid)
+
+        let data = try! JSONEncoder().encode(shortcut)
+        let decoded = try! JSONDecoder().decode(GlobalShortcut.self, from: data)
+        XCTAssertEqual(decoded, shortcut)
+    }
+
+    // Left/right clicks must never validate as global shortcuts.
+    func testPrimaryMouseButtonsAreInvalidShortcuts() {
+        XCTAssertFalse(GlobalShortcut(mouseButton: 0).isValid)
+        XCTAssertFalse(GlobalShortcut(mouseButton: 1).isValid)
+        XCTAssertTrue(GlobalShortcut(mouseButton: 3).isValid)
+    }
+
     // Groups partition the action set: each action lands in exactly one group,
     // and the groups together cover every action.
     func testGroupsPartitionAllActions() {

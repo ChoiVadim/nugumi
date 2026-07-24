@@ -129,3 +129,14 @@ bash Scripts/build-app-bundle.sh  # full universal release bundle + DMG.
 ```
 
 In `swift run` mode Sparkle is fully inert: `updaterController` is `nil` and the "Check for Updates..." menu item is hidden. Sparkle requires a real `.app` bundle (Frameworks/Sparkle.framework + hardened runtime + Info.plist), so end-to-end update testing must use `bash Scripts/build-app-bundle.sh` and run `dist/Nugumi.app`.
+
+## Restart the app after changes (use `swift run Nugumi`)
+
+After any code change the user wants to see, restart the app — otherwise the user is looking at stale UI. **For testing, use `swift run Nugumi`, not a full bundle rebuild.** Kill the previous instance first and relaunch:
+
+```sh
+pkill -f 'Nugumi' ; swift run Nugumi   # quick debug run — this is the default test step
+```
+
+- `swift run Nugumi` is the fast dev loop for UI/behavior iteration (a debug build, Sparkle inert). Do NOT run `bash Scripts/build-app-bundle.sh` just to see a change — that full universal signed bundle is only for release, Sparkle/update testing, or when a feature needs TCC permissions correctly attributed to `com.nugumi.app` rather than the shell (the "TCC launch trap").
+- Run it in the background so it doesn't block, and re-run (kill + `swift run`) after each subsequent change.

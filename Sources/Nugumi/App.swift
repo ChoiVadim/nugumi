@@ -1094,7 +1094,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         }
         return controller
     }()
+    private lazy var dictationController: DictationController = {
+        let controller = DictationController()
+        controller.onMissingAPIKey = { [weak self] in self?.presentLiveTranslationAPIKeyAlert(feature: "Dictation") }
+        controller.onMicrophonePermissionDenied = { [weak self] in self?.presentMicrophonePermissionAlert() }
+        return controller
+    }()
     private var modifierDetectors: [DoubleModifierPressDetector] = []
+    private var mouseButtonMonitors: [MouseButtonShortcutMonitor] = []
+    private var quickMenuRing: RadialActionMenuController?
     private var shortcutRecorderWindowController: ShortcutRecorderWindowController?
     private var lastReplacementSourcePID: pid_t?
     private var translationCache = TranslationCache()
@@ -1403,6 +1411,40 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         app.run()
     }
 
+    // MARK: Streaming-jitter repro (NUGUMI_STREAM_DEBUG=1) — delete when solved.
+    private var fakeStreamTimer: Timer?
+    private func runFakeStreamRepro() {
+        let controller = TranslationPanelController(
+            anchor: .point(NSPoint(x: 500, y: 700), panelSide: .right),
+            sourceText: "debug",
+            targetLanguage: targetLanguage,
+            resultLabel: "Summary",
+            loadingPlaceholder: "Summarizing",
+            showsSource: false,
+            showsFollowUp: true,
+            dismissesOnOutsideClick: false
+        )
+        translationPanelController?.close()
+        translationPanelController = controller
+        let requestID = controller.showLoading()
+        var emitted = ""
+        var i = 0
+        fakeStreamTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { t in
+            guard i < 220 else {
+                t.invalidate()
+                controller.showTranslation(emitted, requestID: requestID, isFinal: true)
+                return
+            }
+            let word = i % 9 == 4 ? "**слово\(i)**" : "слово\(i)"
+            if i % 34 == 33 { emitted += "\n\n" }
+            else if i % 13 == 12 { emitted += "\n- " }
+            else if !emitted.isEmpty { emitted += " " }
+            emitted += word
+            controller.showTranslation(emitted, requestID: requestID)
+            i += 1
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Nugumi is a dark-only design (white ink on dark glass everywhere). Pin
         // the whole app to dark so windows/panels render correctly even when macOS
@@ -1425,6 +1467,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 "didSetDefaultLoginItemV1",
             ] {
                 UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        // Developer switch: NUGUMI_STREAM_DEBUG=1 opens a result panel on
+        // launch and streams fake markdown chunks into it, logging per-render
+        // geometry — repro harness for streaming-jitter debugging.
+        if TranslationContentView.streamDebug {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.runFakeStreamRepro()
             }
         }
         // AX default messaging timeout is 6s. Parameterized calls (e.g.
@@ -1505,6 +1555,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         globalHotKeys.removeAll()
         modifierDetectors.forEach { $0.stop() }
         modifierDetectors.removeAll()
+        mouseButtonMonitors.forEach { $0.stop() }
+        mouseButtonMonitors.removeAll()
 
         let bindings: [(GlobalShortcutAction, @MainActor () -> Void)] = [
             (.screenshotArea, { [weak self] in self?.startScreenshotTranslation() }),
@@ -1513,7 +1565,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             (.toggleInvisibility, { [weak self] in self?.toggleInvisibilityMode() }),
             (.askNugumi, { [weak self] in self?.startAskNugumiPrompt() }),
             (.toggleWritingLanguage, { [weak self] in self?.toggleWritingLanguageAction() }),
-            (.liveTranslation, { [weak self] in self?.toggleLiveTranslation() })
+            (.liveTranslation, { [weak self] in self?.toggleLiveTranslation() }),
+            (.quickMenu, { [weak self] in self?.toggleQuickMenuRing() })
         ]
 
         for (action, handler) in bindings {
@@ -1533,6 +1586,13 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 )
                 modifierDetectors.append(detector)
                 detector.start()
+            case .mouseButton:
+                let monitor = MouseButtonShortcutMonitor(
+                    buttonNumber: Int(shortcut.keyCode),
+                    onPressed: handler
+                )
+                mouseButtonMonitors.append(monitor)
+                monitor.start()
             }
         }
 
@@ -1545,6 +1605,72 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         )
         globalHotKeys.append(askNugumiAlias)
         askNugumiAlias.register()
+    }
+
+    /// The quick-menu shortcut (default Mouse 3): opens the same action ring
+    /// the floating button shows, but centered on the cursor and with no
+    /// selection required. Items that do need text (Explain / Rewrite) reuse
+    /// the selection-grabbing shortcut handlers, which fetch whatever is
+    /// selected at click time via AX/⌘C and show a hint if nothing is.
+    @MainActor
+    private func toggleQuickMenuRing() {
+        if let quickMenuRing {
+            quickMenuRing.close()
+            self.quickMenuRing = nil
+            return
+        }
+        // While the recorder is capturing, a mouse-button press is input for
+        // the field, not a trigger.
+        guard shortcutRecorderWindowController == nil else { return }
+
+        let anchor = NSEvent.mouseLocation
+        var items: [RingItem] = [
+            .phosphor("magnifying-glass", label: "Explain") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.startSelectionTranslateOrReply(forcing: .translate)
+            },
+            .phosphor("pencil-line", label: "Rewrite") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.startSelectedTextTranslationForReplacement()
+            },
+            .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.startSelectionTranslateOrReply(forcing: .smartReply)
+            },
+            .phosphor("question", label: "Ask") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.startAskNugumiPrompt()
+            },
+            .phosphor("scan", label: "Capture") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.startScreenshotTranslation()
+            },
+            // SF Symbols until waveform/mic Phosphor PNGs are bundled.
+            .symbol("mic", label: "Dictate") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.toggleDictation()
+            },
+            .symbol("waveform", label: "Live") { [weak self] in
+                self?.quickMenuRing = nil
+                self?.toggleLiveTranslation()
+            },
+        ]
+        if let opt = makeSummarizeOption(near: anchor, selectionRect: nil, panelSide: .right) {
+            items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
+                self?.quickMenuRing = nil
+            }), at: 5)
+        }
+        let ring = RadialActionMenuController(
+            centeredOn: anchor,
+            ignoring: nil,
+            items: items,
+            showsCenterClose: true,
+            onDismiss: { [weak self] in
+                self?.quickMenuRing = nil
+            }
+        )
+        quickMenuRing = ring
+        ring.show()
     }
 
     @MainActor
@@ -2198,12 +2324,19 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// Dictation shares live translation's OpenAI realtime dependency (and
+    /// its key gate + mic-permission alerts).
     @MainActor
-    private func presentLiveTranslationAPIKeyAlert() {
+    private func toggleDictation() {
+        dictationController.toggle(apiKey: KeychainStore.apiKey(for: .openAI))
+    }
+
+    @MainActor
+    private func presentLiveTranslationAPIKeyAlert(feature: String = "Live translation") {
         NSApp.activate(ignoringOtherApps: true)
         let response = NugumiAlertController(
             title: "OpenAI API key required",
-            message: "Live translation runs on OpenAI's realtime model. Add an OpenAI API key under AI Engine → API key models, then try again.",
+            message: "\(feature) runs on OpenAI's realtime model. Add an OpenAI API key under AI Engine → API key models, then try again.",
             primaryButtonTitle: "Open AI Engine",
             secondaryButtonTitle: "Cancel"
         ).showModal()
@@ -2961,6 +3094,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                 onAsk: { [weak self] in
                     self?.startAskNugumiPrompt()
                 },
+                onScreenshot: { [weak self] in
+                    self?.startScreenshotTranslation()
+                },
+                onLive: { [weak self] in
+                    self?.toggleLiveTranslation()
+                },
+                onDictate: { [weak self] in
+                    self?.toggleDictation()
+                },
                 summarizeOption: summarizeOption
             )
             return
@@ -3004,6 +3146,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             onAsk: { [weak self] in
                 self?.startAskNugumiPrompt()
             },
+            onScreenshot: { [weak self] in
+                self?.startScreenshotTranslation()
+            },
+            onLive: { [weak self] in
+                self?.toggleLiveTranslation()
+            },
+            onDictate: { [weak self] in
+                self?.toggleDictation()
+            },
             summarizeOption: summarizeOption
         )
 
@@ -3034,27 +3185,109 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         selectionRect: NSRect?,
         panelSide: TranslationPanelController.Side
     ) -> RingSummarizeOption? {
-        guard let app = NSWorkspace.shared.frontmostApplication,
-              let open = ChatArchiveFactory.archive(forFrontmostBundleID: app.bundleIdentifier) else { return nil }
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        // Browsers: summarize the open page. No time-range sub-ring — a page
+        // has no time axis, so the button fires immediately.
+        if BrowserPageReader.isBrowser(app.bundleIdentifier) {
+            let pid = app.processIdentifier
+            let pageTitle = focusedWindowTitle(pid: pid)
+            let icon = app.icon ?? NSImage(systemSymbolName: "globe", accessibilityDescription: nil) ?? NSImage()
+            return RingSummarizeOption(
+                appLabel: app.localizedName ?? "browser",
+                appIcon: icon,
+                runDirect: { [weak self] in
+                    self?.runPageSummary(
+                        pid: pid,
+                        pageTitle: pageTitle,
+                        near: screenPoint,
+                        selectionRect: selectionRect,
+                        panelSide: panelSide
+                    )
+                }
+            )
+        }
+        guard let open = ChatArchiveFactory.archive(forFrontmostBundleID: app.bundleIdentifier) else {
+            // Frontmost isn't a summarizable app — offer an app picker so a
+            // summary can be started from anywhere.
+            let choices = summarizeAppChoices(near: screenPoint, selectionRect: selectionRect, panelSide: panelSide)
+            guard !choices.isEmpty else { return nil }
+            let icon = NSImage(systemSymbolName: "square.grid.2x2.fill", accessibilityDescription: "Summarize") ?? NSImage()
+            return RingSummarizeOption(appLabel: "Summarize", appIcon: icon, appChoices: choices)
+        }
         let title = focusedWindowTitle(pid: app.processIdentifier)
         let icon = app.icon ?? NSImage(systemSymbolName: "bubble.left.and.bubble.right", accessibilityDescription: nil) ?? NSImage()
         let label = app.localizedName ?? "chat"
-        return RingSummarizeOption(appLabel: label, appIcon: icon) { [weak self] count in
+        // Warm the cached KakaoTalk userId recovery now, off the click path, so
+        // the first summary isn't blocked on the multi-second SHA-512 search.
+        if app.bundleIdentifier == "com.kakao.KakaoTalkMac" {
+            Task.detached(priority: .utility) { KakaoArchive.prewarmUserId() }
+        }
+        // Telegram's window title is the account name and its chat DB has no
+        // reliable open-chat pointer, so read the open chat off the screen
+        // (OCR the header) at summary time. Other messengers use the AX title.
+        let ocrProvider: (() async -> [String])? =
+            app.bundleIdentifier == TelegramChatDetector.bundleID
+            ? { await TelegramChatDetector.openChatTitleCandidates() }
+            : nil
+        return RingSummarizeOption(appLabel: label, appIcon: icon, run: { [weak self] range in
             self?.runChatSummary(
                 open: open,
                 windowTitle: title,
-                count: count,
+                ocrProvider: ocrProvider,
+                range: range,
                 near: screenPoint,
                 selectionRect: selectionRect,
                 panelSide: panelSide
             )
+        })
+    }
+
+    /// Summarize sources for the "from anywhere" picker. Messengers read their
+    /// local DB regardless of whether they're running; the browser entry needs a
+    /// running browser. Each fires directly — most-recent chat over the last
+    /// week for messengers, the page for a browser — since there's no open-chat
+    /// context and (for browsers) no time axis.
+    @MainActor
+    private func summarizeAppChoices(
+        near screenPoint: NSPoint,
+        selectionRect: NSRect?,
+        panelSide: TranslationPanelController.Side
+    ) -> [RingSummarizeOption] {
+        var choices: [RingSummarizeOption] = []
+        let ws = NSWorkspace.shared
+        for (bundleID, label) in [("com.kakao.KakaoTalkMac", "KakaoTalk"), (TelegramChatDetector.bundleID, "Telegram")] {
+            guard let open = ChatArchiveFactory.archive(forFrontmostBundleID: bundleID),
+                  let appURL = ws.urlForApplication(withBundleIdentifier: bundleID) else { continue }
+            if bundleID == "com.kakao.KakaoTalkMac" {
+                Task.detached(priority: .utility) { KakaoArchive.prewarmUserId() }
+            }
+            let icon = ws.icon(forFile: appURL.path)
+            choices.append(RingSummarizeOption(appLabel: label, appIcon: icon, run: { [weak self] range in
+                self?.runChatSummary(
+                    open: open, windowTitle: nil, ocrProvider: nil, range: range,
+                    near: screenPoint, selectionRect: selectionRect, panelSide: panelSide
+                )
+            }))
         }
+        if let browser = ws.runningApplications.first(where: {
+            BrowserPageReader.isBrowser($0.bundleIdentifier) && !$0.isTerminated
+        }) {
+            let pid = browser.processIdentifier
+            let icon = browser.icon ?? (NSImage(systemSymbolName: "globe", accessibilityDescription: nil) ?? NSImage())
+            choices.append(RingSummarizeOption(appLabel: browser.localizedName ?? "Browser", appIcon: icon, runDirect: { [weak self] in
+                self?.runPageSummary(
+                    pid: pid, pageTitle: nil,
+                    near: screenPoint, selectionRect: selectionRect, panelSide: panelSide
+                )
+            }))
+        }
+        return choices
     }
 
     /// Opens the chat archive, matches the frontmost chat by window title
-    /// (falling back to the most-recently active chat), fetches up to
-    /// `count` messages, and panels the summary through the existing
-    /// `translate(...)` path with `.summarizeChat`. Never crashes — any
+    /// (falling back to the most-recently active chat), keeps the messages
+    /// within the chosen time `range`, and panels the summary through the
+    /// existing `translate(...)` path with `.summarizeChat`. Never crashes — any
     /// `ChatArchiveError` (or other failure) is surfaced via
     /// `presentChatSummaryError`.
     ///
@@ -3067,19 +3300,28 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     private func runChatSummary(
         open: @escaping () throws -> ChatArchive,
         windowTitle: String?,
-        count: Int,
+        ocrProvider: (() async -> [String])? = nil,
+        range: SummaryTimeRange,
         near screenPoint: NSPoint,
         selectionRect: NSRect?,
         panelSide: TranslationPanelController.Side
     ) {
+        let cutoff = range.cutoff()
         Task { [weak self] in
             guard let self else { return }
             do {
+                // Read the on-screen chat (Telegram) before the DB work; empty
+                // for messengers that don't need it (Kakao uses the AX title).
+                let ocrCandidates = await ocrProvider?() ?? []
                 let transcript = try await Task.detached(priority: .userInitiated) { () throws -> String in
                     let archive = try open()
-                    let (chat, _) = try archive.chat(forWindowTitle: windowTitle)
-                    let lines = try archive.messages(chatID: chat.id, limit: count)
-                    return ChatTranscript.format(lines, maxMessages: count, tokenBudget: 12_000)
+                    let (chat, _) = try archive.chat(forWindowTitle: windowTitle, ocrCandidates: ocrCandidates)
+                    // Pull a generous recent window, then keep only the chosen
+                    // time range; the token-budget trim caps the final output.
+                    let recent = try archive.messages(chatID: chat.id, limit: 3000)
+                    let inRange = recent.filter { $0.date >= cutoff }
+                    guard !inRange.isEmpty else { throw ChatArchiveError.emptyChat }
+                    return ChatTranscript.format(inRange, maxMessages: inRange.count, tokenBudget: 12_000)
                 }.value
 
                 // Nothing leaves the device only when running a genuinely local
@@ -3092,6 +3334,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     SummaryConsent.accepted = true
                 }
 
+                // The summary is a terminal action, not tied to the armed
+                // selection — dismiss the floating bar/pet as the panel opens
+                // instead of keeping it "ready" behind the Summary window.
+                self.translateButtonController?.close()
+                self.translateButtonController = nil
+                self.petController?.clearReady()
                 self.translate(
                     transcript,
                     near: screenPoint,
@@ -3099,11 +3347,56 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     useCache: false,
                     selectionRect: selectionRect,
                     panelSide: panelSide,
-                    keepPetReadyUntilPanelCloses: true,
-                    restoresReadyOnUserDismiss: true
+                    keepPetReadyUntilPanelCloses: false,
+                    restoresReadyOnUserDismiss: false
                 )
             } catch {
                 self.presentChatSummaryError(error)
+            }
+        }
+    }
+
+    /// Browser twin of `runChatSummary`: reads the frontmost page's text off
+    /// the AX tree (blocking mach IPC — runs in a detached task), then panels
+    /// the summary through the existing `translate(...)` path with
+    /// `.summarizePage`. Same cloud-consent gate and error surface as chats.
+    @MainActor
+    private func runPageSummary(
+        pid: pid_t,
+        pageTitle: String?,
+        near screenPoint: NSPoint,
+        selectionRect: NSRect?,
+        panelSide: TranslationPanelController.Side
+    ) {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let text = try await Task.detached(priority: .userInitiated) {
+                    try BrowserPageReader.pageText(pid: pid)
+                }.value
+                let page = pageTitle.map { "\($0)\n\n\(text)" } ?? text
+
+                let runsTrulyLocally = (self.currentBackend is OllamaClient) && !LLMModel.option(id: self.textModelID).isCloud
+                if !runsTrulyLocally, !SummaryConsent.accepted {
+                    guard self.presentSummaryCloudConsentAlert(forPage: true) else { return }
+                    SummaryConsent.accepted = true
+                }
+
+                self.translateButtonController?.close()
+                self.translateButtonController = nil
+                self.petController?.clearReady()
+                self.translate(
+                    page,
+                    near: screenPoint,
+                    mode: .summarizePage,
+                    useCache: false,
+                    selectionRect: selectionRect,
+                    panelSide: panelSide,
+                    keepPetReadyUntilPanelCloses: false,
+                    restoresReadyOnUserDismiss: false
+                )
+            } catch {
+                self.presentChatSummaryError(error, title: "Couldn't summarize the page")
             }
         }
     }
@@ -3114,10 +3407,12 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// must not run the summary. Blocking `runModal()` on the main thread
     /// mirrors the existing `contactSupport()` alert pattern.
     @MainActor
-    private func presentSummaryCloudConsentAlert() -> Bool {
+    private func presentSummaryCloudConsentAlert(forPage: Bool = false) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Send this chat to your AI provider?"
-        alert.informativeText = "Chat contents — including messages from other people — will be sent to your selected AI provider to generate this summary."
+        alert.messageText = forPage ? "Send this page to your AI provider?" : "Send this chat to your AI provider?"
+        alert.informativeText = forPage
+            ? "The page contents will be sent to your selected AI provider to generate this summary."
+            : "Chat contents — including messages from other people — will be sent to your selected AI provider to generate this summary."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Continue")
         alert.addButton(withTitle: "Cancel")
@@ -3130,9 +3425,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// to the same plain-message alert the rest of the app already uses for
     /// "nothing to act on" failures (`presentSelectionTranslationError`).
     @MainActor
-    private func presentChatSummaryError(_ error: Error) {
-        let message = (error as? ChatArchiveError)?.description ?? error.localizedDescription
-        presentSelectionTranslationError(message, title: "Couldn't summarize chat")
+    private func presentChatSummaryError(_ error: Error, title: String = "Couldn't summarize chat") {
+        let message = (error as? ChatArchiveError)?.description
+            ?? (error as? BrowserPageReader.PageError)?.description
+            ?? error.localizedDescription
+        presentSelectionTranslationError(message, title: title)
     }
 
     @MainActor
@@ -3275,7 +3572,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             onFollowUp: { [weak self] instruction in
                 self?.reviseCurrentPanel(
                     instruction: instruction,
-                    reviseMode: (mode == .selection || mode == .summarizeChat) ? .revise : .reviseMessage,
+                    reviseMode: (mode == .selection || mode == .summarizeChat || mode == .summarizePage) ? .revise : .reviseMessage,
                     usageKind: usageKind
                 )
             },
@@ -3457,7 +3754,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        let persistsHistory = recordsHistory && mode != .summarizeChat
+        let persistsHistory = recordsHistory && mode != .summarizeChat && mode != .summarizePage
 
         if useCache, let cachedTranslation = translationCache.translation(for: text, targetLanguage: language, thinkingLevel: thinkingLevel) {
             if persistsHistory {
@@ -4012,8 +4309,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         return String(cString: buffer)
     }
 
+    /// `forcedMode` pins the branch regardless of the user's default-mode
+    /// setting — the quick-menu ring has explicit Explain and Reply items,
+    /// while the ⌃⌥T shortcut (nil) keeps following `floatingDefaultMode`.
     @MainActor
-    private func startSelectionTranslateOrReply() {
+    private func startSelectionTranslateOrReply(forcing forcedMode: FloatingButtonDefaultMode? = nil) {
         guard accessibilityIsTrusted() else {
             requestAccessibilityPermissionInteractively()
             return
@@ -4023,7 +4323,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         translateButtonController = nil
         petController?.clearReady()
 
-        let mode = floatingDefaultMode
+        let mode = forcedMode ?? floatingDefaultMode
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self else { return }
@@ -4334,7 +4634,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
                     case .smartReply:
                         usageKind = .smartReply
                         language = self.draftTargetLanguage
-                    case .selection, .draftMessage, .revise, .reviseMessage, .summarizeChat:
+                    case .selection, .draftMessage, .revise, .reviseMessage, .summarizeChat, .summarizePage:
                         usageKind = .screenArea
                         language = self.targetLanguage
                     }
@@ -6098,7 +6398,7 @@ enum KeyboardShortcutPoster {
     }
 }
 
-private struct PasteboardSnapshot {
+struct PasteboardSnapshot {
     private let items: [[NSPasteboard.PasteboardType: Data]]
 
     static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
@@ -6977,6 +7277,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var onTranslate: ((String) -> Void)?
     private var onRewrite: ((String) -> Void)?
     private var onSmartReply: ((String) -> Void)?
+    private var onScreenshot: (() -> Void)?
+    private var onLive: (() -> Void)?
+    private var onDictate: (() -> Void)?
     private var summarizeOption: RingSummarizeOption?
     private var onPromptSubmit: ((String) -> Void)?
     private var onPromptClose: (() -> Void)?
@@ -7771,6 +8074,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onRewrite: @escaping (String) -> Void,
         onSmartReply: @escaping (String) -> Void,
         onAsk: @escaping () -> Void,
+        onScreenshot: @escaping () -> Void = {},
+        onLive: @escaping () -> Void = {},
+        onDictate: @escaping () -> Void = {},
         summarizeOption: RingSummarizeOption? = nil
     ) {
         // Don't yank the pet back to "ready" while Ask is open (input, loading,
@@ -7793,6 +8099,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
         self.onAsk = onAsk
+        self.onScreenshot = onScreenshot
+        self.onLive = onLive
+        self.onDictate = onDictate
         self.summarizeOption = summarizeOption
         currentMode = initialMode
         isReadyLockedUntilPanelCloses = false
@@ -8016,57 +8325,46 @@ final class PetController: NSObject, NSTextFieldDelegate {
         // while a selection is armed.
         guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
         var items: [RingItem] = [
-            .symbol("text.magnifyingglass", label: "Explain") { [weak self] in
+            .phosphor("magnifying-glass", label: "Explain") { [weak self] in
                 guard let self, let t = self.selectedText else { return }
                 self.radialMenu = nil
                 self.onTranslate?(t)
             },
-            .symbol("pencil.line", label: "Rewrite") { [weak self] in
+            .phosphor("pencil-line", label: "Rewrite") { [weak self] in
                 guard let self, let t = self.selectedText else { return }
                 self.radialMenu = nil
                 self.onRewrite?(t)
             },
-            .symbol("arrowshape.turn.up.left", label: "Reply") { [weak self] in
+            .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
                 guard let self, let t = self.selectedText else { return }
                 self.radialMenu = nil
                 self.onSmartReply?(t)
             },
-            .symbol("questionmark.bubble", label: "Ask") { [weak self] in
+            .phosphor("question", label: "Ask") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.onAsk?()
             },
+            .phosphor("scan", label: "Capture") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.onScreenshot?()
+            },
+            .symbol("mic", label: "Dictate") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.onDictate?()
+            },
+            .symbol("waveform", label: "Live") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.onLive?()
+            },
         ]
         if let opt = summarizeOption {
-            items.append(RingItem(label: "Summarize \(opt.appLabel)", image: opt.appIcon) { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.presentCountLayer(opt)
-            })
-        }
-        let menu = RadialActionMenuController(
-            centeredOn: petCenterInScreen(),
-            ignoring: panel,
-            items: items,
-            onDismiss: { [weak self] in
+            items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
                 self?.radialMenu = nil
-            }
-        )
-        radialMenu = menu
-        menu.show()
-    }
-
-    /// Second-layer ring: after picking "Summarize <app>", morphs into a
-    /// 50/100/200/Max count picker centered on the same pet anchor. Picking a
-    /// count hands off to the coordinator-owned `opt.run(_:)`.
-    private func presentCountLayer(_ opt: RingSummarizeOption) {
-        let choices: [(String, Int)] = [("50", 50), ("100", 100), ("200", 200), ("Max", 1000)]
-        let items: [RingItem] = choices.map { (label, n) in
-            RingItem(label: label, image: RingCountBadge.image(label)) { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                opt.run(n)
-            }
+            }), at: 5)
         }
         let menu = RadialActionMenuController(
             centeredOn: petCenterInScreen(),
@@ -8815,7 +9113,7 @@ final class PetMascotView: NSView {
 
     private func drawPixelActionBadge() {
         switch mode {
-        case .selection, .revise, .reviseMessage, .summarizeChat:
+        case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage:
             drawTranslateBadge()
         case .draftMessage:
             drawRewriteBadge()
@@ -9079,44 +9377,295 @@ struct RingItem {
     let label: String
     let image: NSImage
     let handler: () -> Void
+    /// When non-empty, this button is a hover-expandable parent: hovering (or
+    /// clicking) it reveals these buttons as a second-layer fan while the first
+    /// ring stays. The parent's own `handler` is then unused.
+    var subItems: [RingItem] = []
 
     /// Builds a ring item from an SF Symbol, applying the same fixed
     /// size/weight the ring has always rendered its glyphs at.
     static func symbol(_ name: String, label: String, handler: @escaping () -> Void) -> RingItem {
         let img = NSImage(systemSymbolName: name, accessibilityDescription: label)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 20, weight: .semibold))
             ?? NSImage()
+        return RingItem(label: label, image: img, handler: handler)
+    }
+
+    /// Builds a ring item from a bundled Phosphor icon (bold weight, rendered
+    /// to a 40px template PNG in Resources/PhosphorIcons — see LICENSE.txt
+    /// there). Template + 20pt logical size = tints and scales exactly like
+    /// the SF Symbol items it replaced.
+    static func phosphor(_ name: String, label: String, handler: @escaping () -> Void) -> RingItem {
+        let img = Bundle.module.url(forResource: "\(name)-bold", withExtension: "png")
+            .flatMap { NSImage(contentsOf: $0) } ?? NSImage()
+        img.isTemplate = true
+        img.size = NSSize(width: 20, height: 20)
         return RingItem(label: label, image: img, handler: handler)
     }
 }
 
-/// Contextual ring entry that opens the chat-summary count layer. Non-nil
-/// only when the frontmost app is a supported messenger (KakaoTalk) — see
+/// A time window for a chat summary — the second-layer ring buttons.
+enum SummaryTimeRange: CaseIterable {
+    case today, week, month
+
+    var label: String {
+        switch self {
+        case .today: return "Today"
+        case .week:  return "Week"
+        case .month: return "Month"
+        }
+    }
+
+    /// Messages sent at or after this instant are included.
+    func cutoff(now: Date = Date()) -> Date {
+        switch self {
+        case .today: return Calendar.current.startOfDay(for: now)
+        case .week:  return now.addingTimeInterval(-7 * 24 * 3600)
+        case .month: return now.addingTimeInterval(-30 * 24 * 3600)
+        }
+    }
+}
+
+/// Contextual ring entry that reveals the chat-summary time-range layer. Non-nil
+/// only when the frontmost app is a supported messenger — see
 /// `NugumiApp.makeSummarizeOption`. `run` is coordinator-owned: it opens the
-/// chat archive, matches the frontmost chat, fetches messages, and panels
-/// the summary through the existing `translate(...)` path.
+/// chat archive, matches the frontmost chat, fetches messages in the chosen
+/// range, and panels the summary through the existing `translate(...)` path.
+/// Reads the text of the web page open in a browser window straight off the
+/// Accessibility tree. No Apple Events entitlement, no per-browser TCC
+/// Automation prompt, no "Allow JavaScript from Apple Events" toggle — it
+/// rides on the Accessibility permission Nugumi already holds.
+enum BrowserPageReader {
+    /// Frontmost apps that get the ring's summarize-page button. WebKit
+    /// builds its AX tree eagerly; Chromium-based browsers build it lazily
+    /// (see the attribute pokes in `pageText`).
+    private static let browserBundleIDs: Set<String> = [
+        "com.apple.Safari",
+        "com.apple.SafariTechnologyPreview",
+        "com.google.Chrome",
+        "com.google.Chrome.canary",
+        "com.microsoft.edgemac",
+        "com.brave.Browser",
+        "company.thebrowser.Browser",   // Arc
+        "com.naver.whale",
+        "org.mozilla.firefox",
+        "com.vivaldi.Vivaldi",
+        "com.operasoftware.Opera",
+    ]
+
+    static func isBrowser(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return browserBundleIDs.contains(bundleID)
+    }
+
+    enum PageError: Error, CustomStringConvertible {
+        case noWebArea
+        case emptyPage
+        var description: String {
+            switch self {
+            case .noWebArea: return "Couldn't find a readable web page in the browser window."
+            case .emptyPage: return "The page has no readable text."
+            }
+        }
+    }
+
+    /// Matches the chat transcript's ~12k-token budget.
+    private static let characterBudget = 48_000
+    // ponytail: hard node cap bounds the AX IPC walk on pathological pages;
+    // raise if real pages come back truncated.
+    private static let nodeBudget = 20_000
+
+    /// Collects the page text of `pid`'s focused browser window, top to
+    /// bottom. Every AX call is a blocking mach IPC round-trip — call off
+    /// the main thread.
+    static func pageText(pid: pid_t) throws -> String {
+        let appEl = AXUIElementCreateApplication(pid)
+        // Chromium only builds its renderer AX tree once an assistive client
+        // shows up. AXManualAccessibility is its "an app wants the tree, not
+        // VoiceOver" switch; a harmless no-op on Safari/WebKit.
+        AXUIElementSetAttributeValue(appEl, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+
+        var webArea: AXUIElement?
+        for attempt in 0..<10 {
+            if attempt > 0 { usleep(200_000) }
+            // Older Chromium ignores AXManualAccessibility — fall back to the
+            // VoiceOver flag, but only after the polite switch produced
+            // nothing (it has known window-manager side effects).
+            if attempt == 4 {
+                AXUIElementSetAttributeValue(appEl, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            }
+            guard let window = focusedWindow(of: appEl) else { continue }
+            var areas: [AXUIElement] = []
+            collectWebAreas(in: window, depth: 0, into: &areas)
+            // A window can hold several web areas (sidebars, extension
+            // popovers) — the page is the biggest one.
+            if let biggest = areas.max(by: { area($0) < area($1) }), area(biggest) > 10_000 {
+                webArea = biggest
+                break
+            }
+        }
+        guard let webArea else { throw PageError.noWebArea }
+
+        var parts: [String] = []
+        var characters = characterBudget
+        var nodes = nodeBudget
+        collectText(webArea, into: &parts, characters: &characters, nodes: &nodes, depth: 0)
+        let text = parts.joined(separator: "\n")
+        guard text.count >= 40 else { throw PageError.emptyPage }
+        return text
+    }
+
+    private static func focusedWindow(of appEl: AXUIElement) -> AXUIElement? {
+        var win: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &win) == .success,
+              let winEl = win, CFGetTypeID(winEl) == AXUIElementGetTypeID() else { return nil }
+        return (winEl as! AXUIElement)
+    }
+
+    private static func children(of el: AXUIElement) -> [AXUIElement] {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &v) == .success,
+              let arr = v as? [AXUIElement] else { return [] }
+        return arr
+    }
+
+    private static func role(of el: AXUIElement) -> String? {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &v) == .success else { return nil }
+        return v as? String
+    }
+
+    private static func area(_ el: AXUIElement) -> CGFloat {
+        var v: CFTypeRef?
+        var size = CGSize.zero
+        guard AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &v) == .success,
+              let val = v, CFGetTypeID(val) == AXValueGetTypeID(),
+              AXValueGetValue((val as! AXValue), .cgSize, &size) else { return 0 }
+        return size.width * size.height
+    }
+
+    private static func collectWebAreas(in el: AXUIElement, depth: Int, into out: inout [AXUIElement]) {
+        if depth > 24 || out.count >= 8 { return }
+        if role(of: el) == "AXWebArea" { out.append(el); return }
+        for child in children(of: el) { collectWebAreas(in: child, depth: depth + 1, into: &out) }
+    }
+
+    /// Depth-first, matching the page's visual top-to-bottom reading order.
+    /// Buttons/links/headings all bottom out in AXStaticText leaves, so one
+    /// role check covers the whole page (nav noise is the prompt's job).
+    private static func collectText(
+        _ el: AXUIElement,
+        into parts: inout [String],
+        characters: inout Int,
+        nodes: inout Int,
+        depth: Int
+    ) {
+        guard characters > 0, nodes > 0, depth <= 64 else { return }
+        nodes -= 1
+        if role(of: el) == kAXStaticTextRole {
+            var v: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v) == .success,
+               let s = v as? String {
+                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    parts.append(trimmed)
+                    characters -= trimmed.count + 1
+                }
+            }
+            return
+        }
+        for child in children(of: el) {
+            collectText(child, into: &parts, characters: &characters, nodes: &nodes, depth: depth + 1)
+            if characters <= 0 || nodes <= 0 { return }
+        }
+    }
+}
+
 struct RingSummarizeOption {
     let appLabel: String            // e.g. "KakaoTalk"
     let appIcon: NSImage
-    let run: (_ count: Int) -> Void
+    /// Messenger flow: the ring expands into time-range subitems and calls
+    /// this with the picked range. nil for browsers.
+    var run: ((_ range: SummaryTimeRange) -> Void)? = nil
+    /// Browser flow: a web page has no time axis, so the ring renders a
+    /// single button that fires immediately. nil for messengers.
+    var runDirect: (() -> Void)? = nil
+    /// Generic "summarize from anywhere" flow (frontmost app isn't summarizable):
+    /// the ring's second layer becomes an app picker — one button per available
+    /// source (Kakao/Telegram/Browser), each firing its own `runDirect` or
+    /// expanding into its own time-range third orbit (`run`).
+    var appChoices: [RingSummarizeOption]? = nil
 }
 
-/// Renders a small text badge (e.g. "50", "Max") as an `NSImage` for the
-/// count-layer ring buttons, which otherwise expect an SF Symbol image.
-enum RingCountBadge {
+/// Builds the ring's Summarize item from a `RingSummarizeOption`, shared by
+/// all three ring presenters (quick menu, pet, floating button). `dismiss`
+/// is the presenter's own teardown, run before any action fires. Chat
+/// sources expand into time ranges; browsers fire directly.
+@MainActor
+func summarizeRingItem(_ opt: RingSummarizeOption, dismiss: @escaping () -> Void) -> RingItem {
+    func rangeItems(_ run: @escaping (_ range: SummaryTimeRange) -> Void) -> [RingItem] {
+        SummaryTimeRange.allCases.map { range in
+            RingItem(label: range.label, image: RingTextBadge.image(range.label)) {
+                dismiss()
+                run(range)
+            }
+        }
+    }
+
+    if let choices = opt.appChoices {
+        let subItems: [RingItem] = choices.map { choice in
+            if let run = choice.run {
+                // Hovering the app choice opens its own (third) orbit of ranges.
+                return RingItem(label: choice.appLabel, image: choice.appIcon, handler: {}, subItems: rangeItems(run))
+            }
+            return RingItem(label: choice.appLabel, image: choice.appIcon) {
+                dismiss()
+                choice.runDirect?()
+            }
+        }
+        return RingItem(label: "", image: opt.appIcon, handler: {}, subItems: subItems)
+    }
+    if let direct = opt.runDirect {
+        return RingItem(label: "", image: opt.appIcon) {
+            dismiss()
+            direct()
+        }
+    }
+    if let run = opt.run {
+        return RingItem(label: "", image: opt.appIcon, handler: {}, subItems: rangeItems(run))
+    }
+    return RingItem(label: "", image: opt.appIcon, handler: { dismiss() })
+}
+
+/// Renders a short word badge ("Today", "Week", "Month") as an `NSImage` for
+/// the time-range ring buttons, which otherwise expect an SF Symbol image.
+/// Auto-fits the font so the word fills the circle without clipping.
+enum RingTextBadge {
     static func image(_ text: String) -> NSImage {
-        let size = NSSize(width: 24, height: 24)
+        let d = RadialMenuLayoutPolicy.buttonDiameter
+        let size = NSSize(width: d, height: d)
+        let maxWidth: CGFloat = d - 14
+        var fontSize: CGFloat = d * 0.31
+        var attrs: [NSAttributedString.Key: Any] = [:]
+        var r = CGRect.zero
+        repeat {
+            attrs = [
+                .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+                .foregroundColor: NSColor.labelColor
+            ]
+            r = (text as NSString).boundingRect(with: NSSize(width: 200, height: 40), options: [], attributes: attrs)
+            fontSize -= 1
+        } while r.width > maxWidth && fontSize > 8
         let img = NSImage(size: size)
         img.lockFocus()
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: text.count > 2 ? 9 : 11, weight: .semibold),
-            .foregroundColor: NSColor.labelColor
-        ]
-        let s = text as NSString
-        let r = s.boundingRect(with: size, options: [], attributes: attrs)
-        s.draw(at: NSPoint(x: (size.width - r.width) / 2, y: (size.height - r.height) / 2), withAttributes: attrs)
+        (text as NSString).draw(
+            at: NSPoint(x: (size.width - r.width) / 2, y: (size.height - r.height) / 2),
+            withAttributes: attrs
+        )
         img.unlockFocus()
-        img.isTemplate = false
+        // Template so the button's contentTintColor flips the word black/white
+        // to contrast with the glass (same as the SF-symbol buttons).
+        img.isTemplate = true
         return img
     }
 }
@@ -9125,11 +9674,11 @@ enum RingCountBadge {
 /// anchor and how the ring shifts to stay on screen. Kept free of AppKit
 /// state so it is unit-testable.
 enum RadialMenuLayoutPolicy {
-    static let ringRadius: CGFloat = 64
-    static let buttonDiameter: CGFloat = 44
-    /// Room around the ring for the hover label bubbles that sit outside it
-    /// (worst case: a side bubble's full width plus tail and gap).
-    static let panelPadding: CGFloat = 72
+    static let ringRadius: CGFloat = 78
+    static let buttonDiameter: CGFloat = 46
+    /// Room around the ring for hover label bubbles AND the outermost
+    /// hover-revealed orbit (`thirdRingRadius` + a button + margin).
+    static let panelPadding: CGFloat = 160
 
     static var panelSide: CGFloat {
         (ringRadius + buttonDiameter / 2 + panelPadding) * 2
@@ -9141,16 +9690,50 @@ enum RadialMenuLayoutPolicy {
     static func buttonCenters(count: Int) -> [CGPoint] {
         let diagonal = ringRadius * sqrt(0.5)
         let base: [CGPoint] = [
-            CGPoint(x: ringRadius, y: 0),
-            CGPoint(x: 0, y: -ringRadius),
-            CGPoint(x: diagonal, y: diagonal),
-            CGPoint(x: diagonal, y: -diagonal),
-            CGPoint(x: -ringRadius, y: 0),           // left  (5th: summarize)
+            CGPoint(x: ringRadius, y: 0),            // right       (Explain)
+            CGPoint(x: 0, y: -ringRadius),           // bottom      (Rewrite)
+            CGPoint(x: diagonal, y: diagonal),       // top-right   (Reply)
+            CGPoint(x: diagonal, y: -diagonal),      // bottom-right(Ask)
+            CGPoint(x: -diagonal, y: -diagonal),     // bottom-left (5th: Capture)
+            CGPoint(x: -ringRadius, y: 0),           // left        (6th: summarize)
             CGPoint(x: 0, y: ringRadius),            // top
-            CGPoint(x: -diagonal, y: diagonal),      // top-left
-            CGPoint(x: -diagonal, y: -diagonal)      // bottom-left
+            CGPoint(x: -diagonal, y: diagonal)       // top-left
         ]
         return Array(base.prefix(count))
+    }
+
+    /// Radius of the hover-revealed second orbit — a concentric ring well
+    /// OUTSIDE the main one, clear of the inner buttons and their bubbles.
+    static let outerRingRadius: CGFloat = 152
+
+    /// Third orbit (sub-items of a second-layer item, e.g. the time ranges
+    /// behind a picked messenger) — same ring-to-ring spacing again.
+    static let thirdRingRadius: CGFloat = 226
+
+    /// Offsets (from the panel center) for an outer-orbit cluster: buttons sit
+    /// on a concentric ring of `radius`, occupying the arc that points outward
+    /// from the parent (`parentOffset`), fanned symmetrically around it. Their
+    /// center-to-center spacing matches the first ring's (buttons 45° apart at
+    /// `ringRadius`) — so at larger radii the angular step is smaller. The
+    /// inner rings are untouched; each cluster is a further orbit around the
+    /// same center.
+    static func subClusterCenters(
+        parentOffset: CGPoint,
+        count: Int,
+        radius: CGFloat = outerRingRadius
+    ) -> [CGPoint] {
+        guard count > 0 else { return [] }
+        let firstRingChord = 2 * Double(ringRadius) * sin((45.0 * .pi / 180) / 2)
+        let stepAngle = 2 * asin(min(1, firstRingChord / (2 * Double(radius))))
+        let parentAngle = atan2(Double(parentOffset.y), Double(parentOffset.x))
+        let spreadStart = -Double(count - 1) / 2.0
+        return (0..<count).map { i in
+            let a = parentAngle + (spreadStart + Double(i)) * stepAngle
+            return CGPoint(
+                x: radius * CGFloat(cos(a)),
+                y: radius * CGFloat(sin(a))
+            )
+        }
     }
 
     /// Which of the eight ring directions an offset points to — that
@@ -9171,7 +9754,9 @@ enum RadialMenuLayoutPolicy {
         }
     }
 
-    static let bubbleGap: CGFloat = 4
+    // Wide enough that the hover scale-up (+16% of the disc, ~4pt of radius)
+    // still leaves visible air between the disc and its label bubble.
+    static let bubbleGap: CGFloat = 10
 
     /// Where a hover bubble's frame starts so it sits outside the ring on
     /// the button's side, tail toward the circle. For diagonals the bubble's
@@ -9261,13 +9846,47 @@ final class RadialActionMenuController {
     private let items: [RingItem]
     private let onDismiss: () -> Void
     private var buttons: [RadialMenuButtonView] = []
+    /// Second-layer buttons for a hover-expandable item (the time-range orbit).
+    /// Kept separate from `buttons` so the open/close ring animations ignore
+    /// them — they show/hide only on hover.
+    private var subButtons: [RadialMenuButtonView] = []
+    /// The expandable (messenger) button that owns the second orbit, and the
+    /// index of the sub-button highlighted by default (the middle one).
+    private weak var expandableButton: RadialMenuButtonView?
+    private var middleSubIndex = 0
+    /// Which sub-button the cursor is currently over — overrides the default
+    /// middle highlight while hovered.
+    private var hoveredSubIndex: Int?
+    private var subClusterVisible = false
+    /// The expandable button's center (sub-buttons spring out from / collapse
+    /// into it) and their final outer-ring frames. `isSubAnimating` ignores
+    /// hover while the fly-out plays so the highlight doesn't jump to a button
+    /// passing under the cursor.
+    private var subOrigin: NSPoint = .zero
+    private var subTargets: [NSRect] = []
+    private var isSubAnimating = false
+    /// Third orbit — sub-items of an expandable SECOND-layer button (e.g. a
+    /// messenger in the app picker expanding into time ranges). Pre-built
+    /// hidden at init, keyed by the sub button's index; only one open at a
+    /// time (`expandedThirdIndex`).
+    private var thirdButtons: [Int: [RadialMenuButtonView]] = [:]
+    private var thirdTargets: [Int: [NSRect]] = [:]
+    private var thirdOrigins: [Int: NSPoint] = [:]
+    private var expandedThirdIndex: Int?
     private var dismissMonitors: [Any] = []
     private var didClose = false
+    /// Center ✕ for presenter-less rings (the quick menu): a real
+    /// `FloatingTranslateButtonView` in its menu-open state, so the center
+    /// looks exactly like the floating button under a selection ring. Rings
+    /// opened from the floating button / pet leave this nil — their presenter
+    /// shows through the panel's transparent center and renders its own ✕.
+    private var centerCloseButton: FloatingTranslateButtonView?
 
     init(
         centeredOn anchor: NSPoint,
         ignoring presenterWindow: NSWindow?,
         items: [RingItem],
+        showsCenterClose: Bool = false,
         onDismiss: @escaping () -> Void
     ) {
         self.presenterWindow = presenterWindow
@@ -9290,12 +9909,20 @@ final class RadialActionMenuController {
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = false
+        // The app forces darkAqua globally, but the ring's glass should match
+        // the SYSTEM look (Control Center behavior): inherited forced-dark
+        // renders the smoky dark glass variant even on a light-mode system.
+        let systemIsDark = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        panel.appearance = NSAppearance(named: systemIsDark ? .darkAqua : .aqua)
 
         let container = RadialMenuBackdropView(
             frame: NSRect(origin: .zero, size: frame.size)
         )
         container.onEmptyClick = { [weak self] in self?.dismiss() }
         container.onCenterHoverChange = { [weak self] hovered in
+            // Hovering the center ✕ dismisses the open second orbit too.
+            if hovered { self?.hideSubCluster() }
+            self?.centerCloseButton?.setCloseHovered(hovered)
             self?.onCenterHoverChange?(hovered)
         }
         let centerDiameter = RadialMenuLayoutPolicy.buttonDiameter
@@ -9308,8 +9935,11 @@ final class RadialActionMenuController {
 
         let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
         for (item, offset) in zip(items, RadialMenuLayoutPolicy.buttonCenters(count: items.count)) {
+            let isExpandable = !item.subItems.isEmpty
             let button = RadialMenuButtonView(image: item.image) { [weak self] in
-                self?.finish(with: item)
+                // Expandable parents (the messenger button) reveal their
+                // second layer instead of firing/closing — the first ring stays.
+                if isExpandable { self?.showSubCluster() } else { self?.finish(with: item) }
             }
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,
@@ -9317,6 +9947,84 @@ final class RadialActionMenuController {
             ))
             container.addSubview(button)
             buttons.append(button)
+
+            if isExpandable {
+                // Hovering the messenger button opens the second orbit and keeps
+                // it open (sticky) — it closes only when a DIFFERENT first-ring
+                // button is hovered. The messenger and sub highlights are driven
+                // by the controller, not each button's own hover tint.
+                expandableButton = button
+                button.suppressHoverTint = true
+                middleSubIndex = item.subItems.count / 2
+                subOrigin = NSPoint(x: panelCenter.x + offset.x, y: panelCenter.y + offset.y)
+                let subOffsets = RadialMenuLayoutPolicy.subClusterCenters(
+                    parentOffset: offset, count: item.subItems.count
+                )
+                for (index, pair) in zip(item.subItems, subOffsets).enumerated() {
+                    let (sub, subOffset) = pair
+                    let subButton = RadialMenuButtonView(image: sub.image) { [weak self] in
+                        // An expandable sub (messenger with time ranges)
+                        // reveals its third orbit on click; leaves fire.
+                        if sub.subItems.isEmpty {
+                            self?.finish(with: sub)
+                        } else {
+                            self?.showThirdCluster(index)
+                        }
+                    }
+                    subButton.setFrameOrigin(NSPoint(
+                        x: panelCenter.x + subOffset.x - subButton.frame.width / 2,
+                        y: panelCenter.y + subOffset.y - subButton.frame.height / 2
+                    ))
+                    subTargets.append(subButton.frame)
+                    subButton.isHidden = true
+                    subButton.alphaValue = 0
+                    subButton.suppressHoverTint = true
+                    subButton.onHoverChange = { [weak self] hovered in
+                        self?.subHoverChanged(index: index, hovered: hovered)
+                    }
+                    container.addSubview(subButton)
+                    subButtons.append(subButton)
+
+                    if !sub.subItems.isEmpty {
+                        let thirdOffsets = RadialMenuLayoutPolicy.subClusterCenters(
+                            parentOffset: subOffset,
+                            count: sub.subItems.count,
+                            radius: RadialMenuLayoutPolicy.thirdRingRadius
+                        )
+                        var thirds: [RadialMenuButtonView] = []
+                        var targets: [NSRect] = []
+                        for (subSub, thirdOffset) in zip(sub.subItems, thirdOffsets) {
+                            let thirdButton = RadialMenuButtonView(image: subSub.image) { [weak self] in
+                                self?.finish(with: subSub)
+                            }
+                            thirdButton.setFrameOrigin(NSPoint(
+                                x: panelCenter.x + thirdOffset.x - thirdButton.frame.width / 2,
+                                y: panelCenter.y + thirdOffset.y - thirdButton.frame.height / 2
+                            ))
+                            targets.append(thirdButton.frame)
+                            thirdButton.isHidden = true
+                            thirdButton.alphaValue = 0
+                            container.addSubview(thirdButton)
+                            thirds.append(thirdButton)
+                        }
+                        thirdButtons[index] = thirds
+                        thirdTargets[index] = targets
+                        thirdOrigins[index] = NSPoint(
+                            x: panelCenter.x + subOffset.x,
+                            y: panelCenter.y + subOffset.y
+                        )
+                    }
+                }
+                button.onHoverChange = { [weak self] hovered in
+                    if hovered { self?.showSubCluster() }
+                }
+                continue
+            }
+
+            // An empty label means "highlight only, no callout" — the app
+            // summarize button carries its identity in its app icon, so its
+            // hover shows just the glass highlight (no "Telegram" bubble).
+            guard !item.label.isEmpty else { continue }
 
             let placement = RadialMenuLayoutPolicy.labelPlacement(for: offset)
             let bubble = RadialMenuLabelBubbleView(
@@ -9330,7 +10038,14 @@ final class RadialActionMenuController {
             ))
             bubble.alphaValue = 0
             container.addSubview(bubble)
-            button.onHoverChange = { [weak bubble] hovered in
+            button.onHoverChange = { [weak self, weak bubble] hovered in
+                // The collapse animation flies every button into the center —
+                // right under the cursor when the ✕ was clicked — and each
+                // pass fires a phantom mouseEntered. Dead ring, no bubbles.
+                guard let self, !self.didClose else { return }
+                // Hovering any other first-ring button dismisses the open
+                // second orbit (the only thing that closes it besides picking).
+                if hovered { self.hideSubCluster() }
                 NSAnimationContext.runAnimationGroup { context in
                     // Ease the bubble in gently; hide fast so it never lags
                     // behind the cursor leaving the button.
@@ -9339,7 +10054,40 @@ final class RadialActionMenuController {
                 }
             }
         }
-        panel.contentView = container
+
+        if showsCenterClose {
+            let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
+            let closeButton = FloatingTranslateButtonView(initialMode: .selection)
+            closeButton.frame = NSRect(
+                x: panelCenter.x - side / 2,
+                y: panelCenter.y - side / 2,
+                width: side,
+                height: side
+            )
+            // Menu-open state = ✕ glyph, red-hovered right away — correct
+            // here too, since the ring opens centered on the cursor.
+            closeButton.setMenuOpen(true)
+            closeButton.onClick = { [weak self] in self?.dismiss() }
+            container.addSubview(closeButton)
+            centerCloseButton = closeButton
+        }
+
+        // Batch every button's NSGlassEffectView into one backdrop pass via
+        // NSGlassEffectContainerView (resolved by name — see GlassHostView).
+        // Standalone glass views each capture the backdrop on their own,
+        // asynchronously: buttons came up as darker placeholders and snapped
+        // to real glass seconds later, one by one.
+        if let containerCls = NSClassFromString("NSGlassEffectContainerView") as? NSView.Type {
+            let glassGroup = containerCls.init(frame: NSRect(origin: .zero, size: frame.size))
+            if glassGroup.responds(to: NSSelectorFromString("setContentView:")) {
+                glassGroup.setValue(container, forKey: "contentView")
+                panel.contentView = glassGroup
+            } else {
+                panel.contentView = container
+            }
+        } else {
+            panel.contentView = container
+        }
     }
 
     func show() {
@@ -9352,6 +10100,8 @@ final class RadialActionMenuController {
         guard !didClose else { return }
         didClose = true
         removeDismissMonitors()
+        subButtons.forEach { $0.animator().alphaValue = 0 }
+        thirdButtons.values.forEach { $0.forEach { $0.animator().alphaValue = 0 } }
         // Mirror the open animation: buttons collapse back into the center.
         // The panel dies in the completion and is captured strongly, so the
         // teardown outlives self (presenters drop their reference right after
@@ -9378,6 +10128,7 @@ final class RadialActionMenuController {
             for bubble in container.subviews where bubble is RadialMenuLabelBubbleView {
                 bubble.animator().alphaValue = 0
             }
+            centerCloseButton?.animator().alphaValue = 0
         }, completionHandler: {
             panel.close()
         })
@@ -9393,6 +10144,177 @@ final class RadialActionMenuController {
         guard !didClose else { return }
         close()
         item.handler()
+    }
+
+    // MARK: - Hover-revealed second layer (sticky)
+
+    /// Opens the second orbit and keeps it open. Hovering the messenger button
+    /// calls this; it stays up until a DIFFERENT first-ring button is hovered,
+    /// the ring is dismissed, or a time button is picked. The messenger button
+    /// stays highlighted while it's open, and the middle sub-button is
+    /// highlighted by default.
+    private func showSubCluster() {
+        guard !didClose else { return }
+        expandableButton?.setHighlighted(true)
+        if !subClusterVisible {
+            subClusterVisible = true
+            isSubAnimating = true
+            // Stage the starting state (parked on the messenger button,
+            // invisible) and let this CA transaction commit BEFORE animating:
+            // animations scheduled in the same commit that unhides a layer are
+            // skipped by Core Animation — the reveal used to pop in fully
+            // settled while the collapse (already-visible layers) animated fine.
+            for (sub, target) in zip(subButtons, subTargets) {
+                sub.frame = NSRect(
+                    x: subOrigin.x - target.width / 2,
+                    y: subOrigin.y - target.height / 2,
+                    width: target.width,
+                    height: target.height
+                )
+                sub.isHidden = false
+                sub.alphaValue = 0
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.subClusterVisible, !self.didClose else { return }
+                for (sub, target) in zip(self.subButtons, self.subTargets) {
+                    // Spring out from the messenger button to the outer slot —
+                    // the same feel/timing as the first ring opening. Hover is
+                    // ignored until it settles (isSubAnimating) so the highlight
+                    // doesn't jump to a button passing under the cursor
+                    // mid-flight; tracking re-arms at the settled frame.
+                    NSAnimationContext.runAnimationGroup({ context in
+                        context.duration = 0.22
+                        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
+                        sub.animator().frame = target
+                        sub.animator().alphaValue = 1
+                    }, completionHandler: { [weak self, weak sub] in
+                        sub?.updateTrackingAreas()
+                        self?.isSubAnimating = false
+                    })
+                }
+            }
+        }
+        hoveredSubIndex = nil
+        refreshSubHighlight()
+        hideThirdCluster()
+    }
+
+    private func subHoverChanged(index: Int, hovered: Bool) {
+        // Sticky: hovering a time button moves the highlight to it and it STAYS
+        // there after the cursor leaves into empty space. Only re-hovering the
+        // messenger button resets the default back to the middle (in
+        // `showSubCluster`). Ignore hover while the fly-out animates.
+        guard !isSubAnimating, hovered else { return }
+        hoveredSubIndex = index
+        refreshSubHighlight()
+        // Expandable subs (messenger → ranges) open their third orbit on
+        // hover; hovering a plain sub (browser) closes any open one.
+        if thirdButtons[index] != nil {
+            showThirdCluster(index)
+        } else {
+            hideThirdCluster()
+        }
+    }
+
+    /// Reveals the third orbit for the expandable sub at `index`, collapsing
+    /// any other open one. Same two-transaction reveal as `showSubCluster` —
+    /// animations scheduled in the commit that unhides a layer are skipped.
+    private func showThirdCluster(_ index: Int) {
+        guard !didClose, expandedThirdIndex != index else { return }
+        hideThirdCluster()
+        guard let thirds = thirdButtons[index],
+              let targets = thirdTargets[index],
+              let origin = thirdOrigins[index]
+        else { return }
+        expandedThirdIndex = index
+        for (third, target) in zip(thirds, targets) {
+            third.frame = NSRect(
+                x: origin.x - target.width / 2,
+                y: origin.y - target.height / 2,
+                width: target.width,
+                height: target.height
+            )
+            third.isHidden = false
+            third.alphaValue = 0
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.expandedThirdIndex == index, !self.didClose else { return }
+            for (third, target) in zip(thirds, targets) {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.22
+                    context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
+                    third.animator().frame = target
+                    third.animator().alphaValue = 1
+                }, completionHandler: { [weak third] in
+                    third?.updateTrackingAreas()
+                })
+            }
+        }
+    }
+
+    private func hideThirdCluster() {
+        guard let index = expandedThirdIndex else { return }
+        expandedThirdIndex = nil
+        guard let thirds = thirdButtons[index],
+              let targets = thirdTargets[index],
+              let origin = thirdOrigins[index]
+        else { return }
+        for (third, target) in zip(thirds, targets) {
+            NSAnimationContext.runAnimationGroup({ context in
+                // Collapse back INTO the parent sub button, mirroring the
+                // second orbit's close.
+                context.duration = 0.15
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                third.animator().frame = NSRect(
+                    x: origin.x - target.width / 2,
+                    y: origin.y - target.height / 2,
+                    width: target.width,
+                    height: target.height
+                )
+                third.animator().alphaValue = 0
+            }, completionHandler: { [weak third] in
+                third?.isHidden = true
+                third?.frame = target   // reset for the next reveal
+            })
+        }
+    }
+
+    /// Highlights the hovered sub-button, or the middle one by default.
+    private func refreshSubHighlight() {
+        guard subClusterVisible else { return }
+        let active = hoveredSubIndex ?? middleSubIndex
+        for (i, sub) in subButtons.enumerated() {
+            sub.setHighlighted(i == active)
+        }
+    }
+
+    private func hideSubCluster() {
+        hideThirdCluster()
+        guard subClusterVisible else { return }
+        subClusterVisible = false
+        hoveredSubIndex = nil
+        isSubAnimating = true
+        expandableButton?.setHighlighted(false)
+        for (sub, target) in zip(subButtons, subTargets) {
+            sub.setHighlighted(false)
+            NSAnimationContext.runAnimationGroup({ context in
+                // Collapse back INTO the messenger button, mirroring the first
+                // ring's close.
+                context.duration = 0.15
+                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                sub.animator().frame = NSRect(
+                    x: subOrigin.x - target.width / 2,
+                    y: subOrigin.y - target.height / 2,
+                    width: target.width,
+                    height: target.height
+                )
+                sub.animator().alphaValue = 0
+            }, completionHandler: { [weak self, weak sub] in
+                sub?.isHidden = true
+                sub?.frame = target   // reset for the next reveal
+                self?.isSubAnimating = false
+            })
+        }
     }
 
     private func animateButtonsIn() {
@@ -9515,12 +10437,37 @@ private final class RadialMenuBackdropView: NSView {
 private final class RadialMenuButtonView: NSView {
     private let onPick: () -> Void
     private let circleView = NSVisualEffectView()
+    /// Liquid Glass backing (NSGlassEffectView) when the OS has it; the class
+    /// is resolved by name at runtime because the release SDK predates the
+    /// symbol (same constraint as GlassHostView). nil → circleView fallback.
+    private var liquidGlassView: NSView?
     private let iconView = NSImageView()
     private var trackingArea: NSTrackingArea?
+
+    /// Runtime-only NSGlassEffectView factory. KVC keys are guarded by
+    /// responds checks so a future rename degrades to the fallback glass
+    /// instead of throwing.
+    private static func makeLiquidGlass(diameter: CGFloat) -> (glass: NSView, content: NSView)? {
+        guard let cls = NSClassFromString("NSGlassEffectView") as? NSView.Type else { return nil }
+        let glass = cls.init(frame: NSRect(x: 0, y: 0, width: diameter, height: diameter))
+        guard glass.responds(to: NSSelectorFromString("setCornerRadius:")),
+              glass.responds(to: NSSelectorFromString("setContentView:"))
+        else { return nil }
+        glass.setValue(NSNumber(value: Double(diameter / 2)), forKey: "cornerRadius")
+        let content = NSView(frame: glass.bounds)
+        content.autoresizingMask = [.width, .height]
+        glass.setValue(content, forKey: "contentView")
+        return (glass, content)
+    }
 
     /// Fired on hover in/out — the controller shows the label bubble, which
     /// lives outside this view so the ring hit-areas stay circle-sized.
     var onHoverChange: ((Bool) -> Void)?
+
+    /// When true, hover does NOT toggle the glass tint itself — the controller
+    /// drives it via `setHighlighted` instead (for the sticky second layer,
+    /// where the highlight is decoupled from the raw cursor position).
+    var suppressHoverTint = false
 
     init(image: NSImage, onPick: @escaping () -> Void) {
         self.onPick = onPick
@@ -9529,14 +10476,25 @@ private final class RadialMenuButtonView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: diameter, height: diameter))
         wantsLayer = true
 
-        circleView.material = .hudWindow
-        circleView.state = .active
-        circleView.blendingMode = .behindWindow
-        circleView.wantsLayer = true
-        circleView.layer?.cornerRadius = diameter / 2
-        circleView.layer?.masksToBounds = true
-        circleView.frame = bounds
-        addSubview(circleView)
+        // Content (tint overlay + icon) goes inside whichever glass backs the
+        // circle: Liquid Glass on macOS 26+, the frosted effect view before.
+        let contentHost: NSView
+        if let liquid = Self.makeLiquidGlass(diameter: diameter) {
+            liquid.glass.frame = bounds
+            addSubview(liquid.glass)
+            liquidGlassView = liquid.glass
+            contentHost = liquid.content
+        } else {
+            circleView.material = .hudWindow
+            circleView.state = .active
+            circleView.blendingMode = .behindWindow
+            circleView.wantsLayer = true
+            circleView.layer?.cornerRadius = diameter / 2
+            circleView.layer?.masksToBounds = true
+            circleView.frame = bounds
+            addSubview(circleView)
+            contentHost = circleView
+        }
 
         iconView.image = image
         iconView.contentTintColor = .labelColor
@@ -9544,13 +10502,31 @@ private final class RadialMenuButtonView: NSView {
         // Natural symbol size, dead-center: proportional-down fitting can
         // nudge the glyph a point off-center when the fitted size rounds.
         iconView.imageScaling = .scaleNone
-        iconView.frame = circleView.bounds
+        iconView.frame = contentHost.bounds
         iconView.autoresizingMask = [.width, .height]
-        circleView.addSubview(iconView)
+        contentHost.addSubview(iconView)
+
+        // Resting look is the inverted glass (colors swapped vs. the old
+        // default) — highlight flips it back to plain system glass.
+        applyHighlight(false)
     }
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    // A smaller cousin of the floating button's halo — enough to lift the
+    // discs off the backdrop without a heavy drop shadow.
+    override func updateLayer() {
+        guard let layer = self.layer else { return }
+        layer.shadowColor = NSColor.black.cgColor
+        layer.shadowOpacity = 0.2
+        layer.shadowRadius = 4
+        layer.shadowOffset = CGSize(width: 0, height: -1)
+        layer.shadowPath = CGPath(ellipseIn: bounds, transform: nil)
+        layer.masksToBounds = false
     }
 
     override func updateTrackingAreas() {
@@ -9586,16 +10562,40 @@ private final class RadialMenuButtonView: NSView {
     }
 
     private func setHovered(_ hovered: Bool) {
-        // Invert the glass against the system theme on hover — light glass in
-        // dark mode, dark in light mode. The icon's labelColor re-resolves
-        // under the overridden appearance by itself, so it flips too.
-        if hovered {
-            let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            circleView.appearance = NSAppearance(named: isDark ? .aqua : .darkAqua)
-        } else {
-            circleView.appearance = nil
-        }
+        if !suppressHoverTint { applyHighlight(hovered) }
         onHoverChange?(hovered)
+    }
+
+    /// Controller-driven highlight (used by the sticky second layer, where the
+    /// highlighted button isn't necessarily the one under the cursor).
+    func setHighlighted(_ on: Bool) {
+        applyHighlight(on)
+    }
+
+    private func applyHighlight(_ on: Bool) {
+        // Bare glass always — no color wash. Hover/selection is a springy
+        // size bump of the glass disc itself. Only the CHILD's frame moves;
+        // the root frame belongs to the ring's fan/collapse animations, so
+        // the bump can never fight them (bounds stays the fixed diameter).
+        let diameter = RadialMenuLayoutPolicy.buttonDiameter
+        let scaled = on ? diameter * 1.16 : diameter
+        let inset = (diameter - scaled) / 2
+        let target = NSRect(x: inset, y: inset, width: scaled, height: scaled)
+        let glass = liquidGlassView ?? circleView
+        // Keep the disc a true circle: the corner radius doesn't animate with
+        // the frame, but a 3-4pt radius jump on a growing circle is invisible.
+        if let liquidGlassView {
+            if liquidGlassView.responds(to: NSSelectorFromString("setCornerRadius:")) {
+                liquidGlassView.setValue(NSNumber(value: Double(scaled / 2)), forKey: "cornerRadius")
+            }
+        } else {
+            circleView.layer?.cornerRadius = scaled / 2
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
+            glass.animator().frame = target
+        }
     }
 }
 
@@ -9605,6 +10605,9 @@ private final class RadialMenuButtonView: NSView {
 /// busy or dark backgrounds, and a solid callout reads on any of them.
 final class RadialMenuLabelBubbleView: NSView {
     private static let tailLength: CGFloat = 6
+    /// Corner tails read much larger than side ones — their base already spans
+    /// the whole rounded corner — so they poke out less to compensate.
+    private static let cornerTailLength: CGFloat = 3
     private static let tailHalfWidth: CGFloat = 5
     private static let hPad: CGFloat = 9
     private static let vPad: CGFloat = 5
@@ -9634,8 +10637,8 @@ final class RadialMenuLabelBubbleView: NSView {
             size.height += Self.tailLength
         case .topLeft, .topRight, .bottomLeft, .bottomRight:
             // A corner tail pokes out along both axes.
-            size.width += Self.tailLength
-            size.height += Self.tailLength
+            size.width += Self.cornerTailLength
+            size.height += Self.cornerTailLength
         }
         super.init(frame: NSRect(origin: .zero, size: size))
 
@@ -9667,21 +10670,21 @@ final class RadialMenuLabelBubbleView: NSView {
         case .top:
             body.size.height -= Self.tailLength
         case .bottomLeft:
-            body.origin.x += Self.tailLength
-            body.size.width -= Self.tailLength
-            body.origin.y += Self.tailLength
-            body.size.height -= Self.tailLength
+            body.origin.x += Self.cornerTailLength
+            body.size.width -= Self.cornerTailLength
+            body.origin.y += Self.cornerTailLength
+            body.size.height -= Self.cornerTailLength
         case .bottomRight:
-            body.size.width -= Self.tailLength
-            body.origin.y += Self.tailLength
-            body.size.height -= Self.tailLength
+            body.size.width -= Self.cornerTailLength
+            body.origin.y += Self.cornerTailLength
+            body.size.height -= Self.cornerTailLength
         case .topLeft:
-            body.origin.x += Self.tailLength
-            body.size.width -= Self.tailLength
-            body.size.height -= Self.tailLength
+            body.origin.x += Self.cornerTailLength
+            body.size.width -= Self.cornerTailLength
+            body.size.height -= Self.cornerTailLength
         case .topRight:
-            body.size.width -= Self.tailLength
-            body.size.height -= Self.tailLength
+            body.size.width -= Self.cornerTailLength
+            body.size.height -= Self.cornerTailLength
         }
 
         let path = NSBezierPath(roundedRect: body, xRadius: Self.corner, yRadius: Self.corner)
@@ -9709,19 +10712,19 @@ final class RadialMenuLabelBubbleView: NSView {
             tail.line(to: NSPoint(x: body.midX + half, y: body.maxY))
         case .bottomLeft:
             tail.move(to: NSPoint(x: body.minX, y: body.minY + Self.corner))
-            tail.line(to: NSPoint(x: body.minX - length, y: body.minY - length))
+            tail.line(to: NSPoint(x: body.minX - Self.cornerTailLength, y: body.minY - Self.cornerTailLength))
             tail.line(to: NSPoint(x: body.minX + Self.corner, y: body.minY))
         case .bottomRight:
             tail.move(to: NSPoint(x: body.maxX - Self.corner, y: body.minY))
-            tail.line(to: NSPoint(x: body.maxX + length, y: body.minY - length))
+            tail.line(to: NSPoint(x: body.maxX + Self.cornerTailLength, y: body.minY - Self.cornerTailLength))
             tail.line(to: NSPoint(x: body.maxX, y: body.minY + Self.corner))
         case .topLeft:
             tail.move(to: NSPoint(x: body.minX, y: body.maxY - Self.corner))
-            tail.line(to: NSPoint(x: body.minX - length, y: body.maxY + length))
+            tail.line(to: NSPoint(x: body.minX - Self.cornerTailLength, y: body.maxY + Self.cornerTailLength))
             tail.line(to: NSPoint(x: body.minX + Self.corner, y: body.maxY))
         case .topRight:
             tail.move(to: NSPoint(x: body.maxX - Self.corner, y: body.maxY))
-            tail.line(to: NSPoint(x: body.maxX + length, y: body.maxY + length))
+            tail.line(to: NSPoint(x: body.maxX + Self.cornerTailLength, y: body.maxY + Self.cornerTailLength))
             tail.line(to: NSPoint(x: body.maxX, y: body.maxY - Self.corner))
         }
         tail.close()
@@ -9749,6 +10752,9 @@ final class FloatingTranslateButtonController {
     private let onSmartReply: (String) -> Void
     private let buttonView: FloatingTranslateButtonView
     private let onAsk: () -> Void
+    private let onScreenshot: () -> Void
+    private let onLive: () -> Void
+    private let onDictate: () -> Void
     private let summarizeOption: RingSummarizeOption?
     private var radialMenu: RadialActionMenuController?
 
@@ -9760,6 +10766,9 @@ final class FloatingTranslateButtonController {
         onRewrite: @escaping (String) -> Void,
         onSmartReply: @escaping (String) -> Void,
         onAsk: @escaping () -> Void,
+        onScreenshot: @escaping () -> Void = {},
+        onLive: @escaping () -> Void = {},
+        onDictate: @escaping () -> Void = {},
         summarizeOption: RingSummarizeOption? = nil
     ) {
         self.selectedText = selectedText
@@ -9767,6 +10776,9 @@ final class FloatingTranslateButtonController {
         self.onRewrite = onRewrite
         self.onSmartReply = onSmartReply
         self.onAsk = onAsk
+        self.onScreenshot = onScreenshot
+        self.onLive = onLive
+        self.onDictate = onDictate
         self.summarizeOption = summarizeOption
 
         let buttonSize = AskNugumiFloatingTargetPresentationPolicy.buttonSize
@@ -9830,69 +10842,55 @@ final class FloatingTranslateButtonController {
             return
         }
         var items: [RingItem] = [
-            .symbol("text.magnifyingglass", label: "Explain") { [weak self] in
+            .phosphor("magnifying-glass", label: "Explain") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.buttonView.setMenuOpen(false)
                 self.onTranslate(self.selectedText)
             },
-            .symbol("pencil.line", label: "Rewrite") { [weak self] in
+            .phosphor("pencil-line", label: "Rewrite") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.buttonView.setMenuOpen(false)
                 self.onRewrite(self.selectedText)
             },
-            .symbol("arrowshape.turn.up.left", label: "Reply") { [weak self] in
+            .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.buttonView.setMenuOpen(false)
                 self.onSmartReply(self.selectedText)
             },
-            .symbol("questionmark.bubble", label: "Ask") { [weak self] in
+            .phosphor("question", label: "Ask") { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.buttonView.setMenuOpen(false)
                 self.onAsk()
             },
+            .phosphor("scan", label: "Capture") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.onScreenshot()
+            },
+            .symbol("mic", label: "Dictate") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.onDictate()
+            },
+            .symbol("waveform", label: "Live") { [weak self] in
+                guard let self else { return }
+                self.radialMenu = nil
+                self.buttonView.setMenuOpen(false)
+                self.onLive()
+            },
         ]
         if let opt = summarizeOption {
-            items.append(RingItem(label: "Summarize \(opt.appLabel)", image: opt.appIcon) { [weak self] in
+            items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
                 guard let self else { return }
                 self.radialMenu = nil
                 self.buttonView.setMenuOpen(false)
-                self.presentCountLayer(opt)
-            })
-        }
-        let menu = RadialActionMenuController(
-            centeredOn: buttonCenterInScreen(),
-            ignoring: panel,
-            items: items,
-            onDismiss: { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
-            }
-        )
-        menu.onCenterHoverChange = { [weak self] hovered in
-            self?.buttonView.setCloseHovered(hovered)
-        }
-        radialMenu = menu
-        menu.show()
-        buttonView.setMenuOpen(true)
-    }
-
-    /// Second-layer ring: after picking "Summarize <app>", morphs into a
-    /// 50/100/200/Max count picker centered on the same button anchor.
-    /// Picking a count hands off to the coordinator-owned `opt.run(_:)`.
-    private func presentCountLayer(_ opt: RingSummarizeOption) {
-        let choices: [(String, Int)] = [("50", 50), ("100", 100), ("200", 200), ("Max", 1000)]
-        let items: [RingItem] = choices.map { (label, n) in
-            RingItem(label: label, image: RingCountBadge.image(label)) { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
-                opt.run(n)
-            }
+            }), at: 5)
         }
         let menu = RadialActionMenuController(
             centeredOn: buttonCenterInScreen(),
@@ -10790,9 +11788,9 @@ final class FloatingTranslateButtonView: NSView {
     override func updateLayer() {
         guard let layer = self.layer else { return }
         layer.shadowColor = NSColor.black.cgColor
-        layer.shadowOpacity = 0.38
-        layer.shadowRadius = 8
-        layer.shadowOffset = CGSize(width: 0, height: -3)
+        layer.shadowOpacity = 0.2
+        layer.shadowRadius = 4
+        layer.shadowOffset = CGSize(width: 0, height: -1)
         layer.shadowPath = CGPath(ellipseIn: bounds, transform: nil)
         layer.masksToBounds = false
     }
@@ -11010,7 +12008,7 @@ final class FloatingTranslateButtonView: NSView {
     private static func glyphImage(for mode: TranslationMode) -> NSImage {
         let name: String
         switch mode {
-        case .selection, .revise, .reviseMessage, .summarizeChat:
+        case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // The mascot, not a generic sparkles glyph: the button that
             // opens the radial menu wears the app's own mark.
             return mascotGlyphImage()
@@ -11373,6 +12371,9 @@ final class TranslationPanelController {
 
     private func resizeToFitContent(animated: Bool) {
         let currentFrame = panel.frame
+        if TranslationContentView.streamDebug {
+            print(String(format: "[stream] resize curH=%.1f curY=%.1f", currentFrame.height, currentFrame.minY))
+        }
         let visibleFrame = NSScreen.visibleFrame(containing: NSPoint(x: currentFrame.midX, y: currentFrame.midY))
         let targetHeight = min(contentView.preferredHeightForCurrentContent(), visibleFrame.height - 32)
         let targetWidth = TranslationContentView.preferredWidth
@@ -12009,6 +13010,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     // renders plain text (no markdown/NSTextTable re-layout to amortize). Kept
     // small so tokens land near word-by-word; first and final chunks always
     // render (leading + trailing edge).
+    static let streamDebug = ProcessInfo.processInfo.environment["NUGUMI_STREAM_DEBUG"] == "1"
     private static let resultThrottleInterval: TimeInterval = 0.03
     private var pendingResultText: String?
     private var pendingResultTone: ResultTone = .normal
@@ -12203,7 +13205,8 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         inside scrollView: NSScrollView,
         scrollFrame: NSRect,
         rawTextHeight: CGFloat,
-        showsOverflowScroller: Bool = true
+        showsOverflowScroller: Bool = true,
+        topAligned: Bool = false
     ) {
         scrollView.frame = scrollFrame
 
@@ -12212,7 +13215,12 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         let verticalInset: CGFloat
         let textViewHeight: CGFloat
         if fitsInScrollFrame {
-            verticalInset = floor(max(2, (scrollFrame.height - rawTextHeight) / 2))
+            // Streaming pins to the top: centering re-derives the inset from the
+            // text height, so every appended chunk shifts the whole block up and
+            // the panel-growth pass shifts it back — visible trembling at ~33Hz.
+            verticalInset = topAligned
+                ? minimumVerticalTextPadding
+                : floor(max(2, (scrollFrame.height - rawTextHeight) / 2))
             textViewHeight = scrollFrame.height
         } else {
             verticalInset = minimumVerticalTextPadding
@@ -12936,7 +13944,8 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             resultTextView,
             inside: resultScrollView,
             scrollFrame: resultScrollFrame,
-            rawTextHeight: resultRawTextHeight
+            rawTextHeight: resultRawTextHeight,
+            topAligned: !lastRenderUsedBlock
         )
         if shouldScrollResultToTop {
             scrollToTop(resultScrollView)
@@ -12945,6 +13954,16 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
         if showsFollowUp {
             layoutFollowUpFooter()
+        }
+
+        if Self.streamDebug {
+            print(String(
+                format: "[stream] layout bounds=%.1f box=%.1f raw=%.1f tvH=%.1f inset=%.1f clipY=%.1f scroller=%d",
+                bounds.height, resolvedResultBoxHeight, resultRawTextHeight,
+                resultTextView.frame.height, resultTextView.textContainerInset.height,
+                resultScrollView.contentView.bounds.origin.y,
+                resultScrollView.hasVerticalScroller ? 1 : 0
+            ))
         }
     }
 
@@ -13048,6 +14067,13 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         // Any real content (partial or final) ends the loading shimmer.
         stopLoadingAnimation()
         let cleanedText = TextNormalizer.cleanedTranslation(text)
+        if Self.streamDebug {
+            print(String(
+                format: "[stream] pre   len=%d prefixOK=%d tvH=%.1f clipY=%.1f",
+                cleanedText.count, cleanedText.hasPrefix(resultText) ? 1 : 0,
+                resultTextView.frame.height, resultScrollView.contentView.bounds.origin.y
+            ))
+        }
 
         if cleanedText == resultText, tone == resultTone, useBlockMarkdown == lastRenderUsedBlock {
             return
@@ -13074,7 +14100,11 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         resultDisplayText = resultTextView.string
         lastRealResultText = cleanedText
         updateActionButtonStates()
-        layoutForCurrentSize()
+        // No direct layout here: onResultRendered resizes the panel, and both
+        // resize outcomes (setFrame → setFrameSize, or frame-unchanged) run
+        // layoutForCurrentSize exactly once with the NEW bounds. Laying out
+        // first with the stale height flashes a transient overflow state per
+        // chunk (scroller blinks in/out, clip scrolls off the top).
         onResultRendered?()
     }
 
@@ -13265,10 +14295,14 @@ enum TranslationMode {
     /// TL;DR + key points + action items. Read-only, no composition settings.
     /// Panel-only, never a pet/mascot surface.
     case summarizeChat
+    /// Summarizes the web page open in the frontmost browser (text read off
+    /// the AX tree — see `BrowserPageReader`). Same behavior contract as
+    /// `.summarizeChat`: read-only, never persisted, panel-only.
+    case summarizePage
 
     var usesCompositionSettings: Bool {
         switch self {
-        case .selection, .revise, .summarizeChat:
+        case .selection, .revise, .summarizeChat, .summarizePage:
             return false
         case .draftMessage, .smartReply, .reviseMessage:
             return true
@@ -13281,7 +14315,7 @@ enum TranslationMode {
             return nil
         case .smartReply, .reviseMessage:
             return "Reply"
-        case .summarizeChat:
+        case .summarizeChat, .summarizePage:
             return "Summary"
         }
     }
@@ -13296,7 +14330,7 @@ enum TranslationMode {
             return "Thinking"
         case .revise, .reviseMessage:
             return "Revising"
-        case .summarizeChat:
+        case .summarizeChat, .summarizePage:
             return "Summarizing"
         }
     }
@@ -13403,6 +14437,18 @@ enum TranslationMode {
             items or open questions addressed to the reader. Preserve names, dates, \
             numbers, and links exactly. Do not invent anything not in the transcript. \
             Return only the summary — no preamble, no quotes.
+            """
+        case .summarizePage:
+            """
+            You are given the text of a web page the user has open, extracted \
+            top-to-bottom; the first line is the page title. It may contain stray \
+            navigation labels, cookie banners, buttons, or ad text — ignore that \
+            boilerplate and summarize the actual content. Write a concise summary \
+            in \(targetLanguage.promptName): a one-line TL;DR, then a short \
+            bulleted list of the key points, then any conclusions or next steps \
+            the page offers the reader. Preserve names, dates, numbers, and links \
+            exactly. Do not invent anything not on the page. Return only the \
+            summary — no preamble, no quotes.
             """
         }
         return UserAboutContext.appending(to: base)
@@ -14144,7 +15190,7 @@ struct OllamaClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage, .summarizeChat:
+        case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -14409,7 +15455,7 @@ struct OpenAIChatClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage, .summarizeChat:
+        case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -15590,7 +16636,7 @@ struct ClaudeCodeClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage, .summarizeChat:
+        case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text
@@ -16263,7 +17309,7 @@ struct OpenAICodexClient: LLMBackend {
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage, .summarizeChat:
+        case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the
             // selection cleaner collapse the structure the prompt relies on.
             sourceText = text

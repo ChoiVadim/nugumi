@@ -10,6 +10,7 @@ enum GlobalShortcutAction: String, CaseIterable {
     case askNugumi
     case toggleWritingLanguage
     case liveTranslation
+    case quickMenu
 
     var id: UInt32 {
         switch self {
@@ -20,6 +21,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .askNugumi: return 5
         case .toggleWritingLanguage: return 6
         case .liveTranslation: return 7
+        case .quickMenu: return 8
         }
     }
 
@@ -36,6 +38,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .askNugumi: return "Ask Nugumi"
         case .toggleWritingLanguage: return "Toggle writing language"
         case .liveTranslation: return "Live translation captions"
+        case .quickMenu: return "Open quick menu"
         }
     }
 
@@ -51,7 +54,7 @@ enum GlobalShortcutAction: String, CaseIterable {
             return .capture
         case .askNugumi:
             return .assistant
-        case .toggleInvisibility:
+        case .toggleInvisibility, .quickMenu:
             return .app
         }
     }
@@ -76,6 +79,10 @@ enum GlobalShortcutAction: String, CaseIterable {
             return Self.comboDefault(keyCode: UInt32(kVK_ANSI_G), letter: "G")
         case .liveTranslation:
             return Self.comboDefault(keyCode: UInt32(kVK_ANSI_L), letter: "L")
+        case .quickMenu:
+            // Middle click ("Mouse 3") — the ring opens at the cursor, so a
+            // mouse trigger is the natural default. Rebindable to a key combo.
+            return GlobalShortcut(mouseButton: 2)
         }
     }
 
@@ -124,6 +131,7 @@ struct GlobalShortcut: Codable, Equatable {
     enum Kind: String, Codable {
         case combo
         case doubleTap
+        case mouseButton
     }
 
     let kind: Kind
@@ -149,6 +157,17 @@ struct GlobalShortcut: Codable, Equatable {
         self.kind = .doubleTap
         self.keyCode = 0
         self.modifiersRawValue = modifier.intersection(Self.supportedModifiers).rawValue
+        self.keyEquivalent = ""
+        self.keyDisplay = ""
+    }
+
+    /// `buttonNumber` is the `NSEvent.buttonNumber` (0 = left, 1 = right,
+    /// 2 = middle, …). Only buttons ≥ 2 are valid — left/right clicks can
+    /// never become global shortcuts.
+    init(mouseButton buttonNumber: UInt32) {
+        self.kind = .mouseButton
+        self.keyCode = buttonNumber
+        self.modifiersRawValue = 0
         self.keyEquivalent = ""
         self.keyDisplay = ""
     }
@@ -234,6 +253,9 @@ struct GlobalShortcut: Codable, Equatable {
         case .doubleTap:
             // "⌃⌃" / "⌥⌥" / "⇧⇧" / "⌘⌘"
             return modifierGlyphs + modifierGlyphs
+        case .mouseButton:
+            // Humans number mouse buttons from 1; NSEvent from 0.
+            return "Mouse \(keyCode + 1)"
         }
     }
 
@@ -243,6 +265,8 @@ struct GlobalShortcut: Codable, Equatable {
             return !modifiers.isEmpty && !keyDisplay.isEmpty
         case .doubleTap:
             return Self.singleModifierOptions.contains { modifiers == $0 }
+        case .mouseButton:
+            return keyCode >= 2
         }
     }
 
@@ -268,7 +292,7 @@ struct GlobalShortcut: Codable, Equatable {
             return false
         }
         switch lhs.kind {
-        case .combo:
+        case .combo, .mouseButton:
             return lhs.keyCode == rhs.keyCode
         case .doubleTap:
             return true
@@ -407,6 +431,116 @@ final class DoubleModifierPressDetector {
         if state.step(supportedActive: supportedActive, modifier: modifier, now: Date(), interval: interval) {
             onDetected()
         }
+    }
+}
+
+/// Global-shortcut trigger for a spare mouse button (middle or higher).
+/// Carbon hotkeys are keyboard-only, so this uses a CGEvent tap that
+/// CONSUMES the bound click — a pass-through middle-click also reached the
+/// app under the cursor (browser autoscroll swaps/hides the pointer, some
+/// apps paste or close tabs). Falls back to observe-only NSEvent monitors
+/// when the tap can't be created (e.g. no Accessibility permission yet).
+final class MouseButtonShortcutMonitor {
+    private let buttonNumber: Int
+    private let onPressed: @MainActor () -> Void
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
+
+    init(buttonNumber: Int, onPressed: @escaping @MainActor () -> Void) {
+        self.buttonNumber = buttonNumber
+        self.onPressed = onPressed
+    }
+
+    func start() {
+        guard eventTap == nil, globalMonitor == nil, localMonitor == nil else { return }
+        startEventTap()
+        if eventTap == nil {
+            startFallbackMonitors()
+        }
+    }
+
+    func stop() {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+        eventTap = nil
+        runLoopSource = nil
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+        }
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+        }
+        globalMonitor = nil
+        localMonitor = nil
+    }
+
+    private func startEventTap() {
+        let mask = CGEventMask(1 << CGEventType.otherMouseDown.rawValue)
+            | CGEventMask(1 << CGEventType.otherMouseUp.rawValue)
+        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: { _, type, event, userInfo in
+                guard let userInfo else { return Unmanaged.passUnretained(event) }
+                let monitor = Unmanaged<MouseButtonShortcutMonitor>.fromOpaque(userInfo).takeUnretainedValue()
+
+                // The OS disables taps it deems slow — re-arm and let the
+                // event through rather than going permanently deaf.
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let tap = monitor.eventTap {
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
+
+                guard event.getIntegerValueField(.mouseEventButtonNumber) == Int64(monitor.buttonNumber) else {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                if type == .otherMouseDown {
+                    let handler = monitor.onPressed
+                    Task { @MainActor in handler() }
+                }
+                // Swallow BOTH down and up for the bound button, so the app
+                // under the cursor never sees a half-delivered click.
+                return nil
+            },
+            userInfo: selfPointer
+        ) else {
+            return
+        }
+
+        eventTap = tap
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        runLoopSource = source
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private func startFallbackMonitors() {
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .otherMouseDown) { [weak self] event in
+            self?.handleFallback(event)
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [weak self] event in
+            self?.handleFallback(event)
+            return event
+        }
+    }
+
+    private func handleFallback(_ event: NSEvent) {
+        guard event.buttonNumber == buttonNumber else { return }
+        let handler = onPressed
+        Task { @MainActor in handler() }
     }
 }
 
@@ -567,7 +701,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        messageLabel.stringValue = "Click the field, then press keys for \(action.menuTitle) - or double-tap ⌃ ⌥ ⇧ ⌘."
+        messageLabel.stringValue = "Click the field, then press keys for \(action.menuTitle) - or double-tap ⌃ ⌥ ⇧ ⌘, or click a spare mouse button."
         messageLabel.font = Self.messageFont
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 0
@@ -886,7 +1020,7 @@ private final class ShortcutCaptureFieldView: NSView {
     private func startEventMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .flagsChanged]
+            matching: [.keyDown, .flagsChanged, .otherMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
             return self.handleLocal(event)
@@ -936,6 +1070,16 @@ private final class ShortcutCaptureFieldView: NSView {
 
         case .flagsChanged:
             handleFlagsChanged(event)
+            return nil
+
+        case .otherMouseDown:
+            // A spare mouse button (middle or higher) is a valid shortcut on
+            // its own. Only capture while armed — an idle field lets the
+            // click pass so buttons elsewhere in the window keep working.
+            guard state == .recording || state == .conflict else { return event }
+            lastTapModifier = nil
+            lastTapDate = nil
+            onCaptured?(GlobalShortcut(mouseButton: UInt32(event.buttonNumber)))
             return nil
 
         default:

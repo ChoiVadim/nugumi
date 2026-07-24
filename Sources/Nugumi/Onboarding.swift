@@ -108,6 +108,8 @@ struct FeatureTourStep {
             trigger = "Press \(modifierName(forGlyph: single)) twice."
         case .combo:
             trigger = "Press \(shortcut.displayString)."
+        case .mouseButton:
+            trigger = "Click \(shortcut.displayString) on your mouse."
         }
         return [trigger, "Type your question.", "Press Return."]
     }
