@@ -79,7 +79,6 @@ extension NugumiApp {
     /// selection required. Items that do need text (Explain / Rewrite) reuse
     /// the selection-grabbing shortcut handlers, which fetch whatever is
     /// selected at click time via AX/⌘C and show a hint if nothing is.
-    @MainActor
     func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.length = 24
