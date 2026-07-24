@@ -176,8 +176,14 @@ final class FloatingTranslateButtonController {
     /// Bookkeeping shared by every ring-teardown path (pick, dismiss, toggle).
     private func menuDidClose() {
         radialMenu = nil
-        buttonView.setMenuOpen(false)
-        onMenuClosed?()
+        if let onMenuClosed {
+            // Transient quick-menu hub: it dies with the ring, so keep the
+            // ✕ glyph while everything fades instead of flashing the mascot
+            // for a beat first.
+            onMenuClosed()
+        } else {
+            buttonView.setMenuOpen(false)
+        }
     }
 
     /// Programmatic ring control for the quick menu, which presents this
@@ -193,19 +199,22 @@ final class FloatingTranslateButtonController {
         menuDidClose()
     }
 
-    /// Quick-menu teardown: the ring is collapsing into the button — let
-    /// that finish over the mascot, then fade the button itself away.
+    /// Quick-menu teardown: fade out in lockstep with the ring's own
+    /// dissolve — same duration, same curve, one synchronized exit.
     func fadeOutAndClose() {
+        // The ring panel occluded this button's tracking area; when it
+        // closes, the cursor (parked dead-center) re-enters and the hover
+        // scale would balloon the fading button back to full size.
+        buttonView.disableHoverScaling()
         panel.ignoresMouseEvents = true
         let panel = self.panel
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.12
-                panel.animator().alphaValue = 0
-            }, completionHandler: {
-                panel.close()
-            })
-        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        }, completionHandler: {
+            panel.close()
+        })
     }
 
     private func buttonCenterInScreen() -> NSPoint {
@@ -273,6 +282,11 @@ final class FloatingTranslateButtonView: NSView {
         actionButton.imageScaling = .scaleProportionallyUpOrDown
         applyScale(Self.restScale, animated: false)
         updateTrackingAreas()
+    }
+
+    /// Teardown freeze: stops hover from resizing the button while it fades.
+    func disableHoverScaling() {
+        hoverScalingEnabled = false
     }
 
     // Same rationale as GlassHostView.resizeSubviews: the rapid hover in/out

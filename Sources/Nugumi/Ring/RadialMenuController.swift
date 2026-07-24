@@ -417,34 +417,21 @@ final class RadialActionMenuController {
         guard !didClose else { return }
         didClose = true
         removeDismissMonitors()
-        subButtons.forEach { $0.animator().alphaValue = 0 }
-        thirdButtons.values.forEach { $0.forEach { $0.animator().alphaValue = 0 } }
-        // Mirror the open animation: buttons collapse back into the center.
+        // Dissolve in place — no frame animation at all. NSGlassEffectView
+        // renders its shape from the MODEL frame, so any flight toward the
+        // center makes the stacked glass pop up there as a full-opacity disc
+        // on the very first frame (verified frame-by-frame from a screen
+        // recording). With the frames untouched there is nothing to appear
+        // in the center; the whole ring just fades where it stands.
         // The panel dies in the completion and is captured strongly, so the
         // teardown outlives self (presenters drop their reference right after
-        // calling close). Mouse events stop immediately — the buttons are
-        // already dead, only their ghosts animate.
+        // calling close). Mouse events stop immediately.
         panel.ignoresMouseEvents = true
         let panel = self.panel
-        guard let container = panel.contentView else {
-            panel.close()
-            return
-        }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            for button in buttons {
-                button.animator().frame = NSRect(
-                    x: container.bounds.midX - button.frame.width / 2,
-                    y: container.bounds.midY - button.frame.height / 2,
-                    width: button.frame.width,
-                    height: button.frame.height
-                )
-                button.animator().alphaValue = 0
-            }
-            for bubble in container.subviews where bubble is RadialMenuLabelBubbleView {
-                bubble.animator().alphaValue = 0
-            }
+            panel.animator().alphaValue = 0
         }, completionHandler: {
             panel.close()
         })
