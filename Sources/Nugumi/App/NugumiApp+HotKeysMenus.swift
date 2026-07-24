@@ -352,7 +352,6 @@ extension NugumiApp {
     /// `forcedMode` pins the branch regardless of the user's default-mode
     /// setting — the quick-menu ring has explicit Explain and Reply items,
     /// while the ⌃⌥T shortcut (nil) keeps following `floatingDefaultMode`.
-    @MainActor
     func presentShortcutRecorder(for action: GlobalShortcutAction) {
         // Suspend every double-tap detector so the recorder owns flagsChanged
         // events while the panel is up; otherwise the very modifier the user
