@@ -13021,7 +13021,26 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     /// just because its text matches the last streamed partial.
     private var lastRenderUsedBlock = false
     private var resultTone: ResultTone = .normal
-    private let resultTextView = NSTextView()
+    /// Streaming replaces the result storage ~33×/s; NSTextView's implicit
+    /// insertion-point autoscroll (async, after didChangeText) then walks the
+    /// viewport down a few px per chunk. All scrolling here is explicit
+    /// (scrollToTop / clip pinning), so implicit autoscroll is never wanted.
+    private final class NonAutoscrollingTextView: NSTextView {
+        override func scrollRangeToVisible(_ range: NSRange) {}
+    }
+
+    /// NUGUMI_STREAM_DEBUG only: logs who moves the result clip's origin.
+    private final class StreamDebugClipView: NSClipView {
+        override func setBoundsOrigin(_ newOrigin: NSPoint) {
+            if abs(newOrigin.y - bounds.origin.y) > 0.5 {
+                print("[stream] CLIP setBoundsOrigin \(bounds.origin.y) -> \(newOrigin.y)")
+                Thread.callStackSymbols.prefix(10).forEach { print("[stream]   \($0)") }
+            }
+            super.setBoundsOrigin(newOrigin)
+        }
+    }
+
+    private let resultTextView = NonAutoscrollingTextView()
     private let sourceTitleLabel = NSTextField(labelWithString: "")
     private let sourcePreviewView = SourcePreviewView(frame: .zero)
     private let targetTitleButton = LanguagePickerButton(frame: .zero)
@@ -13137,8 +13156,12 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         guard abs(anchorYValue - anchorY) >= 0.5 else {
             return
         }
+        // No layout here: the only caller (resizeToFitContent) always runs
+        // layoutForCurrentSize right after — via setFrame → setFrameSize or
+        // explicitly. Laying out now would use the OLD panel height with the
+        // new text: a transient overflow that blinks the scroller and lets
+        // NSTextView scroll/resize itself before the real layout lands.
         anchorYValue = anchorY
-        layoutForCurrentSize()
     }
 
     func setTargetLanguage(_ language: TranslationLanguage) {
@@ -13658,12 +13681,19 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         }
 
         configureScrollView(resultScrollView)
+        if Self.streamDebug {
+            resultScrollView.contentView = StreamDebugClipView()
+        }
         configureTextView(
             resultTextView,
             text: resultText,
             font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
             color: ResultTone.normal.color
         )
+        // The result view's height is fully managed by layoutScrollableTextView.
+        // Self-sizing would shrink it back (stripping the bottom padding) after
+        // every layout pass — fractional heights and a pulsing scroller knob.
+        resultTextView.isVerticallyResizable = false
         resultScrollView.documentView = resultTextView
         content.addSubview(resultScrollView)
 
@@ -13940,6 +13970,12 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
                 paragraphSpacing: Self.resultFontSize * Self.resultParagraphSpacingFactor
             )
         }
+        // Re-tiling the scroll view/text view can shift the clip's origin
+        // through paths that bypass every public scroll override (observed:
+        // a jump to the document bottom the first time the text outgrows the
+        // box). User scrolls happen between layout passes, never inside one —
+        // so pin the origin across the re-tile, clamped to the new document.
+        let clipOriginBeforeTile = resultScrollView.contentView.bounds.origin
         Self.layoutScrollableTextView(
             resultTextView,
             inside: resultScrollView,
@@ -13950,6 +13986,13 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         if shouldScrollResultToTop {
             scrollToTop(resultScrollView)
             shouldScrollResultToTop = false
+        } else {
+            let maxScrollY = max(0, resultTextView.frame.height - resultScrollFrame.height)
+            let pinnedY = min(max(0, clipOriginBeforeTile.y), maxScrollY)
+            if abs(resultScrollView.contentView.bounds.origin.y - pinnedY) > 0.5 {
+                resultScrollView.contentView.scroll(to: NSPoint(x: 0, y: pinnedY))
+                resultScrollView.reflectScrolledClipView(resultScrollView.contentView)
+            }
         }
 
         if showsFollowUp {
@@ -14091,7 +14134,14 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             ? Self.renderedMarkdownText(cleanedText, font: renderFont, color: tone.color)
             : Self.renderedStreamingText(cleanedText, font: renderFont, color: tone.color)
         if let textStorage = resultTextView.textStorage {
+            // Replacing the whole storage nudges the clip a few px down each
+            // chunk (autoscroll toward the changed range) — the summary's first
+            // line creeps off the top mid-stream. Pin the viewport (and any
+            // user scroll position) across the replacement.
+            let clipOrigin = resultScrollView.contentView.bounds.origin
             textStorage.setAttributedString(renderedText)
+            resultScrollView.contentView.scroll(to: clipOrigin)
+            resultScrollView.reflectScrolledClipView(resultScrollView.contentView)
         } else {
             resultTextView.string = renderedText.string
         }
