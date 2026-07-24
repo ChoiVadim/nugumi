@@ -217,18 +217,11 @@ final class RadialActionMenuController {
     private var expandedThirdIndex: Int?
     private var dismissMonitors: [Any] = []
     private var didClose = false
-    /// Center ✕ for presenter-less rings (the quick menu): a real
-    /// `FloatingTranslateButtonView` in its menu-open state, so the center
-    /// looks exactly like the floating button under a selection ring. Rings
-    /// opened from the floating button / pet leave this nil — their presenter
-    /// shows through the panel's transparent center and renders its own ✕.
-    private var centerCloseButton: FloatingTranslateButtonView?
 
     init(
         centeredOn anchor: NSPoint,
         ignoring presenterWindow: NSWindow?,
         items: [RingItem],
-        showsCenterClose: Bool = false,
         onDismiss: @escaping () -> Void
     ) {
         self.presenterWindow = presenterWindow
@@ -264,7 +257,6 @@ final class RadialActionMenuController {
         container.onCenterHoverChange = { [weak self] hovered in
             // Hovering the center ✕ dismisses the open second orbit too.
             if hovered { self?.hideSubCluster() }
-            self?.centerCloseButton?.setCloseHovered(hovered)
             self?.onCenterHoverChange?(hovered)
         }
         let centerDiameter = RadialMenuLayoutPolicy.buttonDiameter
@@ -397,23 +389,6 @@ final class RadialActionMenuController {
             }
         }
 
-        if showsCenterClose {
-            let side = AskNugumiFloatingTargetPresentationPolicy.buttonSize
-            let closeButton = FloatingTranslateButtonView(initialMode: .selection)
-            closeButton.frame = NSRect(
-                x: panelCenter.x - side / 2,
-                y: panelCenter.y - side / 2,
-                width: side,
-                height: side
-            )
-            // Menu-open state = ✕ glyph, red-hovered right away — correct
-            // here too, since the ring opens centered on the cursor.
-            closeButton.setMenuOpen(true)
-            closeButton.onClick = { [weak self] in self?.dismiss() }
-            container.addSubview(closeButton)
-            centerCloseButton = closeButton
-        }
-
         // Batch every button's NSGlassEffectView into one backdrop pass via
         // NSGlassEffectContainerView (resolved by name — see GlassHostView).
         // Standalone glass views each capture the backdrop on their own,
@@ -470,7 +445,6 @@ final class RadialActionMenuController {
             for bubble in container.subviews where bubble is RadialMenuLabelBubbleView {
                 bubble.animator().alphaValue = 0
             }
-            centerCloseButton?.animator().alphaValue = 0
         }, completionHandler: {
             panel.close()
         })

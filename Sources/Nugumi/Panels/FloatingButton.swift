@@ -26,6 +26,10 @@ final class FloatingTranslateButtonController {
     private let onDictate: () -> Void
     private let summarizeOption: RingSummarizeOption?
     private var radialMenu: RadialActionMenuController?
+    /// Fired whenever the ring closes for any reason (pick, dismiss, toggle).
+    /// The quick menu uses it to fade this button away — for the persistent
+    /// selection bar it stays nil and the bar lives on.
+    var onMenuClosed: (() -> Void)?
 
     init(
         screenPoint: NSPoint,
@@ -106,59 +110,50 @@ final class FloatingTranslateButtonController {
     private func toggleRadialMenu() {
         if let radialMenu {
             radialMenu.close()
-            self.radialMenu = nil
-            buttonView.setMenuOpen(false)
+            menuDidClose()
             return
         }
         var items: [RingItem] = [
             .phosphor("magnifying-glass", label: "Explain") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onTranslate(self.selectedText)
             },
             .phosphor("pencil-line", label: "Rewrite") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onRewrite(self.selectedText)
             },
             .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onSmartReply(self.selectedText)
             },
             .phosphor("question", label: "Ask") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onAsk()
             },
             .phosphor("scan", label: "Capture") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onScreenshot()
             },
             .symbol("mic", label: "Dictate") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onDictate()
             },
             .symbol("waveform", label: "Live") { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
                 self.onLive()
             },
         ]
         if let opt = summarizeOption {
             items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
             }), at: 5)
         }
         let menu = RadialActionMenuController(
@@ -167,8 +162,7 @@ final class FloatingTranslateButtonController {
             items: items,
             onDismiss: { [weak self] in
                 guard let self else { return }
-                self.radialMenu = nil
-                self.buttonView.setMenuOpen(false)
+                self.menuDidClose()
             }
         )
         menu.onCenterHoverChange = { [weak self] hovered in
@@ -177,6 +171,41 @@ final class FloatingTranslateButtonController {
         radialMenu = menu
         menu.show()
         buttonView.setMenuOpen(true)
+    }
+
+    /// Bookkeeping shared by every ring-teardown path (pick, dismiss, toggle).
+    private func menuDidClose() {
+        radialMenu = nil
+        buttonView.setMenuOpen(false)
+        onMenuClosed?()
+    }
+
+    /// Programmatic ring control for the quick menu, which presents this
+    /// button as a transient hub at the cursor instead of a persistent bar.
+    func openMenu() {
+        guard radialMenu == nil else { return }
+        toggleRadialMenu()
+    }
+
+    func closeMenu() {
+        guard let radialMenu else { return }
+        radialMenu.close()
+        menuDidClose()
+    }
+
+    /// Quick-menu teardown: the ring is collapsing into the button — let
+    /// that finish over the mascot, then fade the button itself away.
+    func fadeOutAndClose() {
+        panel.ignoresMouseEvents = true
+        let panel = self.panel
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.12
+                panel.animator().alphaValue = 0
+            }, completionHandler: {
+                panel.close()
+            })
+        }
     }
 
     private func buttonCenterInScreen() -> NSPoint {
@@ -397,8 +426,11 @@ final class FloatingTranslateButtonView: NSView {
         isMenuOpen = open
         if open {
             // The click that opened the menu happened on this button, so
-            // the cursor starts on the ✕ — red right away.
+            // the cursor starts on the ✕ — red right away. Full size while
+            // the ring is up: the quick-menu hub opens with no preceding
+            // hover, still at rest scale (a no-op for the hovered bar).
             isCloseHovered = true
+            applyScale(1.0, animated: true)
             actionButton.image = Self.closeGlyphImage(hovered: true)
             actionButton.toolTip = "Close"
         } else {

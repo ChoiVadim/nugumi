@@ -126,7 +126,9 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }()
     var modifierDetectors: [DoubleModifierPressDetector] = []
     var mouseButtonMonitors: [MouseButtonShortcutMonitor] = []
-    var quickMenuRing: RadialActionMenuController?
+    /// The quick menu's transient hub: a floating button spawned at the
+    /// cursor whose ring is opened immediately (see `toggleQuickMenuRing`).
+    var quickMenuButton: FloatingTranslateButtonController?
     var shortcutRecorderWindowController: ShortcutRecorderWindowController?
     var lastReplacementSourcePID: pid_t?
     var translationCache = TranslationCache()

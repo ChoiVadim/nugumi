@@ -15,63 +15,58 @@ import Vision
 extension NugumiApp {
     @MainActor
     func toggleQuickMenuRing() {
-        if let quickMenuRing {
-            quickMenuRing.close()
-            self.quickMenuRing = nil
+        if let quickMenuButton {
+            // Closing the ring fires onMenuClosed, which fades the button
+            // away and clears the reference.
+            quickMenuButton.closeMenu()
             return
         }
         // While the recorder is capturing, a mouse-button press is input for
         // the field, not a trigger.
         guard shortcutRecorderWindowController == nil else { return }
 
-        let anchor = NSEvent.mouseLocation
-        var items: [RingItem] = [
-            .phosphor("magnifying-glass", label: "Explain") { [weak self] in
-                self?.quickMenuRing = nil
+        // Same window arrangement as the selection bar: a real floating
+        // button in its own panel BELOW the ring, centered on the cursor.
+        // The collapse then plays over a persistent hub instead of piling
+        // up inside the ring panel's own glass group.
+        let cursor = NSEvent.mouseLocation
+        let offsetX = 5 + AskNugumiFloatingTargetPresentationPolicy.buttonSize / 2
+        let offsetY = AskNugumiFloatingTargetPresentationPolicy.buttonSize / 2 + 5
+        let anchor = NSPoint(x: cursor.x - offsetX, y: cursor.y + offsetY)
+        let button = FloatingTranslateButtonController(
+            screenPoint: anchor,
+            selectedText: "",
+            initialMode: .selection,
+            onTranslate: { [weak self] _ in
                 self?.startSelectionTranslateOrReply(forcing: .translate)
             },
-            .phosphor("pencil-line", label: "Rewrite") { [weak self] in
-                self?.quickMenuRing = nil
+            onRewrite: { [weak self] _ in
                 self?.startSelectedTextTranslationForReplacement()
             },
-            .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
-                self?.quickMenuRing = nil
+            onSmartReply: { [weak self] _ in
                 self?.startSelectionTranslateOrReply(forcing: .smartReply)
             },
-            .phosphor("question", label: "Ask") { [weak self] in
-                self?.quickMenuRing = nil
+            onAsk: { [weak self] in
                 self?.startAskNugumiPrompt()
             },
-            .phosphor("scan", label: "Capture") { [weak self] in
-                self?.quickMenuRing = nil
+            onScreenshot: { [weak self] in
                 self?.startScreenshotTranslation()
             },
-            // SF Symbols until waveform/mic Phosphor PNGs are bundled.
-            .symbol("mic", label: "Dictate") { [weak self] in
-                self?.quickMenuRing = nil
-                self?.toggleDictation()
-            },
-            .symbol("waveform", label: "Live") { [weak self] in
-                self?.quickMenuRing = nil
+            onLive: { [weak self] in
                 self?.toggleLiveTranslation()
             },
-        ]
-        if let opt = makeSummarizeOption(near: anchor, selectionRect: nil, panelSide: .right) {
-            items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
-                self?.quickMenuRing = nil
-            }), at: 5)
-        }
-        let ring = RadialActionMenuController(
-            centeredOn: anchor,
-            ignoring: nil,
-            items: items,
-            showsCenterClose: true,
-            onDismiss: { [weak self] in
-                self?.quickMenuRing = nil
-            }
+            onDictate: { [weak self] in
+                self?.toggleDictation()
+            },
+            summarizeOption: makeSummarizeOption(near: cursor, selectionRect: nil, panelSide: .right)
         )
-        quickMenuRing = ring
-        ring.show()
+        button.onMenuClosed = { [weak self, weak button] in
+            button?.fadeOutAndClose()
+            self?.quickMenuButton = nil
+        }
+        quickMenuButton = button
+        button.show()
+        button.openMenu()
     }
 
     @MainActor
