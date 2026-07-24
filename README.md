@@ -88,16 +88,16 @@ Select an incoming message, customer request, recruiting note, or work thread. N
 
 ## Default Shortcuts
 
-| Action | Default |
-| --- | --- |
-| Ask Nugumi | double-tap <kbd>Control</kbd> |
-| Ask Nugumi alias | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>A</kbd> |
-| Translate selected text | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>T</kbd> |
-| Rewrite my text | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>R</kbd> |
-| Toggle writing language | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>G</kbd> |
-| Translate screen area | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>S</kbd> |
+| Action                    | Default                                               |
+| ------------------------- | ----------------------------------------------------- |
+| Ask Nugumi                | double-tap <kbd>Control</kbd>                         |
+| Ask Nugumi alias          | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>A</kbd> |
+| Translate selected text   | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>T</kbd> |
+| Rewrite my text           | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>R</kbd> |
+| Toggle writing language   | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>G</kbd> |
+| Translate screen area     | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>S</kbd> |
 | Live translation captions | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>L</kbd> |
-| Toggle invisibility mode | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>I</kbd> |
+| Toggle invisibility mode  | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>I</kbd> |
 
 Shortcuts can be changed from Nugumi settings.
 
@@ -175,29 +175,36 @@ swift test --filter LiveTranslationTests
 
 ### Useful Areas
 
-| Area | Files |
-| --- | --- |
-| App lifecycle, menu actions, providers, prompts | `Sources/Nugumi/App.swift` |
-| Ask Nugumi prompt behavior | `Sources/Nugumi/AskNugumi.swift` |
-| Settings window and AI Engine UI | `Sources/Nugumi/MainWindow.swift`, `Sources/Nugumi/MainWindowSections.swift` |
-| Shortcuts | `Sources/Nugumi/GlobalShortcuts.swift` |
-| Onboarding and permissions | `Sources/Nugumi/Onboarding.swift` |
-| Ollama and provider readiness | `Sources/Nugumi/Bootstrap.swift` |
-| Live captions, summaries, follow-up questions | `Sources/Nugumi/LiveTranslation.swift` |
-| Snippets and reusable writing terms | `Sources/Nugumi/Snippets.swift` |
-| History and usage stats | `Sources/Nugumi/TranslationHistory.swift`, `Sources/Nugumi/UsageStats.swift` |
+| Area                                          | Files                                                                                                                                                          |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App lifecycle, menu actions                   | `Sources/Nugumi/App/App.swift`                                                                                                                                 |
+| Providers, OAuth, LLM clients                 | `Sources/Nugumi/LLM/` (`LLMCore.swift`, `OllamaClient.swift`, `OpenAIChatClient.swift`, `CodexClient.swift`, `ClaudeCodeClient.swift`, `ModelDiscovery.swift`) |
+| Modes, prompts, writing styles                | `Sources/Nugumi/Panels/TranslationModes.swift`                                                                                                                 |
+| Result panels and floating button             | `Sources/Nugumi/Panels/` (`TranslationPanel.swift`, `TranslationContentView.swift`, `FloatingButton.swift`)                                                    |
+| Selection capture and text pipeline           | `Sources/Nugumi/Selection/`                                                                                                                                    |
+| Pet mascot                                    | `Sources/Nugumi/Pet/`                                                                                                                                          |
+| Quick-menu ring                               | `Sources/Nugumi/Ring/`                                                                                                                                         |
+| Ask Nugumi prompt behavior                    | `Sources/Nugumi/Ask/` (`AskNugumi.swift`, `AskPrompt.swift`, `AskOverlays.swift`)                                                                              |
+| Settings window and AI Engine UI              | `Sources/Nugumi/MainWindow/MainWindow.swift`, `Sources/Nugumi/MainWindow/MainWindowSections.swift`                                                             |
+| Shortcuts                                     | `Sources/Nugumi/App/GlobalShortcuts.swift`                                                                                                                     |
+| Onboarding and permissions                    | `Sources/Nugumi/App/Onboarding.swift`                                                                                                                          |
+| Ollama and provider readiness                 | `Sources/Nugumi/App/Bootstrap.swift`                                                                                                                           |
+| Live captions, summaries, follow-up questions | `Sources/Nugumi/Live/LiveTranslation.swift`                                                                                                                    |
+| Chat archives (KakaoTalk, Telegram)           | `Sources/Nugumi/Archive/`                                                                                                                                      |
+| Snippets and reusable writing terms           | `Sources/Nugumi/MainWindow/Snippets.swift`                                                                                                                     |
+| History and usage stats                       | `Sources/Nugumi/Archive/TranslationHistory.swift`, `Sources/Nugumi/App/UsageStats.swift`                                                                       |
 
 ### Updating README Media
 
 Use the GIF exports in `assets` for README demos so they render directly on GitHub:
 
-| Workflow | Asset |
-| --- | --- |
-| Product overview | `assets/intro.gif` |
-| Ask Nugumi | `assets/ask_v2.gif` |
+| Workflow                 | Asset                      |
+| ------------------------ | -------------------------- |
+| Product overview         | `assets/intro.gif`         |
+| Ask Nugumi               | `assets/ask_v2.gif`        |
 | Understand selected text | `assets/understand_v2.gif` |
-| Rewrite draft | `assets/fix_v2.gif` |
-| Smart reply | `assets/reply_v2.gif` |
+| Rewrite draft            | `assets/fix_v2.gif`        |
+| Smart reply              | `assets/reply_v2.gif`      |
 
 The `.mov` files remain the source captures. Older non-v2 captures remain in the repo for reference, but the README should use the v2 GIF exports.
 

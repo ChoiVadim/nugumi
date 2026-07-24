@@ -7,7 +7,7 @@ This file is loaded as project context by Claude Code. It contains operational i
 - macOS menu bar app, Swift Package Manager, deployment target macOS 14.
 - Bundle ID: `com.nugumi.app`. GitHub repo: `ChoiVadim/nugumi` (`origin`).
 - GitHub CLI account for this repo: use `ChoiVadim`. If multiple accounts are configured locally, prefer `gh-vadim ...` or run `gh-use-vadim` before release/repo operations.
-- Single source file: `Sources/Nugumi/App.swift` (everything except onboarding state lives here). `Sources/Nugumi/Bootstrap.swift` covers Ollama setup wizard.
+- Sources are split by subsystem into feature folders under `Sources/Nugumi/` (`App/`, `Selection/`, `Panels/`, `Ask/`, `Pet/`, `Ring/`, `LLM/`, `Live/`, `Archive/`, `MainWindow/`) — one subsystem per file. `App/App.swift` holds only the `NugumiApp` app delegate and its extensions. SwiftPM discovers files recursively; adding a file needs no `Package.swift` change. `App/Bootstrap.swift` covers the Ollama setup wizard.
 - Distribution: ad-hoc signed `.app` + universal DMG packaged via `Scripts/build-app-bundle.sh`. In-app updates via Sparkle 2.9.1.
 - Renamed from "Yaku" to "Nugumi" at v0.6.0. Existing v0.5.0 (Yaku) installs will not auto-migrate via Sparkle — they must download the new bundle manually from GitHub Releases. The Sparkle EdDSA key is unchanged across the rename.
 
@@ -98,9 +98,9 @@ Notarization adds 2–5 minutes per release; `xcrun notarytool submit --wait` bl
 
 Just send the GitHub Release URL: `https://github.com/ChoiVadim/nugumi/releases/latest`. Users click "Nugumi-X.Y.Z.dmg", mount, drag to Applications. Repeat for the link itself if convenient. After install, the in-app updater takes over.
 
-## When editing App.swift
+## Source layout rules
 
-- Do not introduce a second source file unless an entire subsystem is being extracted. The single-file layout is intentional — easier to grep, easier to ship as a one-shot.
+- One subsystem per file, sorted into the feature folders listed above. New code goes into the file that owns its subsystem (or a new file in the right folder — target under ~400 lines; name extensions `Type+Feature.swift`). `App/App.swift` holds only `NugumiApp` (the `@main` app delegate) and its extensions. When extracting or moving code, do it as pure code motion — no behavior change, `swift build` green after every move — and promote `private` → `internal` only when a use crosses files. Never create a file named `main.swift`.
 - `TranslationMode` declares per-mode metadata (`resultLabel`, `loadingPlaceholder`, `systemPrompt`). New modes go through this enum, not via callsite branching.
 - `OllamaModelOption.all` is the source of truth for which models the menu offers. Update it when adding model variants — do not hardcode model IDs in `OllamaClient` or `OllamaBootstrap`.
 - The floating button uses a single `NSButton` whose `title` and `image` swap based on `TranslationMode`. Don't reintroduce overlapping `NSTextField` / `NSImageView` views — they break centering.
