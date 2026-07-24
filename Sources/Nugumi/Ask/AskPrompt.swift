@@ -12,6 +12,8 @@ import SwiftUI
 import UserNotifications
 import Vision
 
+/// The Ask Nugumi capsule's glass body. Any click inside it focuses the text
+/// field instead of starting a window drag, so the whole pill is clickable.
 private final class AskPromptGlassView: NSVisualEffectView {
     var onClick: (() -> Void)?
 
@@ -68,6 +70,12 @@ private final class AskPromptPanel: NSPanel {
     }
 }
 
+/// Activating an `.accessory` app that wasn't frontmost makes macOS deliver a
+/// reopen event — the same one a Dock relaunch sends. Our own panels activate
+/// the app to take focus, so `applicationShouldHandleReopen` can't tell those
+/// apart from a genuine relaunch and would pop the main window. Any internal
+/// activation routes through here, opening a brief window during which the
+/// delegate ignores reopen.
 @MainActor
 enum SelfActivationGuard {
     private static var suppressUntil = Date.distantPast
