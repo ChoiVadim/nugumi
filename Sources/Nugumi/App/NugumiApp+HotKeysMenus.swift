@@ -401,7 +401,6 @@ extension NugumiApp {
         updateMenuState()
     }
 
-    @MainActor
     @objc func quit() {
         NSApplication.shared.terminate(nil)
     }
