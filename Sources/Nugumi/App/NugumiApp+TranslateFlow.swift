@@ -157,6 +157,7 @@ extension NugumiApp {
     /// Non-nil only when the frontmost app is a supported messenger
     /// (currently KakaoTalk) — drives the ring's contextual "Summarize"
     /// button in both `showTranslateButton` arming sites.
+    @MainActor
     func rewriteSelectedDraftText(
         _ text: String,
         near screenPoint: NSPoint,
