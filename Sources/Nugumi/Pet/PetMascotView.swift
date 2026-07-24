@@ -737,6 +737,3 @@ extension PetMascotView {
     }
 }
 
-/// Where a ring button's hover bubble sits relative to its circle. Also
-/// names the bubble edge (or corner, for diagonals) carrying the tail via
-/// `opposite`.
