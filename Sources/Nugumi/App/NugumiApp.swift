@@ -16,26 +16,26 @@ import Vision
 @MainActor
 final class NugumiApp: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
-    private var mouseMonitor: Any?
-    private var keyboardMonitor: Any?
-    private var lastLeftMouseDownLocation: NSPoint?
+    var mouseMonitor: Any?
+    var keyboardMonitor: Any?
+    var lastLeftMouseDownLocation: NSPoint?
     /// Pasteboard changeCount at the start of the current selection gesture.
     /// If it advances before the clipboard fallback runs, the frontmost app
     /// copied on its own (copy-on-select TUIs, click-to-copy sites) — that
     /// copy is the selection and must survive on the clipboard.
-    private var lastMouseDownPasteboardChangeCount: Int?
-    private var lastMouseDownDragPasteboardChangeCount: Int?
-    private var lastMouseDownWindowNumber: Int?
-    private var lastMouseDownWindowBounds: CGRect?
+    var lastMouseDownPasteboardChangeCount: Int?
+    var lastMouseDownDragPasteboardChangeCount: Int?
+    var lastMouseDownWindowNumber: Int?
+    var lastMouseDownWindowBounds: CGRect?
     /// Per-bundle count of consecutive selection-gesture attempts that returned
     /// no readable text. Apps like KakaoTalk expose neither AX text attributes
     /// nor a working Cmd+C path, so the floating bar silently never appears —
     /// this counter lets us surface a one-time hint pointing users at
     /// Screenshot Translation instead.
-    private var unreadableSelectionFailureCounts: [String: Int] = [:]
-    private static let unreadableSelectionFailureThreshold = 3
-    private static let unreadableSelectionHintShownDefaultsKey = "unreadableSelectionHintShownBundles"
-    private let selectionReader = SelectionReader()
+    var unreadableSelectionFailureCounts: [String: Int] = [:]
+    static let unreadableSelectionFailureThreshold = 3
+    static let unreadableSelectionHintShownDefaultsKey = "unreadableSelectionHintShownBundles"
+    let selectionReader = SelectionReader()
     private let ollamaBaseURL = URL(string: "http://127.0.0.1:11434")!
     private var currentBackend: any LLMBackend {
         backend(for: textModelID)
@@ -91,11 +91,11 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// Suspends the mouse/Cmd+A selection auto-readers so they don't fire
     /// synthetic ⌘+C at the sign-in page on every click — which makes macOS beep
     /// when there's nothing to copy. Set around the login alerts' `present()`.
-    private var isCloudSignInActive = false
-    private var screenshotDragStartLocation: NSPoint?
-    private var screenshotDragEndLocation: NSPoint?
-    private var screenshotPanelSide: TranslationPanelController.Side?
-    private var screenshotDragTracker: ScreenshotDragTracker?
+    var isCloudSignInActive = false
+    var screenshotDragStartLocation: NSPoint?
+    var screenshotDragEndLocation: NSPoint?
+    var screenshotPanelSide: TranslationPanelController.Side?
+    var screenshotDragTracker: ScreenshotDragTracker?
     var globalHotKeys: [GlobalHotKey] = []
     lazy var liveTranslationController: LiveTranslationController = {
         let controller = LiveTranslationController()
@@ -704,486 +704,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         screenRecordingTrustTimer = nil
     }
 
-    private func startMouseMonitor() {
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp]) { [weak self] event in
-            guard let self else { return }
-            let mouseLocation = NSEvent.mouseLocation
-            if event.type == .leftMouseDown {
-                self.lastLeftMouseDownLocation = mouseLocation
-                self.lastMouseDownPasteboardChangeCount = NSPasteboard.general.changeCount
-                self.lastMouseDownDragPasteboardChangeCount = NSPasteboard(name: .drag).changeCount
-                self.lastMouseDownWindowNumber = event.windowNumber
-                self.lastMouseDownWindowBounds = Self.windowBounds(forWindowNumber: event.windowNumber)
-                if self.isScreenshotTranslationRunning {
-                    self.screenshotDragStartLocation = mouseLocation
-                    self.screenshotDragEndLocation = nil
-                    return
-                }
-                // This click is already dropping any live selection in the
-                // target app — dismiss the selection UI now instead of after
-                // the mouse-up read (80ms gate + AX + up to 0.5s clipboard
-                // poll). If this same gesture makes a new selection, the
-                // mouse-up pipeline re-shows it.
-                if let controller = self.translationPanelController,
-                   controller.isVisible,
-                   controller.panelFrame.insetBy(dx: -4, dy: -4).contains(mouseLocation) {
-                    return
-                }
-                self.translateButtonController?.close()
-                self.translateButtonController = nil
-                self.petController?.clearReady()
-                return
-            }
-
-            if event.type == .leftMouseDragged {
-                if self.isScreenshotTranslationRunning {
-                    self.updateScreenshotDrag(to: mouseLocation)
-                }
-                return
-            }
-
-            if self.isScreenshotTranslationRunning {
-                if event.type == .leftMouseUp {
-                    self.updateScreenshotDrag(to: mouseLocation)
-                }
-                return
-            }
-
-            self.handleMouseUp(event)
-        }
-    }
-
-    private func startKeyboardMonitor() {
-        // Global, listen-only — Cmd+A still propagates to the focused app so
-        // its native select-all fires. We just want to know when it happened
-        // so we can read the resulting selection and show the translate UI.
-        keyboardMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            guard let self else { return }
-            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            guard modifiers == .command, event.keyCode == UInt16(kVK_ANSI_A) else {
-                return
-            }
-            self.handleSelectAll()
-        }
-    }
-
-    private func handleSelectAll() {
-        guard selectionDisplayMode != .off else { return }
-        guard accessibilityIsTrusted() else { return }
-        guard !isCloudSignInActive else { return }
-
-        // Cmd+A inside Nugumi's own panels means "select the prompt input",
-        // not "translate everything" — drop those events.
-        let frontmostApp = NSWorkspace.shared.frontmostApplication
-        let frontmostBundleID = frontmostApp?.bundleIdentifier
-        if frontmostBundleID == Bundle.main.bundleIdentifier {
-            return
-        }
-        let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
-        let pasteboardBaseline = NSPasteboard.general.changeCount
-
-        // The target app updates its AX selection state after macOS dispatches
-        // the Cmd+A keystroke. Mirror the mouse-up gating delay.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            guard let self else { return }
-            // ⌘A in Finder selects files, not text — a synthesized ⌘C would
-            // copy the files themselves. AX-only read there (silent, no-op).
-            // Same for open/save panels in any app: ⌘A selects file rows.
-            let allowsClipboard = frontmostBundleID != "com.apple.finder"
-                && !self.selectionReader.isInsideOpenSavePanel()
-            let preferClipboard = allowsClipboard
-                && !self.selectionReader.isLikelyEditableElementAtMouseLocation()
-            self.selectionReader.readSelectedTextContext(
-                preferClipboard: preferClipboard,
-                allowClipboardFallback: allowsClipboard,
-                pasteboardBaseline: pasteboardBaseline
-            ) { [weak self] selection in
-                guard let self else { return }
-
-                guard let selection, !selection.text.isEmpty else {
-                    self.noteUnreadableSelection(
-                        bundleID: frontmostBundleID,
-                        appName: frontmostAppName
-                    )
-                    self.translateButtonController?.close()
-                    self.translateButtonController = nil
-                    self.petController?.clearReady()
-                    return
-                }
-
-                self.clearUnreadableSelectionCounter(bundleID: frontmostBundleID)
-
-                let cleanedSelection = TextNormalizer.cleanedSelection(selection.text)
-                guard !cleanedSelection.isEmpty,
-                      TextNormalizer.looksMeaningful(cleanedSelection)
-                else {
-                    self.translateButtonController?.close()
-                    self.translateButtonController = nil
-                    self.petController?.clearReady()
-                    return
-                }
-
-                let anchor = self.selectAllAnchorPoint(from: selection.selectionRect)
-                self.showTranslateButton(
-                    for: cleanedSelection,
-                    near: anchor,
-                    selectionRect: selection.selectionRect,
-                    panelSide: .right
-                )
-            }
-        }
-    }
-
-    private func selectAllAnchorPoint(from rect: NSRect?) -> NSPoint {
-        // Cmd+A has no mouse-based anchor. Prefer the bottom-right corner of
-        // the reported selection rect; fall back to current pointer position.
-        if let rect, rect.width > 0, rect.height > 0 {
-            return NSPoint(x: rect.maxX, y: rect.minY)
-        }
-        return NSEvent.mouseLocation
-    }
-
-    @MainActor
-    private func applySelectionDisplayMode() {
-        switch selectionDisplayMode {
-        case .floatingBar:
-            petController?.close()
-            petController = nil
-        case .off:
-            petController?.close()
-            petController = nil
-            translateButtonController?.close()
-            translateButtonController = nil
-        case .pet:
-            translateButtonController?.close()
-            translateButtonController = nil
-            if petController == nil {
-                petController = PetController(initialMode: floatingDefaultMode.translationMode)
-            }
-            petController?.show()
-        }
-
-        updateMenuState()
-    }
-
-    private var lastAccessibilitySelectionPromptAt: Date?
-
-    private func handleMouseUp(_ event: NSEvent) {
-        guard accessibilityIsTrusted() else {
-            // Reading the highlighted text needs Accessibility, so without it a
-            // drag-select would silently do nothing. When the user clearly made
-            // a selection gesture, surface the permission request — throttled so
-            // we never spam System Settings on repeated drags / stray gestures.
-            if selectionDisplayMode != .off,
-               isLikelySelectionGesture(event, upLocation: NSEvent.mouseLocation),
-               NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
-                let now = Date()
-                if lastAccessibilitySelectionPromptAt.map({ now.timeIntervalSince($0) > 15 }) ?? true {
-                    lastAccessibilitySelectionPromptAt = now
-                    requestAccessibilityPermissionInteractively()
-                }
-            }
-            return
-        }
-
-        // A cloud sign-in panel (ChatGPT/Claude) is up. Clicking around its page
-        // would otherwise post a synthetic ⌘+C on every mouse-up (clipboard
-        // fallback) and beep when there's no selection. Skip until sign-in ends.
-        if isCloudSignInActive {
-            return
-        }
-
-        // The shortcut recorder is up. Any synthesized ⌘+C we'd post during
-        // the clipboard fallback below would land in Nugumi (now frontmost)
-        // and the recorder field would capture it as the user's shortcut —
-        // see KeyboardShortcutPoster.postCommandShortcut. Hard-skip while the
-        // recorder is open.
-        if shortcutRecorderWindowController != nil {
-            return
-        }
-
-        let mouseLocation = NSEvent.mouseLocation
-        if let controller = translationPanelController,
-           controller.isVisible,
-           controller.panelFrame.insetBy(dx: -4, dy: -4).contains(mouseLocation) {
-            return
-        }
-
-        // Capture the frontmost app at gesture time, not at completion time —
-        // the user may have switched apps during the 80ms+AX-read window, and
-        // we want to attribute the unreadable-selection signal to the app
-        // where the drag actually happened.
-        let isSelectionGesture = isLikelySelectionGesture(event, upLocation: mouseLocation)
-        let frontmostApp = NSWorkspace.shared.frontmostApplication
-        let frontmostBundleID = frontmostApp?.bundleIdentifier
-        let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            guard let self else { return }
-            // The async window is long enough for the user to have brought
-            // Nugumi to the front (e.g. opened the menu to set a shortcut).
-            // Re-check before posting any synthetic keystrokes.
-            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier {
-                return
-            }
-            if self.shortcutRecorderWindowController != nil {
-                return
-            }
-            // A drag in Finder (desktop included) is a marquee selecting
-            // files, not text. Never synthesize ⌘C there: with nothing
-            // selected Finder beeps, and with icons selected it clobbers the
-            // clipboard with the files and "translates" their names.
-            // Open/save panels in ANY app are the same file-browsing surface
-            // (double-clicking a folder to enter it counts as a selection
-            // gesture and would beep on every navigation).
-            let allowsClipboard = frontmostBundleID != "com.apple.finder"
-                && !self.selectionReader.isInsideOpenSavePanel()
-            let preferClipboard = allowsClipboard
-                && self.shouldAttemptClipboardSelectionFallback(for: event, upLocation: mouseLocation)
-
-            // Clipboard fallback after a failed AX read covers apps that
-            // expose a text-area-ish AX role (so `preferClipboard` is false)
-            // but don't actually publish `kAXSelectedTextAttribute` —
-            // KakaoTalk chat bubbles being the canonical example. Only allow
-            // it when the user clearly meant to select something; otherwise
-            // a stray click would synthesize Cmd+C for nothing.
-            self.selectionReader.readSelectedTextContext(
-                preferClipboard: preferClipboard,
-                allowClipboardFallback: isSelectionGesture && allowsClipboard,
-                pasteboardBaseline: self.lastMouseDownPasteboardChangeCount
-            ) { [weak self] selection in
-                guard let self else { return }
-
-                guard let selection, !selection.text.isEmpty else {
-                    // Don't count Finder marquee drags as "app blocks text
-                    // access" — they never had text to begin with.
-                    if isSelectionGesture && allowsClipboard {
-                        self.noteUnreadableSelection(
-                            bundleID: frontmostBundleID,
-                            appName: frontmostAppName
-                        )
-                    }
-                    self.translateButtonController?.close()
-                    self.translateButtonController = nil
-                    self.petController?.clearReady()
-                    return
-                }
-
-                // The app exposed *some* selection text — even if we end up
-                // discarding it as not meaningful below, that's a "user
-                // selected garbage" case, not an "app blocks access" case.
-                if isSelectionGesture {
-                    self.clearUnreadableSelectionCounter(bundleID: frontmostBundleID)
-                }
-
-                let cleanedSelection = TextNormalizer.cleanedSelection(selection.text)
-                guard !cleanedSelection.isEmpty,
-                      TextNormalizer.looksMeaningful(cleanedSelection)
-                else {
-                    self.translateButtonController?.close()
-                    self.translateButtonController = nil
-                    self.petController?.clearReady()
-                    return
-                }
-
-                self.showTranslateButton(
-                    for: cleanedSelection,
-                    near: mouseLocation,
-                    selectionRect: selection.selectionRect,
-                    panelSide: self.panelSideForSelectionEnding(at: mouseLocation)
-                )
-            }
-        }
-    }
-
-    private func panelSideForSelectionEnding(at mouseLocation: NSPoint) -> TranslationPanelController.Side {
-        panelSideForDrag(from: lastLeftMouseDownLocation, to: mouseLocation)
-    }
-
-    private func panelSideForScreenshotEnding(at mouseLocation: NSPoint) -> TranslationPanelController.Side {
-        screenshotPanelSide ?? panelSideForDrag(from: screenshotDragStartLocation, to: mouseLocation)
-    }
-
-    private func panelSideForDrag(from startLocation: NSPoint?, to endLocation: NSPoint) -> TranslationPanelController.Side {
-        guard let startLocation else { return .right }
-
-        let dx = endLocation.x - startLocation.x
-        let dy = endLocation.y - startLocation.y
-        // Need a meaningful horizontal drag — vertical or tiny drags
-        // give no reliable direction signal, so default to .right.
-        guard abs(dx) >= 5, abs(dx) > abs(dy) else { return .right }
-        return dx > 0 ? .right : .left
-    }
-
-    private func updateScreenshotDrag(to mouseLocation: NSPoint) {
-        screenshotDragEndLocation = mouseLocation
-        screenshotPanelSide = panelSideForDrag(from: screenshotDragStartLocation, to: mouseLocation)
-    }
-
-    @MainActor
-    private func startScreenshotDragTracking() {
-        resetScreenshotDragTracking()
-        let tracker = ScreenshotDragTracker { [weak self] startLocation, endLocation, panelSide in
-            guard let self else { return }
-            if let startLocation {
-                self.screenshotDragStartLocation = startLocation
-            }
-            if let endLocation {
-                self.screenshotDragEndLocation = endLocation
-            }
-            if let panelSide {
-                self.screenshotPanelSide = panelSide
-            }
-        }
-        screenshotDragTracker = tracker
-        tracker.enable()
-    }
-
-    @MainActor
-    private func resetScreenshotDragTracking() {
-        screenshotDragTracker?.disable()
-        screenshotDragTracker = nil
-        screenshotDragStartLocation = nil
-        screenshotDragEndLocation = nil
-        screenshotPanelSide = nil
-    }
-
-    private func shouldAttemptClipboardSelectionFallback(for event: NSEvent, upLocation: NSPoint) -> Bool {
-        guard isLikelySelectionGesture(event, upLocation: upLocation) else {
-            return false
-        }
-
-        return !selectionReader.isLikelyEditableElementAtMouseLocation()
-    }
-
-    /// Drag OR double-click. Double-click selects a word in text but
-    /// *activates* rows/folders/chats elsewhere, and in AX-opaque apps
-    /// (KakaoTalk) there is no pre-flight signal to tell the cases apart —
-    /// so a navigation double-click there beeps via the synthesized ⌘C.
-    /// Vadim accepted that trade-off on 2026-07-16 (reversing the
-    /// 2026-07-03 drag-only decision) so double-click word lookup works
-    /// in AX-opaque apps again.
-    private func isLikelySelectionGesture(_ event: NSEvent, upLocation: NSPoint) -> Bool {
-        guard event.type == .leftMouseUp else {
-            return false
-        }
-
-        if event.clickCount >= 2 {
-            return true
-        }
-
-        return isDragSelectionGesture(event, upLocation: upLocation)
-    }
-
-    /// A real drag: ≥15pt of travel with no refuting signal (drag-and-drop
-    /// session, window move/resize).
-    /// `upLocation` must be the pointer position captured AT the mouse-up
-    /// event. This runs again inside the 80ms-delayed read, and reading
-    /// `NSEvent.mouseLocation` there instead measured wherever the cursor
-    /// had flicked to after the click — a stationary double-click followed
-    /// by a quick mouse move read as a ≥15pt "drag" and beeped via the
-    /// clipboard fallback's ⌘C.
-    private func isDragSelectionGesture(_ event: NSEvent, upLocation: NSPoint) -> Bool {
-        guard event.type == .leftMouseUp else {
-            return false
-        }
-
-        guard let downLocation = lastLeftMouseDownLocation else {
-            return false
-        }
-
-        // A real drag-and-drop session (files, photos, dragged text) always
-        // writes to the drag pasteboard when the session starts; a
-        // drag-to-select never does. Dropping a photo into a browser input
-        // used to read as a selection drag here, and the clipboard fallback's
-        // synthesized ⌘C then beeped with nothing to copy.
-        if let baseline = lastMouseDownDragPasteboardChangeCount,
-           NSPasteboard(name: .drag).changeCount != baseline {
-            return false
-        }
-
-        // Moving or resizing a window travels ≥15pt too, but never selects
-        // text — the synthesized ⌘C after dropping a window beeped just like
-        // the drag-and-drop case. During a genuine text-selection drag the
-        // window under the gesture keeps its frame; if it moved or resized,
-        // this was window manipulation.
-        if let windowNumber = lastMouseDownWindowNumber,
-           let startBounds = lastMouseDownWindowBounds,
-           Self.windowBounds(forWindowNumber: windowNumber) != startBounds {
-            return false
-        }
-
-        let distance = hypot(upLocation.x - downLocation.x, upLocation.y - downLocation.y)
-        return distance >= 15
-    }
-
-    /// Frame of any on-screen window (any app) by window number, in CG
-    /// screen coordinates. Bounds are readable without Screen Recording
-    /// permission — only window *names* are gated.
-    private static func windowBounds(forWindowNumber windowNumber: Int) -> CGRect? {
-        guard let windowID = CGWindowID(exactly: windowNumber), windowID > 0 else {
-            return nil
-        }
-        guard let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
-              let boundsDict = info.first?[kCGWindowBounds as String] as? NSDictionary,
-              let bounds = CGRect(dictionaryRepresentation: boundsDict) else {
-            return nil
-        }
-        return bounds
-    }
-
-    private func clearUnreadableSelectionCounter(bundleID: String?) {
-        guard let bundleID else { return }
-        unreadableSelectionFailureCounts[bundleID] = 0
-    }
-
-    private func noteUnreadableSelection(bundleID: String?, appName: String) {
-        guard selectionDisplayMode != .off else { return }
-        guard let bundleID, bundleID != Bundle.main.bundleIdentifier else { return }
-        // UNUserNotificationCenter.current() aborts in non-bundle contexts
-        // (`swift run`). Skipping here also avoids polluting the persistent
-        // "already shown" set with bundles seen only during dev, which would
-        // suppress the hint forever in the user-facing .app build.
-        guard isRunningFromAppBundle else { return }
-
-        let next = (unreadableSelectionFailureCounts[bundleID] ?? 0) + 1
-        unreadableSelectionFailureCounts[bundleID] = next
-
-        guard next >= Self.unreadableSelectionFailureThreshold else { return }
-
-        let defaults = UserDefaults.standard
-        let key = Self.unreadableSelectionHintShownDefaultsKey
-        var shown = Set(defaults.stringArray(forKey: key) ?? [])
-        guard !shown.contains(bundleID) else { return }
-        shown.insert(bundleID)
-        defaults.set(Array(shown).sorted(), forKey: key)
-
-        Self.deliverUnreadableSelectionHint(appName: appName)
-    }
-
-    nonisolated private static func deliverUnreadableSelectionHint(appName: String) {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                break
-            default:
-                return
-            }
-
-            let content = UNMutableNotificationContent()
-            content.title = "Nugumi can't read text in \(appName)"
-            content.body = "This app doesn't expose its selection to other apps. Try Screenshot Translation instead."
-            let request = UNNotificationRequest(
-                identifier: "nugumi.selection.unreadable.\(Date().timeIntervalSince1970)",
-                content: content,
-                trigger: nil
-            )
-            UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
-        }
-    }
-
-    @MainActor
-    private func showTranslateButton(
+    var lastAccessibilitySelectionPromptAt: Date?
+    func showTranslateButton(
         for selectedText: String,
         near screenPoint: NSPoint,
         selectionRect: NSRect? = nil,
@@ -2095,7 +1617,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     /// Accessibility pane directly instead: it's the only reliably-visible
     /// "grant me access" UI we can surface at point of use.
     @MainActor
-    private func requestAccessibilityPermissionInteractively() {
+    func requestAccessibilityPermissionInteractively() {
         // Re-probe (prompt:false) so the Nugumi row exists even right after a
         // tccutil reset, then jump straight to the toggle.
         let probe = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
