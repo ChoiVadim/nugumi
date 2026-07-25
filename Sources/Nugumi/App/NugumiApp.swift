@@ -135,6 +135,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     let usageStatsStore = UsageStatsStore()
     let analyticsClient = AnalyticsClient()
     let snippetsStore = SnippetsStore()
+    let promptToolsStore = PromptToolsStore()
+    let ringLayoutStore = RingLayoutStore()
     let translationHistoryStore = TranslationHistoryStore()
     lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
         baseURL: ollamaBaseURL,
@@ -507,6 +509,15 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // kAXBoundsForRangeParameterizedAttribute) can stall the main thread
         // when an unsupported app responds slowly. Cap it.
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.5)
+        // The ring reads its contents through this hook every time it opens, so
+        // a slot edited in the Ring tab lands on the very next ring.
+        RingConfigurationProvider.current = { [weak self] in
+            guard let self else { return .default }
+            return RingConfiguration(
+                layout: self.ringLayoutStore.layout,
+                tools: self.promptToolsStore.tools
+            )
+        }
         setupStatusItem()
         installMainMenu()
         statusItem?.isVisible = !invisibilityModeEnabled

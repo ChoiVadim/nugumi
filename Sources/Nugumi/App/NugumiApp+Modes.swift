@@ -46,7 +46,7 @@ extension NugumiApp {
         translationPanelController = nil
         updateMenuState()
         mainWindowController?.bridge.refreshFromHost()
-        LanguageToggleHUD.shared.show(text: "Writing in \(next.displayName)")
+        ToastHUD.shared.show(text: "Writing in \(next.displayName)")
     }
 
     @MainActor

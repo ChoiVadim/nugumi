@@ -41,7 +41,10 @@ enum UserAboutContext {
     }
 }
 
-enum TranslationMode {
+/// `Equatable` is spelled out because the enum carries an associated value now
+/// (`.custom`) — Swift only synthesizes `==` for free on payload-free enums, and
+/// several `mode == .selection` checks depend on it.
+enum TranslationMode: Equatable {
     case selection
     case draftMessage
     case smartReply
@@ -61,6 +64,10 @@ enum TranslationMode {
     /// the AX tree — see `BrowserPageReader`). Same behavior contract as
     /// `.summarizeChat`: read-only, never persisted, panel-only.
     case summarizePage
+    /// One of the user's own prompt tools (see `PromptTool`), run over the
+    /// selection. The tool carries its whole system prompt, so nothing about it
+    /// is hardcoded here. Ring-only: never a floating-button default mode.
+    case custom(PromptTool)
 
     var usesCompositionSettings: Bool {
         switch self {
@@ -68,6 +75,22 @@ enum TranslationMode {
             return false
         case .draftMessage, .smartReply, .reviseMessage:
             return true
+        case .custom:
+            // The user's own prompt is authoritative — layering the writing
+            // style, cleanup, and glossary directives on top would fight it.
+            return false
+        }
+    }
+
+    /// Whether the panel's follow-up field revises *content* (`.revise`) rather
+    /// than an outgoing message (`.reviseMessage`). A prompt tool's answer is
+    /// content, so it takes the content path.
+    var revisesAsContent: Bool {
+        switch self {
+        case .selection, .summarizeChat, .summarizePage, .custom:
+            return true
+        case .draftMessage, .smartReply, .revise, .reviseMessage:
+            return false
         }
     }
 
@@ -79,6 +102,8 @@ enum TranslationMode {
             return "Reply"
         case .summarizeChat, .summarizePage:
             return "Summary"
+        case .custom(let tool):
+            return tool.name
         }
     }
 
@@ -94,6 +119,8 @@ enum TranslationMode {
             return "Revising"
         case .summarizeChat, .summarizePage:
             return "Summarizing"
+        case .custom:
+            return "Thinking"
         }
     }
 
@@ -212,8 +239,23 @@ enum TranslationMode {
             exactly. Do not invent anything not on the page. Return only the \
             summary — no preamble, no quotes.
             """
+        case .custom(let tool):
+            TranslationMode.customPrompt(tool, targetLanguage: targetLanguage)
         }
         return UserAboutContext.appending(to: base)
+    }
+
+    /// A prompt tool's own instruction, plus a target-language line when the
+    /// tool asked for one. Tools that transform rather than translate (text →
+    /// JSON, pull out the dates) leave that off — a language instruction would
+    /// corrupt their output.
+    private static func customPrompt(
+        _ tool: PromptTool,
+        targetLanguage: TranslationLanguage
+    ) -> String {
+        let body = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard tool.appliesTargetLanguage else { return body }
+        return body + "\n\nWrite the output in \(targetLanguage.promptName)."
     }
 
     private static func glossarySection(for snippets: [Snippet], includeSnippets: Bool) -> String {

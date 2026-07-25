@@ -37,7 +37,7 @@ struct ClaudeCodeClient: LLMBackend {
     ) async throws -> String {
         let sourceText: String
         switch mode {
-        case .selection, .smartReply:
+        case .selection, .smartReply, .custom:
             sourceText = TextNormalizer.cleanedSelection(text)
         case .draftMessage:
             sourceText = TextNormalizer.cleanedDraftMessage(text)

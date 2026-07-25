@@ -183,6 +183,8 @@ protocol SettingsHost: AnyObject {
     func performSettingsIntent(_ intent: SettingsIntent)
     var usageStats: UsageStatsStore { get }
     var snippets: SnippetsStore { get }
+    var promptTools: PromptToolsStore { get }
+    var ringLayout: RingLayoutStore { get }
     var history: TranslationHistoryStore { get }
     func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
     func runCloudTest(for provider: CloudProvider) async -> CloudTestResult
@@ -208,6 +210,8 @@ final class NugumiSettingsBridge: ObservableObject {
     weak var host: (any SettingsHost)?
     let usageStats: UsageStatsStore
     let snippets: SnippetsStore
+    let promptTools: PromptToolsStore
+    let ringLayout: RingLayoutStore
     let history: TranslationHistoryStore
 
     @Published var section: MainWindowSection = .home
@@ -221,6 +225,9 @@ final class NugumiSettingsBridge: ObservableObject {
     /// section view) so the scrim is rendered at the window root and dims the
     /// sidebar too — a panel-scoped overlay can't paint past the detail column.
     @Published var modelPickerScope: ModelUseScope?
+    /// Non-nil while the Ring tab's slot picker or prompt-tool editor is open.
+    /// Same reason as `modelPickerScope`: the scrim belongs at the window root.
+    @Published var ringSheet: RingSheet?
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
     /// True when a background check has found an update — drives the sidebar
@@ -235,6 +242,8 @@ final class NugumiSettingsBridge: ObservableObject {
         self.host = host
         self.usageStats = host.usageStats
         self.snippets = host.snippets
+        self.promptTools = host.promptTools
+        self.ringLayout = host.ringLayout
         self.history = host.history
         self.settings = host.makeSettingsSnapshot()
         self.bootstrap = host.bootstrapState
@@ -336,12 +345,13 @@ enum EngineSetupFocus: String, CaseIterable, Hashable {
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     case home, insights, dictionary, snippets, style, languages, aiEngine, shortcuts
     case aboutYou
+    case ring
     case settings, help
 
     var id: String { rawValue }
 
     static var primary: [MainWindowSection] {
-        [.home, .insights, .style, .languages, .aiEngine, .aboutYou, .dictionary, .snippets]
+        [.home, .ring, .insights, .style, .languages, .aiEngine, .aboutYou, .dictionary, .snippets]
     }
     static var secondary: [MainWindowSection] { [.shortcuts, .settings, .help] }
 
@@ -353,6 +363,7 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .snippets: return "Snippets"
         case .style: return "Style"
         case .aboutYou: return "About you"
+        case .ring: return "Ring"
         case .languages: return "Languages"
         case .aiEngine: return "AI Engine"
         case .shortcuts: return "Shortcuts"
@@ -369,6 +380,7 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .snippets: return "text.badge.plus"
         case .style: return "textformat"
         case .aboutYou: return "person.crop.circle"
+        case .ring: return "circle.hexagongrid"
         case .languages: return "globe"
         case .aiEngine: return "cpu"
         case .shortcuts: return "command"
@@ -526,6 +538,11 @@ struct MainWindowRootView: View {
                         bridge.perform(.chooseModel(id, scope))
                     }
                 )
+            }
+        }
+        .overlay {
+            if let sheet = bridge.ringSheet {
+                RingSheetOverlay(sheet: sheet)
             }
         }
     }

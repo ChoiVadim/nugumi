@@ -510,7 +510,7 @@ final class PetMascotView: NSView {
 
     private func drawPixelActionBadge() {
         switch mode {
-        case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage:
+        case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage, .custom:
             drawTranslateBadge()
         case .draftMessage:
             drawRewriteBadge()

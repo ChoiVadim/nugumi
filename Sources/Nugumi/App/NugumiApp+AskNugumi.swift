@@ -58,7 +58,12 @@ extension NugumiApp {
             onDictate: { [weak self] in
                 self?.toggleDictation()
             },
-            summarizeOption: makeSummarizeOption(near: cursor, selectionRect: nil, panelSide: .right)
+            summarizeOption: makeSummarizeOption(near: cursor, selectionRect: nil, panelSide: .right),
+            // The quick menu arms no selection, so the empty string routes
+            // `runPromptTool` through its read-the-selection-now branch.
+            onPromptTool: { [weak self] tool, text in
+                self?.runPromptTool(tool, selection: text)
+            }
         )
         button.onMenuClosed = { [weak self, weak button] in
             button?.fadeOutAndClose()

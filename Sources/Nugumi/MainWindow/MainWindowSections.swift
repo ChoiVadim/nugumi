@@ -14,6 +14,7 @@ struct DetailRouter: View {
         case .snippets: SnippetsSection()
         case .style: StyleSection()
         case .aboutYou: AboutYouSection()
+        case .ring: RingSection()
         case .languages: LanguagesSection()
         case .aiEngine: AIEngineSection()
         case .shortcuts: ShortcutsSection()
@@ -74,7 +75,7 @@ private struct KeyCap: View {
     }
 }
 
-private struct SecondaryButton: View {
+struct SecondaryButton: View {
     let title: String
     var destructive: Bool = false
     /// Set to align a column of buttons (e.g. Help rows) to one width.
@@ -2340,7 +2341,7 @@ private struct SnippetDisplayRow: View {
     }
 }
 
-private struct RowIconButton: View {
+struct RowIconButton: View {
     let symbol: String
     let action: () -> Void
     @State private var hovering = false

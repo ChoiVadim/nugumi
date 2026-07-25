@@ -191,7 +191,7 @@ extension NugumiApp {
     }
 
     @MainActor
-    private func showInstantTranslationLoading(near screenPoint: NSPoint) -> FloatingTranslateButtonController? {
+    func showInstantTranslationLoading(near screenPoint: NSPoint) -> FloatingTranslateButtonController? {
         switch selectionDisplayMode {
         case .pet:
             if petController == nil {
@@ -228,7 +228,7 @@ extension NugumiApp {
     }
 
     @MainActor
-    private func hideInstantTranslationLoading(_ loadingBar: FloatingTranslateButtonController?) {
+    func hideInstantTranslationLoading(_ loadingBar: FloatingTranslateButtonController?) {
         petController?.clearThinking()
         guard let loadingBar else { return }
         loadingBar.close()

@@ -25,6 +25,10 @@ final class FloatingTranslateButtonController {
     private let onLive: () -> Void
     private let onDictate: () -> Void
     private let summarizeOption: RingSummarizeOption?
+    /// Runs one of the user's prompt tools. Carries the armed selection the
+    /// same way `onTranslate` does — the quick menu passes an empty string and
+    /// its handler re-reads the selection.
+    private let onPromptTool: ((PromptTool, String) -> Void)?
     private var radialMenu: RadialActionMenuController?
     /// Fired whenever the ring closes for any reason (pick, dismiss, toggle).
     /// The quick menu uses it to fade this button away — for the persistent
@@ -42,7 +46,8 @@ final class FloatingTranslateButtonController {
         onScreenshot: @escaping () -> Void = {},
         onLive: @escaping () -> Void = {},
         onDictate: @escaping () -> Void = {},
-        summarizeOption: RingSummarizeOption? = nil
+        summarizeOption: RingSummarizeOption? = nil,
+        onPromptTool: ((PromptTool, String) -> Void)? = nil
     ) {
         self.selectedText = selectedText
         self.onTranslate = onTranslate
@@ -53,6 +58,7 @@ final class FloatingTranslateButtonController {
         self.onLive = onLive
         self.onDictate = onDictate
         self.summarizeOption = summarizeOption
+        self.onPromptTool = onPromptTool
 
         let buttonSize = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         let shadowPadding = AskNugumiFloatingTargetPresentationPolicy.shadowPadding
@@ -113,53 +119,39 @@ final class FloatingTranslateButtonController {
             menuDidClose()
             return
         }
-        var items: [RingItem] = [
-            .phosphor("magnifying-glass", label: "Explain") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onTranslate(self.selectedText)
-            },
-            .phosphor("pencil-line", label: "Rewrite") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onRewrite(self.selectedText)
-            },
-            .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onSmartReply(self.selectedText)
-            },
-            .phosphor("question", label: "Ask") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onAsk()
-            },
-            .phosphor("scan", label: "Capture") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onScreenshot()
-            },
-            .symbol("mic", label: "Dictate") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onDictate()
-            },
-            .symbol("waveform", label: "Live") { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-                self.onLive()
-            },
-        ]
-        if let opt = summarizeOption {
-            items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
-                guard let self else { return }
-                self.menuDidClose()
-            }), at: 5)
+        var handlers = RingActionHandlers()
+        handlers.explain = { [weak self] in
+            guard let self else { return }
+            self.onTranslate(self.selectedText)
         }
+        handlers.rewrite = { [weak self] in
+            guard let self else { return }
+            self.onRewrite(self.selectedText)
+        }
+        handlers.reply = { [weak self] in
+            guard let self else { return }
+            self.onSmartReply(self.selectedText)
+        }
+        handlers.ask = { [weak self] in self?.onAsk() }
+        handlers.capture = { [weak self] in self?.onScreenshot() }
+        handlers.dictate = { [weak self] in self?.onDictate() }
+        handlers.live = { [weak self] in self?.onLive() }
+        handlers.summarize = summarizeOption
+        if let onPromptTool {
+            handlers.promptTool = { [weak self] tool in
+                guard let self else { return }
+                onPromptTool(tool, self.selectedText)
+            }
+        }
+        let slots = RingBuilder.slots(
+            configuration: RingConfigurationProvider.current(),
+            handlers: handlers,
+            dismiss: { [weak self] in self?.menuDidClose() }
+        )
         let menu = RadialActionMenuController(
             centeredOn: buttonCenterInScreen(),
             ignoring: panel,
-            items: items,
+            slots: slots,
             onDismiss: { [weak self] in
                 guard let self else { return }
                 self.menuDidClose()
@@ -494,7 +486,7 @@ final class FloatingTranslateButtonView: NSView {
     private static func glyphImage(for mode: TranslationMode) -> NSImage {
         let name: String
         switch mode {
-        case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage:
+        case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage, .custom:
             // The mascot, not a generic sparkles glyph: the button that
             // opens the radial menu wears the app's own mark.
             return mascotGlyphImage()

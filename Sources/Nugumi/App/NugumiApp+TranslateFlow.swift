@@ -81,7 +81,10 @@ extension NugumiApp {
                 onDictate: { [weak self] in
                     self?.toggleDictation()
                 },
-                summarizeOption: summarizeOption
+                summarizeOption: summarizeOption,
+                onPromptTool: { [weak self] tool, text in
+                    self?.runPromptTool(tool, selection: text)
+                }
             )
             return
         }
@@ -133,7 +136,10 @@ extension NugumiApp {
             onDictate: { [weak self] in
                 self?.toggleDictation()
             },
-            summarizeOption: summarizeOption
+            summarizeOption: summarizeOption,
+            onPromptTool: { [weak self] tool, text in
+                self?.runPromptTool(tool, selection: text)
+            }
         )
 
         translateButtonController = controller
@@ -297,7 +303,7 @@ extension NugumiApp {
             onFollowUp: { [weak self] instruction in
                 self?.reviseCurrentPanel(
                     instruction: instruction,
-                    reviseMode: (mode == .selection || mode == .summarizeChat || mode == .summarizePage) ? .revise : .reviseMessage,
+                    reviseMode: mode.revisesAsContent ? .revise : .reviseMessage,
                     usageKind: usageKind
                 )
             },

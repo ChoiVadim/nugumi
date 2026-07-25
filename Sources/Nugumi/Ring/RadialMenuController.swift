@@ -185,7 +185,12 @@ final class RadialActionMenuController {
     /// menu's own backdrop), its handler must see the menu still open and
     /// toggle it — dismissing here first would make that handler reopen.
     private weak var presenterWindow: NSWindow?
-    private let items: [RingItem]
+    /// One entry per ring position, `nil` where the slot is empty or its action
+    /// isn't available right now. Positions are fixed: a missing slot leaves a
+    /// gap instead of shifting its neighbours, so a button never moves — not
+    /// when the user empties a slot, and not when the contextual Summarize
+    /// button comes and goes between apps.
+    private let slots: [RingItem?]
     private let onDismiss: () -> Void
     private var buttons: [RadialMenuButtonView] = []
     /// Second-layer buttons for a hover-expandable item (the time-range orbit).
@@ -221,11 +226,11 @@ final class RadialActionMenuController {
     init(
         centeredOn anchor: NSPoint,
         ignoring presenterWindow: NSWindow?,
-        items: [RingItem],
+        slots: [RingItem?],
         onDismiss: @escaping () -> Void
     ) {
         self.presenterWindow = presenterWindow
-        self.items = items
+        self.slots = slots
         self.onDismiss = onDismiss
 
         let frame = RadialMenuLayoutPolicy.panelFrame(anchor: anchor)
@@ -268,7 +273,8 @@ final class RadialActionMenuController {
         ))
 
         let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
-        for (item, offset) in zip(items, RadialMenuLayoutPolicy.buttonCenters(count: items.count)) {
+        for (slot, offset) in zip(slots, RadialMenuLayoutPolicy.buttonCenters(count: slots.count)) {
+            guard let item = slot else { continue }
             let isExpandable = !item.subItems.isEmpty
             let button = RadialMenuButtonView(image: item.image) { [weak self] in
                 // Expandable parents (the messenger button) reveal their

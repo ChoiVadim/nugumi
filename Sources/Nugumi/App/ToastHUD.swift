@@ -12,12 +12,13 @@ import SwiftUI
 import UserNotifications
 import Vision
 
-/// Small auto-fading toast shown when the writing language flips via the
-/// global shortcut — without it the toggle is invisible to the user. One
-/// shared instance so rapid toggles replace the text instead of stacking.
+/// Small auto-fading toast for actions with no visible result of their own —
+/// the writing-language toggle, a prompt tool that only copies to the clipboard.
+/// One shared instance, so firing twice in a row replaces the text instead of
+/// stacking two panels.
 @MainActor
-final class LanguageToggleHUD {
-    static let shared = LanguageToggleHUD()
+final class ToastHUD {
+    static let shared = ToastHUD()
 
     private var panel: NSPanel?
     private var label: NSTextField?

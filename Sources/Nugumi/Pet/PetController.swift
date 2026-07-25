@@ -209,6 +209,9 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var onLive: (() -> Void)?
     private var onDictate: (() -> Void)?
     private var summarizeOption: RingSummarizeOption?
+    /// Runs one of the user's prompt tools, carrying the armed selection the
+    /// same way `onTranslate` does.
+    private var onPromptTool: ((PromptTool, String) -> Void)?
     private var onPromptSubmit: ((String) -> Void)?
     private var onPromptClose: (() -> Void)?
     var onContinue: (() -> Void)?
@@ -1005,7 +1008,8 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onScreenshot: @escaping () -> Void = {},
         onLive: @escaping () -> Void = {},
         onDictate: @escaping () -> Void = {},
-        summarizeOption: RingSummarizeOption? = nil
+        summarizeOption: RingSummarizeOption? = nil,
+        onPromptTool: ((PromptTool, String) -> Void)? = nil
     ) {
         // Don't yank the pet back to "ready" while Ask is open (input, loading,
         // or answer) — a casual selection in another app should leave the
@@ -1031,6 +1035,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         self.onLive = onLive
         self.onDictate = onDictate
         self.summarizeOption = summarizeOption
+        self.onPromptTool = onPromptTool
         currentMode = initialMode
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = false
@@ -1252,52 +1257,39 @@ final class PetController: NSObject, NSTextFieldDelegate {
         // Same gate the old direct invocation had: the ring only makes sense
         // while a selection is armed.
         guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
-        var items: [RingItem] = [
-            .phosphor("magnifying-glass", label: "Explain") { [weak self] in
-                guard let self, let t = self.selectedText else { return }
-                self.radialMenu = nil
-                self.onTranslate?(t)
-            },
-            .phosphor("pencil-line", label: "Rewrite") { [weak self] in
-                guard let self, let t = self.selectedText else { return }
-                self.radialMenu = nil
-                self.onRewrite?(t)
-            },
-            .phosphor("arrow-bend-up-left", label: "Reply") { [weak self] in
-                guard let self, let t = self.selectedText else { return }
-                self.radialMenu = nil
-                self.onSmartReply?(t)
-            },
-            .phosphor("question", label: "Ask") { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.onAsk?()
-            },
-            .phosphor("scan", label: "Capture") { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.onScreenshot?()
-            },
-            .symbol("mic", label: "Dictate") { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.onDictate?()
-            },
-            .symbol("waveform", label: "Live") { [weak self] in
-                guard let self else { return }
-                self.radialMenu = nil
-                self.onLive?()
-            },
-        ]
-        if let opt = summarizeOption {
-            items.insert(summarizeRingItem(opt, dismiss: { [weak self] in
-                self?.radialMenu = nil
-            }), at: 5)
+        var handlers = RingActionHandlers()
+        handlers.explain = { [weak self] in
+            guard let self, let t = self.selectedText else { return }
+            self.onTranslate?(t)
         }
+        handlers.rewrite = { [weak self] in
+            guard let self, let t = self.selectedText else { return }
+            self.onRewrite?(t)
+        }
+        handlers.reply = { [weak self] in
+            guard let self, let t = self.selectedText else { return }
+            self.onSmartReply?(t)
+        }
+        handlers.ask = { [weak self] in self?.onAsk?() }
+        handlers.capture = { [weak self] in self?.onScreenshot?() }
+        handlers.dictate = { [weak self] in self?.onDictate?() }
+        handlers.live = { [weak self] in self?.onLive?() }
+        handlers.summarize = summarizeOption
+        if let onPromptTool {
+            handlers.promptTool = { [weak self] tool in
+                guard let self, let t = self.selectedText else { return }
+                onPromptTool(tool, t)
+            }
+        }
+        let slots = RingBuilder.slots(
+            configuration: RingConfigurationProvider.current(),
+            handlers: handlers,
+            dismiss: { [weak self] in self?.radialMenu = nil }
+        )
         let menu = RadialActionMenuController(
             centeredOn: petCenterInScreen(),
             ignoring: panel,
-            items: items,
+            slots: slots,
             onDismiss: { [weak self] in
                 self?.radialMenu = nil
             }

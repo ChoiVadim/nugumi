@@ -17,7 +17,7 @@ extension NugumiApp {
     @objc private func resetSettings() {
         let response = NugumiAlertController(
             title: "Reset settings?",
-            message: "This restores languages, per-app modes, main mode, display, output, AI mode, live captions, and keyboard shortcuts. Snippets, dictionary, saved API keys, your email voice sample, and usage stats stay unchanged.",
+            message: "This restores languages, per-app modes, main mode, display, output, AI mode, live captions, the ring layout, and keyboard shortcuts. Snippets, dictionary, your prompt tools, saved API keys, your email voice sample, and usage stats stay unchanged.",
             primaryButtonTitle: "Reset",
             secondaryButtonTitle: "Cancel"
         ).showModal()
@@ -63,6 +63,9 @@ extension NugumiApp {
             defaults.removeObject(forKey: "writingStyle.\(category.rawValue)")
         }
         syncAppClassifierOverrides()   // clear the static per-app overrides cache live
+        // The ring's arrangement is a setting, so it resets. The prompt tools
+        // themselves are user content and survive, exactly like snippets do.
+        ringLayoutStore.resetToDefault()
 
         GlobalShortcutStore.resetToDefaults(defaults: defaults)
         shortcutRecorderWindowController?.close()
@@ -91,6 +94,8 @@ extension NugumiApp {
 extension NugumiApp: SettingsHost {
     var usageStats: UsageStatsStore { usageStatsStore }
     var snippets: SnippetsStore { snippetsStore }
+    var promptTools: PromptToolsStore { promptToolsStore }
+    var ringLayout: RingLayoutStore { ringLayoutStore }
     var history: TranslationHistoryStore { translationHistoryStore }
     var isAppBundle: Bool { isRunningFromAppBundle }
     var appVersionString: String {
