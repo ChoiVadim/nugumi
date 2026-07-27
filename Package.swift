@@ -45,6 +45,7 @@ let package = Package(
             ]
         ),
         .target(name: "NugumiToolIPC"),
+        .target(name: "NugumiToolAgentCore"),
         .target(
             name: "CToolSandbox",
             path: "Sources/CToolSandbox",
@@ -66,6 +67,10 @@ let package = Package(
         .testTarget(
             name: "NugumiToolIPCTests",
             dependencies: ["NugumiToolIPC"]
+        ),
+        .testTarget(
+            name: "NugumiToolAgentCoreTests",
+            dependencies: ["NugumiToolAgentCore"]
         ),
         .testTarget(
             name: "NugumiToolWorkerCoreTests",
