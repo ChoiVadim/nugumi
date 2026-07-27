@@ -38,13 +38,17 @@ let package = Package(
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
                 "CSQLCipher",
+                "NugumiToolAgentCore",
                 "NugumiToolIPC"
             ],
             resources: [
                 .process("Resources")
             ]
         ),
-        .target(name: "NugumiToolIPC"),
+        .target(
+            name: "NugumiToolIPC",
+            dependencies: ["NugumiToolAgentCore"]
+        ),
         .target(name: "NugumiToolAgentCore"),
         .target(
             name: "CToolSandbox",
@@ -53,11 +57,19 @@ let package = Package(
         ),
         .target(
             name: "NugumiToolWorkerCore",
-            dependencies: ["CToolSandbox", "NugumiToolIPC"]
+            dependencies: [
+                "CToolSandbox",
+                "NugumiToolAgentCore",
+                "NugumiToolIPC"
+            ]
         ),
         .executableTarget(
             name: "NugumiToolWorker",
-            dependencies: ["NugumiToolIPC", "NugumiToolWorkerCore"],
+            dependencies: [
+                "NugumiToolAgentCore",
+                "NugumiToolIPC",
+                "NugumiToolWorkerCore"
+            ],
             resources: [.copy("Resources/tool_worker_probe.py")]
         ),
         .testTarget(
@@ -74,7 +86,12 @@ let package = Package(
         ),
         .testTarget(
             name: "NugumiToolWorkerCoreTests",
-            dependencies: ["CToolSandbox", "NugumiToolWorkerCore", "NugumiToolIPC"]
+            dependencies: [
+                "CToolSandbox",
+                "NugumiToolAgentCore",
+                "NugumiToolWorkerCore",
+                "NugumiToolIPC"
+            ]
         )
     ],
     swiftLanguageModes: [.v5]

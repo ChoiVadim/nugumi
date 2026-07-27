@@ -1,8 +1,29 @@
 import Foundation
+import NugumiToolIPC
 import XCTest
 @testable import Nugumi
 
 final class ToolWorkerReplyCoordinatorTests: XCTestCase {
+    func testCandidateProtocolFailureHasStableClientClassification() throws {
+        // Given
+        let failure = CandidateWorkerProtocolFailureV1(
+            code: .invalidRequest
+        )
+        let data = try JSONEncoder().encode(
+            CandidateWorkerReplyV1.protocolFailure(failure)
+        )
+
+        // When
+        XCTAssertThrowsError(try ToolWorkerClient.decodeCandidate(data)) {
+            error in
+            // Then
+            XCTAssertEqual(
+                error as? ToolWorkerClientError,
+                .candidateProtocolFailure(failure)
+            )
+        }
+    }
+
     func testEveryTerminalEventWinsExactlyOnceAgainstAllOtherEvents() {
         for winner in terminalEvents {
             var outcomes: [ReplyOutcome] = []
