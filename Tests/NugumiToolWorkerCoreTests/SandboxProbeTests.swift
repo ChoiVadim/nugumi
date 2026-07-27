@@ -146,7 +146,9 @@ final class SandboxProbeTests: XCTestCase {
         }
         report = {}
         for name, injected in cases.items():
-            def reject(*_args, error=injected, **_kwargs):
+            def reject(address, timeout, error=injected):
+                assert address == ("127.0.0.1", 9)
+                assert timeout == 2
                 raise error
             module.socket.create_connection = reject
             report[name] = module.raw_network_is_denied()

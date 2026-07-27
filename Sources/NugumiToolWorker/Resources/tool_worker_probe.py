@@ -41,7 +41,7 @@ def permission_error_when_writing(path: str) -> bool:
 
 def raw_network_is_denied() -> bool:
     try:
-        connection = socket.create_connection(("example.com", 443), timeout=2)
+        connection = socket.create_connection(("127.0.0.1", 9), timeout=2)
     except OSError as error:
         return error.errno in (errno.EACCES, errno.EPERM)
     connection.close()
