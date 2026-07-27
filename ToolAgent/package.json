@@ -1,0 +1,28 @@
+{
+  "name": "nugumi-tool-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": "22.19.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm build && node --experimental-strip-types --test test/session.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-coding-agent": "0.82.1",
+    "typebox": "1.1.38",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.25.2",
+    "@types/node": "22.19.15",
+    "typescript": "5.9.3",
+    "undici": "8.5.0",
+    "undici-types": "6.21.0"
+  }
+}

@@ -29,16 +29,83 @@ public struct ToolAgentValidationReportV1: Codable, Equatable, Sendable {
     public let fingerprint: ToolAgentFingerprintV1
     public let outcome: ToolAgentValidationOutcomeV1
     public let failure: ToolAgentFailureCodeV1?
+    public let fixtureIndex: Int?
+    public let expectedOutput: String?
+    public let actualOutput: String?
+    public let stderrDetail: String?
+    public let exitCode: Int32?
+    public let terminationSignal: Int32?
+    public let stdoutWasTruncated: Bool
+    public let stderrWasTruncated: Bool
+    public let durationMilliseconds: Int?
+    public let passingFingerprint: ToolAgentFingerprintV1?
 
-    public init(candidateID: UUID, fingerprint: ToolAgentFingerprintV1, outcome: ToolAgentValidationOutcomeV1, failure: ToolAgentFailureCodeV1? = nil) throws {
+    public init(
+        candidateID: UUID,
+        fingerprint: ToolAgentFingerprintV1,
+        outcome: ToolAgentValidationOutcomeV1,
+        failure: ToolAgentFailureCodeV1? = nil,
+        fixtureIndex: Int? = nil,
+        expectedOutput: String? = nil,
+        actualOutput: String? = nil,
+        stderrDetail: String? = nil,
+        exitCode: Int32? = nil,
+        terminationSignal: Int32? = nil,
+        stdoutWasTruncated: Bool = false,
+        stderrWasTruncated: Bool = false,
+        durationMilliseconds: Int? = nil,
+        passingFingerprint: ToolAgentFingerprintV1? = nil
+    ) throws {
         guard ToolAgentFingerprintV1.isValid(fingerprint),
-              ((outcome == .passed && failure == nil) || (outcome == .failed && failure != nil)) else {
+              Self.valid(
+                  outcome: outcome,
+                  failure: failure,
+                  fingerprint: fingerprint,
+                  passingFingerprint: passingFingerprint
+              ),
+              fixtureIndex.map({
+                  (0..<ToolAgentProtocolLimitsV1.maximumFixtureCount).contains($0)
+              }) ?? true,
+              durationMilliseconds.map({ (0...600_000).contains($0) }) ?? true,
+              Self.withinDiagnosticLimit(expectedOutput),
+              Self.withinDiagnosticLimit(actualOutput),
+              Self.withinDiagnosticLimit(stderrDetail) else {
             throw ToolAgentFailureCodeV1.attestationFailed
         }
         self.candidateID = candidateID
         self.fingerprint = fingerprint
         self.outcome = outcome
         self.failure = failure
+        self.fixtureIndex = fixtureIndex
+        self.expectedOutput = expectedOutput
+        self.actualOutput = actualOutput
+        self.stderrDetail = stderrDetail
+        self.exitCode = exitCode
+        self.terminationSignal = terminationSignal
+        self.stdoutWasTruncated = stdoutWasTruncated
+        self.stderrWasTruncated = stderrWasTruncated
+        self.durationMilliseconds = durationMilliseconds
+        self.passingFingerprint = passingFingerprint
+    }
+
+    private static func valid(
+        outcome: ToolAgentValidationOutcomeV1,
+        failure: ToolAgentFailureCodeV1?,
+        fingerprint: ToolAgentFingerprintV1,
+        passingFingerprint: ToolAgentFingerprintV1?
+    ) -> Bool {
+        switch outcome {
+        case .passed:
+            return failure == nil && passingFingerprint == fingerprint
+        case .failed:
+            return failure != nil && passingFingerprint == nil
+        }
+    }
+
+    private static func withinDiagnosticLimit(_ value: String?) -> Bool {
+        value.map {
+            $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumDiagnosticBytes
+        } ?? true
     }
 }
 

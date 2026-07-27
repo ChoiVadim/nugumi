@@ -160,7 +160,12 @@ final class ToolAgentProtocolTests: XCTestCase {
 
         // When
         let write = try ToolAgentWriteCandidateResponseV1(candidateID: candidateID, fingerprint: fingerprint)
-        let validation = try ToolAgentValidationReportV1(candidateID: candidateID, fingerprint: fingerprint, outcome: .passed)
+        let validation = try ToolAgentValidationReportV1(
+            candidateID: candidateID,
+            fingerprint: fingerprint,
+            outcome: .passed,
+            passingFingerprint: fingerprint
+        )
         let finish = try ToolAgentFinishCandidateRequestV1(candidateID: candidateID, fingerprint: fingerprint)
 
         // Then
@@ -174,11 +179,83 @@ final class ToolAgentProtocolTests: XCTestCase {
         let candidate = try makeCandidate()
         let fingerprint = try ToolAgentCandidateFingerprintV1.make(candidate: candidate, runtimeVersion: "3.12.11", policyVersion: "validation-v1")
         let write = try ToolAgentWriteCandidateResponseV1(candidateID: UUID(), fingerprint: fingerprint)
-        let staleValidation = try ToolAgentValidationReportV1(candidateID: UUID(), fingerprint: fingerprint, outcome: .passed)
+        let staleValidation = try ToolAgentValidationReportV1(
+            candidateID: UUID(),
+            fingerprint: fingerprint,
+            outcome: .passed,
+            passingFingerprint: fingerprint
+        )
         let mismatchedFinish = try ToolAgentFinishCandidateRequestV1(candidateID: write.candidateID, fingerprint: ToolAgentFingerprintV1("b".repeated(count: 64)))
 
         XCTAssertThrowsError(try ToolAgentAttestationV1(write: write, validation: staleValidation, finish: .init(candidateID: write.candidateID, fingerprint: fingerprint)))
-        XCTAssertThrowsError(try ToolAgentAttestationV1(write: write, validation: .init(candidateID: write.candidateID, fingerprint: fingerprint, outcome: .passed), finish: mismatchedFinish))
+        XCTAssertThrowsError(
+            try ToolAgentAttestationV1(
+                write: write,
+                validation: .init(
+                    candidateID: write.candidateID,
+                    fingerprint: fingerprint,
+                    outcome: .passed,
+                    passingFingerprint: fingerprint
+                ),
+                finish: mismatchedFinish
+            )
+        )
+    }
+
+    func testValidationReportCarriesBoundedRepairDetail() throws {
+        // Given
+        let fingerprint = ToolAgentFingerprintV1("a".repeated(count: 64))
+        let report = try ToolAgentValidationReportV1(
+            candidateID: UUID(),
+            fingerprint: fingerprint,
+            outcome: .failed,
+            failure: .wrongOutput,
+            fixtureIndex: 0,
+            expectedOutput: "HELLO",
+            actualOutput: "hello",
+            stderrDetail: "",
+            exitCode: 0,
+            stdoutWasTruncated: false,
+            stderrWasTruncated: false,
+            durationMilliseconds: 4
+        )
+
+        // When
+        let decoded = try JSONDecoder().decode(
+            ToolAgentValidationReportV1.self,
+            from: ToolAgentCanonicalJSONV1.encode(report)
+        )
+
+        // Then
+        XCTAssertEqual(decoded, report)
+        XCTAssertEqual(decoded.failure, .wrongOutput)
+        XCTAssertEqual(decoded.expectedOutput, "HELLO")
+        XCTAssertEqual(decoded.actualOutput, "hello")
+    }
+
+    func testValidationReportRejectsUnattestedPassAndOversizeDetail() {
+        // Given
+        let fingerprint = ToolAgentFingerprintV1("a".repeated(count: 64))
+
+        // Then
+        XCTAssertThrowsError(
+            try ToolAgentValidationReportV1(
+                candidateID: UUID(),
+                fingerprint: fingerprint,
+                outcome: .passed
+            )
+        )
+        XCTAssertThrowsError(
+            try ToolAgentValidationReportV1(
+                candidateID: UUID(),
+                fingerprint: fingerprint,
+                outcome: .failed,
+                failure: .runtimeError,
+                stderrDetail: "x".repeated(
+                    count: ToolAgentProtocolLimitsV1.maximumDiagnosticBytes + 1
+                )
+            )
+        )
     }
 
     func testSafeEventMetadataCannotEncodeSensitiveCandidateOrHostData() throws {

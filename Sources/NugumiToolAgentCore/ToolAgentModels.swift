@@ -10,6 +10,7 @@ public enum ToolAgentProtocolLimitsV1 {
     public static let maximumSourceBytes = 64 * 1_024
     public static let maximumFixtureInputBytes = 8 * 1_024
     public static let maximumFixtureOutputBytes = 16 * 1_024
+    public static let maximumDiagnosticBytes = 16 * 1_024
     public static let maximumFixtureCount = 3
     public static let maximumSafeMessageBytes = 1_024
 }
