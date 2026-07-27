@@ -481,6 +481,18 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         // the single source of truth; the per-window .darkAqua pins are redundant.
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
+        if let probeMode = ToolWorkerProbeMode.parse(
+            arguments: ProcessInfo.processInfo.arguments
+        ) {
+            Task { @MainActor in
+                let status = await ToolWorkerClient.runAndWriteReport(
+                    to: probeMode.reportURL
+                )
+                Darwin.exit(status)
+            }
+            return
+        }
+
         // Developer switch: NUGUMI_FIRST_RUN=1 clears the first-run flags so
         // the full install experience (intro video → permissions → feature
         // tour → engine choice → main window) replays on this launch. TCC
