@@ -91,7 +91,7 @@ public struct SandboxProbeResult: Codable, Equatable, Sendable {
     public let workspaceWriteSucceeded: Bool
     public let hostReadDenied: Bool
     public let hostWriteDenied: Bool
-    public var rawNetworkDenied: Bool
+    public let rawNetworkDenied: Bool
     public let mediatedNetworkSucceeded: Bool
     public let stdoutBounded: Bool
     public let stderrBounded: Bool
@@ -135,20 +135,6 @@ public struct SandboxProbeResult: Codable, Equatable, Sendable {
             && pythonVersion == "3.12.11"
             && dependencyVersion == "3.10"
     }
-
-    public static let passingFixture = Self(
-        runID: UUID(),
-        pythonVersion: "3.12.11",
-        dependencyVersion: "3.10",
-        workspaceWriteSucceeded: true,
-        hostReadDenied: true,
-        hostWriteDenied: true,
-        rawNetworkDenied: true,
-        mediatedNetworkSucceeded: true,
-        stdoutBounded: true,
-        stderrBounded: true,
-        timedOutProcessGroupTerminated: true
-    )
 }
 
 public enum SandboxProbeFailureCode: String, Codable, Equatable, Sendable {
