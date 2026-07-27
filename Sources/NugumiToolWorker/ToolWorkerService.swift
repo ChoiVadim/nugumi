@@ -3,14 +3,9 @@ import NugumiToolIPC
 import NugumiToolWorkerCore
 
 final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
-    private struct ActiveRun {
-        var task: Task<Void, Never>?
-    }
-
     private weak var connection: NSXPCConnection?
     private let probe: SandboxProbe?
-    private let lock = NSLock()
-    private var activeRuns: [UUID: ActiveRun] = [:]
+    private let coordinator = ProbeRunCoordinator()
 
     init(connection: NSXPCConnection) {
         self.connection = connection
@@ -25,34 +20,36 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
             SandboxProbeRequest.self,
             from: requestData
         ) else {
-            reply(encodedFailure(runID: nil, code: .invalidRequest))
+            reply(Self.encodedFailure(runID: nil, code: .invalidRequest))
             return
         }
 
-        lock.lock()
-        guard activeRuns[request.runID] == nil else {
-            lock.unlock()
-            reply(encodedFailure(runID: request.runID, code: .invalidRequest))
+        let accepted = coordinator.start(
+            runID: request.runID,
+            operation: { [weak self] executionID in
+                guard let self else {
+                    return .failure(
+                        SandboxProbeFailure(
+                            runID: request.runID,
+                            code: .cancelled
+                        )
+                    )
+                }
+                return await execute(request, executionID: executionID)
+            },
+            reply: { result in
+                reply(Self.encoded(result))
+            }
+        )
+        guard accepted else {
+            reply(
+                Self.encodedFailure(
+                    runID: request.runID,
+                    code: .invalidRequest
+                )
+            )
             return
         }
-        activeRuns[request.runID] = ActiveRun()
-        lock.unlock()
-
-        let task = Task { [weak self] in
-            guard let self else { return }
-            let replyData = await execute(request)
-            removeRun(runID: request.runID)
-            reply(replyData)
-        }
-        lock.lock()
-        guard var run = activeRuns[request.runID] else {
-            lock.unlock()
-            task.cancel()
-            return
-        }
-        run.task = task
-        activeRuns[request.runID] = run
-        lock.unlock()
     }
 
     func cancelProbe(
@@ -63,22 +60,24 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
             reply(false)
             return
         }
-        lock.lock()
-        guard let run = activeRuns.removeValue(forKey: identifier) else {
-            lock.unlock()
-            reply(false)
-            return
-        }
-        let task = run.task
-        lock.unlock()
-        probe?.cancel(runID: identifier)
-        task?.cancel()
-        reply(true)
+        reply(
+            coordinator.cancel(runID: identifier) { [probe] executionID in
+                probe?.cancel(runID: executionID)
+            }
+        )
     }
 
-    private func execute(_ request: SandboxProbeRequest) async -> Data {
+    private func execute(
+        _ request: SandboxProbeRequest,
+        executionID: UUID
+    ) async -> SandboxProbeReply {
         guard let connection, let probe else {
-            return encodedFailure(runID: request.runID, code: .runtimeMissing)
+            return .failure(
+                SandboxProbeFailure(
+                    runID: request.runID,
+                    code: .runtimeMissing
+                )
+            )
         }
         do {
             let fixture = try await ToolWorkerHostBridge.fetchFixture(
@@ -87,13 +86,31 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
             )
             let result = try await probe.run(
                 request: request,
-                mediatedFixture: fixture
+                mediatedFixture: fixture,
+                executionID: executionID
             )
-            return encoded(.success(result))
+            return .success(result)
         } catch let error as SandboxProbeError {
-            return encodedFailure(runID: request.runID, code: code(for: error))
+            return .failure(
+                SandboxProbeFailure(
+                    runID: request.runID,
+                    code: code(for: error)
+                )
+            )
+        } catch HostFixtureBridgeError.cancelled {
+            return .failure(
+                SandboxProbeFailure(
+                    runID: request.runID,
+                    code: .cancelled
+                )
+            )
         } catch {
-            return encodedFailure(runID: request.runID, code: .hostProxyRejected)
+            return .failure(
+                SandboxProbeFailure(
+                    runID: request.runID,
+                    code: .hostProxyRejected
+                )
+            )
         }
     }
 
@@ -110,20 +127,14 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
         }
     }
 
-    private func removeRun(runID: UUID) {
-        lock.lock()
-        activeRuns.removeValue(forKey: runID)
-        lock.unlock()
-    }
-
-    private func encodedFailure(
+    private static func encodedFailure(
         runID: UUID?,
         code: SandboxProbeFailureCode
     ) -> Data {
         encoded(.failure(SandboxProbeFailure(runID: runID, code: code)))
     }
 
-    private func encoded(_ reply: SandboxProbeReply) -> Data {
+    private static func encoded(_ reply: SandboxProbeReply) -> Data {
         (try? JSONEncoder().encode(reply)) ?? Data()
     }
 }

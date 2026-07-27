@@ -23,6 +23,7 @@ public enum SandboxProbeError: Error, Equatable, Sendable {
 public final class SandboxProbe: @unchecked Sendable {
     private struct ExecutionContext {
         let request: SandboxProbeRequest
+        let executionID: UUID
         let workspace: URL
         let fixture: URL
     }
@@ -58,11 +59,15 @@ public final class SandboxProbe: @unchecked Sendable {
 
     public func run(
         request: SandboxProbeRequest,
-        mediatedFixture: Data
+        mediatedFixture: Data,
+        executionID: UUID
     ) async throws -> SandboxProbeResult {
         try requireRuntime()
         let workspace = fileManager.temporaryDirectory
-            .appendingPathComponent("nugumi-tool-probe-\(request.runID.uuidString)", isDirectory: true)
+            .appendingPathComponent(
+                "nugumi-tool-probe-\(executionID.uuidString)",
+                isDirectory: true
+            )
         try fileManager.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: workspace) }
 
@@ -70,6 +75,7 @@ public final class SandboxProbe: @unchecked Sendable {
         try mediatedFixture.write(to: fixture, options: .atomic)
         let context = ExecutionContext(
             request: request,
+            executionID: executionID,
             workspace: workspace,
             fixture: fixture
         )
@@ -141,7 +147,7 @@ public final class SandboxProbe: @unchecked Sendable {
             )
         } ?? context.request.limits
         let command = BoundedCommand(
-            runID: context.request.runID,
+            runID: context.executionID,
             executable: runtime.pythonExecutable,
             arguments: [
                 runtime.script.path,

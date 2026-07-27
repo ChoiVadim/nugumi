@@ -72,6 +72,23 @@ final class SandboxProbeTests: XCTestCase {
         XCTAssertFalse(result.memoryLimitApplied)
     }
 
+    func testActualPythonProbeOnlyAcceptsPermissionErrnosAsNetworkDenial() async throws {
+        let classifications = try await actualProbeNetworkClassifications()
+
+        XCTAssertEqual(
+            classifications,
+            [
+                "EACCES": true,
+                "ECONNREFUSED": false,
+                "EHOSTUNREACH": false,
+                "ENETUNREACH": false,
+                "EPERM": true,
+                "ETIMEDOUT": false,
+                "gaierror": false,
+            ]
+        )
+    }
+
     private func result(
         runID: UUID = UUID(),
         pythonVersion: String = "3.12.11",
@@ -98,5 +115,57 @@ final class SandboxProbeTests: XCTestCase {
             stderrBounded: stderrBounded,
             timedOutProcessGroupTerminated: timedOutProcessGroupTerminated
         )
+    }
+
+    private func actualProbeNetworkClassifications() async throws -> [String: Bool] {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = repository.appendingPathComponent(
+            "Sources/NugumiToolWorker/Resources/tool_worker_probe.py"
+        )
+        let python = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                ".local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12"
+            )
+        let source = """
+        import errno, importlib.util, json, platform, socket, sys
+        assert platform.python_version() == "3.12.11"
+        spec = importlib.util.spec_from_file_location("tool_worker_probe", sys.argv[1])
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cases = {
+            "EPERM": OSError(errno.EPERM, "injected"),
+            "EACCES": OSError(errno.EACCES, "injected"),
+            "ETIMEDOUT": OSError(errno.ETIMEDOUT, "injected"),
+            "ECONNREFUSED": OSError(errno.ECONNREFUSED, "injected"),
+            "EHOSTUNREACH": OSError(errno.EHOSTUNREACH, "injected"),
+            "ENETUNREACH": OSError(errno.ENETUNREACH, "injected"),
+            "gaierror": socket.gaierror(socket.EAI_NONAME, "injected"),
+        }
+        report = {}
+        for name, injected in cases.items():
+            def reject(*_args, error=injected, **_kwargs):
+                raise error
+            module.socket.create_connection = reject
+            report[name] = module.raw_network_is_denied()
+        print(json.dumps(report, sort_keys=True))
+        """
+        let command = BoundedCommand(
+            runID: UUID(),
+            executable: python,
+            arguments: ["-c", source, script.path],
+            workingDirectory: FileManager.default.temporaryDirectory,
+            environment: SandboxProbe.sanitizedEnvironment(
+                home: FileManager.default.temporaryDirectory,
+                runtimeBin: python.deletingLastPathComponent(),
+                temporaryDirectory: FileManager.default.temporaryDirectory
+            ),
+            limits: .feasibility
+        )
+        let output = try await BoundedProcess().run(command)
+        XCTAssertEqual(output.exitCode, 0, String(decoding: output.stderr, as: UTF8.self))
+        return try JSONDecoder().decode([String: Bool].self, from: output.stdout)
     }
 }

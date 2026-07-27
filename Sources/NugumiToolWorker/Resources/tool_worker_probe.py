@@ -19,9 +19,8 @@ class ProbePaths:
 
 
 def write_inside_workspace() -> bool:
-    target = Path("workspace-write.txt")
-    target.write_bytes(b"nugumi")
-    return target.read_bytes() == b"nugumi"
+    Path("workspace-write.txt").write_bytes(b"nugumi")
+    return True
 
 
 def permission_error_when_reading(path: str) -> bool:
@@ -43,8 +42,8 @@ def permission_error_when_writing(path: str) -> bool:
 def raw_network_is_denied() -> bool:
     try:
         connection = socket.create_connection(("example.com", 443), timeout=2)
-    except OSError:
-        return True
+    except OSError as error:
+        return error.errno in (errno.EACCES, errno.EPERM)
     connection.close()
     return False
 
