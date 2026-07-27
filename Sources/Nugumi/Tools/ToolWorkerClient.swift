@@ -85,38 +85,40 @@ enum ToolWorkerClient {
             with: NugumiToolWorkerHostProtocol.self
         )
         connection.exportedObject = ProbeFixtureProxy()
-        let state = ToolWorkerReplyState(connection: connection)
+        let state = ToolWorkerReplyCoordinator {
+            connection.invalidate()
+        }
         connection.interruptionHandler = {
-            state.resolve(.failure(ToolWorkerClientError.connectionUnavailable))
+            state.receive(.interruption)
         }
         connection.invalidationHandler = {
-            state.resolve(.failure(ToolWorkerClientError.connectionUnavailable))
+            state.receive(.invalidation)
         }
         connection.resume()
 
         let requestData = try JSONEncoder().encode(request)
         return try await withTaskCancellationHandler {
-            let replyData = try await withCheckedThrowingContinuation {
+            let replyData: Data = try await withCheckedThrowingContinuation {
                 continuation in
-                state.install(continuation)
+                state.install { continuation.resume(with: $0) }
+                guard !Task.isCancelled else {
+                    state.receive(.cancellation)
+                    return
+                }
                 let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
-                    state.resolve(
-                        .failure(ToolWorkerClientError.connectionUnavailable)
-                    )
+                    state.receive(.remoteProxyError)
                 }
                 guard let worker = proxy as? NugumiToolWorkerProtocol else {
-                    state.resolve(
-                        .failure(ToolWorkerClientError.connectionUnavailable)
-                    )
+                    state.receive(.remoteProxyError)
                     return
                 }
                 worker.runProbe(requestData) { data in
-                    state.resolve(.success(data))
+                    state.receive(.reply(data))
                 }
             }
             return try decode(replyData)
         } onCancel: {
-            state.resolve(.failure(ToolWorkerClientError.cancelled))
+            state.receive(.cancellation)
         }
     }
 
@@ -151,49 +153,5 @@ enum ToolWorkerClient {
             code = .launchFailed
         }
         return SandboxProbeFailure(runID: nil, code: code)
-    }
-}
-
-private final class ToolWorkerReplyState: @unchecked Sendable {
-    private let lock = NSLock()
-    private let connection: NSXPCConnection
-    private var continuation: CheckedContinuation<Data, Error>?
-    private var pendingResult: Result<Data, Error>?
-    private var completed = false
-
-    init(connection: NSXPCConnection) {
-        self.connection = connection
-    }
-
-    func install(_ continuation: CheckedContinuation<Data, Error>) {
-        lock.lock()
-        if let result = pendingResult {
-            pendingResult = nil
-            completed = true
-            lock.unlock()
-            continuation.resume(with: result)
-            connection.invalidate()
-            return
-        }
-        self.continuation = continuation
-        lock.unlock()
-    }
-
-    func resolve(_ result: Result<Data, Error>) {
-        lock.lock()
-        guard !completed, pendingResult == nil else {
-            lock.unlock()
-            return
-        }
-        guard let continuation else {
-            pendingResult = result
-            lock.unlock()
-            return
-        }
-        self.continuation = nil
-        completed = true
-        lock.unlock()
-        continuation.resume(with: result)
-        connection.invalidate()
     }
 }
