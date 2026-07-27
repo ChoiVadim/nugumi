@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-27",
+  "head": "035fd57604cb5d88f03c0bc18a8d6c5ce7f0bd16",
+  "stagedDiffExcludingPreviewDocsSHA256": "fb113becea433cc1c1cfd73c1a0082b71fd360a7c18308649c77f75c2b5c5a2b",
+  "unstagedDiffExcludingPreviewDocsSHA256": "dbb5a59a383d9f5638c81c535563d615c2f3d370f22930a11d84a9fe0fb1b065",
+  "untrackedFileCount": 114,
+  "untrackedPathAndFileHashInventorySHA256": "0d3d58e2ee063e89843335bff6ae4cb8f1fbdbb9c68e626c41297ff4e1fa4ea4",
+  "adoptedBaselineFiles": {
+    "Sources/Nugumi/Tools/ToolGenerator.swift": "94398f87853b3993d00492f5e105d0a15d4dd2e64f3c5dea0accc90aa5a0167a",
+    "Sources/Nugumi/MainWindow/ToolEditor.swift": "b216e5160c3ccf641c2add30641a6f031978d315d55d1c89bd0842c0f49ab8c8",
+    "Sources/Nugumi/App/NugumiApp+ScriptTools.swift": "0ee359e2a49754bb6c0f75b2f72124ebbaf07baa4f63d0d36185ac5cc236b08a",
+    "Sources/Nugumi/LLM/LLMCore.swift": "f81789d19bdfda5030b7c0a563eb0c136ccf57cecb9ad8c51f821ea2ec12b4f2"
+  },
+  "rules": [
+    "Patch adopted files in place.",
+    "Do not reset, stash, or replace the dirty baseline.",
+    "Stage only files owned by the current implementation task.",
+    "Compare final adopted-file changes against these hashes before handoff."
+  ]
+}
