@@ -44,6 +44,15 @@ let package = Package(
             ]
         ),
         .target(name: "NugumiToolIPC"),
+        .target(
+            name: "CToolSandbox",
+            path: "Sources/CToolSandbox",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "NugumiToolWorkerCore",
+            dependencies: ["CToolSandbox", "NugumiToolIPC"]
+        ),
         .testTarget(
             name: "NugumiTests",
             dependencies: ["Nugumi"]
@@ -51,6 +60,10 @@ let package = Package(
         .testTarget(
             name: "NugumiToolIPCTests",
             dependencies: ["NugumiToolIPC"]
+        ),
+        .testTarget(
+            name: "NugumiToolWorkerCoreTests",
+            dependencies: ["NugumiToolWorkerCore", "NugumiToolIPC"]
         )
     ],
     swiftLanguageModes: [.v5]
