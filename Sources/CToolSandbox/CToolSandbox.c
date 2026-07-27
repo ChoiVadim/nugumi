@@ -49,6 +49,20 @@ static int set_limit(int resource, uint64_t value) {
     return setrlimit(resource, &limit);
 }
 
+int nugumi_dup2_clearing_cloexec(int source_fd, int destination_fd) {
+    if (dup2(source_fd, destination_fd) < 0) {
+        return -errno;
+    }
+    int flags = fcntl(destination_fd, F_GETFD);
+    if (flags < 0) {
+        return -errno;
+    }
+    if (fcntl(destination_fd, F_SETFD, flags & ~FD_CLOEXEC) != 0) {
+        return -errno;
+    }
+    return 0;
+}
+
 static int read_child_status(int fd, int *error_number, int *memory_limit_applied) {
     unsigned char bytes[sizeof(*error_number) + 1];
     size_t received = 0;
@@ -136,10 +150,20 @@ pid_t nugumi_spawn_limited(
         if (set_limit(RLIMIT_FSIZE, file_bytes) != 0) {
             child_fail(error_pipe[1]);
         }
-        if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
+        int stdout_result = nugumi_dup2_clearing_cloexec(
+            stdout_fd,
+            STDOUT_FILENO
+        );
+        if (stdout_result < 0) {
+            errno = -stdout_result;
             child_fail(error_pipe[1]);
         }
-        if (dup2(stderr_fd, STDERR_FILENO) < 0) {
+        int stderr_result = nugumi_dup2_clearing_cloexec(
+            stderr_fd,
+            STDERR_FILENO
+        );
+        if (stderr_result < 0) {
+            errno = -stderr_result;
             child_fail(error_pipe[1]);
         }
         if (chdir(working_directory) != 0) {

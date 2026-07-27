@@ -22,6 +22,7 @@ pid_t nugumi_spawn_limited(
 );
 
 int nugumi_kill_process_group(pid_t pid);
+int nugumi_dup2_clearing_cloexec(int source_fd, int destination_fd);
 
 #ifdef __cplusplus
 }

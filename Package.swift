@@ -63,7 +63,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NugumiToolWorkerCoreTests",
-            dependencies: ["NugumiToolWorkerCore", "NugumiToolIPC"]
+            dependencies: ["CToolSandbox", "NugumiToolWorkerCore", "NugumiToolIPC"]
         )
     ],
     swiftLanguageModes: [.v5]
