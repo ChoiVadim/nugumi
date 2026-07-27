@@ -3,12 +3,26 @@ import NugumiToolWorkerCore
 
 enum ToolWorkerRuntime {
     static func bundled() -> SandboxProbeRuntime? {
+        guard let resources = Bundle.main.resourceURL else {
+            return nil
+        }
+        let workerBundleURL = resources.appendingPathComponent(
+            "Nugumi_NugumiToolWorker.bundle",
+            isDirectory: true
+        )
         guard
-            let resources = Bundle.main.resourceURL,
-            let script = Bundle.module.url(
+            let workerResources = Bundle(url: workerBundleURL),
+            let script = workerResources.url(
                 forResource: "tool_worker_probe",
                 withExtension: "py"
-            )
+            ),
+            script.standardizedFileURL == workerBundleURL
+                .appendingPathComponent("tool_worker_probe.py")
+                .standardizedFileURL,
+            let values = try? script.resourceValues(
+                forKeys: [.isRegularFileKey]
+            ),
+            values.isRegularFile == true
         else {
             return nil
         }
