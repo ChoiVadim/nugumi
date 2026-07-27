@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "Nugumi", targets: ["Nugumi"])
+        .executable(name: "Nugumi", targets: ["Nugumi"]),
+        .executable(name: "NugumiToolWorker", targets: ["NugumiToolWorker"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.7.0")
@@ -52,6 +53,11 @@ let package = Package(
         .target(
             name: "NugumiToolWorkerCore",
             dependencies: ["CToolSandbox", "NugumiToolIPC"]
+        ),
+        .executableTarget(
+            name: "NugumiToolWorker",
+            dependencies: ["NugumiToolIPC", "NugumiToolWorkerCore"],
+            resources: [.copy("Resources/tool_worker_probe.py")]
         ),
         .testTarget(
             name: "NugumiTests",
