@@ -36,15 +36,21 @@ let package = Package(
             name: "Nugumi",
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
-                "CSQLCipher"
+                "CSQLCipher",
+                "NugumiToolIPC"
             ],
             resources: [
                 .process("Resources")
             ]
         ),
+        .target(name: "NugumiToolIPC"),
         .testTarget(
             name: "NugumiTests",
             dependencies: ["Nugumi"]
+        ),
+        .testTarget(
+            name: "NugumiToolIPCTests",
+            dependencies: ["NugumiToolIPC"]
         )
     ],
     swiftLanguageModes: [.v5]
