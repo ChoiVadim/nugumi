@@ -1,5 +1,7 @@
 .DS_Store
 .build/
+.build/tool-worker-runtime/
+.build/tool-worker-gate/
 dist/
 *.xcuserdata/
 DerivedData/

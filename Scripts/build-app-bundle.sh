@@ -13,9 +13,18 @@ DMG_RW_PATH="$ROOT/.build/Nugumi.rw.dmg"
 DMG_STAGE="$ROOT/.build/dmg-stage"
 LOCAL_HOME="$ROOT/.build/home"
 LOCAL_MODULE_CACHE="$ROOT/.build/clang-module-cache-release"
+TOOL_WORKER_RUNTIME="$ROOT/.build/tool-worker-runtime/arm64"
 
 # Universal (arm64 + x86_64) by default; pass UNIVERSAL=0 to build host-arch only.
 UNIVERSAL="${UNIVERSAL:-1}"
+if [ "$UNIVERSAL" != "0" ]; then
+    echo "Tool worker packaging is arm64-only until an x86_64 runtime gate is proven. Use UNIVERSAL=0." >&2
+    exit 1
+fi
+if [ "$(/usr/bin/uname -m)" != "arm64" ]; then
+    echo "Tool worker packaging currently requires an arm64 build host." >&2
+    exit 1
+fi
 
 # Signing identity. Default is ad-hoc; set DEVELOPER_ID to a Developer ID
 # certificate name (e.g. 'Developer ID Application: Vadim Choi (XXXXXXXXXX)')
@@ -72,11 +81,23 @@ else
         -Xcc "-fmodules-cache-path=$LOCAL_MODULE_CACHE"
     BINARY_PATH="$ROOT/.build/release/Nugumi"
 fi
+WORKER_BINARY_PATH="$(dirname "$BINARY_PATH")/NugumiToolWorker"
+WORKER_RESOURCE_BUNDLE="$(dirname "$BINARY_PATH")/Nugumi_NugumiToolWorker.bundle"
 
 if [ ! -f "$BINARY_PATH" ]; then
     echo "Build output not found at $BINARY_PATH" >&2
     exit 1
 fi
+if [ ! -f "$WORKER_BINARY_PATH" ]; then
+    echo "Tool worker build output not found at $WORKER_BINARY_PATH" >&2
+    exit 1
+fi
+if [ ! -d "$WORKER_RESOURCE_BUNDLE" ]; then
+    echo "Tool worker resource bundle not found at $WORKER_RESOURCE_BUNDLE" >&2
+    exit 1
+fi
+
+"$ROOT/Scripts/prepare-tool-worker-runtime.sh"
 
 # Restore real HOME so codesign / notarytool can find the user's keychain.
 # Swift build needed the sandboxed HOME above, but signing tools look up
@@ -103,6 +124,20 @@ if [ ! -d "$RESOURCE_BUNDLE" ]; then
 fi
 rm -rf "$RESOURCES_DIR/Nugumi_Nugumi.bundle"
 cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/Nugumi_Nugumi.bundle"
+
+XPC_DIR="$CONTENTS_DIR/XPCServices/NugumiToolWorker.xpc"
+XPC_CONTENTS="$XPC_DIR/Contents"
+XPC_MACOS="$XPC_CONTENTS/MacOS"
+XPC_RESOURCES="$XPC_CONTENTS/Resources"
+mkdir -p "$XPC_MACOS" "$XPC_RESOURCES/Runtime"
+cp "$ROOT/Resources/NugumiToolWorker-Info.plist" "$XPC_CONTENTS/Info.plist"
+cp "$WORKER_BINARY_PATH" "$XPC_MACOS/NugumiToolWorker"
+cp -R "$TOOL_WORKER_RUNTIME/python" "$XPC_RESOURCES/Runtime/python"
+cp -R "$TOOL_WORKER_RUNTIME/site-packages" \
+    "$XPC_RESOURCES/Runtime/site-packages"
+cp "$TOOL_WORKER_RUNTIME/runtime.json" "$XPC_RESOURCES/Runtime/runtime.json"
+cp -R "$WORKER_RESOURCE_BUNDLE" \
+    "$XPC_RESOURCES/Nugumi_NugumiToolWorker.bundle"
 
 # SwiftPM-built binaries don't auto-embed @executable_path/../Frameworks in
 # their rpath, so dyld can't locate Sparkle.framework. Add it explicitly.
@@ -131,6 +166,82 @@ fi
 mkdir -p "$CONTENTS_DIR/Frameworks"
 rm -rf "$CONTENTS_DIR/Frameworks/Sparkle.framework"
 cp -R "$SPARKLE_FRAMEWORK_PATH" "$CONTENTS_DIR/Frameworks/Sparkle.framework"
+
+xattr -cr "$APP_DIR"
+PACKAGED_PYTHON="$XPC_RESOURCES/Runtime/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12"
+PYTHON_ENTITLEMENTS="$ROOT/.build/tool-worker-python-entitlements.plist"
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    /usr/bin/jq -n '{
+        "com.apple.security.app-sandbox": true,
+        "com.apple.security.cs.disable-library-validation": true,
+        "com.apple.security.inherit": true
+    }' |
+        /usr/bin/plutil -convert xml1 -o "$PYTHON_ENTITLEMENTS" -
+else
+    /usr/bin/jq -n '{
+        "com.apple.security.app-sandbox": true,
+        "com.apple.security.inherit": true
+    }' |
+        /usr/bin/plutil -convert xml1 -o "$PYTHON_ENTITLEMENTS" -
+fi
+
+# Sign every runtime Mach-O before sealing the worker and its XPC bundle.
+# Sorting by path length signs the deepest files first.
+while IFS= read -r runtime_file; do
+    if [ "$runtime_file" != "$PACKAGED_PYTHON" ] &&
+        /usr/bin/file -b "$runtime_file" | /usr/bin/grep -q '^Mach-O'; then
+        codesign \
+            --force \
+            --sign "$SIGN_IDENTITY" \
+            --options runtime \
+            "$runtime_file"
+    fi
+done < <(
+    find "$XPC_RESOURCES/Runtime" -type f -print |
+        /usr/bin/awk '{ print length($0), $0 }' |
+        /usr/bin/sort -rn |
+        /usr/bin/cut -d' ' -f2-
+)
+
+codesign \
+    --force \
+    --sign "$SIGN_IDENTITY" \
+    --options runtime \
+    --entitlements "$PYTHON_ENTITLEMENTS" \
+    "$PACKAGED_PYTHON"
+PACKAGED_PYTHON_SHA="$(
+    /usr/bin/shasum -a 256 "$PACKAGED_PYTHON" |
+        /usr/bin/awk '{print $1}'
+)"
+PACKAGED_MANIFEST="$XPC_RESOURCES/Runtime/runtime.json"
+/usr/bin/jq -cS \
+    --arg pythonSHA256 "$PACKAGED_PYTHON_SHA" \
+    '.pythonSHA256 = $pythonSHA256' \
+    "$PACKAGED_MANIFEST" >"$PACKAGED_MANIFEST.tmp"
+mv "$PACKAGED_MANIFEST.tmp" "$PACKAGED_MANIFEST"
+
+codesign \
+    --force \
+    --sign "$SIGN_IDENTITY" \
+    --options runtime \
+    "$XPC_MACOS/NugumiToolWorker"
+codesign \
+    --force \
+    --sign "$SIGN_IDENTITY" \
+    --options runtime \
+    --entitlements "$ROOT/Resources/NugumiToolWorker.entitlements" \
+    "$XPC_DIR"
+
+XPC_ENTITLEMENTS="$ROOT/.build/tool-worker-xpc-entitlements.plist"
+codesign -d --entitlements :- "$XPC_DIR" >"$XPC_ENTITLEMENTS" 2>/dev/null
+if ! /usr/bin/plutil -convert json -o - "$XPC_ENTITLEMENTS" |
+    /usr/bin/jq -e '
+        keys == ["com.apple.security.app-sandbox"] and
+        .["com.apple.security.app-sandbox"] == true
+    ' >/dev/null; then
+    echo "Packaged tool worker entitlements are not App Sandbox-only." >&2
+    exit 1
+fi
 
 # Sign each Sparkle component explicitly with --options runtime so the whole
 # load chain (XPC services → framework → app) shares the same hardened-runtime
