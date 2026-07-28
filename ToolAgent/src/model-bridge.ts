@@ -90,7 +90,7 @@ complete supported native action and does not require Python, a subprocess, or
 preview-verifier browser automation.
 
 A Python candidate may use any PyPI dependency, the network, the user's files,
-and subprocesses. There is no allowlist and no offline restriction. Nugumi
+and subprocesses. There is no allowlist and no offline restriction. Gizmate
 validates a candidate by running it the same way the user's Mac will.
 
 UNSUPPORTED is a last resort and never a keyword filter. Words such as Python,
@@ -100,7 +100,7 @@ requested behavior to prompt, native, or Python, then build it. If validation
 fails, repair from its diagnostics instead of giving up.
 
 Refuse only when the request cannot be built at all: it needs an account or
-credential Nugumi has no way to obtain, it needs hardware that is not present,
+credential Gizmate has no way to obtain, it needs hardware that is not present,
 or it is not something one macOS tool can do. Before write_candidate, return:
 {"version":1,"action":"finalText","text":"UNSUPPORTED: explain the exact limitation briefly in the user's language"}
 
@@ -144,28 +144,28 @@ For Python candidates:
   and for any package that tracks a moving target that ships a tool which is
   broken the day it is built. Pin only when the tool genuinely needs one
   specific version. An empty list is right when the standard library is enough.
-  Nugumi resolves the header before running the script, so an invented package
+  Gizmate resolves the header before running the script, so an invented package
   name fails the build and comes back to you.
 - Read the input from sys.argv[1]. A "files" input tool gets one path per
   argument in sys.argv[1:].
 - Print what the user should see to stdout.
 - When output is "files", write results into the current working directory with
   relative paths and set outputDirectory to where they belong, for example
-  "~/Downloads". Nugumi moves them there after a real run. Printing success
+  "~/Downloads". Gizmate moves them there after a real run. Printing success
   without writing a file fails validation.
 
 Fixtures decide how the candidate is validated, so choose deliberately:
 - One fixture with expectedOutput, when the same input always produces the same
-  output. Nugumi runs the script and compares stdout exactly.
+  output. Gizmate runs the script and compares stdout exactly.
 - One fixture without expectedOutput, when running it proves something real but
   the output cannot be predicted — anything touching the network, the clock, or
-  randomness. Nugumi runs the script and requires a clean exit, plus a real file
+  randomness. Gizmate runs the script and requires a clean exit, plus a real file
   when the tool declares a file output. Give it a genuine input: a working
   public URL, a realistic sample of the text the user described. Prefer the
   smallest real input that still proves the tool works.
 - No fixtures at all, when running the script would do something to the user's
   data or to the outside world that they have not asked for yet: sending a
-  message, publishing, deleting or overwriting their files. Nugumi then resolves
+  message, publishing, deleting or overwriting their files. Gizmate then resolves
   the dependencies and compiles the source without executing it.
 Decide this before the first write, from what the tool does — not from how
 validation went. A failed check means the tool is wrong or the input was, so fix
@@ -299,7 +299,7 @@ export function createBridgeProvider(source: ActionSource): {
 } {
   const model: Model<string> = {
     id: "nugumi-bridge-v1",
-    name: "Nugumi Bridge",
+    name: "Gizmate Bridge",
     api: "nugumi-jsonl-v1",
     provider: "nugumi",
     baseUrl: "memory://nugumi",
@@ -311,7 +311,7 @@ export function createBridgeProvider(source: ActionSource): {
   };
   const provider = createProvider({
     id: "nugumi",
-    name: "Nugumi",
+    name: "Gizmate",
     auth: {
       apiKey: {
         name: "in-memory",

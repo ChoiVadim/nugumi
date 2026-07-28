@@ -12,7 +12,7 @@ guard arguments.count >= 2 else {
 let outputURL = URL(fileURLWithPath: arguments[1])
 let size = NSSize(width: 540, height: 380)
 
-// Nugumi green, brightened so it reads on the dark gray gradient.
+// Gizmate green, brightened so it reads on the dark gray gradient.
 let accent = NSColor(srgbRed: 0.16, green: 0.64, blue: 0.58, alpha: 1.0)
 
 let image = NSImage(size: size)
@@ -65,7 +65,7 @@ func drawCentered(_ text: String, font: NSFont, color: NSColor, y: CGFloat, trac
 
 // Heading — a friendly hook rather than a flat "Install".
 drawCentered(
-    "Give Nugumi a home 😺",
+    "Give Gizmate a home 😺",
     font: NSFont.systemFont(ofSize: 24, weight: .bold),
     color: NSColor.white.withAlphaComponent(0.95),
     y: 322
@@ -90,9 +90,9 @@ arrow.draw(
 // the whole block centred horizontally on its widest row.
 struct Step { let n: String; let label: String }
 let steps = [
-    Step(n: "1", label: "Drag Nugumi to Applications"),
+    Step(n: "1", label: "Drag Gizmate to Applications"),
     Step(n: "2", label: "Double-click Applications to open it"),
-    Step(n: "3", label: "Find Nugumi and open it")
+    Step(n: "3", label: "Find Gizmate and open it")
 ]
 
 let labelFont = NSFont.systemFont(ofSize: 12.5, weight: .medium)

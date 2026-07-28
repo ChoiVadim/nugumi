@@ -1,8 +1,8 @@
-# Nugumi Design System
+# Gizmate Design System
 
 ## 1. Atmosphere & Identity
 
-Nugumi should feel like a quiet Mac-native command surface: compact, glassy, and direct. The signature is dark liquid glass around a restrained near-black settings shell, with a single Nugumi green accent used only for progress, success, and primary action.
+Gizmate should feel like a quiet Mac-native command surface: compact, glassy, and direct. The signature is dark liquid glass around a restrained near-black settings shell, with a single Gizmate green accent used only for progress, success, and primary action.
 
 ## 2. Color
 
@@ -23,7 +23,7 @@ Nugumi should feel like a quiet Mac-native command surface: compact, glassy, and
 
 ### Rules
 
-- Keep Nugumi green functional, not decorative.
+- Keep Gizmate green functional, not decorative.
 - Prefer white opacity tokens over extra gray constants for panels and dividers.
 - New semantic colors must be added here before use.
 

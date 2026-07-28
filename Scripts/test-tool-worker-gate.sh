@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/dist/Nugumi.app"
-MAIN_EXECUTABLE="$APP/Contents/MacOS/Nugumi"
-XPC="$APP/Contents/XPCServices/NugumiToolWorker.xpc"
-WORKER_EXECUTABLE="$XPC/Contents/MacOS/NugumiToolWorker"
+APP="$ROOT/dist/Gizmate.app"
+MAIN_EXECUTABLE="$APP/Contents/MacOS/Gizmate"
+XPC="$APP/Contents/XPCServices/GizmateToolWorker.xpc"
+WORKER_EXECUTABLE="$XPC/Contents/MacOS/GizmateToolWorker"
 RUNTIME="$XPC/Contents/Resources/Runtime"
 GATE_DIR="$ROOT/.build/tool-worker-gate"
 FIRST_REPORT="$GATE_DIR/report-first.json"

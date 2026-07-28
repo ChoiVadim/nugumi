@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Release helper for Nugumi.
+# Release helper for Gizmate.
 #
 # Usage: bash Scripts/release.sh <version>
 #   version: semver string, e.g. 0.2.0
 #
 # What it does:
 #   1. Updates CFBundleShortVersionString and CFBundleVersion in Info.plist.
-#   2. Builds dist/Nugumi.app and dist/Nugumi.dmg via build-app-bundle.sh.
+#   2. Builds dist/Gizmate.app and dist/Gizmate.dmg via build-app-bundle.sh.
 #   3. Calls Sparkle's sign_update to produce an EdDSA signature for the dmg.
 #   4. Appends a new <item> to appcast.xml.
 #   5. Prints next steps (commit, tag, push, GitHub Release upload).
@@ -22,7 +22,7 @@
 #   - git add VERSION? appcast.xml Resources/Info.plist
 #   - git commit -m "Release vX.Y.Z"
 #   - git tag vX.Y.Z && git push --tags
-#   - gh release create vX.Y.Z dist/Nugumi.dmg --title "vX.Y.Z" --notes "..."
+#   - gh release create vX.Y.Z dist/Gizmate.dmg --title "vX.Y.Z" --notes "..."
 
 set -euo pipefail
 
@@ -35,7 +35,7 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFO_PLIST="$ROOT/Resources/Info.plist"
 APPCAST="$ROOT/appcast.xml"
-DMG_PATH="$ROOT/dist/Nugumi.dmg"
+DMG_PATH="$ROOT/dist/Gizmate.dmg"
 DMG_URL_BASE="https://github.com/ChoiVadim/nugumi/releases/download"
 
 # Find sign_update.
@@ -87,7 +87,7 @@ SIGN_OUTPUT="$("$SIGN_UPDATE" "$DMG_PATH")"
 echo "$SIGN_OUTPUT"
 
 # 4. Append item to appcast.xml.
-DMG_FILENAME="Nugumi-$VERSION.dmg"
+DMG_FILENAME="Gizmate-$VERSION.dmg"
 DMG_URL="$DMG_URL_BASE/v$VERSION/$DMG_FILENAME"
 PUB_DATE="$(date -u +"%a, %d %b %Y %H:%M:%S +0000")"
 

@@ -2,14 +2,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT/dist/Nugumi.app"
+APP_DIR="$ROOT/dist/Gizmate.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ICNS_PATH="$ROOT/Resources/AppIcon.icns"
 DMG_BG_PATH="$ROOT/Resources/dmg-background.png"
-DMG_PATH="$ROOT/dist/Nugumi.dmg"
-DMG_RW_PATH="$ROOT/.build/Nugumi.rw.dmg"
+DMG_PATH="$ROOT/dist/Gizmate.dmg"
+DMG_RW_PATH="$ROOT/.build/Gizmate.rw.dmg"
 DMG_STAGE="$ROOT/.build/dmg-stage"
 LOCAL_HOME="$ROOT/.build/home"
 LOCAL_MODULE_CACHE="$ROOT/.build/clang-module-cache-release"
@@ -71,7 +71,7 @@ if [ "$UNIVERSAL" = "1" ]; then
         --config-path "$ROOT/.build/swiftpm-config" \
         --security-path "$ROOT/.build/swiftpm-security" \
         -Xcc "-fmodules-cache-path=$LOCAL_MODULE_CACHE"
-    BINARY_PATH="$ROOT/.build/apple/Products/Release/Nugumi"
+    BINARY_PATH="$ROOT/.build/apple/Products/Release/Gizmate"
 else
     swift build \
         -c release \
@@ -80,10 +80,10 @@ else
         --config-path "$ROOT/.build/swiftpm-config" \
         --security-path "$ROOT/.build/swiftpm-security" \
         -Xcc "-fmodules-cache-path=$LOCAL_MODULE_CACHE"
-    BINARY_PATH="$ROOT/.build/release/Nugumi"
+    BINARY_PATH="$ROOT/.build/release/Gizmate"
 fi
-WORKER_BINARY_PATH="$(dirname "$BINARY_PATH")/NugumiToolWorker"
-WORKER_RESOURCE_BUNDLE="$(dirname "$BINARY_PATH")/Nugumi_NugumiToolWorker.bundle"
+WORKER_BINARY_PATH="$(dirname "$BINARY_PATH")/GizmateToolWorker"
+WORKER_RESOURCE_BUNDLE="$(dirname "$BINARY_PATH")/Gizmate_GizmateToolWorker.bundle"
 
 if [ ! -f "$BINARY_PATH" ]; then
     echo "Build output not found at $BINARY_PATH" >&2
@@ -109,37 +109,37 @@ export HOME="$REAL_HOME"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
-cp "$BINARY_PATH" "$MACOS_DIR/Nugumi"
+cp "$BINARY_PATH" "$MACOS_DIR/Gizmate"
 cp "$ROOT/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ICNS_PATH" "$RESOURCES_DIR/AppIcon.icns"
 
 # SwiftPM emits target resources (the PixelifySans font, etc.) into a
-# generated `Nugumi_Nugumi.bundle` next to the product binary. `Bundle.module`
+# generated `Gizmate_Gizmate.bundle` next to the product binary. `Bundle.module`
 # fatalErrors if it can't find this at runtime — and one of its fallbacks is a
 # build-time absolute path under .build that only exists on the build machine.
 # Without copying the bundle into the .app, the app launches for the builder
 # but crashes on every other Mac the moment any resource is touched.
-RESOURCE_BUNDLE="$(dirname "$BINARY_PATH")/Nugumi_Nugumi.bundle"
+RESOURCE_BUNDLE="$(dirname "$BINARY_PATH")/Gizmate_Gizmate.bundle"
 if [ ! -d "$RESOURCE_BUNDLE" ]; then
     echo "SwiftPM resource bundle not found at $RESOURCE_BUNDLE — did 'swift build' run?" >&2
     exit 1
 fi
-rm -rf "$RESOURCES_DIR/Nugumi_Nugumi.bundle"
-cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/Nugumi_Nugumi.bundle"
+rm -rf "$RESOURCES_DIR/Gizmate_Gizmate.bundle"
+cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/Gizmate_Gizmate.bundle"
 
-XPC_DIR="$CONTENTS_DIR/XPCServices/NugumiToolWorker.xpc"
+XPC_DIR="$CONTENTS_DIR/XPCServices/GizmateToolWorker.xpc"
 XPC_CONTENTS="$XPC_DIR/Contents"
 XPC_MACOS="$XPC_CONTENTS/MacOS"
 XPC_RESOURCES="$XPC_CONTENTS/Resources"
 mkdir -p "$XPC_MACOS" "$XPC_RESOURCES/Runtime"
-cp "$ROOT/Resources/NugumiToolWorker-Info.plist" "$XPC_CONTENTS/Info.plist"
-cp "$WORKER_BINARY_PATH" "$XPC_MACOS/NugumiToolWorker"
+cp "$ROOT/Resources/GizmateToolWorker-Info.plist" "$XPC_CONTENTS/Info.plist"
+cp "$WORKER_BINARY_PATH" "$XPC_MACOS/GizmateToolWorker"
 cp -R "$TOOL_WORKER_RUNTIME/python" "$XPC_RESOURCES/Runtime/python"
 cp -R "$TOOL_WORKER_RUNTIME/site-packages" \
     "$XPC_RESOURCES/Runtime/site-packages"
 cp "$TOOL_WORKER_RUNTIME/runtime.json" "$XPC_RESOURCES/Runtime/runtime.json"
 cp -R "$WORKER_RESOURCE_BUNDLE" \
-    "$XPC_RESOURCES/Nugumi_NugumiToolWorker.bundle"
+    "$XPC_RESOURCES/Gizmate_GizmateToolWorker.bundle"
 
 TOOL_AGENT_RESOURCES="$CONTENTS_DIR/Resources/ToolAgent"
 PACKAGED_NODE="$CONTENTS_DIR/Helpers/ToolAgentNode"
@@ -152,7 +152,7 @@ cp -R "$TOOL_AGENT_RUNTIME/node_modules" "$TOOL_AGENT_RESOURCES/node_modules"
 
 # SwiftPM-built binaries don't auto-embed @executable_path/../Frameworks in
 # their rpath, so dyld can't locate Sparkle.framework. Add it explicitly.
-install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS_DIR/Nugumi" 2>/dev/null || true
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS_DIR/Gizmate" 2>/dev/null || true
 
 # --- Sparkle.framework bundling ---
 # Sparkle.framework is fetched as a SwiftPM binary xcframework. Prefer the
@@ -287,12 +287,12 @@ codesign \
     --force \
     --sign "$SIGN_IDENTITY" \
     --options runtime \
-    "$XPC_MACOS/NugumiToolWorker"
+    "$XPC_MACOS/GizmateToolWorker"
 codesign \
     --force \
     --sign "$SIGN_IDENTITY" \
     --options runtime \
-    --entitlements "$ROOT/Resources/NugumiToolWorker.entitlements" \
+    --entitlements "$ROOT/Resources/GizmateToolWorker.entitlements" \
     "$XPC_DIR"
 
 XPC_ENTITLEMENTS="$ROOT/.build/tool-worker-xpc-entitlements.plist"
@@ -322,11 +322,14 @@ for component in \
 done
 codesign --force --sign "$SIGN_IDENTITY" --options runtime "$CONTENTS_DIR/Frameworks/Sparkle.framework"
 
+# The designated requirement stays pinned to the pre-rename identifier
+# com.nugumi.app so accessibility / screen-recording grants survive rebuilds.
+# Must stay in sync with CFBundleIdentifier in Resources/Info.plist.
 codesign \
     --force \
     --sign "$SIGN_IDENTITY" \
     --options runtime \
-    --entitlements "$ROOT/Resources/Nugumi.entitlements" \
+    --entitlements "$ROOT/Resources/Gizmate.entitlements" \
     --requirements '=designated => identifier "com.nugumi.app"' \
     "$APP_DIR"
 
@@ -337,14 +340,14 @@ xattr -cr "$APP_DIR"
 # the DMG's contents already carry the notarization ticket so Gatekeeper can
 # verify offline.
 if [ -n "$NOTARIZE_PROFILE" ]; then
-    NOTARIZE_ZIP="$ROOT/.build/Nugumi-notarize.zip"
+    NOTARIZE_ZIP="$ROOT/.build/Gizmate-notarize.zip"
     rm -f "$NOTARIZE_ZIP"
     /usr/bin/ditto -c -k --keepParent "$APP_DIR" "$NOTARIZE_ZIP"
-    echo "Submitting Nugumi.app to Apple notary…"
+    echo "Submitting Gizmate.app to Apple notary…"
     xcrun notarytool submit "$NOTARIZE_ZIP" \
         --keychain-profile "$NOTARIZE_PROFILE" \
         --wait
-    echo "Stapling notarization ticket to Nugumi.app…"
+    echo "Stapling notarization ticket to Gizmate.app…"
     xcrun stapler staple "$APP_DIR"
     rm -f "$NOTARIZE_ZIP"
 fi
@@ -357,13 +360,13 @@ fi
 
 # --- Styled DMG packaging ---
 
-# Detach only leftover Nugumi DMG mounts so we land at /Volumes/Nugumi exactly.
+# Detach only leftover Gizmate DMG mounts so we land at /Volumes/Gizmate exactly.
 # Preserve spaces in mount paths and avoid detaching unrelated volumes whose
-# path merely contains the word "Nugumi".
+# path merely contains the word "Gizmate".
 /sbin/mount | /usr/bin/awk -F' on ' '{sub(/ \(.*$/, "", $2); print $2}' |
 while IFS= read -r stale; do
     case "$stale" in
-        /Volumes/Nugumi|/Volumes/Nugumi\ [0-9]*)
+        /Volumes/Gizmate|/Volumes/Gizmate\ [0-9]*)
             /usr/bin/hdiutil detach "$stale" -force >/dev/null 2>&1 || true
             ;;
     esac
@@ -372,14 +375,14 @@ done
 rm -rf "$DMG_STAGE" "$DMG_PATH" "$DMG_RW_PATH"
 mkdir -p "$DMG_STAGE/.background"
 cp "$DMG_BG_PATH" "$DMG_STAGE/.background/dmg-background.png"
-cp -R "$APP_DIR" "$DMG_STAGE/Nugumi.app"
+cp -R "$APP_DIR" "$DMG_STAGE/Gizmate.app"
 
 # Pre-size the DMG with some headroom over the staged content.
 STAGE_SIZE_KB="$(/usr/bin/du -sk "$DMG_STAGE" | awk '{print $1}')"
 DMG_SIZE_MB=$(( STAGE_SIZE_KB / 1024 * 5 / 4 + 64 ))
 
 /usr/bin/hdiutil create \
-    -volname "Nugumi" \
+    -volname "Gizmate" \
     -srcfolder "$DMG_STAGE" \
     -ov \
     -fs HFS+ \
@@ -391,7 +394,7 @@ ATTACH_OUTPUT="$(/usr/bin/hdiutil attach "$DMG_RW_PATH" -nobrowse -noautoopen -r
 MOUNT_DEVICE="$(echo "$ATTACH_OUTPUT" | awk '/^\/dev\// {print $1; exit}')"
 MOUNT_POINT="$(echo "$ATTACH_OUTPUT" | awk -F'\t' '/Apple_HFS/ {print $NF; exit}')"
 if [ -z "$MOUNT_POINT" ]; then
-    MOUNT_POINT="/Volumes/Nugumi"
+    MOUNT_POINT="/Volumes/Gizmate"
 fi
 echo "Mounted at $MOUNT_POINT"
 
@@ -412,7 +415,7 @@ tell application "Finder"
         delete item "Applications" of volumeFolder
     end try
     make new alias file at volumeFolder to applicationsFolder with properties {name:"Applications"}
-    tell disk "Nugumi"
+    tell disk "Gizmate"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -423,7 +426,7 @@ tell application "Finder"
         set icon size of theViewOptions to 104
         set text size of theViewOptions to 12
         set background picture of theViewOptions to file ".background:dmg-background.png"
-        set position of item "Nugumi.app" of container window to {145, 176}
+        set position of item "Gizmate.app" of container window to {145, 176}
         set position of item "Applications" of container window to {395, 176}
         try
             set position of item ".background" of container window to {2000, 2000}
@@ -474,7 +477,7 @@ fi
 
 echo "Packaged $DMG_PATH"
 
-ARCHS_OUT="$(/usr/bin/lipo -archs "$MACOS_DIR/Nugumi" 2>/dev/null || echo unknown)"
+ARCHS_OUT="$(/usr/bin/lipo -archs "$MACOS_DIR/Gizmate" 2>/dev/null || echo unknown)"
 DMG_SIZE="$(/usr/bin/du -h "$DMG_PATH" | cut -f1)"
 echo "Architectures: $ARCHS_OUT"
 echo "DMG size: $DMG_SIZE"

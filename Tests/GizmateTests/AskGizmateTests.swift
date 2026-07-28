@@ -1,0 +1,368 @@
+import XCTest
+@testable import Gizmate
+
+final class AskGizmateTests: XCTestCase {
+    func testExtractsJSONFromFencedResponse() throws {
+        let raw = """
+        Here is the answer:
+        ```json
+        {"message":"Use the button on the right.","emotion":"happy"}
+        ```
+        """
+
+        let response = AskGizmateResponse.parse(raw)
+
+        XCTAssertEqual(response.message, "Use the button on the right.")
+    }
+
+    func testIgnoresStrayLegacyKeysInJSON() {
+        // Older models may still emit retired fields; they must be ignored,
+        // never break message extraction.
+        let raw = """
+        {"message":"That worked.","emotion":"happy"}
+        """
+
+        let response = AskGizmateResponse.parse(raw)
+
+        XCTAssertEqual(response.message, "That worked.")
+    }
+
+    func testFallsBackToPlainMessageForNonJSON() {
+        let response = AskGizmateResponse.parse("The save button is at the top right.")
+
+        XCTAssertEqual(response.message, "The save button is at the top right.")
+    }
+
+    func testBlankDecodedMessageDoesNotFallBackToRawJSON() {
+        let response = AskGizmateResponse.parse("{\"message\":\"   \"}")
+
+        XCTAssertEqual(response.message, "")
+    }
+
+    func testPromptWithImageIncludesCoordinateGuide() {
+        let prompt = AskGizmatePromptBuilder.prompt(question: "Where is the Apple icon?", hasImage: true)
+
+        XCTAssertTrue(prompt.contains("Where is the Apple icon?"))
+        XCTAssertTrue(prompt.contains("normalized from 0.0 to 1.0"))
+        XCTAssertTrue(prompt.contains("geometric center"))
+        XCTAssertTrue(prompt.contains("Never anchor to the top-left of a text label"))
+        // (Literals split so this file passes the repo-wide tombstone grep for the removed field names.)
+        XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
+    }
+
+    func testPromptWithoutImageOmitsCoordinateGuide() {
+        let prompt = AskGizmatePromptBuilder.prompt(question: "What is the capital of Korea?", hasImage: false)
+
+        XCTAssertEqual(prompt, "What is the capital of Korea?")
+        XCTAssertFalse(prompt.contains("normalized"))
+        XCTAssertFalse(prompt.contains("screenshot"))
+    }
+
+    func testSystemPromptDescribesGeneralAgentWithOptionalScreenshot() {
+        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+
+        XCTAssertTrue(prompt.contains("desktop assistant"))
+        XCTAssertTrue(prompt.contains("When the user attaches a screenshot"))
+        XCTAssertTrue(prompt.contains("When no screenshot is attached, answer from general knowledge"))
+        // (Literals split so this file passes the repo-wide tombstone grep for the removed field names.)
+        XCTAssertFalse(prompt.contains("pet" + "Target"))
+        XCTAssertFalse(prompt.contains("screenshot" + "_normalized"))
+        XCTAssertFalse(prompt.contains("The user will provide a screenshot"))
+    }
+
+    func testSystemPromptAllowsMarkdownInMessage() {
+        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+        XCTAssertTrue(prompt.contains("Markdown is welcome"))
+        XCTAssertTrue(prompt.contains("numbered lists for steps"))
+    }
+
+    func testSystemPromptUsesPlainTextPlusAnnotationsFenceProtocol() {
+        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+        XCTAssertTrue(prompt.contains("plain text, not JSON"))
+        XCTAssertTrue(prompt.contains("```annotations"))
+        XCTAssertFalse(prompt.contains("Return only JSON"))
+        XCTAssertFalse(prompt.contains("emotion"))
+        // Gen Z suffix must not resurrect the retired protocol either.
+        XCTAssertFalse(AskGizmatePromptBuilder.systemPrompt(genZ: true).contains("emotion"))
+    }
+
+    @MainActor
+    func testFlattenedMarkdownStripsSyntaxKeepsText() {
+        let flat = TranslationContentView.flattenedMarkdown(
+            "**Bold** term\n- first step\n- second step"
+        )
+        XCTAssertFalse(flat.contains("**"), "emphasis syntax must be resolved")
+        XCTAssertTrue(flat.contains("first step"))
+        XCTAssertTrue(flat.contains("second step"))
+    }
+
+    func testAppendingTurnGrowsHistoryUpToCap() {
+        var history: [AskGizmateTurn] = []
+        for index in 1...3 {
+            history = AskGizmatePromptBuilder.appending(
+                AskGizmateTurn(question: "Q\(index)", answer: "A\(index)"),
+                to: history
+            )
+        }
+
+        XCTAssertEqual(history.count, 3)
+        XCTAssertEqual(history.first?.question, "Q1")
+        XCTAssertEqual(history.last?.answer, "A3")
+    }
+
+    func testAppendingTurnDropsOldestTurnsBeyondCap() {
+        var history: [AskGizmateTurn] = []
+        let overflow = AskGizmatePromptBuilder.maxHistoryTurns + 3
+        for index in 1...overflow {
+            history = AskGizmatePromptBuilder.appending(
+                AskGizmateTurn(question: "Q\(index)", answer: "A\(index)"),
+                to: history
+            )
+        }
+
+        XCTAssertEqual(history.count, AskGizmatePromptBuilder.maxHistoryTurns)
+        XCTAssertEqual(history.first?.question, "Q4")
+        XCTAssertEqual(history.last?.question, "Q\(overflow)")
+    }
+
+    func testAboutContextAppendsBackgroundWithDisambiguationGuard() {
+        let prompt = UserAboutContext.appending(to: "Base prompt.", about: "I'm a software developer.")
+
+        XCTAssertTrue(prompt.hasPrefix("Base prompt."))
+        XCTAssertTrue(prompt.contains("I'm a software developer."))
+        XCTAssertTrue(prompt.contains("disambiguate terms"))
+        XCTAssertTrue(prompt.contains("Do not change the output's tone, style, language, or format"))
+    }
+
+    func testAboutContextLeavesPromptUntouchedWhenEmpty() {
+        XCTAssertEqual(UserAboutContext.appending(to: "Base prompt.", about: "  \n "), "Base prompt.")
+    }
+
+    func testAboutContextIsCappedAtMaxLength() {
+        let oversized = String(repeating: "x", count: UserAboutContext.maxLength + 500)
+        let prompt = UserAboutContext.appending(to: "Base.", about: oversized)
+
+        XCTAssertTrue(prompt.contains(String(repeating: "x", count: UserAboutContext.maxLength)))
+        XCTAssertFalse(prompt.contains(String(repeating: "x", count: UserAboutContext.maxLength + 1)))
+    }
+
+    func testAskSystemPromptIncludesAboutUser() {
+        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false, aboutUser: "I'm a PostgreSQL developer.")
+
+        XCTAssertTrue(prompt.contains("desktop assistant"))
+        XCTAssertTrue(prompt.contains("I'm a PostgreSQL developer."))
+    }
+
+    func testTranslationModeSystemPromptIncludesAboutUser() {
+        UserDefaults.standard.set("I'm a software developer.", forKey: UserAboutContext.defaultsKey)
+        defer { UserDefaults.standard.removeObject(forKey: UserAboutContext.defaultsKey) }
+
+        let prompt = TranslationMode.selection.systemPrompt(
+            targetLanguage: TranslationLanguage.defaultLanguage,
+            appCategory: .other,
+            composition: nil
+        )
+
+        XCTAssertTrue(prompt.contains("I'm a software developer."))
+    }
+
+    func testHistoryStoreRoundTripsWithinMaxAge() throws {
+        let suiteName = "test.askGizmateHistory.roundTrip"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let turns = [AskGizmateTurn(question: "Q1", answer: "A1")]
+        let savedAt = Date(timeIntervalSince1970: 1_000_000)
+
+        AskGizmateHistoryStore.save(turns, defaults: defaults, now: savedAt)
+        let loaded = AskGizmateHistoryStore.load(
+            defaults: defaults,
+            now: savedAt.addingTimeInterval(AskGizmateHistoryStore.maxAge - 1)
+        )
+
+        XCTAssertEqual(loaded, turns)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testHistoryStoreExpiresAfterMaxAge() throws {
+        let suiteName = "test.askGizmateHistory.expiry"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let turns = [AskGizmateTurn(question: "Q1", answer: "A1")]
+        let savedAt = Date(timeIntervalSince1970: 1_000_000)
+
+        AskGizmateHistoryStore.save(turns, defaults: defaults, now: savedAt)
+        let loaded = AskGizmateHistoryStore.load(
+            defaults: defaults,
+            now: savedAt.addingTimeInterval(AskGizmateHistoryStore.maxAge + 1)
+        )
+
+        XCTAssertEqual(loaded, [])
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testPetPromptDismissesOnlyWhenClickTargetsPet() {
+        let petFrame = CGRect(x: 40, y: 50, width: 54, height: 46)
+
+        XCTAssertTrue(AskGizmatePetDismissalPolicy.shouldDismissPrompt(
+            clickPoint: CGPoint(x: 67, y: 73),
+            petFrame: petFrame
+        ))
+        XCTAssertFalse(AskGizmatePetDismissalPolicy.shouldDismissPrompt(
+            clickPoint: CGPoint(x: 160, y: 120),
+            petFrame: petFrame
+        ))
+    }
+
+    func testPetPromptDismissalAllowsSmallPetHitTolerance() {
+        let petFrame = CGRect(x: 40, y: 50, width: 54, height: 46)
+
+        XCTAssertTrue(AskGizmatePetDismissalPolicy.shouldDismissPrompt(
+            clickPoint: CGPoint(x: petFrame.minX - AskGizmatePetDismissalPolicy.hitTolerance, y: petFrame.midY),
+            petFrame: petFrame
+        ))
+        XCTAssertFalse(AskGizmatePetDismissalPolicy.shouldDismissPrompt(
+            clickPoint: CGPoint(x: petFrame.minX - AskGizmatePetDismissalPolicy.hitTolerance - 1, y: petFrame.midY),
+            petFrame: petFrame
+        ))
+    }
+
+    func testSelectionStatusUpdateIsIgnoredWhilePetIsThinkingOrPromptIsVisible() {
+        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: true,
+            isPromptVisible: false
+        ))
+        XCTAssertTrue(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: false,
+            isPromptVisible: true
+        ))
+        XCTAssertFalse(PetSelectionStatusPolicy.shouldPreserveCurrentStatus(
+            isThinking: false,
+            isPromptVisible: false
+        ))
+    }
+
+    func testPetBubblePresentationKeepsPetStillWhenBubbleFitsAboveMascot() {
+        let layout = AskGizmatePromptInputMetrics.layout(forContentHeight: 18)
+        let petOrigin = CGPoint(x: 40, y: 40)
+        let petSize = CGSize(width: 54, height: 46)
+        let presentation = AskGizmatePetBubblePresentationMetrics.presentation(
+            petOrigin: petOrigin,
+            petSize: petSize,
+            promptSize: layout.panelSize,
+            bubbleFrame: layout.bubbleFrame,
+            visibleFrame: CGRect(x: 0, y: 0, width: 420, height: 300),
+            edgeMargin: 6
+        )
+        let bubbleScreenFrame = layout.bubbleFrame.offsetBy(
+            dx: presentation.promptFrame.minX,
+            dy: presentation.promptFrame.minY
+        )
+        let petFrame = CGRect(origin: presentation.petOrigin, size: petSize)
+
+        XCTAssertEqual(presentation.petOrigin.x, petOrigin.x, accuracy: 0.001)
+        XCTAssertEqual(presentation.petOrigin.y, petOrigin.y, accuracy: 0.001)
+        XCTAssertEqual(
+            bubbleScreenFrame.minY - petFrame.maxY,
+            AskGizmatePetBubblePresentationMetrics.bubbleToPetPanelGap,
+            accuracy: 0.001
+        )
+    }
+
+    func testPetBubblePresentationMovesPetBelowTopClampedBubble() {
+        let layout = AskGizmateAnswerBubbleMetrics.layout(forContentHeight: 80)
+        let petSize = CGSize(width: 54, height: 46)
+        let visibleFrame = CGRect(x: 0, y: 0, width: 420, height: 300)
+        let edgeMargin: CGFloat = 6
+        let presentation = AskGizmatePetBubblePresentationMetrics.presentation(
+            petOrigin: CGPoint(x: 40, y: 248),
+            petSize: petSize,
+            promptSize: layout.panelSize,
+            bubbleFrame: layout.bubbleFrame,
+            visibleFrame: visibleFrame,
+            edgeMargin: edgeMargin
+        )
+        let bubbleScreenFrame = layout.bubbleFrame.offsetBy(
+            dx: presentation.promptFrame.minX,
+            dy: presentation.promptFrame.minY
+        )
+        let petFrame = CGRect(origin: presentation.petOrigin, size: petSize)
+
+        XCTAssertEqual(
+            bubbleScreenFrame.minY - petFrame.maxY,
+            AskGizmatePetBubblePresentationMetrics.bubbleToPetPanelGap,
+            accuracy: 0.001
+        )
+        XCTAssertLessThanOrEqual(presentation.promptFrame.maxY, visibleFrame.maxY - edgeMargin)
+    }
+
+    func testPromptInputLayoutIsShorterWithSmallerText() {
+        let layout = AskGizmatePromptInputMetrics.layout(forContentHeight: 18)
+
+        XCTAssertEqual(layout.panelSize.width, 182, accuracy: 0.001)
+        XCTAssertEqual(AskGizmatePromptInputMetrics.fontSize, 13, accuracy: 0.001)
+        XCTAssertLessThan(layout.panelSize.width, AskGizmateAnswerBubbleMetrics.panelWidth)
+    }
+
+    func testPromptInputTextHasSymmetricInnerPadding() {
+        let layout = AskGizmatePromptInputMetrics.layout(forContentHeight: 18)
+
+        XCTAssertEqual(layout.textFrame.minX - layout.bubbleFrame.minX, 30, accuracy: 0.001)
+        XCTAssertEqual(layout.bubbleFrame.maxX - layout.textFrame.maxX, 30, accuracy: 0.001)
+    }
+
+    func testPromptInputMeasuresWrappingBeforeVisibleTextFrameEdge() {
+        let layout = AskGizmatePromptInputMetrics.layout(forContentHeight: 18)
+
+        XCTAssertLessThan(AskGizmatePromptInputMetrics.textMeasurementWidth, layout.textFrame.width)
+        XCTAssertEqual(
+            layout.textFrame.width - AskGizmatePromptInputMetrics.textMeasurementWidth,
+            12,
+            accuracy: 0.001
+        )
+        XCTAssertGreaterThanOrEqual(AskGizmatePromptInputMetrics.textMeasurementBottomInset, 6)
+    }
+
+    func testPromptInputLayoutGrowsWhenTextWraps() {
+        let short = AskGizmatePromptInputMetrics.layout(forContentHeight: 18)
+        let taller = AskGizmatePromptInputMetrics.layout(forContentHeight: 72)
+
+        XCTAssertGreaterThan(taller.panelSize.height, short.panelSize.height)
+        XCTAssertGreaterThan(taller.bubbleFrame.height, short.bubbleFrame.height)
+    }
+
+    func testFloatingPromptLayoutHasTallerPillAndCenteredInput() {
+        let layout = AskGizmateFloatingPromptMetrics.layout
+
+        XCTAssertEqual(layout.pillFrame.size.height, 46, accuracy: 0.001)
+        XCTAssertEqual(layout.panelSize.height, 74, accuracy: 0.001)
+        XCTAssertEqual(layout.cornerRadius, 23, accuracy: 0.001)
+        XCTAssertEqual(layout.textFrame.height, 24, accuracy: 0.001)
+        XCTAssertEqual(layout.textFrame.midY, layout.pillFrame.midY, accuracy: 0.001)
+    }
+
+    func testAnswerBubbleLayoutGrowsBeforeScrollLimit() {
+        let short = AskGizmateAnswerBubbleMetrics.layout(forContentHeight: 30)
+        let taller = AskGizmateAnswerBubbleMetrics.layout(forContentHeight: 120)
+
+        XCTAssertGreaterThan(taller.panelSize.height, short.panelSize.height)
+        XCTAssertGreaterThan(taller.bubbleFrame.height, short.bubbleFrame.height)
+        XCTAssertFalse(taller.needsScroll)
+    }
+
+    func testAnswerTextHasSymmetricInnerPadding() {
+        let layout = AskGizmateAnswerBubbleMetrics.layout(forContentHeight: 80)
+
+        // Metrics stay symmetric; the scroller lane is applied at runtime on
+        // the text container only when a scrollbar is present.
+        XCTAssertEqual(layout.viewportFrame.minX - layout.bubbleFrame.minX, 30, accuracy: 0.001)
+        XCTAssertEqual(layout.bubbleFrame.maxX - layout.viewportFrame.maxX, 30, accuracy: 0.001)
+    }
+
+    func testAnswerBubbleLayoutUsesScrollAfterMaximumHeight() {
+        let layout = AskGizmateAnswerBubbleMetrics.layout(forContentHeight: 600)
+
+        XCTAssertEqual(layout.panelSize.height, AskGizmateAnswerBubbleMetrics.maximumPanelHeight)
+        XCTAssertTrue(layout.needsScroll)
+        XCTAssertGreaterThan(layout.documentHeight, layout.viewportFrame.height)
+    }
+}

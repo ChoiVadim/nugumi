@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-pid_t nugumi_spawn_limited(
+pid_t gizmate_spawn_limited(
     const char *executable,
     char *const argv[],
     char *const envp[],
@@ -21,8 +21,8 @@ pid_t nugumi_spawn_limited(
     int *memory_limit_applied
 );
 
-int nugumi_kill_process_group(pid_t pid);
-int nugumi_dup2_clearing_cloexec(int source_fd, int destination_fd);
+int gizmate_kill_process_group(pid_t pid);
+int gizmate_dup2_clearing_cloexec(int source_fd, int destination_fd);
 
 #ifdef __cplusplus
 }

@@ -3,13 +3,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "Nugumi",
+    name: "Gizmate",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "Nugumi", targets: ["Nugumi"]),
-        .executable(name: "NugumiToolWorker", targets: ["NugumiToolWorker"])
+        .executable(name: "Gizmate", targets: ["Gizmate"]),
+        .executable(name: "GizmateToolWorker", targets: ["GizmateToolWorker"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.7.0")
@@ -34,63 +34,63 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "Nugumi",
+            name: "Gizmate",
             dependencies: [
                 .product(name: "Sparkle", package: "Sparkle"),
                 "CSQLCipher",
-                "NugumiToolAgentCore",
-                "NugumiToolIPC"
+                "GizmateToolAgentCore",
+                "GizmateToolIPC"
             ],
             resources: [
                 .process("Resources")
             ]
         ),
         .target(
-            name: "NugumiToolIPC",
-            dependencies: ["NugumiToolAgentCore"]
+            name: "GizmateToolIPC",
+            dependencies: ["GizmateToolAgentCore"]
         ),
-        .target(name: "NugumiToolAgentCore"),
+        .target(name: "GizmateToolAgentCore"),
         .target(
             name: "CToolSandbox",
             path: "Sources/CToolSandbox",
             publicHeadersPath: "include"
         ),
         .target(
-            name: "NugumiToolWorkerCore",
+            name: "GizmateToolWorkerCore",
             dependencies: [
                 "CToolSandbox",
-                "NugumiToolAgentCore",
-                "NugumiToolIPC"
+                "GizmateToolAgentCore",
+                "GizmateToolIPC"
             ]
         ),
         .executableTarget(
-            name: "NugumiToolWorker",
+            name: "GizmateToolWorker",
             dependencies: [
-                "NugumiToolAgentCore",
-                "NugumiToolIPC",
-                "NugumiToolWorkerCore"
+                "GizmateToolAgentCore",
+                "GizmateToolIPC",
+                "GizmateToolWorkerCore"
             ],
             resources: [.copy("Resources/tool_worker_probe.py")]
         ),
         .testTarget(
-            name: "NugumiTests",
-            dependencies: ["Nugumi"]
+            name: "GizmateTests",
+            dependencies: ["Gizmate"]
         ),
         .testTarget(
-            name: "NugumiToolIPCTests",
-            dependencies: ["NugumiToolIPC"]
+            name: "GizmateToolIPCTests",
+            dependencies: ["GizmateToolIPC"]
         ),
         .testTarget(
-            name: "NugumiToolAgentCoreTests",
-            dependencies: ["NugumiToolAgentCore"]
+            name: "GizmateToolAgentCoreTests",
+            dependencies: ["GizmateToolAgentCore"]
         ),
         .testTarget(
-            name: "NugumiToolWorkerCoreTests",
+            name: "GizmateToolWorkerCoreTests",
             dependencies: [
                 "CToolSandbox",
-                "NugumiToolAgentCore",
-                "NugumiToolWorkerCore",
-                "NugumiToolIPC"
+                "GizmateToolAgentCore",
+                "GizmateToolWorkerCore",
+                "GizmateToolIPC"
             ]
         )
     ],

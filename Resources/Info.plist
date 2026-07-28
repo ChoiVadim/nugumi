@@ -3,13 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>Nugumi</string>
+	<string>Gizmate</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<!-- Deliberately still com.nugumi.app after the rename to Gizmate. TCC keys
+	     Accessibility / Screen Recording / Microphone grants off the bundle ID,
+	     and the UserDefaults domain is the bundle ID too. Changing it wipes every
+	     existing user's permissions and settings. -->
 	<key>CFBundleIdentifier</key>
 	<string>com.nugumi.app</string>
 	<key>CFBundleName</key>
-	<string>Nugumi</string>
+	<string>Gizmate</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -21,12 +25,12 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Nugumi uses the microphone to translate what you say in real time into live captions.</string>
+	<string>Gizmate uses the microphone to translate what you say in real time into live captions.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Nugumi captures the selected screen area so it can recognize visible text and translate it.</string>
-	<key>NugumiPostHogAPIKey</key>
+	<string>Gizmate captures the selected screen area so it can recognize visible text and translate it.</string>
+	<key>GizmatePostHogAPIKey</key>
 	<string>phc_sFcbh5NcPxOFnpEOoQhxTRQ6dFo667xQX8c10P9cUZ9</string>
-	<key>NugumiPostHogEndpoint</key>
+	<key>GizmatePostHogEndpoint</key>
 	<string>https://app.posthog.com/batch/</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>

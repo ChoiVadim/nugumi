@@ -78,7 +78,7 @@ export async function runSidecar(
       noThemes: true,
       noContextFiles: true,
       systemPrompt:
-        "Build and verify one complete Nugumi tool using only the five available tools. For Create, Edit, and Fix, ask up to three short clarifications before the first candidate write only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.",
+        "Build and verify one complete Gizmate tool using only the five available tools. For Create, Edit, and Fix, ask up to three short clarifications before the first candidate write only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.",
     });
     await loader.reload();
     const tools = createTools(activeRuntime);

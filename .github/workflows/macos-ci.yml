@@ -40,15 +40,15 @@ jobs:
 
       - name: Verify app bundle artifacts
         run: |
-          test -d dist/Nugumi.app
-          test -f dist/Nugumi.dmg
-          test -d dist/Nugumi.app/Contents/Resources/Nugumi_Nugumi.bundle
-          plutil -lint dist/Nugumi.app/Contents/Info.plist
+          test -d dist/Gizmate.app
+          test -f dist/Gizmate.dmg
+          test -d dist/Gizmate.app/Contents/Resources/Gizmate_Gizmate.bundle
+          plutil -lint dist/Gizmate.app/Contents/Info.plist
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: Nugumi-${{ github.sha }}.dmg
-          path: dist/Nugumi.dmg
+          name: Gizmate-${{ github.sha }}.dmg
+          path: dist/Gizmate.dmg
           if-no-files-found: error
           retention-days: 14

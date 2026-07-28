@@ -49,7 +49,7 @@ static int set_limit(int resource, uint64_t value) {
     return setrlimit(resource, &limit);
 }
 
-int nugumi_dup2_clearing_cloexec(int source_fd, int destination_fd) {
+int gizmate_dup2_clearing_cloexec(int source_fd, int destination_fd) {
     if (dup2(source_fd, destination_fd) < 0) {
         return -errno;
     }
@@ -92,7 +92,7 @@ static int read_child_status(int fd, int *error_number, int *memory_limit_applie
     return -EIO;
 }
 
-pid_t nugumi_spawn_limited(
+pid_t gizmate_spawn_limited(
     const char *executable,
     char *const argv[],
     char *const envp[],
@@ -150,7 +150,7 @@ pid_t nugumi_spawn_limited(
         if (set_limit(RLIMIT_FSIZE, file_bytes) != 0) {
             child_fail(error_pipe[1]);
         }
-        int stdout_result = nugumi_dup2_clearing_cloexec(
+        int stdout_result = gizmate_dup2_clearing_cloexec(
             stdout_fd,
             STDOUT_FILENO
         );
@@ -158,7 +158,7 @@ pid_t nugumi_spawn_limited(
             errno = -stdout_result;
             child_fail(error_pipe[1]);
         }
-        int stderr_result = nugumi_dup2_clearing_cloexec(
+        int stderr_result = gizmate_dup2_clearing_cloexec(
             stderr_fd,
             STDERR_FILENO
         );
@@ -201,7 +201,7 @@ pid_t nugumi_spawn_limited(
     return pid;
 }
 
-int nugumi_kill_process_group(pid_t pid) {
+int gizmate_kill_process_group(pid_t pid) {
     if (pid <= 1) {
         return -EINVAL;
     }

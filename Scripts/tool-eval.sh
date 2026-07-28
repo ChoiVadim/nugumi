@@ -24,4 +24,4 @@ fi
 (cd "$ROOT/ToolAgent" && npx tsc -p tsconfig.json)
 
 cd "$ROOT"
-swift run Nugumi "${ARGS[@]}"
+swift run Gizmate "${ARGS[@]}"

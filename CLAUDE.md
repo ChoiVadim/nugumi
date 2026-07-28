@@ -1,15 +1,35 @@
-# Nugumi — Maintainer Instructions
+# Gizmate — Maintainer Instructions
 
-This file is loaded as project context by Claude Code. It contains operational instructions that apply to every session working on Nugumi, not user-facing documentation.
+This file is loaded as project context by Claude Code. It contains operational instructions that apply to every session working on Gizmate, not user-facing documentation.
 
 ## Project at a glance
 
 - macOS menu bar app, Swift Package Manager, deployment target macOS 14.
 - Bundle ID: `com.nugumi.app`. GitHub repo: `ChoiVadim/nugumi` (`origin`).
 - GitHub CLI account for this repo: use `ChoiVadim`. If multiple accounts are configured locally, prefer `gh-vadim ...` or run `gh-use-vadim` before release/repo operations.
-- Sources are split by subsystem into feature folders under `Sources/Nugumi/` (`App/`, `Selection/`, `Panels/`, `Ask/`, `Pet/`, `Ring/`, `LLM/`, `Live/`, `Archive/`, `MainWindow/`) — one subsystem per file. `App/App.swift` holds only the `NugumiApp` app delegate and its extensions. SwiftPM discovers files recursively; adding a file needs no `Package.swift` change. `App/Bootstrap.swift` covers the Ollama setup wizard.
+- Sources are split by subsystem into feature folders under `Sources/Gizmate/` (`App/`, `Selection/`, `Panels/`, `Ask/`, `Pet/`, `Ring/`, `LLM/`, `Live/`, `Archive/`, `MainWindow/`) — one subsystem per file. `App/App.swift` holds only the `GizmateApp` app delegate and its extensions. SwiftPM discovers files recursively; adding a file needs no `Package.swift` change. `App/Bootstrap.swift` covers the Ollama setup wizard.
 - Distribution: ad-hoc signed `.app` + universal DMG packaged via `Scripts/build-app-bundle.sh`. In-app updates via Sparkle 2.9.1.
-- Renamed from "Yaku" to "Nugumi" at v0.6.0. Existing v0.5.0 (Yaku) installs will not auto-migrate via Sparkle — they must download the new bundle manually from GitHub Releases. The Sparkle EdDSA key is unchanged across the rename.
+- Renamed twice: "Yaku" → "Nugumi" at v0.6.0, then "Nugumi" → "Gizmate". Existing v0.5.0 (Yaku) installs never auto-migrated via Sparkle and must download the new bundle manually. The Gizmate rename deliberately kept the bundle ID, feed URL, and EdDSA key untouched, so it updates in place like any other release — see "Identity that must not change" below.
+
+## Identity that must not change
+
+The app is called Gizmate, but its identity to macOS is still `nugumi`. This is
+deliberate and load-bearing. Do **not** "finish the rename" on anything below —
+each one costs existing users something they cannot get back by reinstalling.
+
+| Stays `nugumi`                         | Where                                                                                                                                                                    | Cost of changing it                                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `com.nugumi.app` bundle ID             | `Resources/Info.plist`                                                                                                                                                   | TCC keys Accessibility / Screen Recording / Microphone off the bundle ID. Every user re-grants from scratch |
+| designated requirement                 | `Scripts/build-app-bundle.sh`                                                                                                                                            | Same grants, pinned at signing time                                                                         |
+| UserDefaults domain + keys             | domain is the bundle ID; `com.nugumi.app.usageStats.events.v1`, `com.nugumi.app.translationHistory.v1`, `askNugumiModelID`, `askNugumiThinkingLevel`, `askNugumiHistory` | Settings, history and stats silently vanish                                                                 |
+| `~/Library/Application Support/Nugumi` | `App/GizmatePaths.swift`, `LLM/LLMCore.swift`                                                                                                                            | API keys and OAuth tokens live here as plain files. Everyone is signed out of every provider                |
+| `com.nugumi.app.tool-worker`           | `Tools/ToolWorkerClient.swift`, `Resources/GizmateToolWorker-Info.plist`                                                                                                 | XPC lookup fails; tool runs die                                                                             |
+| `SUFeedURL`, `SUPublicEDKey`           | `Resources/Info.plist`                                                                                                                                                   | Update channel breaks for everyone already installed                                                        |
+| `ChoiVadim/nugumi` URLs                | `Info.plist`, `Scripts/release.sh`, README badges                                                                                                                        | Shipped builds poll the old URL forever                                                                     |
+| `nugumi-tool-agent`                    | `ToolAgent/package.json`, `Scripts/prepare-tool-agent-runtime.sh`                                                                                                        | Internal pnpm workspace name. Renaming means regenerating the lockfile for zero user benefit                |
+
+`appcast.xml` is append-only history: its 63 existing `<enclosure>` URLs point at
+DMGs that really exist on GitHub under those exact names. Never bulk-edit it.
 
 ## Cutting a release
 
@@ -21,32 +41,32 @@ export SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin"
 bash Scripts/release.sh 0.6.0
 
 # Then commit + tag + GitHub Release. Tag must be vX.Y.Z (the appcast item's
-# enclosure URL is built as github.com/ChoiVadim/nugumi/releases/download/vX.Y.Z/Nugumi-X.Y.Z.dmg).
+# enclosure URL is built as github.com/ChoiVadim/nugumi/releases/download/vX.Y.Z/Gizmate-X.Y.Z.dmg).
 git add Resources/Info.plist appcast.xml
 git commit -m "Release v0.6.0"
 git tag v0.6.0 && git push origin main --tags
-gh release create v0.6.0 dist/Nugumi-0.6.0.dmg --title "v0.6.0" --notes "Release notes here"
+gh release create v0.6.0 dist/Gizmate-0.6.0.dmg --title "v0.6.0" --notes "Release notes here"
 ```
 
 What `Scripts/release.sh` does, in order:
 
 1. Bumps `CFBundleShortVersionString` to the supplied version and increments `CFBundleVersion`.
-2. Runs `Scripts/build-app-bundle.sh` to produce `dist/Nugumi.app` and `dist/Nugumi.dmg` (universal arm64 + x86_64, ad-hoc signed, Sparkle.framework bundled and signed).
+2. Runs `Scripts/build-app-bundle.sh` to produce `dist/Gizmate.app` and `dist/Gizmate.dmg` (universal arm64 + x86_64, ad-hoc signed, Sparkle.framework bundled and signed).
 3. Signs the DMG via Sparkle's `sign_update` (uses the EdDSA private key in macOS Keychain).
 4. Appends an `<item>` to `appcast.xml` with `sparkle:edSignature`, length, version metadata.
-5. Renames `dist/Nugumi.dmg` → `dist/Nugumi-<version>.dmg` so the URL in the appcast matches the GitHub Release asset name.
+5. Renames `dist/Gizmate.dmg` → `dist/Gizmate-<version>.dmg` so the URL in the appcast matches the GitHub Release asset name.
 
-After the GitHub Release is published, all installed copies of Nugumi will see the new version on their next daily Sparkle check (or immediately when the user clicks "Check for Updates...").
+After the GitHub Release is published, all installed copies of Gizmate will see the new version on their next daily Sparkle check (or immediately when the user clicks "Check for Updates...").
 
 ## Sparkle keys
 
-- Public key is committed to `Resources/Info.plist` as `SUPublicEDKey`. **Never** rotate this casually — every shipped Nugumi (and prior Yaku) build has it baked in, and all updates must be signed with the matching private key.
+- Public key is committed to `Resources/Info.plist` as `SUPublicEDKey`. **Never** rotate this casually — every shipped build (Gizmate, Nugumi, and prior Yaku) has it baked in, and all updates must be signed with the matching private key.
 - Private key lives in the maintainer's macOS Keychain (item name `https://sparkle-project.org`). It is **never** committed.
 - If the private key is ever lost or compromised: generate a new pair (`./.build/artifacts/sparkle/Sparkle/bin/generate_keys`), update `SUPublicEDKey`, ship a new release manually (existing installs that haven't taken the rotation update will be stuck on the old key).
 
 ## Build script invariants
 
-- `Scripts/build-app-bundle.sh` must remain idempotent. Running it twice should produce a clean `dist/Nugumi.app`.
+- `Scripts/build-app-bundle.sh` must remain idempotent. Running it twice should produce a clean `dist/Gizmate.app`.
 - The script signs Sparkle's inner XPC services and helpers individually (Downloader.xpc, Installer.xpc, Autoupdate, Updater.app) before signing the framework wrapper, then signs the app bundle with `--options runtime`. Hardened runtime is **required** by Sparkle 2.x.
 - The Sparkle framework must come from the universal `Sparkle.xcframework/macos-arm64_x86_64` slice. The script falls back to a generic `find` only if the universal slice is missing (e.g. host-arch only build).
 - Designated requirement is pinned to `identifier "com.nugumi.app"` so accessibility/screen-recording permissions persist across rebuilds.
@@ -89,18 +109,18 @@ bash Scripts/release.sh 0.6.0
 git add Resources/Info.plist appcast.xml
 git commit -m "Release v0.6.0"
 git tag v0.6.0 && git push origin main --tags
-gh release create v0.6.0 dist/Nugumi-0.6.0.dmg --title "v0.6.0" --notes "..."
+gh release create v0.6.0 dist/Gizmate-0.6.0.dmg --title "v0.6.0" --notes "..."
 ```
 
 Notarization adds 2–5 minutes per release; `xcrun notarytool submit --wait` blocks until Apple finishes. The DMG is sent twice (once for the bundled `.app`, once for the DMG container itself) so Gatekeeper can verify offline at every stage.
 
 ### Sharing the build with users
 
-Just send the GitHub Release URL: `https://github.com/ChoiVadim/nugumi/releases/latest`. Users click "Nugumi-X.Y.Z.dmg", mount, drag to Applications. Repeat for the link itself if convenient. After install, the in-app updater takes over.
+Just send the GitHub Release URL: `https://github.com/ChoiVadim/nugumi/releases/latest`. Users click "Gizmate-X.Y.Z.dmg", mount, drag to Applications. Repeat for the link itself if convenient. After install, the in-app updater takes over.
 
 ## Source layout rules
 
-- One subsystem per file, sorted into the feature folders listed above. New code goes into the file that owns its subsystem (or a new file in the right folder — target under ~400 lines; name extensions `Type+Feature.swift`). `App/App.swift` holds only `NugumiApp` (the `@main` app delegate) and its extensions. When extracting or moving code, do it as pure code motion — no behavior change, `swift build` green after every move — and promote `private` → `internal` only when a use crosses files. Never create a file named `main.swift`.
+- One subsystem per file, sorted into the feature folders listed above. New code goes into the file that owns its subsystem (or a new file in the right folder — target under ~400 lines; name extensions `Type+Feature.swift`). `App/App.swift` holds only `GizmateApp` (the `@main` app delegate) and its extensions. When extracting or moving code, do it as pure code motion — no behavior change, `swift build` green after every move — and promote `private` → `internal` only when a use crosses files. Never create a file named `main.swift`.
 - `TranslationMode` declares per-mode metadata (`resultLabel`, `loadingPlaceholder`, `systemPrompt`). New modes go through this enum, not via callsite branching.
 - `OllamaModelOption.all` is the source of truth for which models the menu offers. Update it when adding model variants — do not hardcode model IDs in `OllamaClient` or `OllamaBootstrap`.
 - The floating button uses a single `NSButton` whose `title` and `image` swap based on `TranslationMode`. Don't reintroduce overlapping `NSTextField` / `NSImageView` views — they break centering.
@@ -124,11 +144,11 @@ cp /tmp/AppIcon.iconset/icon_256x256@2x.png docs/screenshots/logo.png
 ## Local development
 
 ```sh
-swift run Nugumi                  # debug build, no .app bundle, Sparkle inert.
+swift run Gizmate                  # debug build, no .app bundle, Sparkle inert.
 bash Scripts/build-app-bundle.sh  # full universal release bundle + DMG.
 ```
 
-In `swift run` mode Sparkle is fully inert: `updaterController` is `nil` and the "Check for Updates..." menu item is hidden. Sparkle requires a real `.app` bundle (Frameworks/Sparkle.framework + hardened runtime + Info.plist), so end-to-end update testing must use `bash Scripts/build-app-bundle.sh` and run `dist/Nugumi.app`.
+In `swift run` mode Sparkle is fully inert: `updaterController` is `nil` and the "Check for Updates..." menu item is hidden. Sparkle requires a real `.app` bundle (Frameworks/Sparkle.framework + hardened runtime + Info.plist), so end-to-end update testing must use `bash Scripts/build-app-bundle.sh` and run `dist/Gizmate.app`.
 
 ## Tool generation: the validation set
 
@@ -156,13 +176,13 @@ the agent can build tools; the next request the user invents will fail exactly
 as before. Fix the generic machinery — budgets, diagnostics, capabilities, the
 validation contract — and let the model find the answer.
 
-## Restart the app after changes (use `swift run Nugumi`)
+## Restart the app after changes (use `swift run Gizmate`)
 
-After any code change the user wants to see, restart the app — otherwise the user is looking at stale UI. **For testing, use `swift run Nugumi`, not a full bundle rebuild.** Kill the previous instance first and relaunch:
+After any code change the user wants to see, restart the app — otherwise the user is looking at stale UI. **For testing, use `swift run Gizmate`, not a full bundle rebuild.** Kill the previous instance first and relaunch:
 
 ```sh
-pkill -f 'Nugumi' ; swift run Nugumi   # quick debug run — this is the default test step
+pkill -f 'Gizmate' ; swift run Gizmate   # quick debug run — this is the default test step
 ```
 
-- `swift run Nugumi` is the fast dev loop for UI/behavior iteration (a debug build, Sparkle inert). Do NOT run `bash Scripts/build-app-bundle.sh` just to see a change — that full universal signed bundle is only for release, Sparkle/update testing, or when a feature needs TCC permissions correctly attributed to `com.nugumi.app` rather than the shell (the "TCC launch trap").
+- `swift run Gizmate` is the fast dev loop for UI/behavior iteration (a debug build, Sparkle inert). Do NOT run `bash Scripts/build-app-bundle.sh` just to see a change — that full universal signed bundle is only for release, Sparkle/update testing, or when a feature needs TCC permissions correctly attributed to `com.nugumi.app` rather than the shell (the "TCC launch trap").
 - Run it in the background so it doesn't block, and re-run (kill + `swift run`) after each subsequent change.
