@@ -618,7 +618,7 @@ private final class SnippetRow: NSView, NSTextFieldDelegate {
 
     private func updateActionButton() {
         actionButton.title = isEditing ? "✓" : "✕"
-        actionButton.contentTintColor = isEditing ? .systemGreen : nil
+        actionButton.contentTintColor = isEditing ? .gizmateAccent : nil
         actionButton.toolTip = isEditing ? "Save" : "Delete"
     }
 }

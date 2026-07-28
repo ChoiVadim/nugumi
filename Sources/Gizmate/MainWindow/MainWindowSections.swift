@@ -425,22 +425,25 @@ private struct InsightsContent: View {
     }
 }
 
-/// Slice colors for the breakdown donuts: the leading (largest) share wears the
-/// Gizmate green, everything behind it falls back to quiet monochrome whites.
+/// Slice colors for the breakdown donuts. With a monochrome palette the only
+/// thing separating slices is lightness, so the ramp has to descend strictly:
+/// the leading share takes full white and every slice behind it steps down.
+/// Using `FlowTheme.accent` for the leader would put it *below* the first
+/// shade and quietly invert the ranking the chart is meant to show.
 private enum BreakdownPalette {
     static func color(_ index: Int) -> Color {
-        index == 0 ? FlowTheme.accent : shade(index - 1)
+        index == 0 ? Color.white : shade(index - 1)
     }
 
     static func shade(_ index: Int) -> Color {
-        let opacities: [Double] = [0.85, 0.55, 0.34, 0.20, 0.12]
+        let opacities: [Double] = [0.62, 0.42, 0.28, 0.18, 0.10]
         return Color.white.opacity(opacities[min(index, opacities.count - 1)])
     }
 }
 
 /// A hand-rolled donut chart for the breakdown columns. Each slice is a trimmed
-/// circle stroked thickly into a ring segment; the leading slice is green (via
-/// `BreakdownPalette`). The center holds the dominant share. Tiny angular gaps
+/// circle stroked thickly into a ring segment; the leading slice is the
+/// brightest (via `BreakdownPalette`). The center holds the dominant share. Tiny angular gaps
 /// separate slices without an overlay.
 private struct DonutChart: View {
     let fractions: [Double]

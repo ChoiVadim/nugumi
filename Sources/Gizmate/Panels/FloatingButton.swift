@@ -359,7 +359,7 @@ final class FloatingTranslateButtonView: NSView {
         let glass = GlassHostView(
             frame: bounds,
             cornerRadius: bounds.width / 2,
-            tintColor: NSColor(srgbRed: 0.06, green: 0.12, blue: 0.22, alpha: 0.55),
+            tintColor: NSColor(white: 0.12, alpha: 0.55),
             style: .regular
         )
         glass.autoresizingMask = [.width, .height]

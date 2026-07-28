@@ -2,14 +2,9 @@ import AppKit
 import Foundation
 
 extension NSColor {
-    /// Gizmate brand accent (#11766E) — replaces the system blue selection
-    /// tint across the setup window.
-    static let gizmateAccent = NSColor(
-        red: 0x11 / 255.0,
-        green: 0x76 / 255.0,
-        blue: 0x6E / 255.0,
-        alpha: 1
-    )
+    /// Gizmate accent — replaces the system blue selection tint across the
+    /// setup window. Monochrome to match `FlowTheme.accent`; keep the two in sync.
+    static let gizmateAccent = NSColor(white: 0.788, alpha: 1)
 }
 
 enum CloudTestResult {

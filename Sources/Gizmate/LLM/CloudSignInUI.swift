@@ -15,7 +15,6 @@ import Vision
 /// Builds the borderless dark HUD panel that floats above the browser without
 /// stealing focus. Shared so the ChatGPT and Claude sign-in flows look identical.
 enum SignInHUD {
-    static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
 
     static func makePanel<Content: View>(hosting: NSHostingView<Content>, title: String) -> NSPanel {
         // The titled+fullSizeContentView panel reports the titlebar as a top
@@ -76,7 +75,7 @@ enum SignInHUD {
         return panel
     }
 
-    /// Numbered mint step bullet + label, shared by both sign-in panels.
+    /// Numbered step bullet + label, shared by both sign-in panels.
     @ViewBuilder
     static func stepRow(_ number: Int, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
@@ -84,7 +83,7 @@ enum SignInHUD {
                 .font(.system(size: 9.5, weight: .bold))
                 .foregroundStyle(Color.black.opacity(0.82))
                 .frame(width: 15, height: 15)
-                .background(Circle().fill(mint))
+                .background(Circle().fill(FlowTheme.accentBright))
             Text(text)
                 .font(.system(size: 11.5))
                 .foregroundStyle(Color.white.opacity(0.78))
@@ -221,7 +220,7 @@ private struct ClaudeCodeLoginPanelView: View {
                 Button(action: { model.onOpenPage() }) {
                     Text("Open page again")
                         .font(.system(size: 11.5))
-                        .foregroundStyle(SignInHUD.mint)
+                        .foregroundStyle(FlowTheme.accentBright)
                 }
                 .buttonStyle(.plain)
 
@@ -250,7 +249,7 @@ private struct ClaudeCodeLoginPanelView: View {
                         .foregroundStyle(Color.black.opacity(0.85))
                         .padding(.vertical, 5)
                         .padding(.horizontal, 14)
-                        .background(Capsule().fill(SignInHUD.mint.opacity(model.code.isEmpty || isWorking ? 0.4 : 1)))
+                        .background(Capsule().fill(FlowTheme.accentBright.opacity(model.code.isEmpty || isWorking ? 0.4 : 1)))
                 }
                 .buttonStyle(.plain)
                 .disabled(model.code.isEmpty || isWorking)
@@ -397,7 +396,7 @@ private struct CloudAPIKeyPanelView: View {
                 Button(action: { model.onGetKey() }) {
                     Text("Get a key…")
                         .font(.system(size: 11.5))
-                        .foregroundStyle(SignInHUD.mint)
+                        .foregroundStyle(FlowTheme.accentBright)
                 }
                 .buttonStyle(.plain)
 
@@ -426,7 +425,7 @@ private struct CloudAPIKeyPanelView: View {
                         .foregroundStyle(Color.black.opacity(0.85))
                         .padding(.vertical, 5)
                         .padding(.horizontal, 14)
-                        .background(Capsule().fill(SignInHUD.mint.opacity(model.key.isEmpty || isWorking ? 0.4 : 1)))
+                        .background(Capsule().fill(FlowTheme.accentBright.opacity(model.key.isEmpty || isWorking ? 0.4 : 1)))
                 }
                 .buttonStyle(.plain)
                 .disabled(model.key.isEmpty || isWorking)

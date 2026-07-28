@@ -986,8 +986,9 @@ private struct OnboardingRootView: View {
 }
 
 private enum OnboardingPalette {
-    /// Light mint used for stage labels and eyebrows, matching the accent.
-    static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
+    /// Stage labels and eyebrows. Aliases the shared accent so the palette has
+    /// one source of truth.
+    static let mint = FlowTheme.accentBright
 }
 
 // MARK: - Finale choice button

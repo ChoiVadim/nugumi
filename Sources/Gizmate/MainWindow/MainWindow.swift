@@ -8,9 +8,15 @@ import SwiftUI
 /// Flow-inspired flat, opaque palette. Deliberately NOT the frosted GlassHostView
 /// look used by the small panels — the main window is a calm cream + white sheet.
 enum FlowTheme {
-    /// The single accent — Gizmate green (#11766E).
-    static let accent = Color(red: 0.067, green: 0.463, blue: 0.431)
-    static let accentSoft = Color(red: 0.067, green: 0.463, blue: 0.431).opacity(0.22)
+    /// The single accent. Monochrome on purpose: the palette carries hierarchy
+    /// through lightness alone, so nothing competes with the content. Light
+    /// rather than dark because `accent` is used as foreground text on the dark
+    /// sheet as often as it is used as a fill.
+    static let accent = Color(white: 0.788)
+    static let accentSoft = Color.white.opacity(0.18)
+    /// Brighter accent for the sign-in HUDs, which sit on a darker scrim than
+    /// the main sheet and need more separation.
+    static let accentBright = Color(white: 0.910)
 
     /// Two backgrounds only: translucent liquid glass everywhere (clear, shows the
     /// window's NSVisualEffectView), and an opaque near-black settings container.

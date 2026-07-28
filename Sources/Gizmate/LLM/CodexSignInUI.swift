@@ -172,7 +172,6 @@ private struct CodexEnableDeviceCodeView: View {
     let done: () -> Void
     let cancel: () -> Void
 
-    private static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
 
     private var settingImage: NSImage? {
         Bundle.module.url(forResource: "codex-device-code-setting", withExtension: "png")
@@ -213,7 +212,7 @@ private struct CodexEnableDeviceCodeView: View {
                         Text("Open settings")
                     }
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Self.mint)
+                    .foregroundStyle(FlowTheme.accentBright)
                 }
                 .buttonStyle(.plain)
 
@@ -235,7 +234,7 @@ private struct CodexEnableDeviceCodeView: View {
                         .foregroundStyle(Color.black.opacity(0.85))
                         .frame(height: 28)
                         .padding(.horizontal, 20)
-                        .background(Capsule().fill(Self.mint))
+                        .background(Capsule().fill(FlowTheme.accentBright))
                 }
                 .buttonStyle(.plain)
             }
@@ -254,7 +253,6 @@ private struct CodexLoginPanelView: View {
 
     @State private var copied = false
 
-    private static let mint = Color(red: 0.67, green: 0.93, blue: 0.88)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -273,12 +271,12 @@ private struct CodexLoginPanelView: View {
             HStack(spacing: 10) {
                 Text(code)
                     .font(.system(size: 21, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Self.mint)
+                    .foregroundStyle(FlowTheme.accentBright)
                     .textSelection(.enabled)
                 Button(action: copyCode) {
                     Image(systemName: copied ? "checkmark" : "doc.on.doc")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(copied ? Self.mint : Color.white.opacity(0.7))
+                        .foregroundStyle(copied ? FlowTheme.accentBright : Color.white.opacity(0.7))
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -303,7 +301,7 @@ private struct CodexLoginPanelView: View {
                 Button(action: openPage) {
                     Text("Open page again")
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Self.mint)
+                        .foregroundStyle(FlowTheme.accentBright)
                 }
                 .buttonStyle(.plain)
 
@@ -338,7 +336,7 @@ private struct CodexLoginPanelView: View {
                 .font(.system(size: 9.5, weight: .bold))
                 .foregroundStyle(Color.black.opacity(0.82))
                 .frame(width: 15, height: 15)
-                .background(Circle().fill(Self.mint))
+                .background(Circle().fill(FlowTheme.accentBright))
             Text(text)
                 .font(.system(size: 11.5))
                 .foregroundStyle(Color.white.opacity(0.78))

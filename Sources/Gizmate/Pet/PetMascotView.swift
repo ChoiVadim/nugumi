@@ -219,8 +219,10 @@ final class PetMascotView: NSView {
             for c in [5, 6, 8, 9] { cells.append((c + faceOffset, 8, hat)) }
             return ([], cells)
         case .casual:
-            let cap = NSColor(srgbRed: 0.20, green: 0.52, blue: 0.50, alpha: 1)
-            let capDark = NSColor(srgbRed: 0.13, green: 0.40, blue: 0.39, alpha: 1)
+            // Neutral greys at the same lightness the teal used to sit at, so the
+            // cap keeps its shape reading without reintroducing a brand colour.
+            let cap = NSColor(white: 0.46, alpha: 1)
+            let capDark = NSColor(white: 0.34, alpha: 1)
             // Baseball cap: rounded crown sitting up-right, a flat visor
             // jutting left. The crown goes BEHIND the body so the ears poke
             // out in front of it; the visor stays on top, sticking out over
