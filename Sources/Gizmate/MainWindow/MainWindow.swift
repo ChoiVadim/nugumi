@@ -11,7 +11,11 @@ enum FlowTheme {
     /// The single accent. Monochrome on purpose: the palette carries hierarchy
     /// through lightness alone, so nothing competes with the content. Light
     /// rather than dark because `accent` is used as foreground text on the dark
-    /// sheet as often as it is used as a fill.
+    /// sheet.
+    ///
+    /// Use it for **text, icons and hairlines only** — never as a large fill
+    /// under white text. A light accent behind white text has no contrast left;
+    /// raised surfaces belong to the elevation ladder below.
     static let accent = Color(white: 0.788)
     static let accentSoft = Color.white.opacity(0.18)
     /// Brighter accent for the sign-in HUDs, which sit on a darker scrim than
@@ -30,6 +34,27 @@ enum FlowTheme {
 
     static let hairline = Color.white.opacity(0.10)
     static let subtleFill = Color.white.opacity(0.08)
+
+    // MARK: Elevation
+    //
+    // Depth comes from stacked translucent sheets over one backdrop, the way
+    // Apple's materials work — never from opaque grey. Each step adds a thin
+    // veil, so the blur underneath keeps showing through and neighbouring
+    // layers read as height rather than as different paint. Two rules keep it
+    // honest: things content sits *inside* go down (`recess`), things that sit
+    // *on top* go up (`raised`), and white text stays legible on every step
+    // because no step is ever light enough to compete with it.
+
+    /// Recessed well: segmented-control tracks, input fields, anything the eye
+    /// should read as carved into the surface.
+    static let recess = Color.black.opacity(0.18)
+    /// One step above the surface: the selected chip in a track, a hovered row.
+    static let raised = Color.white.opacity(0.14)
+    /// Top of the ladder: the primary action in a section.
+    static let raisedStrong = Color.white.opacity(0.20)
+    /// Hairline along a raised edge — brighter than `hairline` so the lit top
+    /// edge of a chip separates it from the layer beneath.
+    static let edge = Color.white.opacity(0.22)
 
     static func serif(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .serif)
@@ -935,7 +960,23 @@ struct PillPicker<Option: Hashable>: View {
                         .padding(.horizontal, 13)
                         .frame(minWidth: 78)
                         .background(
-                            Capsule().fill(isSelected ? FlowTheme.accent : Color.clear)
+                            // The selected pill is a sheet lifted off the track,
+                            // not a painted slab: a thin veil, a lit top edge and
+                            // a short shadow. That reads as depth while leaving
+                            // the label at full white-on-dark contrast.
+                            Capsule()
+                                .fill(isSelected ? FlowTheme.raised : Color.clear)
+                                .overlay(
+                                    Capsule().strokeBorder(
+                                        isSelected ? FlowTheme.edge : Color.clear,
+                                        lineWidth: 1
+                                    )
+                                )
+                                .shadow(
+                                    color: .black.opacity(isSelected ? 0.28 : 0),
+                                    radius: 3,
+                                    y: 1
+                                )
                         )
                         .contentShape(Capsule())
                 }
@@ -943,7 +984,7 @@ struct PillPicker<Option: Hashable>: View {
             }
         }
         .padding(3)
-        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .background(Capsule().fill(FlowTheme.recess))
     }
 }
 

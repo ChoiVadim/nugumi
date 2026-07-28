@@ -333,7 +333,11 @@ private struct RingSlotPickerPanel: View {
                     .padding(.horizontal, 18)
                     .background(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(FlowTheme.accent)
+                            .fill(FlowTheme.raisedStrong)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(FlowTheme.edge, lineWidth: 1)
+                            )
                     )
             }
             .buttonStyle(.plain)

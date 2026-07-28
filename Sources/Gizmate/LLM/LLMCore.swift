@@ -326,20 +326,25 @@ enum TranslationError: LocalizedError {
         }
     }
 
+    /// Every backend throws these, and translating is only one of the things
+    /// they are asked to do — the same failures reach Ask and the tool builder.
+    /// So the text says what is actually wrong (the model) rather than naming a
+    /// feature the user may not have been using: "the translator isn't running"
+    /// is a confusing thing to read after asking for a tool.
     var errorDescription: String? {
         switch self {
         case .ollama(let message):
-            "Translation request failed: \(message)"
+            "The model request failed: \(message)"
         case .emptyResponse:
-            "Got an empty translation. Try again."
+            "The model returned nothing. Try again."
         case .serverUnavailable:
-            "The translator isn't running. Open setup to fix it."
+            "The local model isn't running. Open setup to fix it."
         case .modelMissing:
-            "The translator isn't downloaded yet. Open setup to download it."
+            "The local model isn't downloaded yet. Open setup to download it."
         case .signInRequired:
-            "Sign in to Ollama to use the online translator. Open setup to finish."
+            "Sign in to Ollama to use its hosted models. Open setup to finish."
         case .modelDownloading(let detail):
-            "\(detail) Try again when the translator is ready."
+            "\(detail) Try again when the model is ready."
         case .invalidAPIKey(let provider):
             "\(provider.displayName) rejected the API key. Open settings to update it."
         case .rateLimited(let provider):

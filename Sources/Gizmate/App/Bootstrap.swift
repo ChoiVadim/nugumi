@@ -465,7 +465,7 @@ final class OllamaBootstrap {
                 }
                 setModelReady(modelID, present
                     ? .ok
-                    : .failed("Download finished but the translator isn't visible. Try Re-check."))
+                    : .failed("Download finished but the model isn't visible. Try Re-check."))
             } catch {
                 setModelReady(modelID, .failed(error.localizedDescription))
             }

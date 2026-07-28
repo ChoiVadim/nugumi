@@ -136,8 +136,12 @@ extension GizmateApp {
 
     /// The Gizmate pixel character with no background, rendered in its own colours
     /// (so the eyes and nose stay visible — a template would flatten it to a blob).
+    /// The brand mark, plain. It used to be the pet mascot carrying a badge for
+    /// the current default mode; the mode now reads from the menu itself, which
+    /// keeps the status item a single template glyph that tints correctly on a
+    /// light and a dark menu bar.
     private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
-        PetMascotView.markImage(height: 20, mode: mode.translationMode) ?? NSApp.applicationIconImage
+        BrandMark.templateImage(height: 18) ?? NSApp.applicationIconImage
     }
 
     func refreshStatusBarIcon() {

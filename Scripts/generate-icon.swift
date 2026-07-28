@@ -3,6 +3,16 @@
 import AppKit
 import Foundation
 
+// Builds Resources/AppIcon.icns from the shipped brand artwork at
+// Sources/Gizmate/Resources/logo.png, so the Dock icon and the in-app brand
+// icon can never drift apart.
+//
+// The mark is free-form rather than sitting on a tile: the artwork is a dark
+// object with its own silhouette, and the dark rounded-square backdrop the
+// previous pixel-mascot icon used would swallow it.
+//
+// Usage: swift Scripts/generate-icon.swift Resources/AppIcon.icns
+
 let arguments = CommandLine.arguments
 guard arguments.count >= 2 else {
     FileHandle.standardError.write(Data("Usage: generate-icon.swift <output.icns>\n".utf8))
@@ -11,11 +21,50 @@ guard arguments.count >= 2 else {
 
 let outputICNS = URL(fileURLWithPath: arguments[1])
 let scriptDir = URL(fileURLWithPath: arguments[0]).deletingLastPathComponent()
-let workDir = scriptDir.deletingLastPathComponent().appendingPathComponent(".build/icon-stage")
+let root = scriptDir.deletingLastPathComponent()
+let sourceArt = root.appendingPathComponent("Sources/Gizmate/Resources/logo.png")
+let workDir = root.appendingPathComponent(".build/icon-stage")
 let iconset = workDir.appendingPathComponent("AppIcon.iconset")
 
 try? FileManager.default.removeItem(at: workDir)
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+
+guard let art = NSImage(contentsOf: sourceArt),
+      let tiff = art.tiffRepresentation,
+      let artRep = NSBitmapImageRep(data: tiff) else {
+    FileHandle.standardError.write(Data("Could not read brand artwork at \(sourceArt.path)\n".utf8))
+    exit(1)
+}
+
+/// Bounding box of everything that is not fully transparent, in image pixels.
+/// The source render is not centred in its own canvas, so drawing it as-is
+/// would leave the icon visibly off-centre in the Dock.
+func opaqueBounds(of rep: NSBitmapImageRep) -> NSRect {
+    var minX = rep.pixelsWide, minY = rep.pixelsHigh, maxX = -1, maxY = -1
+    for y in 0..<rep.pixelsHigh {
+        for x in 0..<rep.pixelsWide {
+            guard let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.02 else { continue }
+            minX = min(minX, x); maxX = max(maxX, x)
+            minY = min(minY, y); maxY = max(maxY, y)
+        }
+    }
+    guard maxX >= minX, maxY >= minY else {
+        return NSRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh)
+    }
+    return NSRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+}
+
+let contentBox = opaqueBounds(of: artRep)
+print("Artwork content box: \(Int(contentBox.width))×\(Int(contentBox.height)) "
+      + "in \(artRep.pixelsWide)×\(artRep.pixelsHigh)")
+
+// `colorAt` indexes from the top-left, AppKit draws from the bottom-left.
+let flippedContentBox = NSRect(
+    x: contentBox.minX,
+    y: CGFloat(artRep.pixelsHigh) - contentBox.maxY,
+    width: contentBox.width,
+    height: contentBox.height
+)
 
 struct Variant {
     let pixels: Int
@@ -34,6 +83,11 @@ let variants: [Variant] = [
     .init(pixels: 512,  filename: "icon_512x512.png"),
     .init(pixels: 1024, filename: "icon_512x512@2x.png")
 ]
+
+/// Fraction of the tile the mark spans. Apple's icon grid leaves a margin, and
+/// filling the square edge to edge makes an icon look oversized next to its
+/// neighbours in the Dock.
+let contentScale: CGFloat = 0.86
 
 func renderIcon(pixels size: Int) throws -> NSBitmapImageRep {
     guard let bitmap = NSBitmapImageRep(
@@ -54,145 +108,31 @@ func renderIcon(pixels size: Int) throws -> NSBitmapImageRep {
 
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+    NSGraphicsContext.current?.imageInterpolation = .high
     defer { NSGraphicsContext.restoreGraphicsState() }
 
-    guard let context = NSGraphicsContext.current?.cgContext else { return bitmap }
-    let rect = NSRect(x: 0, y: 0, width: size, height: size)
-
-    // Squircle-ish background with rounded corners (≈22.5% radius).
-    let cornerRadius = CGFloat(size) * 0.225
-    let backgroundPath = NSBezierPath(
-        roundedRect: rect.insetBy(dx: 0, dy: 0),
-        xRadius: cornerRadius,
-        yRadius: cornerRadius
-    )
-    backgroundPath.addClip()
-
-    let colors = [
-        NSColor(srgbRed: 0.06, green: 0.12, blue: 0.14, alpha: 1.0).cgColor,
-        NSColor(srgbRed: 0.15, green: 0.20, blue: 0.20, alpha: 1.0).cgColor
-    ]
-    let gradient = CGGradient(
-        colorsSpace: CGColorSpaceCreateDeviceRGB(),
-        colors: colors as CFArray,
-        locations: [0.0, 1.0]
-    )!
-    context.drawLinearGradient(
-        gradient,
-        start: CGPoint(x: 0, y: CGFloat(size)),
-        end: CGPoint(x: CGFloat(size), y: 0),
-        options: []
+    let side = CGFloat(size) * contentScale
+    let aspect = flippedContentBox.width / flippedContentBox.height
+    let drawSize = aspect >= 1
+        ? NSSize(width: side, height: side / aspect)
+        : NSSize(width: side * aspect, height: side)
+    let destination = NSRect(
+        x: (CGFloat(size) - drawSize.width) / 2,
+        y: (CGFloat(size) - drawSize.height) / 2,
+        width: drawSize.width,
+        height: drawSize.height
     )
 
-    // Subtle inner highlight.
-    let highlightPath = NSBezierPath(
-        roundedRect: rect.insetBy(dx: CGFloat(size) * 0.04, dy: CGFloat(size) * 0.04),
-        xRadius: cornerRadius * 0.92,
-        yRadius: cornerRadius * 0.92
+    art.draw(
+        in: destination,
+        from: flippedContentBox,
+        operation: .sourceOver,
+        fraction: 1.0,
+        respectFlipped: true,
+        hints: [.interpolation: NSImageInterpolation.high.rawValue]
     )
-    NSColor(calibratedWhite: 1.0, alpha: 0.05).setStroke()
-    highlightPath.lineWidth = max(1, CGFloat(size) * 0.012)
-    highlightPath.stroke()
-
-    drawMascotIcon(in: rect, size: CGFloat(size))
 
     return bitmap
-}
-
-func drawMascotIcon(in rect: NSRect, size: CGFloat) {
-    let cellSize = max(1, floor(size / 23))
-    let rows = mascotRows()
-    let spriteWidth = CGFloat(rows.map(\.count).max() ?? 0) * cellSize
-    let spriteHeight = CGFloat(rows.count) * cellSize
-    let origin = NSPoint(
-        x: floor(rect.midX - spriteWidth / 2),
-        y: floor(rect.midY - spriteHeight / 2 - size * 0.01)
-    )
-
-    let context = NSGraphicsContext.current
-    let previousAntialiasing = context?.shouldAntialias
-
-    context?.shouldAntialias = true
-    NSColor(calibratedWhite: 0.0, alpha: 0.24).setFill()
-    let shadowRect = NSRect(
-        x: origin.x + cellSize * 3,
-        y: origin.y - cellSize * 0.9,
-        width: spriteWidth - cellSize * 6,
-        height: cellSize * 1.7
-    )
-    NSBezierPath(ovalIn: shadowRect).fill()
-
-    context?.shouldAntialias = false
-    drawMascotTail(origin: origin, cellSize: cellSize)
-    drawMascotRows(rows, origin: origin, cellSize: cellSize)
-
-    if let previousAntialiasing {
-        context?.shouldAntialias = previousAntialiasing
-    }
-}
-
-func mascotRows() -> [String] {
-    [
-        "................",
-        "..WG........GW..",
-        ".GWWW......WWWG.",
-        ".GWWWWWWWWWWWWG.",
-        "GWWWWWWWWWWWWWWG",
-        "WWWWKKWWWWKKWWWW",
-        "WWWWKKWWWWKKWWWW",
-        "GWWWWWWPWWWWWWWG",
-        "WWGWWWWWWWWWWGWW",
-        ".GWWWWWWWWWWWWG.",
-        "...WW......WW...",
-        "................"
-    ]
-}
-
-func drawMascotRows(_ rows: [String], origin: NSPoint, cellSize: CGFloat) {
-    for (rowIndex, row) in rows.enumerated() {
-        for (columnIndex, pixel) in row.enumerated() {
-            guard let color = mascotColor(for: pixel) else { continue }
-            color.setFill()
-            let rect = NSRect(
-                x: origin.x + CGFloat(columnIndex) * cellSize,
-                y: origin.y + CGFloat(rows.count - rowIndex - 1) * cellSize,
-                width: cellSize,
-                height: cellSize
-            )
-            NSBezierPath(rect: rect).fill()
-        }
-    }
-}
-
-func drawMascotTail(origin: NSPoint, cellSize: CGFloat) {
-    let cells = [(7, 9), (7, 10), (8, 11), (9, 12), (10, 12)]
-    let tailColor = NSColor(srgbRed: 0.93, green: 0.94, blue: 0.90, alpha: 1.0)
-    let tailShade = NSColor(srgbRed: 0.68, green: 0.72, blue: 0.73, alpha: 1.0)
-    for (index, cell) in cells.enumerated() {
-        (index == cells.count - 1 ? tailShade : tailColor).setFill()
-        let rect = NSRect(
-            x: origin.x + CGFloat(cell.0) * cellSize,
-            y: origin.y + CGFloat(cell.1) * cellSize,
-            width: cellSize,
-            height: cellSize
-        )
-        NSBezierPath(rect: rect).fill()
-    }
-}
-
-func mascotColor(for pixel: Character) -> NSColor? {
-    switch pixel {
-    case "W":
-        return NSColor(srgbRed: 0.95, green: 0.96, blue: 0.92, alpha: 1)
-    case "G":
-        return NSColor(srgbRed: 0.70, green: 0.75, blue: 0.76, alpha: 1)
-    case "K":
-        return NSColor(srgbRed: 0.07, green: 0.09, blue: 0.12, alpha: 1)
-    case "P":
-        return NSColor(srgbRed: 0.92, green: 0.32, blue: 0.48, alpha: 1)
-    default:
-        return nil
-    }
 }
 
 func writePNG(_ bitmap: NSBitmapImageRep, to url: URL) throws {

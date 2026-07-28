@@ -598,14 +598,16 @@ extension GizmateApp {
             return "Could not translate this.\n\(message)"
         case .emptyResponse:
             return "No translation came back. Try again."
+        // Named for the translation panel, but Ask shows these too, so anything
+        // describing the engine rather than the failed action says "model".
         case .modelDownloading(let detail):
-            return "Translator is still downloading.\n\(detail)"
+            return "The model is still downloading.\n\(detail)"
         case .serverUnavailable:
             return "Ollama is not running."
         case .modelMissing:
-            return "Translator is not downloaded yet."
+            return "The model is not downloaded yet."
         case .signInRequired:
-            return "Sign in to Ollama to use the online translator."
+            return "Sign in to Ollama to use its hosted models."
         case .invalidAPIKey(let provider):
             return "\(provider.displayName) rejected the API key."
         case .rateLimited(let provider):

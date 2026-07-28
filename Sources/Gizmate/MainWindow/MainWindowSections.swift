@@ -1706,7 +1706,14 @@ private struct ModelPickerPanel: View {
                     .padding(.horizontal, 18)
                     .background(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(enabled ? FlowTheme.accent : Color.white.opacity(0.06))
+                            .fill(enabled ? FlowTheme.raisedStrong : FlowTheme.card)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(
+                                        enabled ? FlowTheme.edge : FlowTheme.hairline,
+                                        lineWidth: 1
+                                    )
+                            )
                     )
             }
             .buttonStyle(.plain)
