@@ -73,6 +73,13 @@ extension GizmateApp {
     /// Pi owns the whole build: it chooses prompt, native, or Python, submits a
     /// typed candidate, asks Gizmate to validate that kind, repairs failures, and
     /// finishes only the exact attested candidate.
+    ///
+    /// Runs on the Ask model and its thinking level, not the text-actions one.
+    /// Text actions are chosen for turning a sentence around quickly and
+    /// cheaply; building a tool is a multi-turn session that writes code and
+    /// has to read a stack trace and repair it, which is the same kind of work
+    /// Ask is picked for. The readiness check below has to name that model too,
+    /// or the build fails on a model nobody was going to use.
     @MainActor
     func generateScriptTool(
         description: String,
@@ -80,7 +87,7 @@ extension GizmateApp {
         clarification: @escaping ToolBuildClarificationHandlerV1,
         clarificationCancellation: @escaping @Sendable () async -> Void
     ) async -> Result<GeneratedTool, Error> {
-        if let setupError = translationErrorIfBootstrapNeedsSetup() {
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
             return .failure(setupError)
         }
         guard let uv = await uvForBuilding(onPartial: onPartial) else {
@@ -89,8 +96,8 @@ extension GizmateApp {
         do {
             let generated = try await ToolAgentLiveBuilder.build(
                 description: description,
-                backend: currentBackend,
-                thinkingLevel: textThinkingLevel,
+                backend: askBackend,
+                thinkingLevel: askGizmateThinkingLevel,
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
@@ -117,7 +124,7 @@ extension GizmateApp {
         clarification: @escaping ToolBuildClarificationHandlerV1,
         clarificationCancellation: @escaping @Sendable () async -> Void
     ) async -> Result<GeneratedTool, Error> {
-        if let setupError = translationErrorIfBootstrapNeedsSetup() {
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
             return .failure(setupError)
         }
         guard let uv = await uvForBuilding(onPartial: onPartial) else {
@@ -129,8 +136,8 @@ extension GizmateApp {
                 script: script,
                 instruction: instruction,
                 failure: nil,
-                backend: currentBackend,
-                thinkingLevel: textThinkingLevel,
+                backend: askBackend,
+                thinkingLevel: askGizmateThinkingLevel,
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
@@ -152,7 +159,7 @@ extension GizmateApp {
         clarification: @escaping ToolBuildClarificationHandlerV1,
         clarificationCancellation: @escaping @Sendable () async -> Void
     ) async -> Result<GeneratedTool, Error> {
-        if let setupError = translationErrorIfBootstrapNeedsSetup() {
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
             return .failure(setupError)
         }
         guard let uv = await uvForBuilding(onPartial: onPartial) else {
@@ -164,8 +171,8 @@ extension GizmateApp {
                 script: script,
                 instruction: "Repair this tool without changing its intended behavior.",
                 failure: failure,
-                backend: currentBackend,
-                thinkingLevel: textThinkingLevel,
+                backend: askBackend,
+                thinkingLevel: askGizmateThinkingLevel,
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,

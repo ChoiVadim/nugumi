@@ -255,10 +255,12 @@ struct ToolBuilderChat: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(
+                    // Your turn sits one step above the assistant's, so the
+                    // conversation reads as two heights rather than two colours.
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(
                             message.role == .user
-                                ? FlowTheme.accent
+                                ? FlowTheme.raised
                                 : FlowTheme.subtleFill
                         )
                 )
@@ -267,12 +269,19 @@ struct ToolBuilderChat: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// While a question is on screen the build is stopped on the user, not
+    /// working. Leaving the spinner and the last technical status up says the
+    /// opposite, and the last status is whatever internal step happened to run
+    /// before the question — so it reads as a hang and people wait it out.
     @ViewBuilder
     private var activityView: some View {
-        if let current = session.currentActivity {
+        if let current = session.isAwaitingAnswer ? "Waiting for your answer" : session.currentActivity {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
-                    if isBuilding {
+                    if session.isAwaitingAnswer {
+                        Image(systemName: "questionmark.circle")
+                            .foregroundStyle(FlowTheme.accent)
+                    } else if isBuilding {
                         ProgressView().controlSize(.small)
                     } else if session.hasError {
                         Image(systemName: "exclamationmark.circle")
@@ -346,7 +355,11 @@ struct ToolBuilderChat: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
-                        .background(Circle().fill(FlowTheme.accent))
+                        .background(
+                            Circle()
+                                .fill(FlowTheme.raisedStrong)
+                                .overlay(Circle().strokeBorder(FlowTheme.edge, lineWidth: 1))
+                        )
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
@@ -384,7 +397,11 @@ struct ToolBuilderChat: View {
                             .frame(height: 44)
                             .background(
                                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(FlowTheme.accent)
+                                    .fill(FlowTheme.raisedStrong)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                            .strokeBorder(FlowTheme.edge, lineWidth: 1)
+                                    )
                             )
                     }
                     .buttonStyle(.plain)

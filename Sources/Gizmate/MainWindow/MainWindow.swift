@@ -729,15 +729,7 @@ struct SidebarView: View {
         .frame(height: 26)
     }
 
-    /// The app icon, loaded from bundled resources so it shows in `swift run`
-    /// too (where `NSApp.applicationIconImage` is the generic placeholder).
-    private static let brandIcon: NSImage = {
-        if let url = Bundle.module.url(forResource: "logo", withExtension: "png"),
-           let image = NSImage(contentsOf: url) {
-            return image
-        }
-        return NSApp.applicationIconImage
-    }()
+    private static let brandIcon: NSImage = BrandMark.appIcon ?? NSApp.applicationIconImage
 }
 
 struct NavItem: View {

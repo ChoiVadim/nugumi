@@ -160,14 +160,16 @@ struct ToolEvalMode: Equatable {
 
     @MainActor
     func run() async -> Int32 {
+        // Whatever the tool builder runs on, so the eval measures what ships.
+        let scope = ModelUseScope.askGizmate
         let modelID = UserDefaults.standard
-            .string(forKey: ModelUseScope.textActions.defaultsKey)
-            ?? ModelUseScope.textActions.defaultModelID(legacySelectedModelID: nil)
+            .string(forKey: scope.defaultsKey)
+            ?? scope.defaultModelID(legacySelectedModelID: nil)
         let backend = LLMBackendFactory.backend(for: modelID)
         let thinkingLevel = UserDefaults.standard
-            .string(forKey: ModelUseScope.textActions.thinkingDefaultsKey)
+            .string(forKey: scope.thinkingDefaultsKey)
             .flatMap(ThinkingLevel.init(rawValue:))
-            ?? ModelUseScope.textActions.defaultThinkingLevel(legacyThinkingRawValue: nil)
+            ?? scope.defaultThinkingLevel(legacyThinkingRawValue: nil)
 
         let bootstrap = UVBootstrap()
         if bootstrap.executable == nil {

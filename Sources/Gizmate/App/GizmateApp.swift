@@ -488,6 +488,15 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         // the single source of truth; the per-window .darkAqua pins are redundant.
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
+        // Every dialog AppKit draws for us — NSAlert, the About panel, user
+        // notifications — falls back to the application icon. Under `swift run`
+        // there is no bundle, so that fallback is the generic placeholder, which
+        // AppKit renders as a blue folder. Point it at the shipped artwork once
+        // and all of them are branded, instead of setting `.icon` per alert.
+        if let icon = BrandMark.appIcon {
+            NSApp.applicationIconImage = icon
+        }
+
         if let probeMode = ToolWorkerProbeMode.parse(
             arguments: ProcessInfo.processInfo.arguments
         ) {

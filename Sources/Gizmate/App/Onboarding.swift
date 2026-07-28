@@ -966,7 +966,11 @@ private struct OnboardingRootView: View {
                 .frame(height: 44)
                 .background(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(FlowTheme.accent)
+                        .fill(FlowTheme.raisedStrong)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(FlowTheme.edge, lineWidth: 1)
+                        )
                 )
                 .contentShape(Rectangle())
         }
@@ -1095,6 +1099,8 @@ private struct PermissionCard: View {
     private var statusChip: some View {
         HStack(spacing: 5) {
             if state == .granted {
+                // palette-ok: a 7pt dot carries no label, so there is no
+                // foreground for the accent to swallow.
                 Circle()
                     .fill(FlowTheme.accent)
                     .frame(width: 7, height: 7)
@@ -1347,7 +1353,11 @@ private struct PermissionPreviewPanel: View {
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
-                .background(Circle().fill(FlowTheme.accent))
+                .background(
+                    Circle()
+                        .fill(FlowTheme.raisedStrong)
+                        .overlay(Circle().strokeBorder(FlowTheme.edge, lineWidth: 1))
+                )
             Text(text)
                 .font(.system(size: 12))
                 .foregroundStyle(FlowTheme.inkSecondary)

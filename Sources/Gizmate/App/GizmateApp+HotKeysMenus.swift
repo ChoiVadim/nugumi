@@ -134,8 +134,6 @@ extension GizmateApp {
         return menu
     }
 
-    /// The Gizmate pixel character with no background, rendered in its own colours
-    /// (so the eyes and nose stay visible — a template would flatten it to a blob).
     /// The brand mark, plain. It used to be the pet mascot carrying a badge for
     /// the current default mode; the mode now reads from the menu itself, which
     /// keeps the status item a single template glyph that tints correctly on a

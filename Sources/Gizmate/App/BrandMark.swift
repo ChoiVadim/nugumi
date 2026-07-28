@@ -9,6 +9,17 @@ import AppKit
 /// two dark slots, so a naive silhouette would fill the slots in and lose the
 /// face. `templateImage` keeps the body solid and punches the slots back out.
 enum BrandMark {
+    /// The artwork in full colour, for anywhere the brand should appear as a
+    /// picture rather than a tinted glyph — alert icons, the window header.
+    ///
+    /// Loaded from resources rather than read back from `NSApp.applicationIconImage`,
+    /// because that is the generic system placeholder in `swift run` builds, and
+    /// AppKit happily renders the placeholder as a blue folder.
+    static let appIcon: NSImage? = {
+        guard let url = Bundle.module.url(forResource: "logo", withExtension: "png") else { return nil }
+        return NSImage(contentsOf: url)
+    }()
+
     /// Cached because building the mask walks the full 500×500 artwork.
     private static var cache: [CGFloat: NSImage] = [:]
 
