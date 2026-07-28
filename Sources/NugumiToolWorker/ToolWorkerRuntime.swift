@@ -42,26 +42,4 @@ enum ToolWorkerRuntime {
             )
         )
     }
-
-    static func candidateRuntime() -> CandidateValidatorRuntime? {
-        guard let resources = Bundle.main.resourceURL else {
-            return nil
-        }
-        let executable = resources
-            .appendingPathComponent("Runtime", isDirectory: true)
-            .appendingPathComponent("python", isDirectory: true)
-            .appendingPathComponent(
-                "cpython-3.12.11-macos-aarch64-none",
-                isDirectory: true
-            )
-            .appendingPathComponent("bin/python3.12")
-        guard FileManager.default.isExecutableFile(atPath: executable.path)
-        else {
-            return nil
-        }
-        return CandidateValidatorRuntime(
-            pythonExecutable: executable,
-            runtimeVersion: CandidateValidator.runtimeVersion
-        )
-    }
 }

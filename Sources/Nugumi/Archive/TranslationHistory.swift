@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 
-/// What produced a history entry. Mirrors the translation modes plus Ask Nugumi.
+/// What produced a history entry. Mirrors the translation modes plus Ask Gizmo.
 enum HistoryKind: String, Codable, Equatable {
     case selection
     case screenArea
@@ -15,7 +15,7 @@ enum HistoryKind: String, Codable, Equatable {
         case .screenArea: return "Screen translation"
         case .draftMessage: return "Rewrite"
         case .smartReply: return "Reply"
-        case .askNugumi: return "Ask Nugumi"
+        case .askNugumi: return "Ask Gizmo"
         }
     }
 
@@ -50,7 +50,7 @@ struct TranslationHistoryEntry: Codable, Identifiable, Equatable {
     let targetLanguageID: String?
 }
 
-/// Persisted feed of recent translations and Ask Nugumi turns, shown on Home.
+/// Persisted feed of recent translations and Ask Gizmo turns, shown on Home.
 /// Kept separate from `UsageStatsStore` (which stores only counts) so the stats
 /// stay lightweight while history keeps the actual text.
 @MainActor

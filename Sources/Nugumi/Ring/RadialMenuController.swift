@@ -650,9 +650,9 @@ final class RadialActionMenuController {
     }
 
     /// The panel is non-activating and never key, so Escape needs both a
-    /// local monitor (Nugumi frontmost) and a global one (another app
+    /// local monitor (Gizmo frontmost) and a global one (another app
     /// frontmost — observed, not consumed). Mouse clicks: the global monitor
-    /// covers other apps, the local one covers Nugumi's own windows — except
+    /// covers other apps, the local one covers Gizmo's own windows — except
     /// the menu itself and the presenting bar/pet, whose click handler owns
     /// the toggle.
     private func installDismissMonitors() {

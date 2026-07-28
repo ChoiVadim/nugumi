@@ -398,7 +398,7 @@ enum OllamaModelCache {
 
     /// Names the server reported as vision-capable (`/api/show` capabilities
     /// include "vision"). Drives `supportsImages` so only these appear in the
-    /// vision-only Ask Nugumi picker.
+    /// vision-only Ask Gizmo picker.
     static var visionCapable: Set<String> {
         lock.lock()
         defer { lock.unlock() }

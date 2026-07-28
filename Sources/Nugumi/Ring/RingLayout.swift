@@ -6,7 +6,7 @@ import Foundation
 enum RingSlotContent: Codable, Equatable {
     case empty
     case builtIn(RingActionID)
-    case promptTool(UUID)
+    case tool(UUID)
 }
 
 /// The ring's contents, in geometric slot order. Slot *i* maps to
@@ -51,20 +51,24 @@ struct RingLayout: Codable, Equatable {
 
 /// Everything the ring needs to build itself. Presenters read this through
 /// `RingConfigurationProvider` at open time rather than storing a copy, so a
-/// layout edit lands on the very next ring.
+/// layout edit — and a fresh clipboard reading — lands on the very next ring.
 struct RingConfiguration {
     var layout: RingLayout
-    var tools: [PromptTool]
+    /// Only tools that could actually run: named, with a prompt or a script.
+    var tools: [NugumiTool]
+    /// What's in front of the user right now, used to test each tool's trigger.
+    var context: ToolContext
 
-    static let `default` = RingConfiguration(layout: .default, tools: [])
+    static let `default` = RingConfiguration(layout: .default, tools: [], context: .empty)
 }
 
 /// Live ring contents, published once by the app delegate at launch. Same
-/// arrangement as `AppCategoryClassifier.userOverrides`: read-only
-/// configuration the presenters need, kept out of four construction sites.
+/// arrangement as `AppCategoryClassifier.userOverrides`: read-only configuration
+/// the presenters need, kept out of four construction sites. Takes the armed
+/// selection because only the presenter knows it.
 @MainActor
 enum RingConfigurationProvider {
-    static var current: () -> RingConfiguration = { .default }
+    static var current: (_ selection: String) -> RingConfiguration = { _ in .default }
 }
 
 /// The user's ring layout, persisted in UserDefaults. Same shape and contract
@@ -113,7 +117,7 @@ final class RingLayoutStore: ObservableObject {
     /// dangling id.
     func removeTool(_ id: UUID) {
         var changed = false
-        for (i, slot) in layout.slots.enumerated() where slot == .promptTool(id) {
+        for (i, slot) in layout.slots.enumerated() where slot == .tool(id) {
             layout.slots[i] = .empty
             changed = true
         }

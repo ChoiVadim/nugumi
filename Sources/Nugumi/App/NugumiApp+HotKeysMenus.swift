@@ -63,7 +63,7 @@ extension NugumiApp {
             }
         }
 
-        // Always-on ⌃⌥A alias for Ask Nugumi, in addition to its configurable
+        // Always-on ⌃⌥A alias for Ask Gizmo, in addition to its configurable
         // (default double-tap ⌃) shortcut above. Fixed id avoids colliding with
         // the action ids 1...7.
         let askNugumiAlias = GlobalHotKey(
@@ -87,7 +87,7 @@ extension NugumiApp {
             button.image = makeStatusBarIcon(for: floatingDefaultMode)
             button.imagePosition = .imageOnly
             button.imageScaling = .scaleNone
-            button.toolTip = "Nugumi"
+            button.toolTip = "Gizmo"
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -128,13 +128,13 @@ extension NugumiApp {
         contact.target = self
         menu.addItem(contact)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Nugumi", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Gizmo", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         return menu
     }
 
-    /// The Nugumi pixel character with no background, rendered in its own colours
+    /// The Gizmo pixel character with no background, rendered in its own colours
     /// (so the eyes and nose stay visible — a template would flatten it to a blob).
     private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
         PetMascotView.markImage(height: 20, mode: mode.translationMode) ?? NSApp.applicationIconImage
@@ -276,7 +276,7 @@ extension NugumiApp {
 
     @objc func contactSupport() {
         let metadata = supportMetadata()
-        let subject = "Nugumi bug or request"
+        let subject = "Gizmo bug or request"
         let body = """
         Hey Vadim,
 
@@ -316,7 +316,7 @@ extension NugumiApp {
         let screenCount = NSScreen.screens.count
 
         return """
-        App: Nugumi \(version)
+        App: Gizmo \(version)
         Build: \(build)
         macOS: \(osVersion)
         Mac: \(hardwareModel()) (\(architecture))
@@ -378,7 +378,7 @@ extension NugumiApp {
 
     @MainActor
     private func setKeyboardShortcut(_ shortcut: GlobalShortcut, for action: GlobalShortcutAction) -> Bool {
-        // Reserve the always-on Ask Nugumi alias so no action can shadow it.
+        // Reserve the always-on Ask Gizmo alias so no action can shadow it.
         if shortcut == GlobalShortcutAction.askNugumiAlias {
             return false
         }
@@ -408,10 +408,10 @@ extension NugumiApp {
     /// Builds the application's main menu. An accessory (LSUIElement) app gets no
     /// menu bar by default, so the standard text-editing key equivalents
     /// (⌘C / ⌘V / ⌘X / ⌘A / ⌘Z) never reach the focused text field — they are
-    /// delivered through the Edit menu. The menu surfaces only while Nugumi is the
+    /// delivered through the Edit menu. The menu surfaces only while Gizmo is the
     /// active app. ⌘Q is deliberately bound to "Close Window" rather than Quit:
-    /// Nugumi lives in the menu bar, so closing the window must not kill it — users
-    /// quit via the status-bar "Quit Nugumi" item.
+    /// Gizmo lives in the menu bar, so closing the window must not kill it — users
+    /// quit via the status-bar "Quit Gizmo" item.
     func installMainMenu() {
         let mainMenu = NSMenu()
 
@@ -421,7 +421,7 @@ extension NugumiApp {
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
-        appMenu.addItem(withTitle: "Hide Nugumi",
+        appMenu.addItem(withTitle: "Hide Gizmo",
                         action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others",
                         action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")

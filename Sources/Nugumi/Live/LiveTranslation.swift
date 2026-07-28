@@ -4,7 +4,7 @@ import Carbon.HIToolbox
 import Foundation
 import ScreenCaptureKit
 
-/// Maps Nugumi's target-language setting to the ISO code the Realtime
+/// Maps Gizmo's target-language setting to the ISO code the Realtime
 /// translation API expects in `session.audio.output.language`.
 enum LiveTranslationLanguage {
     static func apiCode(for language: TranslationLanguage) -> String {
@@ -191,7 +191,7 @@ final class AudioBatcher {
     }
 }
 
-/// Logs each distinct server event type once to ~/Library/Logs/Nugumi/codex.log,
+/// Logs each distinct server event type once to ~/Library/Logs/Gizmo/codex.log,
 /// so we can verify which transcript events the server actually emits (e.g.
 /// whether `session.input_transcript.delta` ever arrives).
 enum LiveTranslationDebug {

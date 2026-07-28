@@ -94,7 +94,7 @@ extension NugumiApp {
 extension NugumiApp: SettingsHost {
     var usageStats: UsageStatsStore { usageStatsStore }
     var snippets: SnippetsStore { snippetsStore }
-    var promptTools: PromptToolsStore { promptToolsStore }
+    var tools: ToolsStore { toolsStore }
     var ringLayout: RingLayoutStore { ringLayoutStore }
     var history: TranslationHistoryStore { translationHistoryStore }
     var isAppBundle: Bool { isRunningFromAppBundle }

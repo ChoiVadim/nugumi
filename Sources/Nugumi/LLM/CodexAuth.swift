@@ -438,7 +438,7 @@ enum CodexCredentialBroker {
 
 // MARK: - Claude Code (Anthropic subscription) OAuth
 //
-// Lets a user drive Nugumi with their Claude Pro/Max subscription instead of a
+// Lets a user drive Gizmo with their Claude Pro/Max subscription instead of a
 // pay-as-you-go Anthropic API key. Uses the Claude Code OAuth client + PKCE
 // flow and the *native* /v1/messages API (the OpenAI-compat endpoint used by
 // the `.anthropic` API-key provider does not accept OAuth Bearer tokens).

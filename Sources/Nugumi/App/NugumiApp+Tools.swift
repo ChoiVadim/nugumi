@@ -2,13 +2,25 @@ import AppKit
 import Foundation
 
 extension NugumiApp {
-    /// Runs one of the user's prompt tools (`PromptTool`) over the ring's armed
-    /// selection. The quick menu arms its ring with no selection, so an empty
-    /// `selection` means "read what's selected now" — the same arrangement the
-    /// built-in ring actions use.
+    /// Runs one of the user's tools. Script tools take their input from the
+    /// context snapshot; prompt tools work on the ring's armed selection, and the
+    /// quick menu arms its ring with no selection, so an empty `selection` means
+    /// "read what's selected now" — the same arrangement the built-in ring
+    /// actions use.
     @MainActor
-    func runPromptTool(_ tool: PromptTool, selection: String) {
+    func runTool(_ tool: NugumiTool, selection: String) {
         guard tool.isUsable else { return }
+
+        switch tool.kind {
+        case .python:
+            runScriptTool(tool, selection: selection)
+            return
+        case .native:
+            runNativeTool(tool, selection: selection)
+            return
+        case .prompt:
+            break
+        }
 
         let armed = TextNormalizer.cleanedSelection(selection)
         if !armed.isEmpty {
@@ -46,12 +58,12 @@ extension NugumiApp {
     /// `.replace` follows Rewrite (the writing language).
     @MainActor
     private func run(
-        _ tool: PromptTool,
+        _ tool: NugumiTool,
         on text: String,
         near screenPoint: NSPoint,
         selectionRect: NSRect?
     ) {
-        switch tool.result {
+        switch tool.output {
         case .panel:
             translateButtonController?.close()
             translateButtonController = nil
@@ -78,6 +90,10 @@ extension NugumiApp {
             )
         case .clipboard:
             runPromptToolToClipboard(tool, on: text, near: screenPoint)
+        case .files, .notify:
+            // Both are script-tool result modes. A prompt tool only ever produces
+            // text, so the nearest honest behavior is to hand that text over.
+            runPromptToolToClipboard(tool, on: text, near: screenPoint)
         }
     }
 
@@ -87,7 +103,7 @@ extension NugumiApp {
     /// user is told via the shared toast.
     @MainActor
     private func runPromptToolToClipboard(
-        _ tool: PromptTool,
+        _ tool: NugumiTool,
         on text: String,
         near screenPoint: NSPoint
     ) {

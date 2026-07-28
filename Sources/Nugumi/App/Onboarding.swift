@@ -25,14 +25,16 @@ enum PermissionKind {
 /// to list the KakaoTalk container (what the chat-summary feature actually
 /// needs to read): success ⇒ granted, failure ⇒ missing.
 enum FullDiskAccessProbe {
-    static func isGranted() -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let container = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac"
-        // If KakaoTalk isn't installed, fall back to a generic TCC-gated path.
-        let probe = FileManager.default.fileExists(atPath: container)
-            ? container
-            : "\(home)/Library/Application Support/com.apple.TCC"
-        return (try? FileManager.default.contentsOfDirectory(atPath: probe)) != nil
+    static func isGranted() async -> Bool {
+        await Task.detached(priority: .utility) {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let container = "\(home)/Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Application Support/com.kakao.KakaoTalkMac"
+            // If KakaoTalk isn't installed, fall back to a generic TCC-gated path.
+            let probe = FileManager.default.fileExists(atPath: container)
+                ? container
+                : "\(home)/Library/Application Support/com.apple.TCC"
+            return (try? FileManager.default.contentsOfDirectory(atPath: probe)) != nil
+        }.value
     }
 }
 
@@ -50,37 +52,37 @@ struct FeatureTourStep {
 
         return [
             FeatureTourStep(
-                title: "Ask Nugumi anything",
-                body: "Confused by something on your screen? Ask Nugumi - it looks and answers.",
+                title: "Ask Gizmo anything",
+                body: "Confused by something on your screen? Ask Gizmo - it looks and answers.",
                 steps: askSteps(for: askShortcut),
                 videoURL: videoURL(named: "ask", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/demo.mp4")
             ),
             FeatureTourStep(
                 title: "Understand anything you read",
-                body: "Stuck on a word or a sentence? Nugumi explains it in simple words - and you can keep asking.",
+                body: "Stuck on a word or a sentence? Gizmo explains it in simple words - and you can keep asking.",
                 steps: [
                     "Select the text you don't get.",
-                    "Click the Nugumi that pops up and pick Explain.",
+                    "Click the Gizmo that pops up and pick Explain.",
                     "Read the answer. Ask more if you want.",
                 ],
                 videoURL: videoURL(named: "understand", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/translate.mp4")
             ),
             FeatureTourStep(
                 title: "Write it rough, send it clean",
-                body: "Write however it comes out. Nugumi makes it clean and natural - in a style you pick for each app.",
+                body: "Write however it comes out. Gizmo makes it clean and natural - in a style you pick for each app.",
                 steps: [
                     "Write your message.",
                     "Select it.",
-                    "Click the Nugumi that pops up and pick Rewrite.",
+                    "Click the Gizmo that pops up and pick Rewrite.",
                 ],
                 videoURL: videoURL(named: "fix", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/make-native.mp4")
             ),
             FeatureTourStep(
                 title: "Replies that know the answer",
-                body: "Nugumi reads the message you got and writes the reply for you.",
+                body: "Gizmo reads the message you got and writes the reply for you.",
                 steps: [
                     "Select the message you got.",
-                    "Click the Nugumi that pops up.",
+                    "Click the Gizmo that pops up.",
                     "Pick Reply.",
                 ],
                 videoURL: videoURL(named: "reply", remote: "https://df41nzkzrv2ws.cloudfront.net/nugumi/reply.mp4")
@@ -190,7 +192,7 @@ final class OnboardingModel: ObservableObject {
     @Published var scrTrusted = CGPreflightScreenCaptureAccess()
     /// Full Disk Access is optional — unlike `axTrusted`/`scrTrusted`, nothing
     /// in this model ever gates first-run completion or auto-advance on it.
-    @Published var fdaGranted = FullDiskAccessProbe.isGranted()
+    @Published var fdaGranted = false
 
     /// Set by the window controller.
     var requestClose: (() -> Void)?
@@ -205,8 +207,17 @@ final class OnboardingModel: ObservableObject {
     /// the setup flow for the engine they just picked on the finale page.
     var openEngineSetup: ((EngineSetupFocus) -> Void)?
 
-    init(mode: Mode) {
+    private let fullDiskAccessProbe: @Sendable () async -> Bool
+    private var fullDiskAccessProbeTask: Task<Void, Never>?
+
+    init(
+        mode: Mode,
+        fullDiskAccessProbe: @escaping @Sendable () async -> Bool = {
+            await FullDiskAccessProbe.isGranted()
+        }
+    ) {
         self.mode = mode
+        self.fullDiskAccessProbe = fullDiskAccessProbe
         // First-run order: intro video → feature tour → permissions (only if
         // something is missing) → engine choice. Review mode always starts on
         // the permissions page so granted status stays visible.
@@ -224,15 +235,16 @@ final class OnboardingModel: ObservableObject {
             } else {
                 page = .feature(0)
             }
-        } else if mode == .firstRun, !Self.mainWindowEverAutoShown, nextPermission == nil {
+        } else if mode == .firstRun, !Self.mainWindowEverAutoShown, axTrusted, scrTrusted {
             // Post-restart resume: granting Screen Recording relaunches the
-            // app. Tour watched, permissions done — only the engine choice
-            // is left.
+            // app. Required permissions are done — only the engine choice is
+            // left. Full Disk Access is optional and resolves asynchronously.
             page = .finale
         }
         if let override = Self.devPageOverride {
             page = override
         }
+        refreshFullDiskAccessStatus()
     }
 
     /// Developer switch: NUGUMI_ONBOARDING_PAGE=intro|permissions|feature|finale
@@ -266,10 +278,9 @@ final class OnboardingModel: ObservableObject {
     func refreshPermissions() {
         let ax = AXIsProcessTrusted()
         let scr = CGPreflightScreenCaptureAccess()
-        let fda = FullDiskAccessProbe.isGranted()
         if ax != axTrusted { axTrusted = ax }
         if scr != scrTrusted { scrTrusted = scr }
-        if fda != fdaGranted { fdaGranted = fda }
+        refreshFullDiskAccessStatus()
 
         // First-run auto-advance once both REQUIRED permissions land; review
         // mode stays put so the user can see (and revisit) the granted state.
@@ -370,7 +381,23 @@ final class OnboardingModel: ObservableObject {
     private func refreshTrustFlags() {
         axTrusted = AXIsProcessTrusted()
         scrTrusted = CGPreflightScreenCaptureAccess()
-        fdaGranted = FullDiskAccessProbe.isGranted()
+        refreshFullDiskAccessStatus()
+    }
+
+    /// TCC-protected directory enumeration can block inside `open(2)` for a
+    /// packaged app. Keep it off the main actor and coalesce the 1-second UI
+    /// poll so one slow check cannot create an unbounded queue of checks.
+    private func refreshFullDiskAccessStatus() {
+        guard fullDiskAccessProbeTask == nil else { return }
+        let probe = fullDiskAccessProbe
+        fullDiskAccessProbeTask = Task { [weak self] in
+            let granted = await probe()
+            guard let self, !Task.isCancelled else { return }
+            self.fullDiskAccessProbeTask = nil
+            if granted != self.fdaGranted {
+                self.fdaGranted = granted
+            }
+        }
     }
 
     private func advanceFeature(from index: Int) {
@@ -394,7 +421,7 @@ final class OnboardingModel: ObservableObject {
     }
 
     private func openAccessibilitySettings() {
-        // Re-probe (prompt: false) so the Nugumi row exists in the list even
+        // Re-probe (prompt: false) so the Gizmo row exists in the list even
         // if permissions were reset (tccutil) while the app is running.
         let probe = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(probe)
@@ -430,9 +457,9 @@ final class OnboardingModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             UserDefaults.standard.set(true, forKey: requestedOnceKey)
             // Always request: beyond the one-time stock dialog, this call is
-            // what REGISTERS Nugumi in the Screen Recording list. After a TCC
+            // what REGISTERS Gizmo in the Screen Recording list. After a TCC
             // reset the UserDefaults flag still says "already asked" — without
-            // re-requesting, the user opens Settings and there is no Nugumi
+            // re-requesting, the user opens Settings and there is no Gizmo
             // row to toggle at all.
             _ = CGRequestScreenCaptureAccess()
             if !needsSystemPrompt {
@@ -467,7 +494,7 @@ final class OnboardingModel: ObservableObject {
         case .intro:
             return ""
         case .permissions:
-            return "Give Nugumi the access it needs"
+            return "Give Gizmo the access it needs"
         case .feature(let index):
             return steps[index].title
         case .finale:
@@ -480,11 +507,11 @@ final class OnboardingModel: ObservableObject {
         case .intro:
             return ""
         case .permissions:
-            return "Nugumi only reads what you explicitly select or capture."
+            return "Gizmo only reads what you explicitly select or capture."
         case .feature(let index):
             return steps[index].body
         case .finale:
-            return "Nugumi needs a model to think with. Pick one of three options - you can switch anytime."
+            return "Gizmo needs a model to think with. Pick one of three options - you can switch anytime."
         }
     }
 
@@ -552,7 +579,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Set up Nugumi"
+        window.title = "Set up Gizmo"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
@@ -1255,7 +1282,7 @@ private struct PermissionPreviewPanel: View {
                 // both are silent registrations/manual toggles, so the button
                 // opens System Settings directly. One step only.
                 VStack(alignment: .leading, spacing: 9) {
-                    plainCaption("The button opens System Settings - turn Nugumi on in the list.")
+                    plainCaption("The button opens System Settings - turn Gizmo on in the list.")
                     settingsListPreview
                 }
             } else {
@@ -1272,7 +1299,7 @@ private struct PermissionPreviewPanel: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 9) {
-                    stepCaption(2, "Then turn Nugumi on in the list.")
+                    stepCaption(2, "Then turn Gizmo on in the list.")
                     settingsListPreview
                 }
             }
@@ -1348,8 +1375,8 @@ private struct FauxSystemDialog: View {
 
                 VStack(alignment: .leading, spacing: 7) {
                     Text(active == .accessibility
-                        ? "\u{201C}Nugumi\u{201D} would like to control this computer"
-                        : "\u{201C}Nugumi\u{201D} would like to record this computer's screen and audio.")
+                        ? "\u{201C}Gizmo\u{201D} would like to control this computer"
+                        : "\u{201C}Gizmo\u{201D} would like to record this computer's screen and audio.")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Color.white.opacity(0.93))
                         .fixedSize(horizontal: false, vertical: true)
@@ -1389,7 +1416,7 @@ private struct FauxSystemDialog: View {
     }
 }
 
-/// Flat mock of the System Settings privacy list with Nugumi's toggle live.
+/// Flat mock of the System Settings privacy list with Gizmo's toggle live.
 private struct FauxSettingsList: View {
     let active: PermissionKind
     let nugumiEnabled: Bool
@@ -1404,7 +1431,7 @@ private struct FauxSettingsList: View {
             )
             Divider().background(Color.white.opacity(0.075))
             FauxSettingsRow(
-                name: "Nugumi",
+                name: "Gizmo",
                 iconColor: FlowTheme.accent,
                 enabled: nugumiEnabled,
                 highlighted: true

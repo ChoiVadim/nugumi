@@ -20,7 +20,7 @@ import Vision
 /// Reads the text of the web page open in a browser window straight off the
 /// Accessibility tree. No Apple Events entitlement, no per-browser TCC
 /// Automation prompt, no "Allow JavaScript from Apple Events" toggle — it
-/// rides on the Accessibility permission Nugumi already holds.
+/// rides on the Accessibility permission Gizmo already holds.
 enum BrowserPageReader {
     /// Frontmost apps that get the ring's summarize-page button. WebKit
     /// builds its AX tree eagerly; Chromium-based browsers build it lazily

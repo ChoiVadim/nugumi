@@ -442,7 +442,7 @@ private struct UsageStatsMenuSummaryView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Nugumi usage")
+                    Text("Gizmo usage")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                     Text("Local stats")
                         .font(.system(size: 10, weight: .semibold))
@@ -511,7 +511,7 @@ private struct UsageStatsMenuSummaryView: View {
                             WorkflowLegendItem(kind: item.kind)
                         }
                         if snapshot.modeBreakdown.allSatisfy({ $0.count == 0 }) {
-                            Text("Start using Nugumi to fill this chart")
+                            Text("Start using Gizmo to fill this chart")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(.secondary)
                         }

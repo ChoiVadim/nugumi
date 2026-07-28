@@ -64,10 +64,10 @@ enum TranslationMode: Equatable {
     /// the AX tree — see `BrowserPageReader`). Same behavior contract as
     /// `.summarizeChat`: read-only, never persisted, panel-only.
     case summarizePage
-    /// One of the user's own prompt tools (see `PromptTool`), run over the
+    /// One of the user's own prompt tools (see `NugumiTool`), run over the
     /// selection. The tool carries its whole system prompt, so nothing about it
     /// is hardcoded here. Ring-only: never a floating-button default mode.
-    case custom(PromptTool)
+    case custom(NugumiTool)
 
     var usesCompositionSettings: Bool {
         switch self {
@@ -250,7 +250,7 @@ enum TranslationMode: Equatable {
     /// JSON, pull out the dates) leave that off — a language instruction would
     /// corrupt their output.
     private static func customPrompt(
-        _ tool: PromptTool,
+        _ tool: NugumiTool,
         targetLanguage: TranslationLanguage
     ) -> String {
         let body = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)

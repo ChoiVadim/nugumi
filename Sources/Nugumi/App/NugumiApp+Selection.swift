@@ -81,7 +81,7 @@ extension NugumiApp {
         guard accessibilityIsTrusted() else { return }
         guard !isCloudSignInActive else { return }
 
-        // Cmd+A inside Nugumi's own panels means "select the prompt input",
+        // Cmd+A inside Gizmo's own panels means "select the prompt input",
         // not "translate everything" — drop those events.
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let frontmostBundleID = frontmostApp?.bundleIdentifier
@@ -202,7 +202,7 @@ extension NugumiApp {
         }
 
         // The shortcut recorder is up. Any synthesized ⌘+C we'd post during
-        // the clipboard fallback below would land in Nugumi (now frontmost)
+        // the clipboard fallback below would land in Gizmo (now frontmost)
         // and the recorder field would capture it as the user's shortcut —
         // see KeyboardShortcutPoster.postCommandShortcut. Hard-skip while the
         // recorder is open.
@@ -229,7 +229,7 @@ extension NugumiApp {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             guard let self else { return }
             // The async window is long enough for the user to have brought
-            // Nugumi to the front (e.g. opened the menu to set a shortcut).
+            // Gizmo to the front (e.g. opened the menu to set a shortcut).
             // Re-check before posting any synthetic keystrokes.
             if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier {
                 return
@@ -479,7 +479,7 @@ extension NugumiApp {
             }
 
             let content = UNMutableNotificationContent()
-            content.title = "Nugumi can't read text in \(appName)"
+            content.title = "Gizmo can't read text in \(appName)"
             content.body = "This app doesn't expose its selection to other apps. Try Screenshot Translation instead."
             let request = UNNotificationRequest(
                 identifier: "nugumi.selection.unreadable.\(Date().timeIntervalSince1970)",

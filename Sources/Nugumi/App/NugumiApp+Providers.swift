@@ -65,7 +65,7 @@ extension NugumiApp {
         let response = NugumiAlertController(
             title: isOAuth ? "Sign out of \(provider.displayName)?" : "Remove \(provider.displayName) API key?",
             message: isOAuth
-                ? "Nugumi will forget this account. Models from \(provider.displayName) stop working until you sign in again."
+                ? "Gizmo will forget this account. Models from \(provider.displayName) stop working until you sign in again."
                 : "The key is deleted from this Mac. Models from \(provider.displayName) stop working until you add a key again.",
             primaryButtonTitle: isOAuth ? "Sign out" : "Remove key",
             secondaryButtonTitle: "Cancel"

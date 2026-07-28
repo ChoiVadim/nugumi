@@ -9,11 +9,19 @@ import {
 
 const badCandidate = {
   schemaVersion: 1,
+  kind: "python",
   name: "Uppercase",
   brief: "Uppercases copied text",
   symbolName: "textformat",
+  input: "clipboardText",
+  output: "clipboard",
+  trigger: "always",
+  hosts: [],
+  extensions: [],
   source: "import sys\nprint(sys.argv[1])\n",
   fixtures: [{ input: "hello", expectedOutput: "HELLO" }],
+  timeoutSeconds: 30,
+  declaresNetwork: false,
 } as const;
 
 const repairedCandidate = {

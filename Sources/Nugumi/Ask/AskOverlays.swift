@@ -213,7 +213,7 @@ final class AskAnnotationOverlayController {
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         // Capturable on purpose: annotations should survive into the user's
-        // own screenshots. Nugumi's own follow-up captures still exclude this
+        // own screenshots. Gizmo's own follow-up captures still exclude this
         // layer via the capture-time sharing snapshot (which force-sets .none
         // and restores), and invisibility mode applies like any other window.
         InvisibilityState.apply(to: panel)
@@ -240,7 +240,7 @@ final class AskAnnotationOverlayController {
 }
 
 /// Transparent, non-activating overlay that covers the captured screen while
-/// the Ask Nugumi prompt is open. Mouse drags become freehand red strokes;
+/// the Ask Gizmo prompt is open. Mouse drags become freehand red strokes;
 /// at submit they are composited into the pending screen capture. The panel
 /// never becomes key, so typing stays in the prompt field the whole time.
 @MainActor

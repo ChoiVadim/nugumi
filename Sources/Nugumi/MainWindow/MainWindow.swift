@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import NugumiToolAgentCore
 import SwiftUI
 
 // MARK: - Theme
@@ -183,8 +184,43 @@ protocol SettingsHost: AnyObject {
     func performSettingsIntent(_ intent: SettingsIntent)
     var usageStats: UsageStatsStore { get }
     var snippets: SnippetsStore { get }
-    var promptTools: PromptToolsStore { get }
+    var tools: ToolsStore { get }
     var ringLayout: RingLayoutStore { get }
+    /// Whether the uv runtime script tools need is present.
+    var uvIsReady: Bool { get }
+    /// Installs uv if needed, then runs `script` once on the current context and
+    /// reports what happened — the editor's Install & test button. `onOutput`
+    /// receives stdout/stderr as they arrive, so a long run isn't a silent spinner.
+    func testScriptTool(
+        _ tool: NugumiTool,
+        script: String,
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async -> ToolTestState
+    /// Writes a tool from a plain-language description. Never runs it.
+    func generateScriptTool(
+        description: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error>
+    /// Amends an existing tool from one instruction. Never runs it.
+    func reviseScriptTool(
+        tool: NugumiTool,
+        script: String,
+        instruction: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error>
+    /// Repairs the complete tool after a failed run.
+    func repairScriptTool(
+        tool: NugumiTool,
+        script: String,
+        failure: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error>
     var history: TranslationHistoryStore { get }
     func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
     func runCloudTest(for provider: CloudProvider) async -> CloudTestResult
@@ -210,7 +246,7 @@ final class NugumiSettingsBridge: ObservableObject {
     weak var host: (any SettingsHost)?
     let usageStats: UsageStatsStore
     let snippets: SnippetsStore
-    let promptTools: PromptToolsStore
+    let tools: ToolsStore
     let ringLayout: RingLayoutStore
     let history: TranslationHistoryStore
 
@@ -242,7 +278,7 @@ final class NugumiSettingsBridge: ObservableObject {
         self.host = host
         self.usageStats = host.usageStats
         self.snippets = host.snippets
-        self.promptTools = host.promptTools
+        self.tools = host.tools
         self.ringLayout = host.ringLayout
         self.history = host.history
         self.settings = host.makeSettingsSnapshot()
@@ -328,6 +364,65 @@ final class NugumiSettingsBridge: ObservableObject {
 
     func hasCredentials(_ provider: CloudProvider) -> Bool {
         host?.cloudProviderHasCredentials(provider) ?? false
+    }
+    var uvReady: Bool { host?.uvIsReady ?? false }
+    func testScriptTool(
+        _ tool: NugumiTool,
+        script: String,
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async -> ToolTestState {
+        guard let host else { return .failed("Not available.") }
+        return await host.testScriptTool(tool, script: script, onOutput: onOutput)
+    }
+    func generateScriptTool(
+        description: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error> {
+        guard let host else { return .failure(ToolGeneratorError.emptyDescription) }
+        return await host.generateScriptTool(
+            description: description,
+            onPartial: onPartial,
+            clarification: clarification,
+            clarificationCancellation: clarificationCancellation
+        )
+    }
+    func reviseScriptTool(
+        tool: NugumiTool,
+        script: String,
+        instruction: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error> {
+        guard let host else { return .failure(ToolGeneratorError.emptyDescription) }
+        return await host.reviseScriptTool(
+            tool: tool,
+            script: script,
+            instruction: instruction,
+            onPartial: onPartial,
+            clarification: clarification,
+            clarificationCancellation: clarificationCancellation
+        )
+    }
+    func repairScriptTool(
+        tool: NugumiTool,
+        script: String,
+        failure: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error> {
+        guard let host else { return .failure(ToolGeneratorError.emptyDescription) }
+        return await host.repairScriptTool(
+            tool: tool,
+            script: script,
+            failure: failure,
+            onPartial: onPartial,
+            clarification: clarification,
+            clarificationCancellation: clarificationCancellation
+        )
     }
     var appVersion: String { host?.appVersionString ?? "" }
     var isAppBundle: Bool { host?.isAppBundle ?? false }

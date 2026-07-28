@@ -7,11 +7,15 @@ public enum ToolAgentProtocolLimitsV1 {
     public static let maximumNameBytes = 128
     public static let maximumBriefBytes = 1_024
     public static let maximumSymbolNameBytes = 128
+    public static let maximumPromptBytes = 16 * 1_024
+    public static let maximumTargetBytes = 8 * 1_024
     public static let maximumSourceBytes = 64 * 1_024
     public static let maximumFixtureInputBytes = 8 * 1_024
     public static let maximumFixtureOutputBytes = 16 * 1_024
     public static let maximumDiagnosticBytes = 16 * 1_024
     public static let maximumFixtureCount = 3
+    public static let maximumFilterCount = 16
+    public static let maximumFilterValueBytes = 255
     public static let maximumSafeMessageBytes = 1_024
 }
 
@@ -45,24 +49,221 @@ public enum ToolAgentBuildStateV1: String, Codable, CaseIterable, Equatable, Sen
     case budgetExhausted
 }
 
+/// How much a passing validation actually proves.
+///
+/// Validation used to be one bit, and the bit meant "reproduced an exact
+/// string". Tools that talk to the network, write files, or read the clock can
+/// never earn that bit, so the agent was forbidden from writing them at all.
+/// Grading the proof instead of demanding the strongest one lets those tools
+/// exist, as long as Nugumi says plainly which grade a tool earned.
+public enum ToolAgentAssuranceV1: String, Codable, CaseIterable, Equatable, Sendable {
+    /// Ran on every fixture and matched the expected output exactly.
+    case verified
+    /// Ran on real input and survived: exit 0, and any promised file appeared.
+    case smoke
+    /// Never executed. The source compiles and its dependencies resolve.
+    case unverified
+}
+
 public struct ToolAgentFixtureV1: Codable, Equatable, Sendable {
     public let input: String
-    public let expectedOutput: String
+    /// Supplied only when the tool is deterministic enough that an exact string
+    /// is a fair test. A fixture without one is a smoke run: the candidate has
+    /// to survive real input, not reproduce a byte-exact answer. Most useful
+    /// tools — anything touching the network, the clock, or the filesystem —
+    /// can only be checked that way.
+    public let expectedOutput: String?
 
-    public init(input: String, expectedOutput: String) {
+    public init(input: String, expectedOutput: String? = nil) {
         self.input = input
         self.expectedOutput = expectedOutput
     }
 }
 
+public struct ToolAgentAskUserRequestV1: Codable, Equatable, Sendable {
+    public let question: String
+
+    public init(question: String) throws {
+        guard !question.isEmpty,
+              question.utf8.count <= ToolAgentProtocolLimitsV1.maximumSafeMessageBytes else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        self.question = question
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ToolAgentDynamicCodingKeyV1.self)
+        guard Set(container.allKeys.map(\.stringValue)) == Set(["question"]) else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        try self.init(question: container.decode(String.self, forKey: .required("question")))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(question, forKey: .question)
+    }
+
+    private enum CodingKeys: String, CodingKey { case question }
+}
+
+public struct ToolAgentAskUserResponseV1: Codable, Equatable, Sendable {
+    public let answer: String
+
+    public init(answer: String) throws {
+        guard !answer.isEmpty,
+              answer.utf8.count <= ToolAgentProtocolLimitsV1.maximumSafeMessageBytes else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        self.answer = answer
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ToolAgentDynamicCodingKeyV1.self)
+        guard Set(container.allKeys.map(\.stringValue)) == Set(["answer"]) else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        try self.init(answer: container.decode(String.self, forKey: .required("answer")))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(answer, forKey: .answer)
+    }
+
+    private enum CodingKeys: String, CodingKey { case answer }
+}
+
+public enum ToolAgentCandidateKindV1: String, Codable, Equatable, Sendable {
+    case prompt
+    case native
+    case python
+}
+
+public enum ToolAgentOperationV1: String, Codable, CaseIterable, Equatable, Sendable {
+    case create
+    case edit
+    case fix
+}
+
+public enum ToolAgentCandidateInputV1: String, Codable, Equatable, Sendable {
+    case selection
+    case clipboardText
+    case clipboardURL
+    case files
+    case none
+}
+
+public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
+    case panel
+    case replace
+    case clipboard
+    case files
+    case notify
+}
+
+public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {
+    case always
+    case selection
+    case link
+    case files
+}
+
+public enum ToolAgentNativeActionV1: String, Codable, Equatable, Sendable {
+    case openApp
+    case openAppFullScreen
+    case sendTextToApp
+    case revealInFinder
+    case openURL
+    case runShortcut
+
+    fileprivate var needsTarget: Bool {
+        self != .revealInFinder
+    }
+}
+
 public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     public let schemaVersion: Int
+    public let kind: ToolAgentCandidateKindV1
     public let name: String
     public let brief: String
     public let symbolName: String
+    public let input: ToolAgentCandidateInputV1
+    public let output: ToolAgentCandidateOutputV1
+    public let trigger: ToolAgentCandidateTriggerV1
+    public let hosts: [String]
+    public let extensions: [String]
+    public let prompt: String
+    public let appliesTargetLanguage: Bool
+    public let nativeAction: ToolAgentNativeActionV1?
+    public let target: String
     public let source: String
     public let fixtures: [ToolAgentFixtureV1]
+    public let outputDirectory: String?
+    public let timeoutSeconds: Int
+    public let declaresNetwork: Bool
 
+    public init(
+        kind: ToolAgentCandidateKindV1,
+        name: String,
+        brief: String,
+        symbolName: String,
+        input: ToolAgentCandidateInputV1,
+        output: ToolAgentCandidateOutputV1,
+        trigger: ToolAgentCandidateTriggerV1,
+        hosts: [String] = [],
+        extensions: [String] = [],
+        prompt: String = "",
+        appliesTargetLanguage: Bool = false,
+        nativeAction: ToolAgentNativeActionV1? = nil,
+        target: String = "",
+        source: String = "",
+        fixtures: [ToolAgentFixtureV1] = [],
+        outputDirectory: String? = nil,
+        timeoutSeconds: Int = 120,
+        declaresNetwork: Bool = false
+    ) throws {
+        try Self.validate(
+            kind: kind,
+            name: name,
+            brief: brief,
+            symbolName: symbolName,
+            input: input,
+            output: output,
+            trigger: trigger,
+            hosts: hosts,
+            extensions: extensions,
+            prompt: prompt,
+            nativeAction: nativeAction,
+            target: target,
+            source: source,
+            fixtures: fixtures,
+            outputDirectory: outputDirectory,
+            timeoutSeconds: timeoutSeconds
+        )
+        self.schemaVersion = 1
+        self.kind = kind
+        self.name = name
+        self.brief = brief
+        self.symbolName = symbolName
+        self.input = input
+        self.output = output
+        self.trigger = trigger
+        self.hosts = hosts
+        self.extensions = extensions
+        self.prompt = prompt
+        self.appliesTargetLanguage = appliesTargetLanguage
+        self.nativeAction = nativeAction
+        self.target = target
+        self.source = source
+        self.fixtures = fixtures
+        self.outputDirectory = outputDirectory
+        self.timeoutSeconds = timeoutSeconds
+        self.declaresNetwork = declaresNetwork
+    }
+
+    /// Keeps persisted phase-zero Python runs and existing protocol fixtures
+    /// readable while the candidate contract grows to cover every Nugumi kind.
     public init(
         name: String,
         brief: String,
@@ -70,57 +271,512 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         source: String,
         fixtures: [ToolAgentFixtureV1]
     ) throws {
-        try Self.validate(name: name, brief: brief, symbolName: symbolName, source: source, fixtures: fixtures)
-        self.schemaVersion = 1
-        self.name = name
-        self.brief = brief
-        self.symbolName = symbolName
-        self.source = source
-        self.fixtures = fixtures
+        try self.init(
+            kind: .python,
+            name: name,
+            brief: brief,
+            symbolName: symbolName,
+            input: .clipboardText,
+            output: .clipboard,
+            trigger: .always,
+            source: source,
+            fixtures: fixtures,
+            timeoutSeconds: 30
+        )
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        let kind = try container.decodeIfPresent(
+            ToolAgentCandidateKindV1.self,
+            forKey: .kind
+        ) ?? .python
         let name = try container.decode(String.self, forKey: .name)
         let brief = try container.decode(String.self, forKey: .brief)
         let symbolName = try container.decode(String.self, forKey: .symbolName)
-        let source = try container.decode(String.self, forKey: .source)
-        let fixtures = try container.decode([ToolAgentFixtureV1].self, forKey: .fixtures)
+        let input = try container.decodeIfPresent(
+            ToolAgentCandidateInputV1.self,
+            forKey: .input
+        ) ?? .clipboardText
+        let output = try container.decodeIfPresent(
+            ToolAgentCandidateOutputV1.self,
+            forKey: .output
+        ) ?? .clipboard
+        let trigger = try container.decodeIfPresent(
+            ToolAgentCandidateTriggerV1.self,
+            forKey: .trigger
+        ) ?? .always
+        let hosts = try container.decodeIfPresent([String].self, forKey: .hosts) ?? []
+        let extensions = try container.decodeIfPresent([String].self, forKey: .extensions) ?? []
+        let prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        let appliesTargetLanguage = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .appliesTargetLanguage
+        ) ?? false
+        let nativeAction = try container.decodeIfPresent(
+            ToolAgentNativeActionV1.self,
+            forKey: .nativeAction
+        )
+        let target = try container.decodeIfPresent(String.self, forKey: .target) ?? ""
+        let source = try container.decodeIfPresent(String.self, forKey: .source) ?? ""
+        let fixtures = try container.decodeIfPresent(
+            [ToolAgentFixtureV1].self,
+            forKey: .fixtures
+        ) ?? []
+        let outputDirectory = try container.decodeIfPresent(
+            String.self,
+            forKey: .outputDirectory
+        )
+        let timeoutSeconds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .timeoutSeconds
+        ) ?? (kind == .python ? 30 : 120)
+        let declaresNetwork = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .declaresNetwork
+        ) ?? false
         guard schemaVersion == 1 else {
             throw ToolAgentFailureCodeV1.invalidCandidate
         }
-        try Self.validate(name: name, brief: brief, symbolName: symbolName, source: source, fixtures: fixtures)
+        try Self.validate(
+            kind: kind,
+            name: name,
+            brief: brief,
+            symbolName: symbolName,
+            input: input,
+            output: output,
+            trigger: trigger,
+            hosts: hosts,
+            extensions: extensions,
+            prompt: prompt,
+            nativeAction: nativeAction,
+            target: target,
+            source: source,
+            fixtures: fixtures,
+            outputDirectory: outputDirectory,
+            timeoutSeconds: timeoutSeconds
+        )
         self.schemaVersion = schemaVersion
+        self.kind = kind
         self.name = name
         self.brief = brief
         self.symbolName = symbolName
+        self.input = input
+        self.output = output
+        self.trigger = trigger
+        self.hosts = hosts
+        self.extensions = extensions
+        self.prompt = prompt
+        self.appliesTargetLanguage = appliesTargetLanguage
+        self.nativeAction = nativeAction
+        self.target = target
         self.source = source
         self.fixtures = fixtures
+        self.outputDirectory = outputDirectory
+        self.timeoutSeconds = timeoutSeconds
+        self.declaresNetwork = declaresNetwork
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(name, forKey: .name)
+        try container.encode(brief, forKey: .brief)
+        try container.encode(symbolName, forKey: .symbolName)
+        try container.encode(input, forKey: .input)
+        try container.encode(output, forKey: .output)
+        try container.encode(trigger, forKey: .trigger)
+        try container.encode(hosts, forKey: .hosts)
+        try container.encode(extensions, forKey: .extensions)
+        switch kind {
+        case .prompt:
+            try container.encode(prompt, forKey: .prompt)
+            try container.encode(appliesTargetLanguage, forKey: .appliesTargetLanguage)
+        case .native:
+            try container.encode(nativeAction, forKey: .nativeAction)
+            try container.encode(target, forKey: .target)
+        case .python:
+            try container.encode(source, forKey: .source)
+            try container.encode(fixtures, forKey: .fixtures)
+            try container.encodeIfPresent(outputDirectory, forKey: .outputDirectory)
+            try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
+            try container.encode(declaresNetwork, forKey: .declaresNetwork)
+        }
     }
 
     private static func validate(
+        kind: ToolAgentCandidateKindV1,
         name: String,
         brief: String,
         symbolName: String,
+        input: ToolAgentCandidateInputV1,
+        output: ToolAgentCandidateOutputV1,
+        trigger: ToolAgentCandidateTriggerV1,
+        hosts: [String],
+        extensions: [String],
+        prompt: String,
+        nativeAction: ToolAgentNativeActionV1?,
+        target: String,
         source: String,
-        fixtures: [ToolAgentFixtureV1]
+        fixtures: [ToolAgentFixtureV1],
+        outputDirectory: String?,
+        timeoutSeconds: Int
     ) throws {
         guard !name.isEmpty,
               !brief.isEmpty,
               !symbolName.isEmpty,
-              !source.isEmpty,
               name.utf8.count <= ToolAgentProtocolLimitsV1.maximumNameBytes,
               brief.utf8.count <= ToolAgentProtocolLimitsV1.maximumBriefBytes,
               symbolName.utf8.count <= ToolAgentProtocolLimitsV1.maximumSymbolNameBytes,
-              source.utf8.count <= ToolAgentProtocolLimitsV1.maximumSourceBytes,
-              (1...ToolAgentProtocolLimitsV1.maximumFixtureCount).contains(fixtures.count),
+              hosts.count <= ToolAgentProtocolLimitsV1.maximumFilterCount,
+              extensions.count <= ToolAgentProtocolLimitsV1.maximumFilterCount,
+              (hosts + extensions).allSatisfy({
+                  !$0.isEmpty
+                      && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFilterValueBytes
+              }),
               fixtures.allSatisfy({
                   !$0.input.isEmpty
                       && $0.input.utf8.count <= ToolAgentProtocolLimitsV1.maximumFixtureInputBytes
-                      && $0.expectedOutput.utf8.count <= ToolAgentProtocolLimitsV1.maximumFixtureOutputBytes
-              }) else {
+                      && $0.expectedOutput.map({
+                          $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFixtureOutputBytes
+                      }) ?? true
+              }),
+              trigger != .link || input == .clipboardURL,
+              trigger != .files || input == .files,
+              trigger != .selection || input == .selection else {
             throw ToolAgentFailureCodeV1.invalidCandidate
+        }
+
+        switch kind {
+        case .prompt:
+            guard input == .selection,
+                  output != .files,
+                  output != .notify,
+                  !prompt.isEmpty,
+                  prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
+                  nativeAction == nil,
+                  target.isEmpty,
+                  source.isEmpty,
+                  fixtures.isEmpty,
+                  outputDirectory == nil else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        case .native:
+            guard let nativeAction,
+                  output == .replace || output == .clipboard || output == .notify,
+                  prompt.isEmpty,
+                  source.isEmpty,
+                  fixtures.isEmpty,
+                  outputDirectory == nil,
+                  target.utf8.count <= ToolAgentProtocolLimitsV1.maximumTargetBytes,
+                  !nativeAction.needsTarget || !target.isEmpty else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        case .python:
+            // Zero fixtures is legal. A tool whose whole point is a real side
+            // effect — sending mail, moving the user's files — cannot be run
+            // during validation without doing the thing, so it is checked by
+            // compiling it and resolving its dependencies instead. Demanding a
+            // fixture there is what forced every earlier candidate to be a pure
+            // text transform.
+            guard !source.isEmpty,
+                  source.utf8.count <= ToolAgentProtocolLimitsV1.maximumSourceBytes,
+                  fixtures.count <= ToolAgentProtocolLimitsV1.maximumFixtureCount,
+                  prompt.isEmpty,
+                  nativeAction == nil,
+                  target.isEmpty,
+                  outputDirectory.map({
+                      !$0.isEmpty
+                          && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumTargetBytes
+                  }) ?? true,
+                  (5...1_800).contains(timeoutSeconds),
+                  output != .files || outputDirectory != nil else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case kind
+        case name
+        case brief
+        case symbolName
+        case input
+        case output
+        case trigger
+        case hosts
+        case extensions
+        case prompt
+        case appliesTargetLanguage
+        case nativeAction
+        case target
+        case source
+        case fixtures
+        case outputDirectory
+        case timeoutSeconds
+        case declaresNetwork
+    }
+}
+
+/// A complete, bounded installed-tool snapshot supplied only when Pi is
+/// revising an existing tool. Unlike a candidate, Python fixtures are omitted:
+/// they are not stored with installed tools and must never be invented merely
+/// to construct editing context.
+public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
+    public let kind: ToolAgentCandidateKindV1
+    public let name: String
+    public let brief: String
+    public let symbolName: String
+    public let input: ToolAgentCandidateInputV1
+    public let output: ToolAgentCandidateOutputV1
+    public let trigger: ToolAgentCandidateTriggerV1
+    public let hosts: [String]
+    public let extensions: [String]
+    public let prompt: String
+    public let appliesTargetLanguage: Bool
+    public let nativeAction: ToolAgentNativeActionV1?
+    public let target: String
+    public let source: String
+    public let outputDirectory: String?
+    public let timeoutSeconds: Int
+    public let declaresNetwork: Bool
+
+    public init(
+        kind: ToolAgentCandidateKindV1,
+        name: String,
+        brief: String,
+        symbolName: String,
+        input: ToolAgentCandidateInputV1,
+        output: ToolAgentCandidateOutputV1,
+        trigger: ToolAgentCandidateTriggerV1,
+        hosts: [String] = [],
+        extensions: [String] = [],
+        prompt: String = "",
+        appliesTargetLanguage: Bool = false,
+        nativeAction: ToolAgentNativeActionV1? = nil,
+        target: String = "",
+        source: String = "",
+        outputDirectory: String? = nil,
+        timeoutSeconds: Int = 120,
+        declaresNetwork: Bool = false
+    ) throws {
+        try Self.validate(
+            kind: kind,
+            name: name,
+            brief: brief,
+            symbolName: symbolName,
+            input: input,
+            output: output,
+            trigger: trigger,
+            hosts: hosts,
+            extensions: extensions,
+            prompt: prompt,
+            appliesTargetLanguage: appliesTargetLanguage,
+            nativeAction: nativeAction,
+            target: target,
+            source: source,
+            outputDirectory: outputDirectory,
+            timeoutSeconds: timeoutSeconds,
+            declaresNetwork: declaresNetwork
+        )
+        self.kind = kind
+        self.name = name
+        self.brief = brief
+        self.symbolName = symbolName
+        self.input = input
+        self.output = output
+        self.trigger = trigger
+        self.hosts = hosts
+        self.extensions = extensions
+        self.prompt = prompt
+        self.appliesTargetLanguage = appliesTargetLanguage
+        self.nativeAction = nativeAction
+        self.target = target
+        self.source = source
+        self.outputDirectory = outputDirectory
+        self.timeoutSeconds = timeoutSeconds
+        self.declaresNetwork = declaresNetwork
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            kind: try container.decode(ToolAgentCandidateKindV1.self, forKey: .kind),
+            name: try container.decode(String.self, forKey: .name),
+            brief: try container.decode(String.self, forKey: .brief),
+            symbolName: try container.decode(String.self, forKey: .symbolName),
+            input: try container.decode(ToolAgentCandidateInputV1.self, forKey: .input),
+            output: try container.decode(ToolAgentCandidateOutputV1.self, forKey: .output),
+            trigger: try container.decode(ToolAgentCandidateTriggerV1.self, forKey: .trigger),
+            hosts: try container.decodeIfPresent([String].self, forKey: .hosts) ?? [],
+            extensions: try container.decodeIfPresent([String].self, forKey: .extensions) ?? [],
+            prompt: try container.decodeIfPresent(String.self, forKey: .prompt) ?? "",
+            appliesTargetLanguage: try container.decodeIfPresent(Bool.self, forKey: .appliesTargetLanguage) ?? false,
+            nativeAction: try container.decodeIfPresent(ToolAgentNativeActionV1.self, forKey: .nativeAction),
+            target: try container.decodeIfPresent(String.self, forKey: .target) ?? "",
+            source: try container.decodeIfPresent(String.self, forKey: .source) ?? "",
+            outputDirectory: try container.decodeIfPresent(String.self, forKey: .outputDirectory),
+            timeoutSeconds: try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
+                ?? (try container.decode(ToolAgentCandidateKindV1.self, forKey: .kind) == .python ? 30 : 120),
+            declaresNetwork: try container.decodeIfPresent(Bool.self, forKey: .declaresNetwork) ?? false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(name, forKey: .name)
+        try container.encode(brief, forKey: .brief)
+        try container.encode(symbolName, forKey: .symbolName)
+        try container.encode(input, forKey: .input)
+        try container.encode(output, forKey: .output)
+        try container.encode(trigger, forKey: .trigger)
+        try container.encode(hosts, forKey: .hosts)
+        try container.encode(extensions, forKey: .extensions)
+        switch kind {
+        case .prompt:
+            try container.encode(prompt, forKey: .prompt)
+            try container.encode(appliesTargetLanguage, forKey: .appliesTargetLanguage)
+        case .native:
+            try container.encode(nativeAction, forKey: .nativeAction)
+            try container.encode(target, forKey: .target)
+        case .python:
+            try container.encode(source, forKey: .source)
+            try container.encodeIfPresent(outputDirectory, forKey: .outputDirectory)
+            try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
+            try container.encode(declaresNetwork, forKey: .declaresNetwork)
+        }
+    }
+
+    private static func validate(
+        kind: ToolAgentCandidateKindV1,
+        name: String,
+        brief: String,
+        symbolName: String,
+        input: ToolAgentCandidateInputV1,
+        output: ToolAgentCandidateOutputV1,
+        trigger: ToolAgentCandidateTriggerV1,
+        hosts: [String],
+        extensions: [String],
+        prompt: String,
+        appliesTargetLanguage: Bool,
+        nativeAction: ToolAgentNativeActionV1?,
+        target: String,
+        source: String,
+        outputDirectory: String?,
+        timeoutSeconds: Int,
+        declaresNetwork: Bool
+    ) throws {
+        guard !name.isEmpty,
+              !symbolName.isEmpty,
+              name.utf8.count <= ToolAgentProtocolLimitsV1.maximumNameBytes,
+              brief.utf8.count <= ToolAgentProtocolLimitsV1.maximumBriefBytes,
+              symbolName.utf8.count <= ToolAgentProtocolLimitsV1.maximumSymbolNameBytes,
+              hosts.count <= ToolAgentProtocolLimitsV1.maximumFilterCount,
+              extensions.count <= ToolAgentProtocolLimitsV1.maximumFilterCount,
+              (hosts + extensions).allSatisfy({
+                  !$0.isEmpty
+                      && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFilterValueBytes
+              }),
+              trigger != .link || input == .clipboardURL,
+              trigger != .files || input == .files,
+              trigger != .selection || input == .selection else {
+            throw ToolAgentFailureCodeV1.invalidCandidate
+        }
+
+        switch kind {
+        case .prompt:
+            guard input == .selection,
+                  output != .files,
+                  output != .notify,
+                  !prompt.isEmpty,
+                  prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
+                  nativeAction == nil,
+                  target.isEmpty,
+                  source.isEmpty,
+                  outputDirectory == nil,
+                  timeoutSeconds == 120,
+                  !declaresNetwork else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        case .native:
+            guard let nativeAction,
+                  output == .replace || output == .clipboard || output == .notify,
+                  prompt.isEmpty,
+                  !appliesTargetLanguage,
+                  source.isEmpty,
+                  outputDirectory == nil,
+                  timeoutSeconds == 120,
+                  !declaresNetwork,
+                  target.utf8.count <= ToolAgentProtocolLimitsV1.maximumTargetBytes,
+                  !nativeAction.needsTarget || !target.isEmpty else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        case .python:
+            guard !source.isEmpty,
+                  source.utf8.count <= ToolAgentProtocolLimitsV1.maximumSourceBytes,
+                  prompt.isEmpty,
+                  !appliesTargetLanguage,
+                  nativeAction == nil,
+                  target.isEmpty,
+                  outputDirectory.map({
+                      !$0.isEmpty
+                          && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumTargetBytes
+                  }) ?? true,
+                  (5...1_800).contains(timeoutSeconds),
+                  output != .files || outputDirectory != nil else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case name
+        case brief
+        case symbolName
+        case input
+        case output
+        case trigger
+        case hosts
+        case extensions
+        case prompt
+        case appliesTargetLanguage
+        case nativeAction
+        case target
+        case source
+        case outputDirectory
+        case timeoutSeconds
+        case declaresNetwork
+    }
+}
+
+public enum ToolAgentRequestContractV1 {
+    public static func validate(
+        operation: ToolAgentOperationV1,
+        currentTool: ToolAgentInstalledToolV1?,
+        failure: String?
+    ) throws {
+        guard failure.map({ !$0.isEmpty && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumDiagnosticBytes }) ?? true else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+
+        switch operation {
+        case .create:
+            guard currentTool == nil, failure == nil else {
+                throw ToolAgentFailureCodeV1.invalidProtocol
+            }
+        case .edit:
+            guard currentTool != nil, failure == nil else {
+                throw ToolAgentFailureCodeV1.invalidProtocol
+            }
+        case .fix:
+            guard currentTool != nil, failure != nil else {
+                throw ToolAgentFailureCodeV1.invalidProtocol
+            }
         }
     }
 }

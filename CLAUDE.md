@@ -130,6 +130,32 @@ bash Scripts/build-app-bundle.sh  # full universal release bundle + DMG.
 
 In `swift run` mode Sparkle is fully inert: `updaterController` is `nil` and the "Check for Updates..." menu item is hidden. Sparkle requires a real `.app` bundle (Frameworks/Sparkle.framework + hardened runtime + Info.plist), so end-to-end update testing must use `bash Scripts/build-app-bundle.sh` and run `dist/Nugumi.app`.
 
+## Tool generation: the validation set
+
+Unit tests cover the agent protocol; they cannot tell you whether the agent can
+actually build the tool a user asked for. That is what the eval is for.
+
+```sh
+Scripts/tool-eval.sh              # every case
+Scripts/tool-eval.sh download     # only cases whose name contains "download"
+```
+
+Each case is a real request through the real agent against the model configured
+for text actions, so a full run costs tokens and minutes. The JSON report
+(`.build/tool-eval/report.json`) holds every candidate the model wrote, the
+diagnostic it got back after each validation, the status trail, and the result
+of running the finished tool for real. Read that, not just the pass/fail line —
+"it failed" is not a finding.
+
+Cases live in `ToolEvalSuite.all` (`App/ToolEvalMode.swift`) and are written the
+way a user would type them.
+
+**The suite must never be made to pass by teaching the system prompt a specific
+answer.** A recipe in the prompt proves the prompt can hold a recipe, not that
+the agent can build tools; the next request the user invents will fail exactly
+as before. Fix the generic machinery — budgets, diagnostics, capabilities, the
+validation contract — and let the model find the answer.
+
 ## Restart the app after changes (use `swift run Nugumi`)
 
 After any code change the user wants to see, restart the app — otherwise the user is looking at stale UI. **For testing, use `swift run Nugumi`, not a full bundle rebuild.** Kill the previous instance first and relaunch:

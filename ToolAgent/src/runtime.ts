@@ -22,6 +22,10 @@ type Pending =
       readonly reject: (error: Error) => void;
     };
 
+function sameUUID(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 export class SidecarRuntime {
   readonly abortController = new AbortController();
   private pending: Pending | undefined;
@@ -139,11 +143,12 @@ export class SidecarRuntime {
     const pending = this.pending;
     if (pending === undefined) throw new ProtocolError("invalidProtocol", "unexpected response");
     if (message.type === "modelResponse") {
-      if (pending.kind !== "model" || message.payload.requestID !== pending.id) {
+      if (pending.kind !== "model" || !sameUUID(message.payload.requestID, pending.id)) {
         throw new ProtocolError("invalidProtocol", "mismatched model response ID");
       }
       this.pending = undefined;
       if (message.payload.result.kind === "error") {
+        this.fail(message.payload.result.error, "model bridge failed");
         pending.reject(new ProtocolError("invalidProtocol", "model bridge failed"));
       } else {
         pending.resolve(message.payload.result.text);
@@ -152,7 +157,7 @@ export class SidecarRuntime {
     }
     if (
       pending.kind !== "tool" ||
-      message.payload.callID !== pending.id ||
+      !sameUUID(message.payload.callID, pending.id) ||
       message.payload.result.name !== pending.name
     ) {
       throw new ProtocolError("invalidProtocol", "mismatched tool response ID");

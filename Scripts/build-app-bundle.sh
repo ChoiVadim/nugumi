@@ -14,6 +14,7 @@ DMG_STAGE="$ROOT/.build/dmg-stage"
 LOCAL_HOME="$ROOT/.build/home"
 LOCAL_MODULE_CACHE="$ROOT/.build/clang-module-cache-release"
 TOOL_WORKER_RUNTIME="$ROOT/.build/tool-worker-runtime/arm64"
+TOOL_AGENT_RUNTIME="$ROOT/.build/tool-agent-runtime/arm64"
 
 # Universal (arm64 + x86_64) by default; pass UNIVERSAL=0 to build host-arch only.
 UNIVERSAL="${UNIVERSAL:-1}"
@@ -98,6 +99,7 @@ if [ ! -d "$WORKER_RESOURCE_BUNDLE" ]; then
 fi
 
 "$ROOT/Scripts/prepare-tool-worker-runtime.sh"
+"$ROOT/Scripts/prepare-tool-agent-runtime.sh"
 
 # Restore real HOME so codesign / notarytool can find the user's keychain.
 # Swift build needed the sandboxed HOME above, but signing tools look up
@@ -138,6 +140,15 @@ cp -R "$TOOL_WORKER_RUNTIME/site-packages" \
 cp "$TOOL_WORKER_RUNTIME/runtime.json" "$XPC_RESOURCES/Runtime/runtime.json"
 cp -R "$WORKER_RESOURCE_BUNDLE" \
     "$XPC_RESOURCES/Nugumi_NugumiToolWorker.bundle"
+
+TOOL_AGENT_RESOURCES="$CONTENTS_DIR/Resources/ToolAgent"
+PACKAGED_NODE="$CONTENTS_DIR/Helpers/ToolAgentNode"
+mkdir -p "$CONTENTS_DIR/Helpers" "$TOOL_AGENT_RESOURCES"
+cp "$TOOL_AGENT_RUNTIME/node" "$PACKAGED_NODE"
+cp "$TOOL_AGENT_RUNTIME/package.json" "$TOOL_AGENT_RESOURCES/package.json"
+cp "$TOOL_AGENT_RUNTIME/runtime.json" "$TOOL_AGENT_RESOURCES/runtime.json"
+cp -R "$TOOL_AGENT_RUNTIME/dist" "$TOOL_AGENT_RESOURCES/dist"
+cp -R "$TOOL_AGENT_RUNTIME/node_modules" "$TOOL_AGENT_RESOURCES/node_modules"
 
 # SwiftPM-built binaries don't auto-embed @executable_path/../Frameworks in
 # their rpath, so dyld can't locate Sparkle.framework. Add it explicitly.
@@ -220,6 +231,58 @@ PACKAGED_MANIFEST="$XPC_RESOURCES/Runtime/runtime.json"
     "$PACKAGED_MANIFEST" >"$PACKAGED_MANIFEST.tmp"
 mv "$PACKAGED_MANIFEST.tmp" "$PACKAGED_MANIFEST"
 
+while IFS= read -r runtime_file; do
+    if /usr/bin/file -b "$runtime_file" | /usr/bin/grep -q '^Mach-O'; then
+        codesign \
+            --force \
+            --sign "$SIGN_IDENTITY" \
+            --options runtime \
+            "$runtime_file"
+    fi
+done < <(
+    find "$TOOL_AGENT_RESOURCES/node_modules" -type f \
+        \( -name '*.node' -o -name '*.dylib' -o -name '*.so' \) -print |
+        /usr/bin/awk '{ print length($0), $0 }' |
+        /usr/bin/sort -rn |
+        /usr/bin/cut -d' ' -f2-
+)
+if [ "$SIGN_IDENTITY" = "-" ]; then
+    NODE_ENTITLEMENTS="$ROOT/.build/tool-agent-node-entitlements.plist"
+    /usr/bin/jq -n '{
+        "com.apple.security.cs.allow-jit": true,
+        "com.apple.security.cs.disable-library-validation": true
+    }' |
+        /usr/bin/plutil -convert xml1 -o "$NODE_ENTITLEMENTS" -
+    codesign \
+        --force \
+        --sign "$SIGN_IDENTITY" \
+        --options runtime \
+        --entitlements "$NODE_ENTITLEMENTS" \
+        "$PACKAGED_NODE"
+else
+    NODE_ENTITLEMENTS="$ROOT/.build/tool-agent-node-entitlements.plist"
+    /usr/bin/jq -n '{
+        "com.apple.security.cs.allow-jit": true
+    }' |
+        /usr/bin/plutil -convert xml1 -o "$NODE_ENTITLEMENTS" -
+    codesign \
+        --force \
+        --sign "$SIGN_IDENTITY" \
+        --options runtime \
+        --entitlements "$NODE_ENTITLEMENTS" \
+        "$PACKAGED_NODE"
+fi
+PACKAGED_NODE_SHA="$(
+    /usr/bin/shasum -a 256 "$PACKAGED_NODE" |
+        /usr/bin/awk '{print $1}'
+)"
+TOOL_AGENT_MANIFEST="$TOOL_AGENT_RESOURCES/runtime.json"
+/usr/bin/jq -cS \
+    --arg nodeSHA256 "$PACKAGED_NODE_SHA" \
+    '.nodeSHA256 = $nodeSHA256' \
+    "$TOOL_AGENT_MANIFEST" >"$TOOL_AGENT_MANIFEST.tmp"
+mv "$TOOL_AGENT_MANIFEST.tmp" "$TOOL_AGENT_MANIFEST"
+
 codesign \
     --force \
     --sign "$SIGN_IDENTITY" \
@@ -268,6 +331,7 @@ codesign \
     "$APP_DIR"
 
 xattr -cr "$APP_DIR"
+/usr/bin/codesign --verify --deep --strict --verbose=4 "$APP_DIR"
 
 # Notarize and staple the .app *before* it is dropped into the DMG. That way
 # the DMG's contents already carry the notarization ticket so Gatekeeper can
@@ -286,6 +350,10 @@ if [ -n "$NOTARIZE_PROFILE" ]; then
 fi
 
 echo "Built $APP_DIR"
+
+if [ "${SKIP_DMG:-0}" = "1" ]; then
+    exit 0
+fi
 
 # --- Styled DMG packaging ---
 
@@ -308,7 +376,7 @@ cp -R "$APP_DIR" "$DMG_STAGE/Nugumi.app"
 
 # Pre-size the DMG with some headroom over the staged content.
 STAGE_SIZE_KB="$(/usr/bin/du -sk "$DMG_STAGE" | awk '{print $1}')"
-DMG_SIZE_MB=$(( STAGE_SIZE_KB / 1024 + 12 ))
+DMG_SIZE_MB=$(( STAGE_SIZE_KB / 1024 * 5 / 4 + 64 ))
 
 /usr/bin/hdiutil create \
     -volname "Nugumi" \

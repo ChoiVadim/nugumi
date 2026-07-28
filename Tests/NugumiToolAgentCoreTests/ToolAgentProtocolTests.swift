@@ -3,6 +3,184 @@ import XCTest
 @testable import NugumiToolAgentCore
 
 final class ToolAgentProtocolTests: XCTestCase {
+    func testEditRequestRoundTripsInstalledPythonSourceAt64KiB() throws {
+        // Given
+        let source = "x".repeated(count: ToolAgentProtocolLimitsV1.maximumSourceBytes)
+        let installedTool = try ToolAgentInstalledToolV1(
+            kind: .python,
+            name: "Uppercase",
+            brief: "Uppercases copied text.",
+            symbolName: "textformat",
+            input: .clipboardText,
+            output: .clipboard,
+            trigger: .always,
+            source: source,
+            timeoutSeconds: 30
+        )
+        let request = try ToolBuildRequestV1(
+            description: "Make output title case.",
+            budgets: .preview,
+            operation: .edit,
+            currentTool: installedTool
+        )
+        let start = try ToolAgentStartV1(
+            description: request.description,
+            budgets: request.budgets,
+            operation: request.operation,
+            currentTool: request.currentTool,
+            failure: request.failure
+        )
+        let message = ToolAgentMessageV1.start(runID: request.runID, start)
+
+        // When
+        let decodedRequest = try JSONDecoder().decode(
+            ToolBuildRequestV1.self,
+            from: ToolAgentCanonicalJSONV1.encode(request)
+        )
+        let decodedMessage = try ToolAgentJSONLCodecV1.decode(
+            ToolAgentJSONLCodecV1.encode(message)
+        )
+
+        // Then
+        XCTAssertEqual(decodedRequest, request)
+        XCTAssertEqual(decodedMessage, message)
+        guard case .start(let decodedStart) = decodedMessage.payload else {
+            return XCTFail("Expected start payload")
+        }
+        XCTAssertEqual(decodedStart.operation, .edit)
+        XCTAssertEqual(decodedStart.currentTool?.source.utf8.count, source.utf8.count)
+        XCTAssertNil(decodedStart.failure)
+    }
+
+    func testOperationContractRejectsInvalidCreateEditAndFixCombinations() throws {
+        // Given
+        let installedTool = try ToolAgentInstalledToolV1(
+            kind: .python,
+            name: "Uppercase",
+            brief: "Uppercases copied text.",
+            symbolName: "textformat",
+            input: .clipboardText,
+            output: .clipboard,
+            trigger: .always,
+            source: "print(input())",
+            timeoutSeconds: 30
+        )
+
+        // Then
+        XCTAssertThrowsError(try ToolAgentStartV1(
+            description: "Create a tool.",
+            budgets: .preview,
+            operation: .create,
+            currentTool: installedTool
+        ))
+        XCTAssertThrowsError(try ToolAgentStartV1(
+            description: "Edit it.",
+            budgets: .preview,
+            operation: .edit
+        ))
+        XCTAssertThrowsError(try ToolAgentStartV1(
+            description: "Edit it.",
+            budgets: .preview,
+            operation: .edit,
+            currentTool: installedTool,
+            failure: "wrong output"
+        ))
+        XCTAssertThrowsError(try ToolBuildRequestV1(
+            description: "Fix it.",
+            budgets: .preview,
+            operation: .fix,
+            currentTool: installedTool
+        ))
+        XCTAssertThrowsError(try ToolBuildRequestV1(
+            description: "Fix it.",
+            budgets: .preview,
+            operation: .fix,
+            failure: "wrong output"
+        ))
+    }
+
+    func testInstalledToolRejectsShapesTheStrictSidecarCannotDecode() {
+        XCTAssertThrowsError(try ToolAgentInstalledToolV1(
+            kind: .native,
+            name: "Open Notes",
+            brief: "",
+            symbolName: "doc.text",
+            input: .none,
+            output: .panel,
+            trigger: .always,
+            nativeAction: .openApp,
+            target: "Notes"
+        ))
+        XCTAssertThrowsError(try ToolAgentInstalledToolV1(
+            kind: .python,
+            name: "Files",
+            brief: "",
+            symbolName: "folder",
+            input: .files,
+            output: .files,
+            trigger: .files,
+            source: "print('ok')",
+            outputDirectory: "",
+            timeoutSeconds: 30
+        ))
+        XCTAssertThrowsError(try ToolAgentInstalledToolV1(
+            kind: .python,
+            name: "Files",
+            brief: "",
+            symbolName: "folder",
+            input: .files,
+            output: .files,
+            trigger: .files,
+            source: "print('ok')",
+            outputDirectory: String(
+                repeating: "x",
+                count: ToolAgentProtocolLimitsV1.maximumTargetBytes + 1
+            ),
+            timeoutSeconds: 30
+        ))
+    }
+
+    func testInstalledToolRejectsIrrelevantFieldsThatWouldBeDroppedOnEncode() {
+        XCTAssertThrowsError(try ToolAgentInstalledToolV1(
+            kind: .prompt,
+            name: "Explain",
+            brief: "",
+            symbolName: "lightbulb",
+            input: .selection,
+            output: .panel,
+            trigger: .always,
+            prompt: "Explain simply.",
+            timeoutSeconds: 30,
+            declaresNetwork: true
+        ))
+        XCTAssertThrowsError(try ToolAgentInstalledToolV1(
+            kind: .native,
+            name: "Open Notes",
+            brief: "",
+            symbolName: "doc.text",
+            input: .none,
+            output: .notify,
+            trigger: .always,
+            appliesTargetLanguage: true,
+            nativeAction: .openApp,
+            target: "Notes",
+            declaresNetwork: true
+        ))
+        XCTAssertThrowsError(try ToolAgentInstalledToolV1(
+            kind: .python,
+            name: "Uppercase",
+            brief: "",
+            symbolName: "textformat",
+            input: .clipboardText,
+            output: .clipboard,
+            trigger: .always,
+            prompt: "ignored",
+            appliesTargetLanguage: true,
+            source: "print('ok')",
+            timeoutSeconds: 30
+        ))
+    }
+
     func testMessageRoundTripsEveryV1Type() throws {
         // Given
         let candidate = try makeCandidate()
@@ -54,8 +232,35 @@ final class ToolAgentProtocolTests: XCTestCase {
         XCTAssertThrowsError(try makeCandidate(source: sourceTooLarge))
         XCTAssertThrowsError(try makeCandidate(fixtures: [.init(input: inputTooLarge, expectedOutput: "OK")]))
         XCTAssertThrowsError(try makeCandidate(fixtures: [.init(input: "input", expectedOutput: outputTooLarge)]))
-        XCTAssertThrowsError(try makeCandidate(fixtures: []))
         XCTAssertThrowsError(try makeCandidate(fixtures: Array(repeating: .init(input: "input", expectedOutput: "OK"), count: ToolAgentProtocolLimitsV1.maximumFixtureCount + 1)))
+    }
+
+    /// A tool whose whole point is a side effect cannot be handed a fixture
+    /// without performing it, and a tool that reads the clock or the network
+    /// has no exact output to promise. Both used to be unrepresentable.
+    func testCandidateAcceptsUncheckableFixtures() throws {
+        XCTAssertNoThrow(try makeCandidate(fixtures: []))
+        XCTAssertNoThrow(try makeCandidate(fixtures: [.init(input: "input")]))
+    }
+
+    /// The fingerprint is a hash of the canonical encoding, and the model action
+    /// validator accepts a candidate by re-encoding it and comparing bytes. Both
+    /// break silently if an absent `expectedOutput` encodes as an explicit null.
+    func testFixtureWithoutExpectedOutputRoundTripsWithoutTheKey() throws {
+        // Given
+        let candidate = try makeCandidate(fixtures: [.init(input: "input")])
+
+        // When
+        let encoded = try ToolAgentCanonicalJSONV1.encode(candidate)
+        let decoded = try JSONDecoder().decode(
+            ToolAgentCandidateV1.self,
+            from: encoded
+        )
+
+        // Then
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("expectedOutput"))
+        XCTAssertEqual(decoded, candidate)
+        XCTAssertEqual(try ToolAgentCanonicalJSONV1.encode(decoded), encoded)
     }
 
     func testCandidateUsesUTF8BytesRatherThanCharacterCount() throws {
@@ -281,6 +486,61 @@ final class ToolAgentProtocolTests: XCTestCase {
         XCTAssertFalse(payload.contains(stdout))
         XCTAssertFalse(payload.contains(stderr))
         XCTAssertFalse(payload.contains("/Users/person/private.txt"))
+    }
+
+    func testAskUserRequestAndResponseRoundTrip() throws {
+        // Given
+        let request = try ToolAgentAskUserRequestV1(question: "Which app should receive the selected text?")
+        let response = try ToolAgentAskUserResponseV1(answer: "Notes")
+        let requestEnvelope = ToolAgentToolRequestEnvelopeV1(
+            callID: UUID(),
+            request: .askUser(request)
+        )
+        let responseEnvelope = ToolAgentToolResponseEnvelopeV1(
+            callID: UUID(),
+            result: .askUser(response)
+        )
+
+        // When
+        let decodedRequest = try JSONDecoder().decode(
+            ToolAgentToolRequestEnvelopeV1.self,
+            from: ToolAgentCanonicalJSONV1.encode(requestEnvelope)
+        )
+        let decodedResponse = try JSONDecoder().decode(
+            ToolAgentToolResponseEnvelopeV1.self,
+            from: ToolAgentCanonicalJSONV1.encode(responseEnvelope)
+        )
+
+        // Then
+        XCTAssertEqual(decodedRequest, requestEnvelope)
+        XCTAssertEqual(decodedResponse, responseEnvelope)
+    }
+
+    func testAskUserRejectsUnknownEmptyAndOversizedUTF8Text() throws {
+        // Given
+        let oversized = "😀".repeated(
+            count: (ToolAgentProtocolLimitsV1.maximumSafeMessageBytes / 4) + 1
+        )
+        let unexpectedField = try ToolAgentCanonicalJSONV1.encode([
+            "question": "Where should the result go?",
+            "unexpected": "value"
+        ])
+        let unexpectedResponseField = try ToolAgentCanonicalJSONV1.encode([
+            "answer": "Notes",
+            "unexpected": "value"
+        ])
+
+        // Then
+        XCTAssertThrowsError(try ToolAgentAskUserRequestV1(question: ""))
+        XCTAssertThrowsError(try ToolAgentAskUserResponseV1(answer: ""))
+        XCTAssertThrowsError(try ToolAgentAskUserRequestV1(question: oversized))
+        XCTAssertThrowsError(try ToolAgentAskUserResponseV1(answer: oversized))
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentAskUserRequestV1.self, from: unexpectedField)
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentAskUserResponseV1.self, from: unexpectedResponseField)
+        )
     }
 
     private func makeCandidate(

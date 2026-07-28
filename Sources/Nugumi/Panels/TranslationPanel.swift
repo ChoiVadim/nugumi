@@ -61,8 +61,8 @@ final class TranslationPanelController {
     private var activeRequestID = UUID()
     private var globalOutsideClickMonitor: Any?
     private var localOutsideClickMonitor: Any?
-    /// Esc closes the panel whenever Nugumi receives the keystroke (e.g.
-    /// right after an Ask Nugumi answer, when the prompt left Nugumi active).
+    /// Esc closes the panel whenever Gizmo receives the keystroke (e.g.
+    /// right after an Ask Gizmo answer, when the prompt left Gizmo active).
     private var localEscapeKeyMonitor: Any?
     private var commandCopyInterceptor: CommandCopyInterceptor?
     private var returnKeyInterceptor: ReturnKeyInterceptor?
@@ -75,7 +75,7 @@ final class TranslationPanelController {
     var onUserDismiss: (() -> Void)?
     private let replaceShortcutSourcePID: pid_t?
     /// When false, a click outside the panel does NOT dismiss it — only the ✕
-    /// button or Esc. The Ask Nugumi answer uses this so reading it isn't a
+    /// button or Esc. The Ask Gizmo answer uses this so reading it isn't a
     /// one-misclick-away-from-gone affair.
     private let dismissesOnOutsideClick: Bool
 

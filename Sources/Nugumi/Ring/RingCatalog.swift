@@ -71,7 +71,7 @@ enum RingActionID: String, Codable, CaseIterable {
         case .reply:
             return "Draft a reply to the selected message, or answer the question in it."
         case .ask:
-            return "Open the Ask Nugumi prompt."
+            return "Open the Ask Gizmo prompt."
         case .capture:
             return "Pick a region of the screen and read the text in it."
         case .summarize:

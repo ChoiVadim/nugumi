@@ -32,7 +32,7 @@ struct OpenAIChatClient: LLMBackend {
 
         if let image {
             guard LLMModel.option(id: model).supportsImages else {
-                throw TranslationError.cloudError(provider, "Ask Nugumi with a screenshot needs a vision model.")
+                throw TranslationError.cloudError(provider, "Ask Gizmo with a screenshot needs a vision model.")
             }
             guard image.data.count <= Self.maxImageBytes else {
                 throw TranslationError.cloudError(provider, "Image too large (limit 5 MB)")
@@ -64,6 +64,103 @@ struct OpenAIChatClient: LLMBackend {
         }
         messages.append(OpenAIMessage(role: "user", content: currentUserContent))
 
+        let answer = try await stream(
+            messages: messages,
+            thinkingLevel: thinkingLevel,
+            onPartial: onPartial
+        )
+
+        let parsed = AskNugumiResponse.parse(answer)
+        guard !parsed.message.isEmpty else {
+            throw TranslationError.emptyResponse
+        }
+        return parsed
+    }
+
+    func translate(
+        _ text: String,
+        images: [ImageInput] = [],
+        to targetLanguage: TranslationLanguage,
+        mode: TranslationMode = .selection,
+        appCategory: AppCategory,
+        composition: CompositionSettings? = nil,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        guard !apiKey.isEmpty else {
+            throw TranslationError.invalidAPIKey(provider)
+        }
+
+        let sourceText: String
+        switch mode {
+        case .selection, .smartReply, .custom:
+            sourceText = TextNormalizer.cleanedSelection(text)
+        case .draftMessage:
+            sourceText = TextNormalizer.cleanedDraftMessage(text)
+        case .revise, .reviseMessage, .summarizeChat, .summarizePage:
+            // Already composed deliberately (labeled sections) — don't let the
+            // selection cleaner collapse the structure the prompt relies on.
+            sourceText = text
+        }
+        guard !sourceText.isEmpty || !images.isEmpty else {
+            throw TranslationError.emptyResponse
+        }
+
+        for image in images where image.data.count > Self.maxImageBytes {
+            throw TranslationError.cloudError(provider, "Image too large (limit 5 MB)")
+        }
+
+        let systemPrompt = mode.systemPrompt(
+            targetLanguage: targetLanguage,
+            appCategory: appCategory,
+            composition: composition
+        )
+        let userContent: OpenAIContent = images.isEmpty
+            ? .string(sourceText)
+            : .parts([.text(sourceText)] + images.map { .imageURL($0.openAIDataURI) })
+
+        let translated = try await stream(
+            messages: [
+                OpenAIMessage(role: "system", content: .string(systemPrompt)),
+                OpenAIMessage(role: "user", content: userContent)
+            ],
+            thinkingLevel: thinkingLevel
+        ) { raw in
+            let partial = TextNormalizer.cleanedTranslation(raw)
+            if !partial.isEmpty { onPartial(partial) }
+        }
+
+        let finalTranslation = TextNormalizer.cleanedTranslation(translated)
+        guard !finalTranslation.isEmpty else {
+            throw TranslationError.emptyResponse
+        }
+        return finalTranslation
+    }
+    func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        guard !apiKey.isEmpty else { throw TranslationError.invalidAPIKey(provider) }
+        return try await stream(
+            messages: [
+                OpenAIMessage(role: "system", content: .string(systemPrompt)),
+                OpenAIMessage(role: "user", content: .string(userPrompt))
+            ],
+            thinkingLevel: thinkingLevel,
+            onPartial: onPartial
+        )
+    }
+
+    /// One streaming chat completion. `ask` and `translate` held byte-identical
+    /// copies of this; `onPartial` gets the accumulated raw text so each caller
+    /// decides how to clean it.
+    private func stream(
+        messages: [OpenAIMessage],
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
         let body = OpenAIRequest(
             model: model,
             stream: true,
@@ -137,139 +234,7 @@ struct OpenAIChatClient: LLMBackend {
             if chunk.choices.first?.finishReason != nil { break }
         }
 
-        let parsed = AskNugumiResponse.parse(answer)
-        guard !parsed.message.isEmpty else {
-            throw TranslationError.emptyResponse
-        }
-        return parsed
-    }
-
-    func translate(
-        _ text: String,
-        images: [ImageInput] = [],
-        to targetLanguage: TranslationLanguage,
-        mode: TranslationMode = .selection,
-        appCategory: AppCategory,
-        composition: CompositionSettings? = nil,
-        thinkingLevel: ThinkingLevel,
-        onPartial: @escaping (String) -> Void
-    ) async throws -> String {
-        guard !apiKey.isEmpty else {
-            throw TranslationError.invalidAPIKey(provider)
-        }
-
-        let sourceText: String
-        switch mode {
-        case .selection, .smartReply, .custom:
-            sourceText = TextNormalizer.cleanedSelection(text)
-        case .draftMessage:
-            sourceText = TextNormalizer.cleanedDraftMessage(text)
-        case .revise, .reviseMessage, .summarizeChat, .summarizePage:
-            // Already composed deliberately (labeled sections) — don't let the
-            // selection cleaner collapse the structure the prompt relies on.
-            sourceText = text
-        }
-        guard !sourceText.isEmpty || !images.isEmpty else {
-            throw TranslationError.emptyResponse
-        }
-
-        for image in images where image.data.count > Self.maxImageBytes {
-            throw TranslationError.cloudError(provider, "Image too large (limit 5 MB)")
-        }
-
-        let systemPrompt = mode.systemPrompt(
-            targetLanguage: targetLanguage,
-            appCategory: appCategory,
-            composition: composition
-        )
-        let userContent: OpenAIContent = images.isEmpty
-            ? .string(sourceText)
-            : .parts([.text(sourceText)] + images.map { .imageURL($0.openAIDataURI) })
-
-        let body = OpenAIRequest(
-            model: model,
-            stream: true,
-            messages: [
-                OpenAIMessage(role: "system", content: .string(systemPrompt)),
-                OpenAIMessage(role: "user", content: userContent)
-            ],
-            thinkingOptions: CloudThinkingOptions(
-                provider: provider,
-                model: model,
-                thinkingLevel: thinkingLevel
-            )
-        )
-
-        var request = URLRequest(url: provider.baseURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = 120
-        request.httpBody = try JSONEncoder().encode(body)
-
-        let bytes: URLSession.AsyncBytes
-        let response: URLResponse
-        do {
-            (bytes, response) = try await URLSession.shared.bytes(for: request)
-        } catch let urlError as URLError where urlError.code == .cannotConnectToHost
-            || urlError.code == .cannotFindHost
-            || urlError.code == .networkConnectionLost
-            || urlError.code == .notConnectedToInternet
-            || urlError.code == .timedOut {
-            throw TranslationError.cloudError(provider, urlError.localizedDescription)
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw TranslationError.cloudError(provider, "invalid response")
-        }
-
-        switch httpResponse.statusCode {
-        case 200..<300:
-            break
-        case 401, 403:
-            throw TranslationError.invalidAPIKey(provider)
-        case 429:
-            throw TranslationError.rateLimited(provider)
-        case 402:
-            throw TranslationError.outOfCredits(provider)
-        default:
-            let body = await CloudHTTPError.readBody(bytes)
-            throw TranslationError.cloudError(
-                provider,
-                CloudHTTPError.detail(status: httpResponse.statusCode, body: body)
-            )
-        }
-
-        var translated = ""
-        let decoder = JSONDecoder()
-        for try await rawLine in bytes.lines {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix(":") { continue }
-            guard line.hasPrefix("data:") else { continue }
-            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
-            if payload == "[DONE]" { break }
-            guard let data = payload.data(using: .utf8) else { continue }
-            if let streamError = try? decoder.decode(OpenAIStreamError.self, from: data) {
-                throw TranslationError.cloudError(provider, streamError.displayMessage)
-            }
-            guard let chunk = try? decoder.decode(OpenAIStreamChunk.self, from: data) else {
-                throw TranslationError.cloudError(provider, "Unexpected stream payload")
-            }
-            if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
-                translated += delta
-                let partial = TextNormalizer.cleanedTranslation(translated)
-                if !partial.isEmpty {
-                    onPartial(partial)
-                }
-            }
-            if chunk.choices.first?.finishReason != nil { break }
-        }
-
-        let finalTranslation = TextNormalizer.cleanedTranslation(translated)
-        guard !finalTranslation.isEmpty else {
-            throw TranslationError.emptyResponse
-        }
-        return finalTranslation
+        return answer
     }
 }
 

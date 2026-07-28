@@ -4,14 +4,6 @@ import NugumiToolAgentCore
 @objc public protocol NugumiToolWorkerProtocol {
     func runProbe(_ requestData: Data, withReply reply: @escaping (Data) -> Void)
     func cancelProbe(_ runID: String, withReply reply: @escaping (Bool) -> Void)
-    func runCandidate(
-        _ requestData: Data,
-        withReply reply: @escaping (Data) -> Void
-    )
-    func cancelCandidate(
-        _ runID: String,
-        withReply reply: @escaping (Bool) -> Void
-    )
 }
 
 @objc public protocol NugumiToolWorkerHostProtocol {

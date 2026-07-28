@@ -211,7 +211,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
     private var summarizeOption: RingSummarizeOption?
     /// Runs one of the user's prompt tools, carrying the armed selection the
     /// same way `onTranslate` does.
-    private var onPromptTool: ((PromptTool, String) -> Void)?
+    private var onTool: ((NugumiTool, String) -> Void)?
     private var onPromptSubmit: ((String) -> Void)?
     private var onPromptClose: (() -> Void)?
     var onContinue: (() -> Void)?
@@ -469,7 +469,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    /// Dresses the pet in the writing register Nugumi will use for the frontmost app
+    /// Dresses the pet in the writing register Gizmo will use for the frontmost app
     /// (formal = hat + mustache, casual = cap, polite = bare). Uses the app-based
     /// category only — deliberately not the AppleScript URL read — so passively
     /// switching apps never triggers an Automation prompt. The legacy corner badge
@@ -478,7 +478,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         appIconView.isHidden = true
         guard let runningApp = NSWorkspace.shared.frontmostApplication,
               runningApp.bundleIdentifier != Bundle.main.bundleIdentifier else {
-            return // keep the last register while Nugumi itself is frontmost
+            return // keep the last register while Gizmo itself is frontmost
         }
         let category = AppCategoryClassifier.category(for: runningApp.bundleIdentifier)
         petView.setWritingStyle(WritingStyle.resolved(for: category))
@@ -925,7 +925,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
     }
 
     /// Give the prompt's native NSTextField keyboard focus so the blinking
-    /// caret appears. The panel becomes key without activating Nugumi
+    /// caret appears. The panel becomes key without activating Gizmo
     /// (`.nonactivatingPanel` on promptPanel) — other apps stay active and
     /// keep receiving keystrokes when the user clicks back into them.
     private func focusPromptField() {
@@ -1009,7 +1009,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         onLive: @escaping () -> Void = {},
         onDictate: @escaping () -> Void = {},
         summarizeOption: RingSummarizeOption? = nil,
-        onPromptTool: ((PromptTool, String) -> Void)? = nil
+        onTool: ((NugumiTool, String) -> Void)? = nil
     ) {
         // Don't yank the pet back to "ready" while Ask is open (input, loading,
         // or answer) — a casual selection in another app should leave the
@@ -1035,7 +1035,7 @@ final class PetController: NSObject, NSTextFieldDelegate {
         self.onLive = onLive
         self.onDictate = onDictate
         self.summarizeOption = summarizeOption
-        self.onPromptTool = onPromptTool
+        self.onTool = onTool
         currentMode = initialMode
         isReadyLockedUntilPanelCloses = false
         panel.ignoresMouseEvents = false
@@ -1256,33 +1256,33 @@ final class PetController: NSObject, NSTextFieldDelegate {
         }
         // Same gate the old direct invocation had: the ring only makes sense
         // while a selection is armed.
-        guard selectedText != nil, !isReadyLockedUntilPanelCloses else { return }
+        guard let text = selectedText, !isReadyLockedUntilPanelCloses else { return }
+
+        // Same reasoning as the floating bar: bind the armed selection and the
+        // callbacks now, so a handler can't be defeated by the presenter's state
+        // changing between the ring opening and the pick landing.
+        let translate = onTranslate
+        let rewrite = onRewrite
+        let smartReply = onSmartReply
+        let ask = onAsk
+        let screenshot = onScreenshot
+        let dictate = onDictate
+        let live = onLive
+
         var handlers = RingActionHandlers()
-        handlers.explain = { [weak self] in
-            guard let self, let t = self.selectedText else { return }
-            self.onTranslate?(t)
-        }
-        handlers.rewrite = { [weak self] in
-            guard let self, let t = self.selectedText else { return }
-            self.onRewrite?(t)
-        }
-        handlers.reply = { [weak self] in
-            guard let self, let t = self.selectedText else { return }
-            self.onSmartReply?(t)
-        }
-        handlers.ask = { [weak self] in self?.onAsk?() }
-        handlers.capture = { [weak self] in self?.onScreenshot?() }
-        handlers.dictate = { [weak self] in self?.onDictate?() }
-        handlers.live = { [weak self] in self?.onLive?() }
+        handlers.explain = { translate?(text) }
+        handlers.rewrite = { rewrite?(text) }
+        handlers.reply = { smartReply?(text) }
+        handlers.ask = { ask?() }
+        handlers.capture = { screenshot?() }
+        handlers.dictate = { dictate?() }
+        handlers.live = { live?() }
         handlers.summarize = summarizeOption
-        if let onPromptTool {
-            handlers.promptTool = { [weak self] tool in
-                guard let self, let t = self.selectedText else { return }
-                onPromptTool(tool, t)
-            }
+        if let onTool {
+            handlers.tool = { tool in onTool(tool, text) }
         }
         let slots = RingBuilder.slots(
-            configuration: RingConfigurationProvider.current(),
+            configuration: RingConfigurationProvider.current(text),
             handlers: handlers,
             dismiss: { [weak self] in self?.radialMenu = nil }
         )

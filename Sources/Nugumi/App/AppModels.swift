@@ -119,7 +119,7 @@ struct LLMModel: Equatable {
         // whatever `/api/tags` discovers (see makeOllamaModel).
         .init(id: "gpt-oss:120b-cloud", shortName: "gpt-oss:120b", displayName: "gpt-oss:120b", backend: .ollama(requiresAccount: true),  supportsImages: false),
         .init(id: "gpt-oss:20b",        shortName: "gpt-oss:20b",  displayName: "gpt-oss:20b",  backend: .ollama(requiresAccount: false), supportsImages: false),
-        // The one curated local vision model, so Ask Nugumi works on a
+        // The one curated local vision model, so Ask Gizmo works on a
         // pure-Ollama setup (gpt-oss has no vision). Bare tag on purpose:
         // `ollama pull gemma4` registers as "gemma4:latest", and the two
         // spellings are unified via canonicalOllamaID.
@@ -259,7 +259,7 @@ struct LLMModel: Equatable {
             displayName: short,
             backend: .ollama(requiresAccount: isCloud),
             // Vision support comes from the server's reported capabilities
-            // (`/api/show`); only vision models surface in Ask Nugumi.
+            // (`/api/show`); only vision models surface in Ask Gizmo.
             supportsImages: OllamaModelCache.visionCapable.contains(name)
         )
     }
@@ -353,7 +353,7 @@ enum ModelUseScope: String, CaseIterable {
         case .textActions:
             return "Everyday text: \(model.shortName)"
         case .askNugumi:
-            return "Ask Nugumi: \(model.shortName)"
+            return "Ask Gizmo: \(model.shortName)"
         }
     }
 
@@ -369,7 +369,7 @@ enum ModelUseScope: String, CaseIterable {
 
 /// Per-engine model presets applied when an engine connects (key validated,
 /// ChatGPT signed in, Ollama model installed) — see `applyEnginePreset`.
-/// Everyday text gets the fast/cheap tier, Ask Nugumi the vision flagship.
+/// Everyday text gets the fast/cheap tier, Ask Gizmo the vision flagship.
 enum EngineModelPreset {
     case ollama
     case cloud(CloudProvider)
@@ -454,7 +454,7 @@ extension ModelUseScope {
         case .textActions:
             return "Everyday text: \(level.menuTitle)"
         case .askNugumi:
-            return "Ask Nugumi: \(level.menuTitle)"
+            return "Ask Gizmo: \(level.menuTitle)"
         }
     }
 }

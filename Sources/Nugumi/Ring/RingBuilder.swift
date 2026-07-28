@@ -16,7 +16,7 @@ struct RingActionHandlers {
     /// Summarize carries its own sub-orbit structure, so it arrives as the
     /// option rather than a plain closure.
     var summarize: RingSummarizeOption?
-    var promptTool: ((PromptTool) -> Void)?
+    var tool: ((NugumiTool) -> Void)?
 }
 
 /// Turns a saved layout into the positioned slots the radial menu renders. The
@@ -41,10 +41,12 @@ enum RingBuilder {
                 return nil
             case .builtIn(let id):
                 return builtInItem(id, handlers: handlers, dismiss: dismiss)
-            case .promptTool(let id):
+            case .tool(let id):
                 guard let tool = configuration.tools.first(where: { $0.id == id }),
-                      tool.isUsable,
-                      let run = handlers.promptTool
+                      // A tool whose trigger doesn't fit the moment leaves its slot
+                      // as a gap — the same rule the contextual Summarize follows.
+                      tool.trigger.matches(configuration.context),
+                      let run = handlers.tool
                 else { return nil }
                 return RingItem.symbol(tool.resolvedSymbolName, label: tool.name) {
                     dismiss()

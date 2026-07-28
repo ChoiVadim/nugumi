@@ -249,7 +249,7 @@ struct AskNugumiTurn: Codable, Equatable {
     let answer: String
 }
 
-/// Persists the Ask Nugumi dialog across app launches so follow-up questions
+/// Persists the Ask Gizmo dialog across app launches so follow-up questions
 /// keep their context after a restart. The saved-at clock resets on every save,
 /// so an actively used conversation never expires; after `maxAge` without a new
 /// ask, the next launch starts fresh.
@@ -287,7 +287,7 @@ enum AskNugumiPromptBuilder {
     }
 
     private static let systemPromptBase = """
-You are Nugumi, a concise and helpful desktop assistant. Answer the user's question directly and usefully.
+You are Gizmo, a concise and helpful desktop assistant. Answer the user's question directly and usefully.
 
 When the user attaches a screenshot, you can see what is currently on their screen and answer about it. When no screenshot is attached, answer from general knowledge.
 

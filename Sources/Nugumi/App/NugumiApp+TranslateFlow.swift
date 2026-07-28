@@ -82,8 +82,8 @@ extension NugumiApp {
                     self?.toggleDictation()
                 },
                 summarizeOption: summarizeOption,
-                onPromptTool: { [weak self] tool, text in
-                    self?.runPromptTool(tool, selection: text)
+                onTool: { [weak self] tool, text in
+                    self?.runTool(tool, selection: text)
                 }
             )
             return
@@ -137,8 +137,8 @@ extension NugumiApp {
                 self?.toggleDictation()
             },
             summarizeOption: summarizeOption,
-            onPromptTool: { [weak self] tool, text in
-                self?.runPromptTool(tool, selection: text)
+            onTool: { [weak self] tool, text in
+                self?.runTool(tool, selection: text)
             }
         )
 

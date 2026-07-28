@@ -106,6 +106,20 @@ struct ClaudeCodeClient: LLMBackend {
         return parsed
     }
 
+    func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        try await stream(
+            systemPrompt: systemPrompt,
+            messages: [["role": "user", "content": userPrompt]],
+            thinkingLevel: thinkingLevel,
+            onPartial: onPartial
+        )
+    }
+
     /// Native content array: a text block plus one image block per attachment.
     private static func contentBlocks(text: String, images: [ImageInput]) -> [[String: Any]] {
         var blocks: [[String: Any]] = [["type": "text", "text": text]]

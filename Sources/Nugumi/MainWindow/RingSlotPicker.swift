@@ -22,25 +22,32 @@ struct RingSheetOverlay: View {
         ZStack {
             Color.black.opacity(0.45)
                 .ignoresSafeArea()
-                .onTapGesture { bridge.ringSheet = nil }
+                .onTapGesture(perform: close)
             switch sheet {
             case .slot(let index):
-                RingSlotPickerPanel(slotIndex: index)
+                RingSlotPickerPanel(toolsStore: bridge.tools, slotIndex: index)
             case .toolEditor(let id, let assignTo):
-                PromptToolEditorPanel(toolID: id, assignTo: assignTo)
+                ToolEditorPanel(toolID: id, assignTo: assignTo)
             }
         }
-        .onExitCommand { bridge.ringSheet = nil }
+        .onExitCommand(perform: close)
+    }
+
+    /// Both panels hold text fields; the responder has to come back to the window
+    /// before they're torn down or the window stops routing clicks. See
+    /// `ToolEditorPanel.dismiss()`.
+    private func close() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        bridge.ringSheet = nil
     }
 }
 
 // MARK: - Slot picker
 
-/// Two-pane picker for one ring slot. Left column groups the sources, right
-/// column lists them, and the choice is staged until Assign commits it — so a
-/// stray click never rearranges the ring. Mirrors `ModelPickerPanel`.
 private struct RingSlotPickerPanel: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
+    /// Observed so the list refreshes the moment a tool is deleted.
+    @ObservedObject var toolsStore: ToolsStore
     let slotIndex: Int
 
     @State private var search = ""
@@ -61,8 +68,8 @@ private struct RingSlotPickerPanel: View {
         RingActionID.allCases.filter { matches($0.displayName, $0.summary) }
     }
 
-    private var tools: [PromptTool] {
-        bridge.promptTools.tools
+    private var tools: [NugumiTool] {
+        toolsStore.tools
             .sorted { $0.createdAt < $1.createdAt }
             .filter { matches($0.name, $0.prompt) }
     }
@@ -78,11 +85,9 @@ private struct RingSlotPickerPanel: View {
             header
             searchField
             Divider().background(FlowTheme.hairline)
-            HStack(spacing: 0) {
-                groupColumn
-                Divider().background(FlowTheme.hairline)
-                listColumn
-            }
+            sourceBar
+            Divider().background(FlowTheme.hairline)
+            listColumn
             Divider().background(FlowTheme.hairline)
             footer
         }
@@ -97,7 +102,7 @@ private struct RingSlotPickerPanel: View {
         .onAppear {
             searchFocused = true
             pending = current == .empty ? nil : current
-            if case .promptTool = current { group = .tools }
+            if case .tool = current { group = .tools }
         }
     }
 
@@ -112,7 +117,7 @@ private struct RingSlotPickerPanel: View {
                     .foregroundStyle(FlowTheme.inkTertiary)
             }
             Spacer()
-            Button(action: { bridge.ringSheet = nil }) {
+            Button(action: { closePanel() }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(FlowTheme.inkSecondary)
@@ -120,6 +125,8 @@ private struct RingSlotPickerPanel: View {
                     .background(Circle().fill(FlowTheme.subtleFill))
             }
             .buttonStyle(.plain)
+            .help("Close")
+            .accessibilityLabel("Close action picker")
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
@@ -145,56 +152,51 @@ private struct RingSlotPickerPanel: View {
         .padding(.bottom, 12)
     }
 
-    private var groupColumn: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            groupRow(.builtIn, count: builtIns.count)
-            groupRow(.tools, count: tools.count)
-            Divider().background(FlowTheme.hairline).padding(.vertical, 8)
+    private var sourceBar: some View {
+        HStack(spacing: 8) {
+            sourceTab(.builtIn, count: builtIns.count)
+            sourceTab(.tools, count: tools.count)
+            Spacer(minLength: 0)
             Button {
                 bridge.ringSheet = .toolEditor(id: nil, assignTo: slotIndex)
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: "plus.circle")
                         .font(.system(size: 12, weight: .semibold))
-                    Text("New prompt tool")
+                    Text("New tool")
                         .font(.system(size: 12.5, weight: .medium))
                 }
                 .foregroundStyle(FlowTheme.accent)
-                .padding(.vertical, 8)
-                .padding(.horizontal, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 10)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Spacer(minLength: 0)
         }
-        .padding(.vertical, 8)
-        .frame(width: 200)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
-    private func groupRow(_ value: Group, count: Int) -> some View {
+    private func sourceTab(_ value: Group, count: Int) -> some View {
         let isSelected = value == group
         return Button { group = value } label: {
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(isSelected ? FlowTheme.accent : Color.clear)
-                    .frame(width: 2.5)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(value.rawValue)
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(isSelected ? FlowTheme.ink : FlowTheme.inkSecondary)
-                    Text("\(count) \(count == 1 ? "item" : "items")")
-                        .font(.system(size: 11))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                }
-                .padding(.vertical, 7)
-                .padding(.leading, 12)
-                Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                Text(value.rawValue)
+                Text("\(count)")
+                    .foregroundStyle(FlowTheme.inkTertiary)
             }
-            .background(isSelected ? Color.white.opacity(0.06) : Color.clear)
-            .contentShape(Rectangle())
+            .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
+            .foregroundStyle(isSelected ? FlowTheme.ink : FlowTheme.inkSecondary)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? FlowTheme.accentSoft : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -216,7 +218,7 @@ private struct RingSlotPickerPanel: View {
                     }
                 case .tools:
                     if tools.isEmpty {
-                        Text("No tools yet. Use “New prompt tool” on the left.")
+                        Text("No tools yet. Use “New tool” above.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(FlowTheme.inkTertiary)
                             .padding(.horizontal, 14)
@@ -224,17 +226,18 @@ private struct RingSlotPickerPanel: View {
                     }
                     ForEach(tools) { tool in
                         optionRow(
-                            content: .promptTool(tool.id),
+                            content: .tool(tool.id),
                             symbolImage: AnyView(Image(systemName: tool.resolvedSymbolName)),
                             title: tool.name.isEmpty ? "Untitled tool" : tool.name,
                             detail: tool.isUsable
-                                ? tool.result.explanation
+                                ? tool.output.explanation
                                 : "Unfinished — this tool still needs a prompt.",
-                            // Editing (and deleting, from the editor's footer)
-                            // lives here: the Ring tab itself shows only the ring.
+                            // Managing tools lives here: the Ring tab itself shows
+                            // only the ring.
                             onEdit: {
-                                bridge.ringSheet = .toolEditor(id: tool.id, assignTo: slotIndex)
-                            }
+                                bridge.ringSheet = .toolEditor(id: tool.id, assignTo: nil)
+                            },
+                            onDelete: { delete(tool) }
                         )
                     }
                 }
@@ -249,64 +252,81 @@ private struct RingSlotPickerPanel: View {
         symbolImage: AnyView,
         title: String,
         detail: String,
-        onEdit: (() -> Void)? = nil
+        onEdit: (() -> Void)? = nil,
+        onDelete: (() -> Void)? = nil
     ) -> some View {
         let isPending = pending == content
-        let assignedElsewhere = bridge.ringLayout.layout.slots.contains(content) && content != current
-        return Button { pending = content } label: {
-            HStack(spacing: 11) {
-                symbolImage
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Color.white.opacity(0.08)))
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
+        return HStack(spacing: 4) {
+            Button { pending = content } label: {
+                HStack(spacing: 11) {
+                    symbolImage
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(FlowTheme.ink)
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(title)
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(FlowTheme.ink)
-                        if assignedElsewhere { RingTag(text: "moves here") }
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(detail)
-                        .font(.system(size: 11))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if isPending {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(FlowTheme.accent)
+                    }
                 }
-                Spacer(minLength: 8)
-                if let onEdit {
-                    RowIconButton(symbol: "pencil", action: onEdit)
-                }
-                if isPending {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(FlowTheme.accent)
-                }
+                .padding(.vertical, 8)
+                .padding(.leading, 14)
+                .padding(.trailing, 8)
+                .contentShape(Rectangle())
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
-            .background(isPending ? Color.white.opacity(0.06) : Color.clear)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+
+            if let onEdit {
+                RowIconButton(symbol: "pencil", action: onEdit)
+                    .help("Edit \(title)")
+                    .accessibilityLabel("Edit \(title)")
+            }
+            if let onDelete {
+                RowIconButton(symbol: "trash", action: onDelete)
+                    .help("Delete \(title)")
+                    .accessibilityLabel("Delete \(title)")
+                    .padding(.trailing, 8)
+            }
         }
-        .buttonStyle(.plain)
+        .background(isPending ? Color.white.opacity(0.06) : Color.clear)
+    }
+
+    private var canAssign: Bool {
+        pending != nil && pending != current
+    }
+
+    private var pendingIsAssignedElsewhere: Bool {
+        guard let pending, pending != current else { return false }
+        return bridge.ringLayout.layout.slots.contains(pending)
     }
 
     private var footer: some View {
         HStack(spacing: 10) {
-            if current != .empty {
-                SecondaryButton(title: "Remove from ring", destructive: true) {
-                    bridge.ringLayout.clear(slotIndex)
-                    bridge.ringSheet = nil
-                }
+            if pendingIsAssignedElsewhere {
+                Text("Already in another slot. Assigning moves it here.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(FlowTheme.inkTertiary)
             }
             Spacer(minLength: 0)
-            SecondaryButton(title: "Cancel") { bridge.ringSheet = nil }
+            SecondaryButton(title: "Cancel") { closePanel() }
             Button {
                 guard let pending else { return }
                 bridge.ringLayout.assign(pending, to: slotIndex)
-                bridge.ringSheet = nil
+                closePanel()
             } label: {
-                Text("Assign")
+                Text(pendingIsAssignedElsewhere ? "Move here" : "Assign")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.vertical, 7)
@@ -317,11 +337,39 @@ private struct RingSlotPickerPanel: View {
                     )
             }
             .buttonStyle(.plain)
-            .disabled(pending == nil || pending == current)
-            .opacity(pending == nil || pending == current ? 0.45 : 1)
+            .disabled(!canAssign)
+            .opacity(canAssign ? 1 : 0.45)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+
+    /// Deleting a tool removes its folder and its script for good, so it asks
+    /// first — there's no undo behind this.
+    private func delete(_ tool: NugumiTool) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete “\(tool.name)”?"
+        alert.informativeText = tool.kind == .python
+            ? "Its script is deleted too. This can't be undone."
+            : "This can't be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        bridge.ringLayout.removeTool(tool.id)
+        bridge.tools.delete(tool.id)
+        ToolApprovals.revoke(tool.id)
+        if pending == .tool(tool.id) { pending = nil }
+    }
+
+    /// Same responder handoff as the editor: a text field losing the window's
+    /// first responder while being removed leaves the window ignoring clicks.
+    private func closePanel() {
+        searchFocused = false
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        bridge.ringSheet = nil
     }
 
     private func describe(_ content: RingSlotContent) -> String {
@@ -330,234 +378,9 @@ private struct RingSlotPickerPanel: View {
             return "empty"
         case .builtIn(let id):
             return id.displayName
-        case .promptTool(let id):
-            return bridge.promptTools.tool(id: id)?.name ?? "a deleted tool"
+        case .tool(let id):
+            return bridge.tools.tool(id: id)?.name ?? "a deleted tool"
         }
-    }
-}
-
-// MARK: - Prompt tool editor
-
-/// Draft-based editor: nothing reaches the store until Save, so Cancel and
-/// Escape are always safe.
-private struct PromptToolEditorPanel: View {
-    @EnvironmentObject var bridge: NugumiSettingsBridge
-    let toolID: UUID?
-    let assignTo: Int?
-
-    @State private var draft = PromptTool()
-    @State private var loaded = false
-    @FocusState private var nameFocused: Bool
-
-    private var isNew: Bool { toolID == nil }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().background(FlowTheme.hairline)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    nameAndIcon
-                    promptField
-                    resultPicker
-                    languageToggle
-                }
-                .padding(16)
-            }
-            Divider().background(FlowTheme.hairline)
-            footer
-        }
-        .frame(width: 640, height: 560)
-        .background(Color(white: 0.11))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(FlowTheme.hairline, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
-        .onAppear {
-            guard !loaded else { return }
-            loaded = true
-            if let toolID, let existing = bridge.promptTools.tool(id: toolID) {
-                draft = existing
-            }
-            nameFocused = true
-        }
-    }
-
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(isNew ? "New prompt tool" : "Edit tool")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                Text("Your prompt runs over the selected text. Nugumi adds nothing else to it.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            }
-            Spacer()
-            Button(action: { bridge.ringSheet = nil }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-                    .frame(width: 24, height: 24)
-                    .background(Circle().fill(FlowTheme.subtleFill))
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
-    }
-
-    private var nameAndIcon: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel("Name", hint: "Shown on the ring button when you hover it.")
-            TextField("To JSON", text: $draft.name)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(FlowTheme.ink)
-                .focused($nameFocused)
-                .padding(.vertical, 8)
-                .padding(.horizontal, 11)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-
-            fieldLabel("Icon")
-            IconGrid(selection: $draft.symbolName)
-        }
-    }
-
-    private var promptField: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel(
-                "Prompt",
-                hint: "Write it as an instruction to the model, the way you'd brief a person."
-            )
-            TextEditor(text: $draft.prompt)
-                .font(.system(size: 13))
-                .foregroundStyle(FlowTheme.ink)
-                .scrollContentBackground(.hidden)
-                .frame(height: 120)
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-        }
-    }
-
-    private var resultPicker: some View {
-        SettingRow("Result", subtitle: draft.result.explanation) {
-            PillPicker(
-                options: PromptToolResult.allCases,
-                selection: $draft.result,
-                label: { $0.displayName }
-            )
-        }
-    }
-
-    private var languageToggle: some View {
-        SettingRow(
-            "Write the answer in the target language",
-            subtitle: "Leave this off for tools that transform text rather than translate it."
-        ) {
-            Toggle("", isOn: $draft.appliesTargetLanguage)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(FlowTheme.accent)
-        }
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            if let toolID {
-                SecondaryButton(title: "Delete", destructive: true) {
-                    bridge.ringLayout.removeTool(toolID)
-                    bridge.promptTools.delete(toolID)
-                    bridge.ringSheet = nil
-                }
-            }
-            Spacer(minLength: 0)
-            SecondaryButton(title: "Cancel") { bridge.ringSheet = nil }
-            Button(action: save) {
-                Text("Save")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(FlowTheme.accent)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(!draft.isUsable)
-            .opacity(draft.isUsable ? 1 : 0.45)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private func save() {
-        guard draft.isUsable else { return }
-        var tool = draft
-        tool.name = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        tool.prompt = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if isNew {
-            bridge.promptTools.add(tool)
-        } else {
-            bridge.promptTools.update(tool)
-        }
-        if let assignTo {
-            bridge.ringLayout.assign(.promptTool(tool.id), to: assignTo)
-        }
-        bridge.ringSheet = nil
-    }
-
-    private func fieldLabel(_ title: String, hint: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(FlowTheme.inkSecondary)
-            if let hint {
-                Text(hint)
-                    .font(.system(size: 11))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            }
-        }
-    }
-}
-
-/// Scrolling grid of the curated SF Symbols in `PromptToolIcons`.
-private struct IconGrid: View {
-    @Binding var selection: String
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 12)
-
-    var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 6) {
-                ForEach(PromptToolIcons.all, id: \.self) { name in
-                    let isSelected = name == selection
-                    Button { selection = name } label: {
-                        Image(systemName: name)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
-                            .frame(width: 30, height: 30)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(isSelected ? FlowTheme.accent : Color.white.opacity(0.05))
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(name)
-                }
-            }
-            .padding(8)
-        }
-        .frame(height: 108)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
     }
 }
 

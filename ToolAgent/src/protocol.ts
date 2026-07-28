@@ -6,13 +6,18 @@ export const LIMITS = {
   descriptionBytes: 8 * 1024,
   modelTextBytes: 512 * 1024,
   safeMessageBytes: 1024,
+  askUserBytes: 1024,
   nameBytes: 128,
   briefBytes: 1024,
   symbolBytes: 128,
+  promptBytes: 16 * 1024,
+  targetBytes: 8 * 1024,
   sourceBytes: 64 * 1024,
   fixtureInputBytes: 8 * 1024,
   fixtureOutputBytes: 16 * 1024,
   diagnosticBytes: 16 * 1024,
+  filterCount: 16,
+  filterValueBytes: 255,
 } as const;
 
 export const TOOL_NAMES = [
@@ -20,49 +25,272 @@ export const TOOL_NAMES = [
   "write_candidate",
   "run_validation",
   "finish_candidate",
+  "ask_user",
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 const byteString = (maximum: number, allowEmpty = false) =>
-  z.string().refine(
-    (value) => (allowEmpty || value.length > 0) && Buffer.byteLength(value) <= maximum,
-    "string exceeds UTF-8 byte limit",
-  );
+  z
+    .string()
+    .refine(
+      (value) =>
+        (allowEmpty || value.length > 0) && Buffer.byteLength(value) <= maximum,
+      "string exceeds UTF-8 byte limit",
+    );
 
 const uuid = z.string().uuid();
-const fingerprint = z.object({ value: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+const fingerprint = z
+  .object({ value: z.string().regex(/^[a-f0-9]{64}$/) })
+  .strict();
 const budgets = z
   .object({
-    modelTurns: z.number().int().min(1).max(8),
+    // Mirrors ToolAgentBudgetsV1.preview. A repair budget the turn budget
+    // cannot pay for is not a repair budget.
+    modelTurns: z.number().int().min(1).max(12),
     toolCalls: z.number().int().min(1).max(32),
     repairs: z.number().int().min(0).max(3),
-    durationSeconds: z.number().int().min(1).max(600),
+    durationSeconds: z.number().int().min(1).max(900),
   })
   .strict();
 
-export const candidateSchema = z
+const commonCandidate = {
+  schemaVersion: z.literal(1),
+  name: byteString(LIMITS.nameBytes),
+  brief: byteString(LIMITS.briefBytes),
+  symbolName: byteString(LIMITS.symbolBytes),
+  input: z.enum([
+    "selection",
+    "clipboardText",
+    "clipboardURL",
+    "files",
+    "none",
+  ]),
+  output: z.enum(["panel", "replace", "clipboard", "files", "notify"]),
+  trigger: z.enum(["always", "selection", "link", "files"]),
+  hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
+  extensions: z
+    .array(byteString(LIMITS.filterValueBytes))
+    .max(LIMITS.filterCount),
+} as const;
+
+const promptCandidate = z
   .object({
-    schemaVersion: z.literal(1),
-    name: byteString(LIMITS.nameBytes),
-    brief: byteString(LIMITS.briefBytes),
-    symbolName: byteString(LIMITS.symbolBytes),
+    ...commonCandidate,
+    kind: z.literal("prompt"),
+    input: z.literal("selection"),
+    output: z.enum(["panel", "replace", "clipboard"]),
+    trigger: z.enum(["always", "selection"]),
+    prompt: byteString(LIMITS.promptBytes),
+    appliesTargetLanguage: z.boolean(),
+  })
+  .strict();
+
+const nativeCandidate = z
+  .object({
+    ...commonCandidate,
+    kind: z.literal("native"),
+    output: z.enum(["replace", "clipboard", "notify"]),
+    nativeAction: z.enum([
+      "openApp",
+      "openAppFullScreen",
+      "sendTextToApp",
+      "revealInFinder",
+      "openURL",
+      "runShortcut",
+    ]),
+    target: byteString(LIMITS.targetBytes, true),
+  })
+  .strict();
+
+const pythonCandidate = z
+  .object({
+    ...commonCandidate,
+    kind: z.literal("python"),
     source: byteString(LIMITS.sourceBytes),
+    // Zero fixtures means "running this would do something to the user's data".
+    // A fixture without expectedOutput means "run it, but its output is not a
+    // fixed string". Both are how a tool that does real work gets validated at
+    // all.
     fixtures: z
       .array(
         z
           .object({
             input: byteString(LIMITS.fixtureInputBytes),
-            expectedOutput: byteString(LIMITS.fixtureOutputBytes, true),
+            expectedOutput: byteString(
+              LIMITS.fixtureOutputBytes,
+              true,
+            ).optional(),
           })
           .strict(),
       )
-      .min(1)
       .max(3),
+    outputDirectory: byteString(LIMITS.targetBytes).optional(),
+    timeoutSeconds: z.number().int().min(5).max(1800),
+    declaresNetwork: z.boolean(),
   })
   .strict();
 
+export const candidateSchema = z
+  .discriminatedUnion("kind", [
+    promptCandidate,
+    nativeCandidate,
+    pythonCandidate,
+  ])
+  .superRefine((candidate, context) => {
+    if (candidate.trigger === "selection" && candidate.input !== "selection") {
+      context.addIssue({
+        code: "custom",
+        message: "selection trigger needs selection input",
+      });
+    }
+    if (candidate.trigger === "link" && candidate.input !== "clipboardURL") {
+      context.addIssue({
+        code: "custom",
+        message: "link trigger needs clipboard URL input",
+      });
+    }
+    if (candidate.trigger === "files" && candidate.input !== "files") {
+      context.addIssue({
+        code: "custom",
+        message: "files trigger needs files input",
+      });
+    }
+    if (
+      candidate.kind === "native" &&
+      candidate.nativeAction !== "revealInFinder" &&
+      candidate.target.length === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "native action target is required",
+      });
+    }
+    if (
+      candidate.kind === "python" &&
+      candidate.output === "files" &&
+      candidate.outputDirectory === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "files output needs outputDirectory",
+      });
+    }
+  });
+
 export type Candidate = z.infer<typeof candidateSchema>;
+
+const commonInstalledTool = {
+  name: byteString(LIMITS.nameBytes),
+  brief: byteString(LIMITS.briefBytes, true),
+  symbolName: byteString(LIMITS.symbolBytes),
+  input: z.enum([
+    "selection",
+    "clipboardText",
+    "clipboardURL",
+    "files",
+    "none",
+  ]),
+  output: z.enum(["panel", "replace", "clipboard", "files", "notify"]),
+  trigger: z.enum(["always", "selection", "link", "files"]),
+  hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
+  extensions: z
+    .array(byteString(LIMITS.filterValueBytes))
+    .max(LIMITS.filterCount),
+} as const;
+
+const installedPromptTool = z
+  .object({
+    ...commonInstalledTool,
+    kind: z.literal("prompt"),
+    input: z.literal("selection"),
+    output: z.enum(["panel", "replace", "clipboard"]),
+    trigger: z.enum(["always", "selection"]),
+    prompt: byteString(LIMITS.promptBytes),
+    appliesTargetLanguage: z.boolean(),
+  })
+  .strict();
+
+const installedNativeTool = z
+  .object({
+    ...commonInstalledTool,
+    kind: z.literal("native"),
+    output: z.enum(["replace", "clipboard", "notify"]),
+    nativeAction: z.enum([
+      "openApp",
+      "openAppFullScreen",
+      "sendTextToApp",
+      "revealInFinder",
+      "openURL",
+      "runShortcut",
+    ]),
+    target: byteString(LIMITS.targetBytes, true),
+  })
+  .strict();
+
+const installedPythonTool = z
+  .object({
+    ...commonInstalledTool,
+    kind: z.literal("python"),
+    source: byteString(LIMITS.sourceBytes),
+    outputDirectory: byteString(LIMITS.targetBytes).optional(),
+    timeoutSeconds: z.number().int().min(5).max(1800),
+    declaresNetwork: z.boolean(),
+  })
+  .strict();
+
+export const installedToolSchema = z
+  .discriminatedUnion("kind", [
+    installedPromptTool,
+    installedNativeTool,
+    installedPythonTool,
+  ])
+  .superRefine((tool, context) => {
+    if (tool.trigger === "selection" && tool.input !== "selection") {
+      context.addIssue({
+        code: "custom",
+        message: "selection trigger needs selection input",
+      });
+    }
+    if (tool.trigger === "link" && tool.input !== "clipboardURL") {
+      context.addIssue({
+        code: "custom",
+        message: "link trigger needs clipboard URL input",
+      });
+    }
+    if (tool.trigger === "files" && tool.input !== "files") {
+      context.addIssue({
+        code: "custom",
+        message: "files trigger needs files input",
+      });
+    }
+    if (
+      tool.kind === "native" &&
+      tool.nativeAction !== "revealInFinder" &&
+      tool.target.length === 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "native action target is required",
+      });
+    }
+    if (
+      tool.kind === "python" &&
+      tool.output === "files" &&
+      tool.outputDirectory === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "files output needs outputDirectory",
+      });
+    }
+  });
+
+export type InstalledTool = z.infer<typeof installedToolSchema>;
+
+export const askUserRequestSchema = z
+  .object({ question: byteString(LIMITS.askUserBytes) })
+  .strict();
 
 export const toolResponsePayloadSchemas = {
   read_build_context: z
@@ -82,6 +310,7 @@ export const toolResponsePayloadSchemas = {
       candidateID: uuid,
       fingerprint,
       outcome: z.enum(["passed", "failed"]),
+      assurance: z.enum(["verified", "smoke", "unverified"]),
       failure: z
         .enum([
           "invalidCandidate",
@@ -119,10 +348,16 @@ export const toolResponsePayloadSchemas = {
       fingerprint,
     })
     .strict(),
+  ask_user: z.object({ answer: byteString(LIMITS.askUserBytes) }).strict(),
 } as const;
 
 const modelResult = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("text"), text: byteString(LIMITS.modelTextBytes) }).strict(),
+  z
+    .object({
+      kind: z.literal("text"),
+      text: byteString(LIMITS.modelTextBytes),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("error"),
@@ -138,24 +373,80 @@ const modelResult = z.discriminatedUnion("kind", [
 ]);
 
 const inboundSchemas = {
-  start: z.object({ description: byteString(LIMITS.descriptionBytes), budgets }).strict(),
+  start: z
+    .object({
+      operation: z.enum(["create", "edit", "fix"]).default("create"),
+      description: byteString(LIMITS.safeMessageBytes),
+      budgets,
+      currentTool: installedToolSchema.optional(),
+      failure: byteString(LIMITS.diagnosticBytes).optional(),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (
+        value.operation === "create" &&
+        (value.currentTool !== undefined || value.failure !== undefined)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "create does not accept current tool or failure",
+        });
+      }
+      if (value.operation === "edit" && value.currentTool === undefined) {
+        context.addIssue({
+          code: "custom",
+          message: "edit requires current tool",
+        });
+      }
+      if (value.operation === "edit" && value.failure !== undefined) {
+        context.addIssue({
+          code: "custom",
+          message: "edit does not accept failure",
+        });
+      }
+      if (value.operation === "fix" && value.currentTool === undefined) {
+        context.addIssue({
+          code: "custom",
+          message: "fix requires current tool",
+        });
+      }
+      if (value.operation === "fix" && value.failure === undefined) {
+        context.addIssue({ code: "custom", message: "fix requires failure" });
+      }
+    }),
   modelResponse: z.object({ requestID: uuid, result: modelResult }).strict(),
   toolResponse: z
     .object({
       callID: uuid,
-      result: z.object({ name: z.enum(TOOL_NAMES), payload: z.unknown() }).strict(),
+      result: z
+        .object({ name: z.enum(TOOL_NAMES), payload: z.unknown() })
+        .strict(),
     })
     .strict(),
-  cancel: z.object({ reason: z.enum(["userRequested", "deadlineExceeded"]) }).strict(),
+  cancel: z
+    .object({ reason: z.enum(["userRequested", "deadlineExceeded"]) })
+    .strict(),
 } as const;
 
-export type StartPayload = z.infer<(typeof inboundSchemas)["start"]>;
+/** Allows legacy in-process callers to omit operation; parsed wire input is
+ * normalized to create by the Zod default below. */
+export type StartPayload = z.input<(typeof inboundSchemas)["start"]>;
+type ParsedStartPayload = z.output<(typeof inboundSchemas)["start"]>;
 
 export type Inbound =
-  | { readonly type: "start"; readonly payload: StartPayload }
-  | { readonly type: "modelResponse"; readonly payload: z.infer<typeof inboundSchemas.modelResponse> }
-  | { readonly type: "toolResponse"; readonly payload: z.infer<typeof inboundSchemas.toolResponse> }
-  | { readonly type: "cancel"; readonly payload: z.infer<typeof inboundSchemas.cancel> };
+  | { readonly type: "start"; readonly payload: ParsedStartPayload }
+  | {
+      readonly type: "modelResponse";
+      readonly payload: z.infer<typeof inboundSchemas.modelResponse>;
+    }
+  | {
+      readonly type: "toolResponse";
+      readonly payload: z.infer<typeof inboundSchemas.toolResponse>;
+    }
+  | {
+      readonly type: "cancel";
+      readonly payload: z.infer<typeof inboundSchemas.cancel>;
+    };
 
 export type Envelope<TPayload> = {
   readonly version: 1;
@@ -165,14 +456,21 @@ export type Envelope<TPayload> = {
 };
 
 export class ProtocolError extends Error {
-  public constructor(public readonly code: "invalidProtocol" | "invalidModelAction", message: string) {
+  public constructor(
+    public readonly code: "invalidProtocol" | "invalidModelAction",
+    message: string,
+  ) {
     super(message);
     this.name = "ProtocolError";
   }
 }
 
 function rejectDuplicateKeys(text: string): void {
-  const stack: Array<{ readonly kind: "object" | "array"; readonly keys: Set<string>; expectingKey: boolean }> = [];
+  const stack: Array<{
+    readonly kind: "object" | "array";
+    readonly keys: Set<string>;
+    expectingKey: boolean;
+  }> = [];
   let index = 0;
   while (index < text.length) {
     const character = text[index];
@@ -184,7 +482,8 @@ function rejectDuplicateKeys(text: string): void {
         else if (text[index] === '"') break;
         else index += 1;
       }
-      if (index >= text.length) throw new ProtocolError("invalidProtocol", "malformed JSON");
+      if (index >= text.length)
+        throw new ProtocolError("invalidProtocol", "malformed JSON");
       const top = stack.at(-1);
       if (top?.kind === "object" && top.expectingKey) {
         const key = JSON.parse(text.slice(start, index + 1));
@@ -195,9 +494,17 @@ function rejectDuplicateKeys(text: string): void {
         top.expectingKey = false;
       }
     } else if (character === "{") {
-      stack.push({ kind: "object", keys: new Set<string>(), expectingKey: true });
+      stack.push({
+        kind: "object",
+        keys: new Set<string>(),
+        expectingKey: true,
+      });
     } else if (character === "[") {
-      stack.push({ kind: "array", keys: new Set<string>(), expectingKey: false });
+      stack.push({
+        kind: "array",
+        keys: new Set<string>(),
+        expectingKey: false,
+      });
     } else if (character === "}" || character === "]") {
       stack.pop();
     } else if (character === ",") {
@@ -208,7 +515,10 @@ function rejectDuplicateKeys(text: string): void {
   }
 }
 
-export function parseInbound(line: string): { readonly runID: string; readonly message: Inbound } {
+export function parseInbound(line: string): {
+  readonly runID: string;
+  readonly message: Inbound;
+} {
   if (Buffer.byteLength(line) > LIMITS.frameBytes) {
     throw new ProtocolError("invalidProtocol", "frame too large");
   }
@@ -217,7 +527,8 @@ export function parseInbound(line: string): { readonly runID: string; readonly m
   try {
     decoded = JSON.parse(line);
   } catch (error) {
-    if (error instanceof SyntaxError) throw new ProtocolError("invalidProtocol", "malformed JSON");
+    if (error instanceof SyntaxError)
+      throw new ProtocolError("invalidProtocol", "malformed JSON");
     throw error;
   }
   const envelope = z
@@ -229,10 +540,12 @@ export function parseInbound(line: string): { readonly runID: string; readonly m
     })
     .strict()
     .safeParse(decoded);
-  if (!envelope.success) throw new ProtocolError("invalidProtocol", "invalid envelope");
+  if (!envelope.success)
+    throw new ProtocolError("invalidProtocol", "invalid envelope");
   const { runID, type, payload } = envelope.data;
   const parsed = inboundSchemas[type].safeParse(payload);
-  if (!parsed.success) throw new ProtocolError("invalidProtocol", `invalid ${type} payload`);
+  if (!parsed.success)
+    throw new ProtocolError("invalidProtocol", `invalid ${type} payload`);
   return { runID, message: { type, payload: parsed.data } as Inbound };
 }
 
@@ -250,7 +563,17 @@ export function encodeEnvelope<TPayload>(
 
 export function parseToolResponse(name: ToolName, payload: unknown): unknown {
   const parsed = toolResponsePayloadSchemas[name].safeParse(payload);
-  if (!parsed.success) throw new ProtocolError("invalidProtocol", `invalid ${name} response`);
+  if (!parsed.success)
+    throw new ProtocolError("invalidProtocol", `invalid ${name} response`);
+  return parsed.data;
+}
+
+export function parseAskUserRequest(
+  payload: unknown,
+): z.infer<typeof askUserRequestSchema> {
+  const parsed = askUserRequestSchema.safeParse(payload);
+  if (!parsed.success)
+    throw new ProtocolError("invalidProtocol", "invalid ask_user request");
   return parsed.data;
 }
 
@@ -259,7 +582,8 @@ export function parseStrictJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
-    if (error instanceof SyntaxError) throw new ProtocolError("invalidModelAction", "malformed action");
+    if (error instanceof SyntaxError)
+      throw new ProtocolError("invalidModelAction", "malformed action");
     throw error;
   }
 }

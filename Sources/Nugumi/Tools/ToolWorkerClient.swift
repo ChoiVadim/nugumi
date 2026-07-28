@@ -1,10 +1,8 @@
 import Foundation
-import NugumiToolAgentCore
 import NugumiToolIPC
 
 enum ToolWorkerClientError: Error, Equatable {
     case cancelled
-    case candidateProtocolFailure(CandidateWorkerProtocolFailureV1)
     case connectionUnavailable
     case invalidReply
     case workerFailure(SandboxProbeFailure)
@@ -18,21 +16,6 @@ enum ToolWorkerClient {
 
     static func runProbe() async throws -> SandboxProbeResult {
         try await withSentinels(at: NugumiPaths.root, send: requestProbe)
-    }
-
-    static func runCandidate(
-        candidateID: UUID,
-        candidate: ToolAgentCandidateV1,
-        fingerprint: ToolAgentFingerprintV1
-    ) async throws -> CandidateValidationReplyV1 {
-        try await requestCandidate(
-            CandidateValidationRequestV1(
-                runID: UUID(),
-                candidateID: candidateID,
-                candidate: candidate,
-                fingerprint: fingerprint
-            )
-        )
     }
 
     static func withSentinels(
@@ -154,94 +137,6 @@ enum ToolWorkerClient {
         }
     }
 
-    private static func requestCandidate(
-        _ request: CandidateValidationRequestV1
-    ) async throws -> CandidateValidationReplyV1 {
-        let connection = SendableXPCConnection(
-            NSXPCConnection(serviceName: "com.nugumi.app.tool-worker")
-        )
-        connection.value.remoteObjectInterface = NSXPCInterface(
-            with: NugumiToolWorkerProtocol.self
-        )
-        let state = ToolWorkerReplyCoordinator {
-            connection.value.invalidate()
-        }
-        connection.value.interruptionHandler = {
-            state.receive(.interruption)
-        }
-        connection.value.invalidationHandler = {
-            state.receive(.invalidation)
-        }
-        connection.value.resume()
-
-        let requestData = try JSONEncoder().encode(request)
-        let replyData: Data = try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                state.install { continuation.resume(with: $0) }
-                guard !Task.isCancelled else {
-                    cancelCandidate(
-                        request.runID,
-                        connection: connection.value,
-                        state: state
-                    )
-                    return
-                }
-                let proxy = connection.value
-                    .remoteObjectProxyWithErrorHandler { _ in
-                    state.receive(.remoteProxyError)
-                }
-                guard let worker = proxy as? NugumiToolWorkerProtocol else {
-                    state.receive(.remoteProxyError)
-                    return
-                }
-                worker.runCandidate(requestData) { data in
-                    state.receive(.reply(data))
-                }
-            }
-        } onCancel: {
-            cancelCandidate(
-                request.runID,
-                connection: connection.value,
-                state: state
-            )
-        }
-        return try decodeCandidate(replyData)
-    }
-
-    static func decodeCandidate(
-        _ data: Data
-    ) throws -> CandidateValidationReplyV1 {
-        guard let reply = try? JSONDecoder().decode(
-            CandidateWorkerReplyV1.self,
-            from: data
-        ) else {
-            throw ToolWorkerClientError.invalidReply
-        }
-        switch reply {
-        case let .validation(result):
-            return result
-        case let .protocolFailure(failure):
-            throw ToolWorkerClientError.candidateProtocolFailure(failure)
-        }
-    }
-
-    private static func cancelCandidate(
-        _ runID: UUID,
-        connection: NSXPCConnection,
-        state: ToolWorkerReplyCoordinator
-    ) {
-        let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
-            state.receive(.cancellation)
-        }
-        guard let worker = proxy as? NugumiToolWorkerProtocol else {
-            state.receive(.cancellation)
-            return
-        }
-        worker.cancelCandidate(runID.uuidString) { _ in
-            state.receive(.cancellation)
-        }
-    }
-
     private static func failure(for error: Error) -> SandboxProbeFailure {
         if case let ToolWorkerClientError.workerFailure(failure) = error {
             return failure
@@ -250,8 +145,6 @@ enum ToolWorkerClient {
         switch error as? ToolWorkerClientError {
         case .cancelled:
             code = .cancelled
-        case .candidateProtocolFailure:
-            code = .invalidProbeOutput
         case .invalidReply:
             code = .invalidProbeOutput
         case .connectionUnavailable, .none:

@@ -63,4 +63,34 @@ final class RadialMenuLayoutTests: XCTestCase {
             XCTAssertNotNil(NSImage(systemSymbolName: name, accessibilityDescription: nil))
         }
     }
+
+    func testRingRemoveControlAppearsOnlyForHoveredPopulatedSlot() {
+        XCTAssertFalse(
+            RingSlotControlVisibility.showsClearControl(
+                isEmpty: false,
+                isHovering: false
+            )
+        )
+        XCTAssertTrue(
+            RingSlotControlVisibility.showsClearControl(
+                isEmpty: false,
+                isHovering: true
+            )
+        )
+        XCTAssertFalse(
+            RingSlotControlVisibility.showsClearControl(
+                isEmpty: true,
+                isHovering: true
+            )
+        )
+    }
+
+    func testRingRemoveAccessibilityActionAppearsOnlyForPopulatedSlot() {
+        XCTAssertTrue(
+            RingSlotControlVisibility.showsClearAccessibilityAction(isEmpty: false)
+        )
+        XCTAssertFalse(
+            RingSlotControlVisibility.showsClearAccessibilityAction(isEmpty: true)
+        )
+    }
 }

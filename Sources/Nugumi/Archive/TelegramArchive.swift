@@ -325,7 +325,7 @@ final class TelegramArchive: ChatArchive {
 /// off the pixels. The window title is the account name and the app is
 /// AX-opaque, but the chat name is drawn in the header — so we screenshot the
 /// Telegram window (occlusion-independent: we grab the window's own content,
-/// not the composited screen, so Nugumi's ring on top doesn't matter) and OCR
+/// not the composited screen, so Gizmo's ring on top doesn't matter) and OCR
 /// the top strip. Returns header-band strings for `ChatNameMatch` to resolve.
 /// Empty on any failure (no screen-recording permission, window gone) → the
 /// caller falls back to the most-recent chat.

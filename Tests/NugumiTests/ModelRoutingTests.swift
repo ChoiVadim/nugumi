@@ -69,7 +69,7 @@ final class ModelRoutingTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelUseScope.askNugumi.thinkingMenuTitle(for: .high),
-            "Ask Nugumi: High"
+            "Ask Gizmo: High"
         )
     }
 
@@ -80,7 +80,7 @@ final class ModelRoutingTests: XCTestCase {
         )
         XCTAssertEqual(
             ModelUseScope.askNugumi.menuTitle(for: LLMModel.option(id: "gemma4")),
-            "Ask Nugumi: Gemma 4"
+            "Ask Gizmo: Gemma 4"
         )
     }
 

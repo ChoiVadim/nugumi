@@ -28,7 +28,7 @@ final class FloatingTranslateButtonController {
     /// Runs one of the user's prompt tools. Carries the armed selection the
     /// same way `onTranslate` does — the quick menu passes an empty string and
     /// its handler re-reads the selection.
-    private let onPromptTool: ((PromptTool, String) -> Void)?
+    private let onTool: ((NugumiTool, String) -> Void)?
     private var radialMenu: RadialActionMenuController?
     /// Fired whenever the ring closes for any reason (pick, dismiss, toggle).
     /// The quick menu uses it to fade this button away — for the persistent
@@ -47,7 +47,7 @@ final class FloatingTranslateButtonController {
         onLive: @escaping () -> Void = {},
         onDictate: @escaping () -> Void = {},
         summarizeOption: RingSummarizeOption? = nil,
-        onPromptTool: ((PromptTool, String) -> Void)? = nil
+        onTool: ((NugumiTool, String) -> Void)? = nil
     ) {
         self.selectedText = selectedText
         self.onTranslate = onTranslate
@@ -58,7 +58,7 @@ final class FloatingTranslateButtonController {
         self.onLive = onLive
         self.onDictate = onDictate
         self.summarizeOption = summarizeOption
-        self.onPromptTool = onPromptTool
+        self.onTool = onTool
 
         let buttonSize = AskNugumiFloatingTargetPresentationPolicy.buttonSize
         let shadowPadding = AskNugumiFloatingTargetPresentationPolicy.shadowPadding
@@ -119,32 +119,34 @@ final class FloatingTranslateButtonController {
             menuDidClose()
             return
         }
+        // Capture the callbacks and the armed text by value rather than reaching
+        // back through `self`. The ring dismisses BEFORE it fires the picked
+        // action, and for the quick menu that teardown drops the app's only
+        // reference to this controller — so a `[weak self]` handler would find
+        // itself deallocated and silently do nothing.
+        let text = selectedText
+        let translate = onTranslate
+        let rewrite = onRewrite
+        let smartReply = onSmartReply
+        let ask = onAsk
+        let screenshot = onScreenshot
+        let dictate = onDictate
+        let live = onLive
+
         var handlers = RingActionHandlers()
-        handlers.explain = { [weak self] in
-            guard let self else { return }
-            self.onTranslate(self.selectedText)
-        }
-        handlers.rewrite = { [weak self] in
-            guard let self else { return }
-            self.onRewrite(self.selectedText)
-        }
-        handlers.reply = { [weak self] in
-            guard let self else { return }
-            self.onSmartReply(self.selectedText)
-        }
-        handlers.ask = { [weak self] in self?.onAsk() }
-        handlers.capture = { [weak self] in self?.onScreenshot() }
-        handlers.dictate = { [weak self] in self?.onDictate() }
-        handlers.live = { [weak self] in self?.onLive() }
+        handlers.explain = { translate(text) }
+        handlers.rewrite = { rewrite(text) }
+        handlers.reply = { smartReply(text) }
+        handlers.ask = ask
+        handlers.capture = screenshot
+        handlers.dictate = dictate
+        handlers.live = live
         handlers.summarize = summarizeOption
-        if let onPromptTool {
-            handlers.promptTool = { [weak self] tool in
-                guard let self else { return }
-                onPromptTool(tool, self.selectedText)
-            }
+        if let onTool {
+            handlers.tool = { tool in onTool(tool, text) }
         }
         let slots = RingBuilder.slots(
-            configuration: RingConfigurationProvider.current(),
+            configuration: RingConfigurationProvider.current(selectedText),
             handlers: handlers,
             dismiss: { [weak self] in self?.menuDidClose() }
         )

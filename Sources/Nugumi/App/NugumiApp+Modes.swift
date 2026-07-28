@@ -30,7 +30,7 @@ extension NugumiApp {
         NSApp.activate(ignoringOtherApps: true)
         _ = NugumiAlertController(
             title: "Invisibility mode is on",
-            message: "Nugumi is now hidden from screenshots and screen sharing, and the menu-bar icon is gone. Press \(chord) anywhere to bring it back.",
+            message: "Gizmo is now hidden from screenshots and screen sharing, and the menu-bar icon is gone. Press \(chord) anywhere to bring it back.",
             primaryButtonTitle: "Got it"
         ).showModal()
     }

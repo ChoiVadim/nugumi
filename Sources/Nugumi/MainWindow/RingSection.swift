@@ -5,7 +5,7 @@ struct RingSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
-        RingSectionContent(layoutStore: bridge.ringLayout, toolsStore: bridge.promptTools)
+        RingSectionContent(layoutStore: bridge.ringLayout, toolsStore: bridge.tools)
     }
 }
 
@@ -14,7 +14,7 @@ struct RingSection: View {
 /// screen at once. Tools are created, edited, and deleted from a slot's picker.
 private struct RingSectionContent: View {
     @ObservedObject var layoutStore: RingLayoutStore
-    @ObservedObject var toolsStore: PromptToolsStore
+    @ObservedObject var toolsStore: ToolsStore
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
@@ -30,7 +30,8 @@ private struct RingSectionContent: View {
                     RingDiagram(
                         layout: layoutStore.layout,
                         tools: toolsStore.tools,
-                        onPick: { bridge.ringSheet = .slot($0) }
+                        onPick: { bridge.ringSheet = .slot($0) },
+                        onClear: { layoutStore.clear($0) }
                     )
                     .scaleEffect(fit)
                     .frame(width: geo.size.width, height: geo.size.height)
@@ -71,8 +72,9 @@ private struct RingSectionContent: View {
 /// hangs off on screen.
 struct RingDiagram: View {
     let layout: RingLayout
-    let tools: [PromptTool]
+    let tools: [NugumiTool]
     let onPick: (Int) -> Void
+    let onClear: (Int) -> Void
 
     /// The live ring is drawn at 1.0; the diagram runs larger so the label
     /// bubbles have room to sit outside the circles.
@@ -117,7 +119,8 @@ struct RingDiagram: View {
                     placement: RadialMenuLayoutPolicy.labelPlacement(
                         for: CGPoint(x: center.x, y: -center.y)
                     ),
-                    action: { onPick(index) }
+                    action: { onPick(index) },
+                    clearAction: { onClear(index) }
                 )
                 .offset(x: center.x, y: center.y)
             }
@@ -135,21 +138,49 @@ struct RingDiagram: View {
     }
 }
 
+enum RingSlotControlVisibility {
+    static func showsClearControl(isEmpty: Bool, isHovering: Bool) -> Bool {
+        !isEmpty && isHovering
+    }
+
+    static func showsClearAccessibilityAction(isEmpty: Bool) -> Bool {
+        !isEmpty
+    }
+}
+
+private struct RingSlotClearAccessibilityAction: ViewModifier {
+    let isEmpty: Bool
+    let label: String
+    let clearAction: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if RingSlotControlVisibility.showsClearAccessibilityAction(isEmpty: isEmpty) {
+            content.accessibilityAction(named: Text("Remove \(label) from Ring")) {
+                clearAction()
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct RingSlotButton: View {
     /// Caps a long tool name so one wordy button can't blow out the diagram's
     /// width; the ring itself lets its bubbles run full length.
     static let bubbleMaxWidth: CGFloat = 132
 
     let content: RingSlotContent
-    let tools: [PromptTool]
+    let tools: [NugumiTool]
     let diameter: CGFloat
     let placement: RadialMenuLabelPlacement
     let action: () -> Void
+    let clearAction: () -> Void
 
     @State private var hovering = false
 
-    private var tool: PromptTool? {
-        guard case .promptTool(let id) = content else { return nil }
+    private var tool: NugumiTool? {
+        guard case .tool(let id) = content else { return nil }
         return tools.first { $0.id == id }
     }
 
@@ -158,7 +189,7 @@ private struct RingSlotButton: View {
         switch content {
         case .empty: return true
         case .builtIn: return false
-        case .promptTool: return tool == nil
+        case .tool: return tool == nil
         }
     }
 
@@ -166,24 +197,60 @@ private struct RingSlotButton: View {
         switch content {
         case .empty: return ""
         case .builtIn(let id): return id.displayName
-        case .promptTool: return tool?.name ?? ""
+        case .tool: return tool?.name ?? ""
         }
     }
 
     var body: some View {
-        Button(action: action) {
-            discBody
-                .frame(width: diameter, height: diameter)
-                .contentShape(Circle())
-                .overlay(alignment: bubbleAlignment) {
-                    if !isEmpty, !label.isEmpty {
-                        bubble.offset(x: bubbleOffset.x, y: bubbleOffset.y)
+        ZStack(alignment: .topTrailing) {
+            Button(action: action) {
+                discBody
+                    .frame(width: diameter, height: diameter)
+                    .contentShape(Circle())
+                    .overlay(alignment: bubbleAlignment) {
+                        if !isEmpty, !label.isEmpty {
+                            bubble.offset(x: bubbleOffset.x, y: bubbleOffset.y)
+                        }
                     }
+            }
+            .buttonStyle(.plain)
+            .help(isEmpty ? "Add an action" : label)
+            .modifier(
+                RingSlotClearAccessibilityAction(
+                    isEmpty: isEmpty,
+                    label: label,
+                    clearAction: clearAction
+                )
+            )
+
+            if RingSlotControlVisibility.showsClearControl(
+                isEmpty: isEmpty,
+                isHovering: hovering
+            ) {
+                Button(action: clearAction) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(FlowTheme.ink)
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.black.opacity(0.86)))
+                        .overlay(Circle().stroke(FlowTheme.hairline, lineWidth: 1))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .offset(x: 8, y: -8)
+                .zIndex(2)
+                .help("Remove from Ring")
+                .accessibilityLabel("Remove \(label) from Ring")
+                .transition(.opacity)
+            }
         }
-        .buttonStyle(.plain)
+        // `offset` does not participate in layout. Keep the slot centered while
+        // extending this hover region to cover the clear control's 8 pt overhang.
+        .padding(8)
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .help(isEmpty ? "Add an action" : label)
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 
     @ViewBuilder
@@ -217,8 +284,8 @@ private struct RingSlotButton: View {
             Image(nsImage: id.icon.image(pointSize: 21))
                 .renderingMode(.template)
                 .foregroundStyle(FlowTheme.ink)
-        case .promptTool:
-            Image(systemName: tool?.resolvedSymbolName ?? PromptToolIcons.fallback)
+        case .tool:
+            Image(systemName: tool?.resolvedSymbolName ?? ToolIcons.fallback)
                 .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(FlowTheme.ink)
         }

@@ -12,7 +12,7 @@ import SwiftUI
 import UserNotifications
 import Vision
 
-/// The Ask Nugumi capsule's glass body. Any click inside it focuses the text
+/// The Ask Gizmo capsule's glass body. Any click inside it focuses the text
 /// field instead of starting a window drag, so the whole pill is clickable.
 private final class AskPromptGlassView: NSVisualEffectView {
     var onClick: (() -> Void)?
@@ -79,13 +79,56 @@ private final class AskPromptPanel: NSPanel {
 @MainActor
 enum SelfActivationGuard {
     private static var suppressUntil = Date.distantPast
+    /// Who was in front before Gizmo took focus for a panel, so dismissing that
+    /// panel can hand focus straight back instead of leaving Gizmo active — where
+    /// AppKit would promote whatever window is next in line (the settings window)
+    /// and raise it.
+    private static weak var previousApp: NSRunningApplication?
 
     static func activate() {
         suppressUntil = Date().addingTimeInterval(0.6)
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            previousApp = frontmost
+        }
+
+        // Activating an app raises ALL of its windows, so an open-but-behind
+        // settings window would jump in front of whatever the user is actually
+        // looking at — they asked for a small panel at the cursor, not for
+        // Gizmo's window. Note the real windows that weren't already in front
+        // and send them back once the activation has settled. Panels are
+        // untouched: `canBecomeMain` is false for them, and they're the point.
+        let demoted = NSApp.windows.filter {
+            $0.isVisible && $0.canBecomeMain && !$0.isKeyWindow
+        }
         NSApp.activate(ignoringOtherApps: true)
+        guard !demoted.isEmpty else { return }
+        DispatchQueue.main.async {
+            for window in demoted where window.isVisible && !window.isKeyWindow {
+                window.orderBack(nil)
+            }
+        }
     }
 
     static var isSuppressing: Bool { Date() < suppressUntil }
+
+    /// Called when a panel we activated for is dismissed with nothing to replace
+    /// it. Returns focus to the app the user was in; only then does closing the
+    /// panel leave the screen the way they left it.
+    ///
+    /// A no-op when a Gizmo window is genuinely in front — if the user clicked
+    /// into the settings window while the panel was up, that's where they want
+    /// to be.
+    static func relinquish() {
+        suppressUntil = Date().addingTimeInterval(0.6)
+        guard let previousApp, !previousApp.isTerminated else { return }
+        guard NSApp.keyWindow?.canBecomeMain != true else {
+            self.previousApp = nil
+            return
+        }
+        previousApp.activate()
+        self.previousApp = nil
+    }
 }
 
 @MainActor
@@ -226,7 +269,7 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         textField.onEscape = { [weak self] in
             self?.close()
         }
-        setPlaceholder("Ask Nugumi")
+        setPlaceholder("Ask Gizmo")
         textField.font = NSFont.systemFont(ofSize: 14, weight: .regular)
         textField.textColor = NSColor(calibratedWhite: 1.0, alpha: 0.88)
         textField.isBordered = false

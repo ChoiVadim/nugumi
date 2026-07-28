@@ -5,47 +5,6 @@ import NugumiToolIPC
 import XCTest
 
 final class WorkerCoordinationTests: XCTestCase {
-    func testCandidateCoordinatorRejectsDuplicateAndCancelsAcceptedRun() async {
-        let coordinator = CandidateRunCoordinator()
-        let runID = UUID()
-        let operation = ManualAsyncValue<CandidateValidationReplyV1>()
-        let execution = ManualAsyncValue<UUID>()
-        let cancelledExecution = ManualAsyncValue<UUID>()
-        let replies = CandidateReplyRecorder()
-
-        XCTAssertTrue(
-            coordinator.start(
-                runID: runID,
-                operation: { executionID in
-                    execution.resolve(executionID)
-                    return await operation.value()
-                },
-                reply: { replies.record($0) }
-            )
-        )
-        let executionID = await execution.value()
-        await operation.waitUntilRequested()
-        XCTAssertFalse(
-            coordinator.start(
-                runID: runID,
-                operation: { _ in self.candidateFailure(runID: runID) },
-                reply: { replies.record($0) }
-            )
-        )
-
-        XCTAssertTrue(
-            coordinator.cancel(runID: runID) {
-                cancelledExecution.resolve($0)
-            }
-        )
-        let cancelledExecutionID = await cancelledExecution.value()
-        XCTAssertEqual(cancelledExecutionID, executionID)
-        operation.resolve(candidateFailure(runID: runID, failure: .cancelled))
-        let firstReply = await replies.waitForFirst()
-        XCTAssertEqual(firstReply.failure, .cancelled)
-        XCTAssertFalse(coordinator.cancel(runID: runID, onCancel: { _ in }))
-    }
-
     func testStaleCompletionCannotEraseReusedRun() async throws {
         let coordinator = ProbeRunCoordinator()
         let runID = UUID()
@@ -163,30 +122,6 @@ final class WorkerCoordinationTests: XCTestCase {
         .failure(SandboxProbeFailure(runID: runID, code: code))
     }
 
-    private func candidateFailure(
-        runID: UUID,
-        failure: ToolAgentFailureCodeV1 = .workerFailure
-    ) -> CandidateValidationReplyV1 {
-        CandidateValidationReplyV1(
-            runID: runID,
-            candidateID: UUID(),
-            fingerprint: ToolAgentFingerprintV1(
-                String(repeating: "a", count: 64)
-            ),
-            fixtureIndex: nil,
-            outcome: .failed,
-            failure: failure,
-            exitCode: nil,
-            terminationSignal: nil,
-            actualOutput: nil,
-            stderrDetail: nil,
-            stdoutWasTruncated: false,
-            stderrWasTruncated: false,
-            processGroupTerminated: true,
-            durationMilliseconds: 0,
-            passingFingerprint: nil
-        )
-    }
 }
 
 private final class ManualAsyncValue<Value>: @unchecked Sendable {
@@ -293,36 +228,6 @@ private final class ReplyRecorder: @unchecked Sendable {
     }
 
     func waitForFirst() async -> SandboxProbeReply {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            guard let first = replies.first else {
-                waiters.append(continuation)
-                lock.unlock()
-                return
-            }
-            lock.unlock()
-            continuation.resume(returning: first)
-        }
-    }
-}
-
-private final class CandidateReplyRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var replies: [CandidateValidationReplyV1] = []
-    private var waiters: [
-        CheckedContinuation<CandidateValidationReplyV1, Never>
-    ] = []
-
-    func record(_ reply: CandidateValidationReplyV1) {
-        lock.lock()
-        replies.append(reply)
-        let pending = waiters
-        waiters.removeAll()
-        lock.unlock()
-        pending.forEach { $0.resume(returning: reply) }
-    }
-
-    func waitForFirst() async -> CandidateValidationReplyV1 {
         await withCheckedContinuation { continuation in
             lock.lock()
             guard let first = replies.first else {

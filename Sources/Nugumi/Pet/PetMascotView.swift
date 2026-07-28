@@ -45,7 +45,7 @@ final class PetMascotView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        toolTip = "Nugumi"
+        toolTip = "Gizmo"
     }
 
     required init?(coder: NSCoder) {
@@ -703,7 +703,7 @@ final class PetMascotView: NSView {
     private func tooltip(for state: State, mode: TranslationMode) -> String {
         switch state {
         case .idle, .run:
-            return "Nugumi pet"
+            return "Gizmo pet"
         case .ready:
             return "Choose an action"
         case .thinking:

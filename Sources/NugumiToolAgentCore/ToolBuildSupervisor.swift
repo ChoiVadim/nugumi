@@ -27,6 +27,7 @@ public struct ToolBuildValidationInputV1: Sendable {
 public typealias ToolBuildProcessFactoryV1 = @Sendable (ToolBuildRequestV1) async throws -> ToolBuildProcessClientV1
 public typealias ToolBuildModelHandlerV1 = @Sendable (ToolAgentModelRequestV1) async throws -> ToolAgentModelResponseResultV1
 public typealias ToolBuildValidationHandlerV1 = @Sendable (ToolBuildValidationInputV1) async throws -> ToolAgentValidationReportV1
+public typealias ToolBuildClarificationHandlerV1 = @Sendable (ToolAgentAskUserRequestV1) async throws -> ToolAgentAskUserResponseV1
 public typealias ToolBuildSleepV1 = @Sendable (UInt64) async throws -> Void
 
 public actor ToolBuildSupervisor {
@@ -36,6 +37,8 @@ public actor ToolBuildSupervisor {
     let makeProcess: ToolBuildProcessFactoryV1
     let model: ToolBuildModelHandlerV1
     let validation: ToolBuildValidationHandlerV1
+    let clarification: ToolBuildClarificationHandlerV1
+    let clarificationCancellation: @Sendable () async -> Void
     let makeCandidateID: @Sendable () -> UUID
     let sleep: ToolBuildSleepV1
 
@@ -45,6 +48,8 @@ public actor ToolBuildSupervisor {
     var latestAttempt: ToolBuildAttemptV1?
     var latestValidation: ToolAgentValidationReportV1?
     var attestation: ToolAgentAttestationV1?
+    var clarificationCount = 0
+    var pendingClarification: (runID: UUID, token: UUID, task: Task<ToolAgentAskUserResponseV1, Error>)?
 
     public init(
         store: ToolBuildStore,
@@ -53,6 +58,8 @@ public actor ToolBuildSupervisor {
         makeProcess: @escaping ToolBuildProcessFactoryV1,
         model: @escaping ToolBuildModelHandlerV1,
         validation: @escaping ToolBuildValidationHandlerV1,
+        clarification: @escaping ToolBuildClarificationHandlerV1 = { _ in throw ToolAgentFailureCodeV1.invalidProtocol },
+        clarificationCancellation: @escaping @Sendable () async -> Void = {},
         makeCandidateID: @escaping @Sendable () -> UUID = { UUID() },
         sleep: @escaping ToolBuildSleepV1 = { try await Task.sleep(nanoseconds: $0) }
     ) {
@@ -62,6 +69,8 @@ public actor ToolBuildSupervisor {
         self.makeProcess = makeProcess
         self.model = model
         self.validation = validation
+        self.clarification = clarification
+        self.clarificationCancellation = clarificationCancellation
         self.makeCandidateID = makeCandidateID
         self.sleep = sleep
     }
@@ -76,6 +85,8 @@ public actor ToolBuildSupervisor {
         latestAttempt = nil
         latestValidation = nil
         attestation = nil
+        clarificationCount = 0
+        pendingClarification = nil
         defer { clearActiveRun(request.runID) }
 
         do {
@@ -84,7 +95,13 @@ public actor ToolBuildSupervisor {
             activeProcess = process
             try await process.send(.start(
                 runID: request.runID,
-                .init(description: request.description, budgets: request.budgets)
+                try .init(
+                    description: request.description,
+                    budgets: request.budgets,
+                    operation: request.operation,
+                    currentTool: request.currentTool,
+                    failure: request.failure
+                )
             ))
 
             let timeout = UInt64(request.budgets.durationSeconds) * 1_000_000_000
@@ -116,28 +133,29 @@ public actor ToolBuildSupervisor {
             throw failure
         }
     }
-
     public func cancel(runID: UUID) async -> Bool {
         guard activeRequest?.runID == runID, terminal == nil else { return false }
+        let process = activeProcess
         terminal = .failure(.cancelled)
-        if let process = activeProcess {
+        await cancelPendingClarification(runID: runID)
+        if let process {
             try? await process.send(.cancel(runID: runID, .init(reason: .userRequested)))
             await process.cancel()
         }
         try? await store.transition(runID: runID, to: .cancelled, failure: .cancelled)
         return true
     }
-
     func expire(runID: UUID) async {
         guard activeRequest?.runID == runID, terminal == nil else { return }
+        let process = activeProcess
         terminal = .failure(.timedOut)
-        if let process = activeProcess {
+        await cancelPendingClarification(runID: runID)
+        if let process {
             try? await process.send(.cancel(runID: runID, .init(reason: .deadlineExceeded)))
             await process.cancel()
         }
         try? await store.transition(runID: runID, to: .failed, failure: .timedOut)
     }
-
     func runLoop(request: ToolBuildRequestV1, process: ToolBuildProcessClientV1) async throws -> ToolBuildResultV1 {
         while terminal == nil {
             guard let message = try await process.receive() else {
@@ -167,11 +185,12 @@ public actor ToolBuildSupervisor {
         }
         return try terminal!.get()
     }
-
     func terminate(runID: UUID, state: ToolAgentBuildStateV1, failure: ToolAgentFailureCodeV1) async {
         guard activeRequest?.runID == runID, terminal == nil else { return }
+        let process = activeProcess
         terminal = .failure(failure)
-        await activeProcess?.cancel()
+        await cancelPendingClarification(runID: runID)
+        await process?.cancel()
         try? await store.transition(runID: runID, to: state, failure: failure)
     }
 
@@ -182,12 +201,30 @@ public actor ToolBuildSupervisor {
         latestAttempt = nil
         latestValidation = nil
         attestation = nil
+        clarificationCount = 0
+    }
+
+    private func cancelPendingClarification(runID: UUID) async {
+        guard let pending = pendingClarification, pending.runID == runID else { return }
+        await clarificationCancellation()
+        pending.task.cancel()
+        _ = await pending.task.result
+        clearPendingClarification(runID: runID, token: pending.token)
+    }
+
+    func clearPendingClarification(runID: UUID, token: UUID) {
+        if pendingClarification?.runID == runID, pendingClarification?.token == token { pendingClarification = nil }
     }
 
     private static func isValid(_ request: ToolBuildRequestV1, runtimeVersion: String, policyVersion: String) -> Bool {
         let budgets = request.budgets
         return !request.description.isEmpty
             && request.description.utf8.count <= ToolAgentProtocolLimitsV1.maximumSafeMessageBytes
+            && (try? ToolAgentRequestContractV1.validate(
+                operation: request.operation,
+                currentTool: request.currentTool,
+                failure: request.failure
+            )) != nil
             && !runtimeVersion.isEmpty
             && !policyVersion.isEmpty
             && (1...ToolAgentBudgetsV1.preview.modelTurns).contains(budgets.modelTurns)

@@ -44,6 +44,7 @@ enum AnalyticsEventName: String, CaseIterable, Equatable {
     case permissionsCompleted = "permissions_completed"
     case firstUsefulActionCompleted = "first_useful_action_completed"
     case modelChanged = "model_changed"
+    case toolGenerated = "tool_generated"
     case errorOccurred = "error_occurred"
 }
 

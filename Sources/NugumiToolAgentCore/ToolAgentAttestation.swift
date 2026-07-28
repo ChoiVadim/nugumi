@@ -28,6 +28,8 @@ public struct ToolAgentValidationReportV1: Codable, Equatable, Sendable {
     public let candidateID: UUID
     public let fingerprint: ToolAgentFingerprintV1
     public let outcome: ToolAgentValidationOutcomeV1
+    /// What a `passed` outcome is worth. Meaningless when the outcome failed.
+    public let assurance: ToolAgentAssuranceV1
     public let failure: ToolAgentFailureCodeV1?
     public let fixtureIndex: Int?
     public let expectedOutput: String?
@@ -44,6 +46,7 @@ public struct ToolAgentValidationReportV1: Codable, Equatable, Sendable {
         candidateID: UUID,
         fingerprint: ToolAgentFingerprintV1,
         outcome: ToolAgentValidationOutcomeV1,
+        assurance: ToolAgentAssuranceV1 = .verified,
         failure: ToolAgentFailureCodeV1? = nil,
         fixtureIndex: Int? = nil,
         expectedOutput: String? = nil,
@@ -75,6 +78,7 @@ public struct ToolAgentValidationReportV1: Codable, Equatable, Sendable {
         self.candidateID = candidateID
         self.fingerprint = fingerprint
         self.outcome = outcome
+        self.assurance = assurance
         self.failure = failure
         self.fixtureIndex = fixtureIndex
         self.expectedOutput = expectedOutput

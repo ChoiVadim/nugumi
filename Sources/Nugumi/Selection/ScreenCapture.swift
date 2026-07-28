@@ -30,7 +30,7 @@ enum ScreenshotTranslationError: LocalizedError {
         case .noTextRecognized:
             "No readable text was found in the selected area."
         case .screenRecordingPermissionDenied:
-            "Nugumi needs Screen Recording permission to capture screenshots. Open settings to enable it, then choose Quit & Reopen to apply the change."
+            "Gizmo needs Screen Recording permission to capture screenshots. Open settings to enable it, then choose Quit & Reopen to apply the change."
         }
     }
 
@@ -208,7 +208,7 @@ enum ScreenshotCapture {
 
     static func captureInteractiveArea() async throws -> URL {
         // Permission is requested once at launch (requestScreenRecordingPermissionIfNeeded),
-        // which is what registers Nugumi in System Settings. Calling CGRequestScreenCaptureAccess
+        // which is what registers Gizmo in System Settings. Calling CGRequestScreenCaptureAccess
         // here would stack Apple's system prompt on top of our NugumiAlertController.
         guard CGPreflightScreenCaptureAccess() else {
             throw ScreenshotTranslationError.screenRecordingPermissionDenied

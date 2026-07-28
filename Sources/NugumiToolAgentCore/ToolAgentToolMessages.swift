@@ -5,6 +5,7 @@ public enum ToolAgentToolNameV1: String, Codable, CaseIterable, Equatable, Senda
     case writeCandidate = "write_candidate"
     case runValidation = "run_validation"
     case finishCandidate = "finish_candidate"
+    case askUser = "ask_user"
 }
 
 public struct ToolAgentReadBuildContextRequestV1: Codable, Equatable, Sendable {
@@ -16,6 +17,7 @@ public enum ToolAgentToolRequestV1: Codable, Equatable, Sendable {
     case writeCandidate(ToolAgentWriteCandidateRequestV1)
     case runValidation(ToolAgentRunValidationRequestV1)
     case finishCandidate(ToolAgentFinishCandidateRequestV1)
+    case askUser(ToolAgentAskUserRequestV1)
 
     private enum CodingKeys: String, CodingKey { case name, payload }
 
@@ -26,6 +28,7 @@ public enum ToolAgentToolRequestV1: Codable, Equatable, Sendable {
         case .writeCandidate: self = .writeCandidate(try container.decode(ToolAgentWriteCandidateRequestV1.self, forKey: .payload))
         case .runValidation: self = .runValidation(try container.decode(ToolAgentRunValidationRequestV1.self, forKey: .payload))
         case .finishCandidate: self = .finishCandidate(try container.decode(ToolAgentFinishCandidateRequestV1.self, forKey: .payload))
+        case .askUser: self = .askUser(try container.decode(ToolAgentAskUserRequestV1.self, forKey: .payload))
         }
     }
 
@@ -43,6 +46,9 @@ public enum ToolAgentToolRequestV1: Codable, Equatable, Sendable {
             try container.encode(value, forKey: .payload)
         case .finishCandidate(let value):
             try container.encode(ToolAgentToolNameV1.finishCandidate, forKey: .name)
+            try container.encode(value, forKey: .payload)
+        case .askUser(let value):
+            try container.encode(ToolAgentToolNameV1.askUser, forKey: .name)
             try container.encode(value, forKey: .payload)
         }
     }
@@ -71,6 +77,7 @@ public enum ToolAgentToolResponseV1: Codable, Equatable, Sendable {
     case writeCandidate(ToolAgentWriteCandidateResponseV1)
     case runValidation(ToolAgentValidationReportV1)
     case finishCandidate(ToolAgentAttestationV1)
+    case askUser(ToolAgentAskUserResponseV1)
 
     private enum CodingKeys: String, CodingKey { case name, payload }
 
@@ -81,6 +88,7 @@ public enum ToolAgentToolResponseV1: Codable, Equatable, Sendable {
         case .writeCandidate: self = .writeCandidate(try container.decode(ToolAgentWriteCandidateResponseV1.self, forKey: .payload))
         case .runValidation: self = .runValidation(try container.decode(ToolAgentValidationReportV1.self, forKey: .payload))
         case .finishCandidate: self = .finishCandidate(try container.decode(ToolAgentAttestationV1.self, forKey: .payload))
+        case .askUser: self = .askUser(try container.decode(ToolAgentAskUserResponseV1.self, forKey: .payload))
         }
     }
 
@@ -98,6 +106,9 @@ public enum ToolAgentToolResponseV1: Codable, Equatable, Sendable {
             try container.encode(value, forKey: .payload)
         case .finishCandidate(let value):
             try container.encode(ToolAgentToolNameV1.finishCandidate, forKey: .name)
+            try container.encode(value, forKey: .payload)
+        case .askUser(let value):
+            try container.encode(ToolAgentToolNameV1.askUser, forKey: .name)
             try container.encode(value, forKey: .payload)
         }
     }

@@ -36,7 +36,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     static let unreadableSelectionFailureThreshold = 3
     static let unreadableSelectionHintShownDefaultsKey = "unreadableSelectionHintShownBundles"
     let selectionReader = SelectionReader()
-    private let ollamaBaseURL = URL(string: "http://127.0.0.1:11434")!
+    private let ollamaBaseURL = LLMBackendFactory.ollamaBaseURL
     var currentBackend: any LLMBackend {
         backend(for: textModelID)
     }
@@ -45,21 +45,7 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     private func backend(for modelID: String) -> any LLMBackend {
-        let model = LLMModel.option(id: modelID)
-        switch model.backend {
-        case .ollama:
-            return OllamaClient(baseURL: ollamaBaseURL, model: model.apiModelID)
-        case .cloud(let provider):
-            switch provider {
-            case .openAICodex:
-                return OpenAICodexClient(apiModelID: model.apiModelID)
-            case .anthropicClaudeCode:
-                return ClaudeCodeClient(model: model.apiModelID)
-            case .openAI, .anthropic, .gemini, .openRouter:
-                let key = KeychainStore.apiKey(for: provider) ?? ""
-                return OpenAIChatClient(provider: provider, apiKey: key, model: model.apiModelID)
-            }
-        }
+        LLMBackendFactory.backend(for: modelID)
     }
 
     var translateButtonController: FloatingTranslateButtonController?
@@ -135,7 +121,8 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     let usageStatsStore = UsageStatsStore()
     let analyticsClient = AnalyticsClient()
     let snippetsStore = SnippetsStore()
-    let promptToolsStore = PromptToolsStore()
+    let toolsStore = ToolsStore()
+    let uvBootstrap = UVBootstrap()
     let ringLayoutStore = RingLayoutStore()
     let translationHistoryStore = TranslationHistoryStore()
     lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
@@ -432,6 +419,26 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
     }
 
     static func main() {
+        if let evalMode = ToolEvalMode.parse(
+            arguments: ProcessInfo.processInfo.arguments
+        ) {
+            _ = NSApplication.shared
+            Task { @MainActor in
+                let status = await evalMode.run()
+                exit(status)
+            }
+            dispatchMain()
+        }
+        if let gateMode = ToolAgentGateMode.parse(
+            arguments: ProcessInfo.processInfo.arguments
+        ) {
+            _ = NSApplication.shared
+            Task {
+                let status = await gateMode.run()
+                exit(status)
+            }
+            dispatchMain()
+        }
         let app = NSApplication.shared
         let delegate = NugumiApp()
         app.delegate = delegate
@@ -523,11 +530,14 @@ final class NugumiApp: NSObject, NSApplicationDelegate {
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.5)
         // The ring reads its contents through this hook every time it opens, so
         // a slot edited in the Ring tab lands on the very next ring.
-        RingConfigurationProvider.current = { [weak self] in
+        RingConfigurationProvider.current = { [weak self] selection in
             guard let self else { return .default }
             return RingConfiguration(
                 layout: self.ringLayoutStore.layout,
-                tools: self.promptToolsStore.tools
+                // Unrunnable tools (no prompt, or a script tool with no script)
+                // are filtered here so the builder never has to consult the store.
+                tools: self.toolsStore.tools.filter(self.toolsStore.isRunnable),
+                context: ToolContext.current(selection: selection)
             )
         }
         setupStatusItem()
@@ -765,4 +775,3 @@ extension NugumiApp: SPUStandardUserDriverDelegate {
         MainActor.assumeIsolated { setAvailableUpdate(nil) }
     }
 }
-

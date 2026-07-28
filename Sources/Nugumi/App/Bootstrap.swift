@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 extension NSColor {
-    /// Nugumi brand accent (#11766E) — replaces the system blue selection
+    /// Gizmo brand accent (#11766E) — replaces the system blue selection
     /// tint across the setup window.
     static let nugumiAccent = NSColor(
         red: 0x11 / 255.0,
@@ -356,7 +356,7 @@ final class OllamaBootstrap {
             }
         }
         // Surface every installed model in the picker, not just the curated
-        // set, and record which are vision-capable so Ask Nugumi can offer them.
+        // set, and record which are vision-capable so Ask Gizmo can offer them.
         let vision = await visionCapableModels(among: allNames)
         OllamaModelCache.update(names: allNames, vision: vision)
         return found

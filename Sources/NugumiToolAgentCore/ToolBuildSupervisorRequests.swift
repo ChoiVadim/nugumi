@@ -59,12 +59,37 @@ extension ToolBuildSupervisor {
             response = .runValidation(try await acceptValidation(validationRequest, request: request))
         case .finishCandidate(let finish):
             response = .finishCandidate(try await acceptFinish(finish, request: request))
+        case .askUser(let clarificationRequest):
+            response = .askUser(try await acceptClarification(clarificationRequest, request: request))
         }
         guard terminal == nil else { return }
         try await process.send(.toolResponse(
             runID: request.runID,
             .init(callID: envelope.callID, result: response)
         ))
+    }
+
+    func acceptClarification(_ clarificationRequest: ToolAgentAskUserRequestV1, request: ToolBuildRequestV1) async throws -> ToolAgentAskUserResponseV1 {
+        guard latestAttempt == nil,
+              clarificationCount < 3 else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        clarificationCount += 1
+        let handler = clarification
+        let token = UUID()
+        let task = Task { try await handler(clarificationRequest) }
+        pendingClarification = (request.runID, token, task)
+        do {
+            let response = try await task.value
+            clearPendingClarification(runID: request.runID, token: token)
+            guard terminal == nil else {
+                throw ToolAgentFailureCodeV1.cancelled
+            }
+            return response
+        } catch {
+            clearPendingClarification(runID: request.runID, token: token)
+            throw error
+        }
     }
 
     func acceptWrite(
@@ -118,6 +143,7 @@ extension ToolBuildSupervisor {
             candidateID: supplied.candidateID,
             fingerprint: supplied.fingerprint,
             outcome: supplied.outcome,
+            assurance: supplied.assurance,
             failure: supplied.failure,
             fixtureIndex: supplied.fixtureIndex,
             expectedOutput: supplied.expectedOutput,

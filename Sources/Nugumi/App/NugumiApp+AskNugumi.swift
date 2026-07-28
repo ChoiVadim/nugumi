@@ -60,9 +60,9 @@ extension NugumiApp {
             },
             summarizeOption: makeSummarizeOption(near: cursor, selectionRect: nil, panelSide: .right),
             // The quick menu arms no selection, so the empty string routes
-            // `runPromptTool` through its read-the-selection-now branch.
-            onPromptTool: { [weak self] tool, text in
-                self?.runPromptTool(tool, selection: text)
+            // `runTool` through its read-the-selection-now branch.
+            onTool: { [weak self] tool, text in
+                self?.runTool(tool, selection: text)
             }
         )
         button.onMenuClosed = { [weak self, weak button] in
@@ -76,7 +76,7 @@ extension NugumiApp {
 
     @MainActor
     func startAskNugumiPrompt() {
-        // Toggle: if any Ask Nugumi UI (prompt, loading, answer, or an
+        // Toggle: if any Ask Gizmo UI (prompt, loading, answer, or an
         // in-flight request) is already up, the shortcut dismisses it instead
         // of opening another one.
         let askUIOpen = isAskNugumiRunning
@@ -116,10 +116,13 @@ extension NugumiApp {
                 if self.isAskNugumiRunning {
                     self.cancelAskNugumiRequest()
                 }
+                // Escape / ✕ on the panel takes this path rather than
+                // `dismissAskNugumi`, so it has to give focus back too.
+                SelfActivationGuard.relinquish()
             }
         )
         askPromptController = controller
-        // Capture before `show()`: activating Nugumi closes any menu the
+        // Capture before `show()`: activating Gizmo closes any menu the
         // user is asking about. The prompt appears one capture (~100 ms)
         // later, with the dropdown already safely in the pending shot.
         Task { @MainActor [weak self] in
@@ -169,7 +172,7 @@ extension NugumiApp {
 
         let model = LLMModel.option(id: askNugumiModelID)
         guard model.supportsImages else {
-            askPromptController?.showError("Ask Nugumi needs a vision model.")
+            askPromptController?.showError("Ask Gizmo needs a vision model.")
             petController?.showPromptError("Needs a vision model.")
             return
         }
@@ -190,7 +193,7 @@ extension NugumiApp {
             petController?.setPromptLoading()
         }
 
-        // Hide the wide "Ask Nugumi" pill and surface the round loading bar
+        // Hide the wide "Ask Gizmo" pill and surface the round loading bar
         // instead — a compact "in flight" indicator that never intercepts
         // clicks (`ignoresMouseEvents = true`). If the request fails,
         // `AskPromptController.showError` calls `panel.makeKeyAndOrderFront`
@@ -299,7 +302,7 @@ extension NugumiApp {
 
         let model = LLMModel.option(id: askNugumiModelID)
         guard model.supportsImages else {
-            controller.showError("Ask Nugumi needs a vision model.")
+            controller.showError("Ask Gizmo needs a vision model.")
             return
         }
         if let setupError = askNugumiSetupErrorIfNeeded(for: model) {
@@ -553,7 +556,7 @@ extension NugumiApp {
         hideAskFloatingLoadingBar()
     }
 
-    /// Opens the pet prompt input wired to Ask Nugumi. Reused for the initial
+    /// Opens the pet prompt input wired to Ask Gizmo. Reused for the initial
     /// shortcut-triggered prompt and for the answer bubble's "continue" button —
     /// `askHistory` persists across launches (see `AskNugumiHistoryStore`) so
     /// follow-ups keep context.
@@ -594,8 +597,8 @@ extension NugumiApp {
         }
     }
 
-    /// Tears down every Ask Nugumi surface (pet prompt/answer, standalone
-    /// prompt window, in-flight request). Used by the Ask Nugumi shortcut toggle.
+    /// Tears down every Ask Gizmo surface (pet prompt/answer, standalone
+    /// prompt window, in-flight request). Used by the Ask Gizmo shortcut toggle.
     @MainActor
     private func dismissAskNugumi() {
         if isAskNugumiRunning {
@@ -608,6 +611,10 @@ extension NugumiApp {
         petController?.clearPrompt()
         closeAskAnnotationOverlay()
         hideAskFloatingLoadingBar()
+        // Nothing of ours needs focus now. Hand it back, or AppKit hands it to the
+        // next window in line — which is the settings window if it's open, and it
+        // gets raised in the process.
+        SelfActivationGuard.relinquish()
     }
 
     @MainActor

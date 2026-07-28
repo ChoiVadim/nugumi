@@ -154,6 +154,30 @@ struct OpenAICodexClient: LLMBackend {
         return parsed
     }
 
+    func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String {
+        let body = CodexResponsesRequest(
+            model: apiModelID,
+            instructions: systemPrompt,
+            input: [CodexInputItem(role: "user", content: [.text(userPrompt, role: "user")])],
+            stream: true,
+            store: false,
+            reasoning: CodexReasoningConfig(effort: thinkingLevel.cloudReasoningEffort)
+        )
+        var answer = ""
+        // Generating a whole tool takes longer than a translation, so this uses
+        // the roomier of the two timeouts already in this file.
+        try await runStreaming(body: body, timeoutInterval: 60) { delta in
+            answer += delta
+            onPartial(answer)
+        }
+        return answer
+    }
+
     // MARK: Streaming transport (Responses API SSE)
 
     private func runStreaming(
@@ -207,7 +231,7 @@ struct OpenAICodexClient: LLMBackend {
             || urlError.code == .timedOut {
             CodexDebugLog.append("inference: URLError \(urlError.code.rawValue) — \(urlError.localizedDescription)")
             // The subscription endpoint sometimes drops individual requests
-            // upstream — be explicit about that so users don't think Nugumi
+            // upstream — be explicit about that so users don't think Gizmo
             // is broken.
             let message: String
             if urlError.code == .notConnectedToInternet {

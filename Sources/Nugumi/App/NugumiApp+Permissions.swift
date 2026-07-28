@@ -15,7 +15,7 @@ import Vision
 extension NugumiApp {
     @MainActor
     func requestAccessibilityPermissionIfNeeded() {
-        // prompt:false silently registers Nugumi in System Settings → Privacy &
+        // prompt:false silently registers Gizmo in System Settings → Privacy &
         // Security → Accessibility (so the TCC entry exists and the user can find
         // the toggle), without surfacing macOS's stock "would like to control this
         // computer using accessibility features" dialog. The friendlier prompt
@@ -33,14 +33,14 @@ extension NugumiApp {
 
     /// Point-of-use Accessibility request (selection / reply shortcuts). The
     /// launch-time `requestAccessibilityPermissionIfNeeded` (prompt:false)
-    /// already registers Nugumi in the Accessibility list — and macOS only ever
+    /// already registers Gizmo in the Accessibility list — and macOS only ever
     /// shows its native prompt:true dialog while the app is ABSENT from that
     /// list, so prompt:true here is a permanent silent no-op. Open the
     /// Accessibility pane directly instead: it's the only reliably-visible
     /// "grant me access" UI we can surface at point of use.
     @MainActor
     func requestAccessibilityPermissionInteractively() {
-        // Re-probe (prompt:false) so the Nugumi row exists even right after a
+        // Re-probe (prompt:false) so the Gizmo row exists even right after a
         // tccutil reset, then jump straight to the toggle.
         let probe = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(probe)

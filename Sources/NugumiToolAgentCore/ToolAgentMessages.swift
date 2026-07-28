@@ -13,16 +13,87 @@ public struct ToolAgentBudgetsV1: Codable, Equatable, Sendable {
         self.durationSeconds = durationSeconds
     }
 
-    public static let preview = Self(modelTurns: 8, toolCalls: 32, repairs: 3, durationSeconds: 600)
+    /// A build costs the model five turns before any repair: read the context,
+    /// write, validate, finish, and say it finished. Each repair adds a write
+    /// and a validation, so a usable repair budget needs `5 + 2 * repairs`
+    /// turns — anything less and the agent runs out of turns holding a
+    /// candidate that already passed, which is the worst possible failure: the
+    /// work is done and gets thrown away. `minimumModelTurns` states that, and
+    /// the extra turn is slack for a wasted call.
+    public static let preview = Self(modelTurns: 12, toolCalls: 32, repairs: 3, durationSeconds: 900)
+
+    /// Turns needed before any repair: read_build_context, write_candidate,
+    /// run_validation, finish_candidate, finalText.
+    public static let turnsBeforeRepairs = 5
+
+    /// Turns one repair costs: another write_candidate and run_validation.
+    public static let turnsPerRepair = 2
+
+    public var minimumModelTurns: Int {
+        Self.turnsBeforeRepairs + Self.turnsPerRepair * repairs
+    }
 }
 
 public struct ToolAgentStartV1: Codable, Equatable, Sendable {
     public let description: String
     public let budgets: ToolAgentBudgetsV1
+    public let operation: ToolAgentOperationV1
+    public let currentTool: ToolAgentInstalledToolV1?
+    public let failure: String?
 
     public init(description: String, budgets: ToolAgentBudgetsV1) {
         self.description = description
         self.budgets = budgets
+        self.operation = .create
+        self.currentTool = nil
+        self.failure = nil
+    }
+
+    public init(
+        description: String,
+        budgets: ToolAgentBudgetsV1,
+        operation: ToolAgentOperationV1,
+        currentTool: ToolAgentInstalledToolV1? = nil,
+        failure: String? = nil
+    ) throws {
+        try ToolAgentRequestContractV1.validate(
+            operation: operation,
+            currentTool: currentTool,
+            failure: failure
+        )
+        self.description = description
+        self.budgets = budgets
+        self.operation = operation
+        self.currentTool = currentTool
+        self.failure = failure
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case description
+        case budgets
+        case operation
+        case currentTool
+        case failure
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            description: container.decode(String.self, forKey: .description),
+            budgets: container.decode(ToolAgentBudgetsV1.self, forKey: .budgets),
+            operation: container.decodeIfPresent(ToolAgentOperationV1.self, forKey: .operation) ?? .create,
+            currentTool: container.decodeIfPresent(ToolAgentInstalledToolV1.self, forKey: .currentTool),
+            failure: container.decodeIfPresent(String.self, forKey: .failure)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(description, forKey: .description)
+        try container.encode(budgets, forKey: .budgets)
+        try container.encode(operation, forKey: .operation)
+        try container.encodeIfPresent(currentTool, forKey: .currentTool)
+        try container.encodeIfPresent(failure, forKey: .failure)
     }
 }
 

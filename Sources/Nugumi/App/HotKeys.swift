@@ -26,7 +26,7 @@ struct GlobalHotKeyDefinition {
     }
 
     /// Explicit-id variant for fixed hotkeys that aren't backed by a
-    /// `GlobalShortcutAction` slot (e.g. the always-on Ask Nugumi ⌃⌥A alias).
+    /// `GlobalShortcutAction` slot (e.g. the always-on Ask Gizmo ⌃⌥A alias).
     init(id: UInt32, shortcut: GlobalShortcut) {
         self.id = id
         keyCode = shortcut.keyCode

@@ -234,6 +234,17 @@ protocol LLMBackend {
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> AskNugumiResponse
+
+    /// One shot with a caller-supplied system prompt and no Nugumi persona,
+    /// returning the model's text verbatim. `ask` can't serve this: it injects
+    /// `AskNugumiPromptBuilder.systemPrompt` and post-processes through
+    /// `AskNugumiResponse.parse`, both of which would mangle a tool manifest.
+    func complete(
+        systemPrompt: String,
+        userPrompt: String,
+        thinkingLevel: ThinkingLevel,
+        onPartial: @escaping (String) -> Void
+    ) async throws -> String
 }
 
 /// Turns a non-2xx cloud HTTP response into a human sentence instead of a bare

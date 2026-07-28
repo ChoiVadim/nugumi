@@ -10,6 +10,7 @@ import { createInterface, type Interface } from "node:readline";
 import {
   parseInbound,
   ProtocolError,
+  type StartPayload,
 } from "./protocol.js";
 import { SidecarRuntime } from "./runtime.js";
 import { createTools } from "./tools.js";
@@ -18,6 +19,15 @@ type ProviderBundle = {
   readonly provider: Provider<string>;
   readonly model: Model<string>;
 };
+
+export function makeInitialPrompt(start: StartPayload): string {
+  return JSON.stringify({
+    operation: start.operation ?? "create",
+    instruction: start.description,
+    currentTool: start.currentTool,
+    failure: start.failure,
+  });
+}
 
 export async function runSidecar(
   makeProvider: (runtime: SidecarRuntime) => ProviderBundle,
@@ -67,7 +77,8 @@ export async function runSidecar(
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      systemPrompt: "Build one offline Python text tool using only the four available tools.",
+      systemPrompt:
+        "Build and verify one complete Nugumi tool using only the five available tools. For Create, Edit, and Fix, ask up to three short clarifications before the first candidate write only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.",
     });
     await loader.reload();
     const tools = createTools(activeRuntime);
@@ -88,7 +99,7 @@ export async function runSidecar(
       { once: true },
     );
     activeRuntime.emit("state", { state: "understanding" });
-    const prompt = session.prompt(activeRuntime.start.description, {
+    const prompt = session.prompt(makeInitialPrompt(activeRuntime.start), {
       expandPromptTemplates: false,
     });
     await Promise.race([prompt, activeRuntime.waitForFailure()]);

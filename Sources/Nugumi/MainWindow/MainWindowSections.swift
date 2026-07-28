@@ -61,7 +61,7 @@ private struct ReadOnlyField: View {
 private struct KeyCap: View {
     let text: String
     /// Dimmed style for a fixed, non-rebindable secondary cap (e.g. the Ask
-    /// Nugumi ⌃⌥A alias shown next to its configurable shortcut).
+    /// Gizmo ⌃⌥A alias shown next to its configurable shortcut).
     var muted: Bool = false
     var body: some View {
         Text(text.isEmpty ? "—" : text)
@@ -123,7 +123,7 @@ private struct HomeContent: View {
                         Text("Welcome back")
                             .font(FlowTheme.serif(30))
                             .foregroundStyle(FlowTheme.ink)
-                        Text("Your recent results and chats with Nugumi.")
+                        Text("Your recent results and chats with Gizmo.")
                             .font(.system(size: 14))
                             .foregroundStyle(FlowTheme.inkSecondary)
                     }
@@ -157,7 +157,7 @@ private struct HomeContent: View {
                             Text("No history yet")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(FlowTheme.ink)
-                            Text("Select text anywhere and translate, rewrite, reply, or ask Nugumi - it shows up here.")
+                            Text("Select text anywhere and translate, rewrite, reply, or ask Gizmo - it shows up here.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(FlowTheme.inkSecondary)
                         }
@@ -426,7 +426,7 @@ private struct InsightsContent: View {
 }
 
 /// Slice colors for the breakdown donuts: the leading (largest) share wears the
-/// Nugumi green, everything behind it falls back to quiet monochrome whites.
+/// Gizmo green, everything behind it falls back to quiet monochrome whites.
 private enum BreakdownPalette {
     static func color(_ index: Int) -> Color {
         index == 0 ? FlowTheme.accent : shade(index - 1)
@@ -501,7 +501,7 @@ struct StyleSection: View {
     var body: some View {
         DetailContainer(
             "Style",
-            subtitle: "How Nugumi writes when it rewrites your messages and replies.",
+            subtitle: "How Gizmo writes when it rewrites your messages and replies.",
             accessory: HStack(spacing: 8) {
                 Text("Gen Z")
                     .font(.system(size: 13, weight: .medium))
@@ -515,7 +515,7 @@ struct StyleSection: View {
         ) {
             PageBanner(
                 title: "Your voice, per place",
-                message: "Nugumi picks a category automatically from the app you're in. Set the register for each below.",
+                message: "Gizmo picks a category automatically from the app you're in. Set the register for each below.",
                 symbol: "textformat.alt"
             )
 
@@ -528,7 +528,7 @@ struct StyleSection: View {
             SubCard {
                 VStack(alignment: .leading, spacing: 14) {
                     SettingRow("Auto Cleanup",
-                               subtitle: "How much Nugumi tidies the text it writes.") {
+                               subtitle: "How much Gizmo tidies the text it writes.") {
                         PillPicker(
                             options: CleanupLevel.allCases,
                             selection: bridge.binding(\.cleanupLevel) { .setCleanupLevel($0) },
@@ -576,7 +576,7 @@ private extension CleanupLevel {
 }
 
 /// Before → after demonstration for the selected Auto Cleanup level. The "after"
-/// bubble is accent-tinted to read as Nugumi's output, mirroring the rewrite side
+/// bubble is accent-tinted to read as Gizmo's output, mirroring the rewrite side
 /// of the Style previews.
 private struct CleanupExample: View {
     let level: CleanupLevel
@@ -589,7 +589,7 @@ private struct CleanupExample: View {
             Rectangle()
                 .fill(FlowTheme.hairline)
                 .frame(width: 1)
-            row(label: "Nugumi writes", text: level.example.after, accent: true)
+            row(label: "Gizmo writes", text: level.example.after, accent: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -850,7 +850,7 @@ private struct PlainTextEditor: NSViewRepresentable {
 
 private struct ChatBubble: View {
     let text: String
-    /// Accent-tinted bubble for the "Nugumi's rewrite" side of the preview.
+    /// Accent-tinted bubble for the "Gizmo's rewrite" side of the preview.
     var accent: Bool = false
     /// Right-aligned (outgoing) bubble — the "tail" corner flattens bottom-right.
     var trailing: Bool = false
@@ -1018,7 +1018,7 @@ private struct EmailVoiceSampleEditor: View {
             Text("Voice sample")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(FlowTheme.inkSecondary)
-            Text("Paste an email you typically send. Nugumi mirrors its greeting, rhythm, and sign-off when it writes email replies.")
+            Text("Paste an email you typically send. Gizmo mirrors its greeting, rhythm, and sign-off when it writes email replies.")
                 .font(.system(size: 12))
                 .foregroundStyle(FlowTheme.inkTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1093,7 +1093,7 @@ struct LanguagesSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
-        DetailContainer("Languages", subtitle: "The language Nugumi replies in.") {
+        DetailContainer("Languages", subtitle: "The language Gizmo replies in.") {
             SubCard {
                 VStack(spacing: 18) {
                     SettingRow("Reading language",
@@ -1174,7 +1174,7 @@ struct AIEngineSection: View {
                                subtitle: "Translate, rewrite, and smart replies.",
                                onOpenPicker: { bridge.modelPickerScope = .textActions })
                 ModelScopeCard(scope: .askNugumi,
-                               title: "Ask Nugumi",
+                               title: "Ask Gizmo",
                                subtitle: "Screenshot questions. Vision-capable models only.",
                                onOpenPicker: { bridge.modelPickerScope = .askNugumi })
             } else {
@@ -1835,7 +1835,7 @@ private struct ProviderRow: View {
     }
 }
 
-// MARK: - Ollama local setup (ported from the old "Nugumi Setup" window)
+// MARK: - Ollama local setup (ported from the old "Gizmo Setup" window)
 
 private struct OllamaSetupCard: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
@@ -2035,7 +2035,7 @@ struct ShortcutsSection: View {
         SettingRow(action.menuTitle) {
             HStack(spacing: 8) {
                 KeyCap(text: bridge.settings.shortcut(for: action).displayString)
-                // Ask Nugumi also fires on a fixed ⌃⌥A alias — shown muted since
+                // Ask Gizmo also fires on a fixed ⌃⌥A alias — shown muted since
                 // "Change" only rebinds the primary (double-tap ⌃) shortcut.
                 if action == .askNugumi {
                     KeyCap(text: GlobalShortcutAction.askNugumiAlias.displayString, muted: true)
@@ -2055,7 +2055,7 @@ struct BehaviorSection: View {
     @EnvironmentObject var bridge: NugumiSettingsBridge
 
     var body: some View {
-        DetailContainer("Settings", subtitle: "How Nugumi shows up while you work.") {
+        DetailContainer("Settings", subtitle: "How Gizmo shows up while you work.") {
             SubCard {
                 VStack(spacing: 18) {
                     SettingRow("Main mode",
@@ -2077,7 +2077,7 @@ struct BehaviorSection: View {
             SubCard {
                 VStack(spacing: 18) {
                     SettingRow("Launch at login",
-                               subtitle: "Start Nugumi automatically when you log in to your Mac.") {
+                               subtitle: "Start Gizmo automatically when you log in to your Mac.") {
                         Toggle("", isOn: bridge.binding(\.launchAtLogin) { .setLaunchAtLogin($0) })
                             .labelsHidden()
                             .toggleStyle(.switch)
@@ -2085,7 +2085,7 @@ struct BehaviorSection: View {
                     }
                     Divider().background(FlowTheme.hairline)
                     SettingRow("Invisibility mode",
-                               subtitle: "Hide Nugumi's windows from screen recording and screenshots.") {
+                               subtitle: "Hide Gizmo's windows from screen recording and screenshots.") {
                         Toggle("", isOn: Binding(
                             get: { bridge.settings.invisibilityEnabled },
                             set: { _ in bridge.perform(.toggleInvisibility) }
@@ -2110,11 +2110,11 @@ struct AboutYouSection: View {
     var body: some View {
         DetailContainer(
             "About you",
-            subtitle: "Background Nugumi keeps in mind when it answers you."
+            subtitle: "Background Gizmo keeps in mind when it answers you."
         ) {
             PageBanner(
                 title: "Better answers, your context",
-                message: "When a term has several meanings, Nugumi picks the one most relevant to you - \"RLS\" means row-level security to a developer, not a sleep disorder.",
+                message: "When a term has several meanings, Gizmo picks the one most relevant to you - \"RLS\" means row-level security to a developer, not a sleep disorder.",
                 symbol: "person.crop.circle"
             )
 
@@ -2222,8 +2222,8 @@ private struct SnippetsListContent: View {
     private var title: String { kind == .snippet ? "Snippets" : "Dictionary" }
     private var subtitle: String {
         kind == .snippet
-            ? "Short phrases Nugumi expands before rewriting."
-            : "Words and names Nugumi keeps exactly as written."
+            ? "Short phrases Gizmo expands before rewriting."
+            : "Words and names Gizmo keeps exactly as written."
     }
 
     var body: some View {
@@ -2239,7 +2239,7 @@ private struct SnippetsListContent: View {
                 SubCard {
                     Text(kind == .snippet
                          ? "No snippets yet. Add one like “omw” → “on my way”."
-                         : "No saved words yet. Add names or terms Nugumi should never translate.")
+                         : "No saved words yet. Add names or terms Gizmo should never translate.")
                         .font(.system(size: 13))
                         .foregroundStyle(FlowTheme.inkSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2460,7 +2460,7 @@ struct HelpSection: View {
         DetailContainer("Help", subtitle: "Setup, support, and housekeeping.") {
             SubCard {
                 VStack(spacing: 16) {
-                    HelpRow(title: "How to use Nugumi",
+                    HelpRow(title: "How to use Gizmo",
                             subtitle: "Permission setup and a quick feature tour.",
                             button: "Open") {
                         bridge.perform(.openPermissionsHelp)
@@ -2490,8 +2490,8 @@ struct HelpSection: View {
                         bridge.perform(.resetSettings)
                     }
                     Divider().background(FlowTheme.hairline)
-                    HelpRow(title: "Quit Nugumi",
-                            subtitle: "Close Nugumi completely.",
+                    HelpRow(title: "Quit Gizmo",
+                            subtitle: "Close Gizmo completely.",
                             button: "Quit",
                             destructive: true) {
                         bridge.perform(.quit)

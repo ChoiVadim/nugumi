@@ -7,15 +7,10 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
     private weak var connection: NSXPCConnection?
     private let probe: SandboxProbe?
     private let coordinator = ProbeRunCoordinator()
-    private let candidateValidator: CandidateValidator?
-    private let candidateCoordinator = CandidateRunCoordinator()
 
     init(connection: NSXPCConnection) {
         self.connection = connection
         probe = ToolWorkerRuntime.bundled().map { SandboxProbe(runtime: $0) }
-        candidateValidator = ToolWorkerRuntime.candidateRuntime().map {
-            CandidateValidator(runtime: $0)
-        }
     }
 
     func runProbe(
@@ -69,81 +64,6 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
         reply(
             coordinator.cancel(runID: identifier) { [probe] executionID in
                 probe?.cancel(runID: executionID)
-            }
-        )
-    }
-
-    func runCandidate(
-        _ requestData: Data,
-        withReply reply: @escaping (Data) -> Void
-    ) {
-        guard let request = try? JSONDecoder().decode(
-            CandidateValidationRequestV1.self,
-            from: requestData
-        ) else {
-            reply(
-                Self.encoded(
-                    .protocolFailure(
-                        CandidateWorkerProtocolFailureV1(
-                            code: .invalidRequest
-                        )
-                    )
-                )
-            )
-            return
-        }
-        guard let candidateValidator else {
-            reply(
-                Self.encoded(
-                    .validation(
-                    Self.candidateFailure(
-                        request,
-                        failure: .workerFailure
-                    )
-                    )
-                )
-            )
-            return
-        }
-        let accepted = candidateCoordinator.start(
-            runID: request.runID,
-            operation: { executionID in
-                await candidateValidator.validate(
-                    request,
-                    executionID: executionID
-                )
-            },
-            reply: {
-                result in reply(Self.encoded(.validation(result)))
-            }
-        )
-        guard accepted else {
-            reply(
-                Self.encoded(
-                    .validation(
-                    Self.candidateFailure(
-                        request,
-                        failure: .workerFailure
-                    )
-                    )
-                )
-            )
-            return
-        }
-    }
-
-    func cancelCandidate(
-        _ runID: String,
-        withReply reply: @escaping (Bool) -> Void
-    ) {
-        guard let identifier = UUID(uuidString: runID) else {
-            reply(false)
-            return
-        }
-        reply(
-            candidateCoordinator.cancel(runID: identifier) {
-                [candidateValidator] executionID in
-                candidateValidator?.cancel(runID: executionID)
             }
         )
     }
@@ -219,30 +139,4 @@ final class ToolWorkerService: NSObject, NugumiToolWorkerProtocol {
         (try? JSONEncoder().encode(reply)) ?? Data()
     }
 
-    private static func encoded(_ reply: CandidateWorkerReplyV1) -> Data {
-        (try? JSONEncoder().encode(reply)) ?? Data()
-    }
-
-    private static func candidateFailure(
-        _ request: CandidateValidationRequestV1,
-        failure: ToolAgentFailureCodeV1
-    ) -> CandidateValidationReplyV1 {
-        CandidateValidationReplyV1(
-            runID: request.runID,
-            candidateID: request.candidateID,
-            fingerprint: request.fingerprint,
-            fixtureIndex: nil,
-            outcome: .failed,
-            failure: failure,
-            exitCode: nil,
-            terminationSignal: nil,
-            actualOutput: nil,
-            stderrDetail: nil,
-            stdoutWasTruncated: false,
-            stderrWasTruncated: false,
-            processGroupTerminated: true,
-            durationMilliseconds: 0,
-            passingFingerprint: nil
-        )
-    }
 }

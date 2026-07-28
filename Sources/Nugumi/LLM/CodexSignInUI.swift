@@ -22,7 +22,7 @@ import Vision
 /// ChatGPT (Codex) device-flow sign-in, shown as a compact floating panel.
 ///
 /// Deliberately NOT an `NSAlert.runModal`: the app-modal alert activated
-/// Nugumi on every click, yanking the main window in front of the browser
+/// Gizmo on every click, yanking the main window in front of the browser
 /// page the user was trying to sign in with. A `.nonactivatingPanel` floats
 /// above the browser, takes clicks without activating the app, and needs no
 /// nested modal run loop — completion is a plain continuation.
@@ -79,7 +79,7 @@ final class CodexLoginAlert: NSObject {
         verificationURL = start.verificationURL
         userCode = start.userCode
 
-        // Open the browser WITHOUT activating Nugumi — the sign-in page must
+        // Open the browser WITHOUT activating Gizmo — the sign-in page must
         // stay in front; the panel floats above it.
         NSWorkspace.shared.open(start.verificationURL)
 
@@ -294,7 +294,7 @@ private struct CodexLoginPanelView: View {
                     .fill(Color.white.opacity(0.08))
             )
 
-            Text("Nugumi finishes the rest automatically once you continue.")
+            Text("Gizmo finishes the rest automatically once you continue.")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.white.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)

@@ -5,12 +5,75 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
     public let description: String
     public let budgets: ToolAgentBudgetsV1
     public let createdAt: Date
+    public let operation: ToolAgentOperationV1
+    public let currentTool: ToolAgentInstalledToolV1?
+    public let failure: String?
 
     public init(runID: UUID = UUID(), description: String, budgets: ToolAgentBudgetsV1 = .preview, createdAt: Date = Date()) {
         self.runID = runID
         self.description = description
         self.budgets = budgets
         self.createdAt = createdAt
+        self.operation = .create
+        self.currentTool = nil
+        self.failure = nil
+    }
+
+    public init(
+        runID: UUID = UUID(),
+        description: String,
+        budgets: ToolAgentBudgetsV1 = .preview,
+        createdAt: Date = Date(),
+        operation: ToolAgentOperationV1,
+        currentTool: ToolAgentInstalledToolV1? = nil,
+        failure: String? = nil
+    ) throws {
+        try ToolAgentRequestContractV1.validate(
+            operation: operation,
+            currentTool: currentTool,
+            failure: failure
+        )
+        self.runID = runID
+        self.description = description
+        self.budgets = budgets
+        self.createdAt = createdAt
+        self.operation = operation
+        self.currentTool = currentTool
+        self.failure = failure
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case runID
+        case description
+        case budgets
+        case createdAt
+        case operation
+        case currentTool
+        case failure
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            runID: container.decode(UUID.self, forKey: .runID),
+            description: container.decode(String.self, forKey: .description),
+            budgets: container.decode(ToolAgentBudgetsV1.self, forKey: .budgets),
+            createdAt: container.decode(Date.self, forKey: .createdAt),
+            operation: container.decodeIfPresent(ToolAgentOperationV1.self, forKey: .operation) ?? .create,
+            currentTool: container.decodeIfPresent(ToolAgentInstalledToolV1.self, forKey: .currentTool),
+            failure: container.decodeIfPresent(String.self, forKey: .failure)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(runID, forKey: .runID)
+        try container.encode(description, forKey: .description)
+        try container.encode(budgets, forKey: .budgets)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(operation, forKey: .operation)
+        try container.encodeIfPresent(currentTool, forKey: .currentTool)
+        try container.encodeIfPresent(failure, forKey: .failure)
     }
 }
 
