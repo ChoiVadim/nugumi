@@ -163,6 +163,7 @@ struct ToolEditorPanel: View {
             // for a round-trip.
             generatedSummary = existing.brief
             page = .overview
+            chat.greetForEditing(existing.name)
         }
     }
 

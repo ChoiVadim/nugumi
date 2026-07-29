@@ -48,6 +48,10 @@ enum FlowTheme {
     /// Recessed well: segmented-control tracks, input fields, anything the eye
     /// should read as carved into the surface.
     static let recess = Color.black.opacity(0.18)
+    /// What "this one is selected" looks like: a well sunk *below* the surface,
+    /// not a chip lifted above it. Deeper than `recess` because it has to read
+    /// against the sidebar's own material rather than against a lit track.
+    static let selected = Color.black.opacity(0.28)
     /// One step above the surface: the selected chip in a track, a hovered row.
     static let raised = Color.white.opacity(0.14)
     /// Top of the ladder: the primary action in a section.
@@ -744,10 +748,11 @@ struct SidebarView: View {
     }
 
     private var brandHeader: some View {
-        HStack(alignment: .center, spacing: 9) {
+        HStack(alignment: .center, spacing: 11) {
             Image(nsImage: Self.brandIcon)
                 .resizable()
                 .interpolation(.high)
+                .scaledToFit()
                 .frame(width: 32, height: 32)
             // "Gizmate" with a small round β badge raised like a superscript.
             HStack(alignment: .top, spacing: 1) {
@@ -774,7 +779,7 @@ struct SidebarView: View {
         .frame(height: 34)
     }
 
-    private static let brandIcon: NSImage = BrandMark.appIcon ?? NSApp.applicationIconImage
+    private static let brandIcon: NSImage = BrandMark.trimmedIcon ?? NSApp.applicationIconImage
 }
 
 struct NavItem: View {
@@ -799,7 +804,11 @@ struct NavItem: View {
             .padding(.horizontal, 10)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(isSelected ? Color.white.opacity(0.13) : Color.clear)
+                    .fill(isSelected ? FlowTheme.selected : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(isSelected ? FlowTheme.hairline : Color.clear, lineWidth: 1)
+                    )
             )
             .contentShape(Rectangle())
         }

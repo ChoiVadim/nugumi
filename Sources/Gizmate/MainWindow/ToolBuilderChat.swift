@@ -55,12 +55,36 @@ final class ToolBuilderChatSession: ObservableObject {
         messages = [
             ToolBuilderChatMessage(
                 role: .assistant,
-                text: "You can describe the outcome you want. I may ask a few questions, and nothing is saved until you press Save."
+                text: """
+                Hey! 👋 Tell me what you want to happen, in your own words. \
+                Something like "open Terminal and run my deploy command".
+
+                I'll ask if anything's unclear, build it, and you can try it \
+                right here. Nothing is saved until you press Save.
+                """
             )
         ]
     }
 
     var currentActivity: String? { activity.last }
+
+    /// Swaps the opening line once an existing tool has loaded. The greeting is
+    /// built in `init`, before the panel knows whether this is a new tool or one
+    /// being edited — and "tell me what you want to happen" is a strange thing
+    /// to hear about a tool that already works.
+    func greetForEditing(_ name: String) {
+        guard let first = messages.first, first.role == .assistant else { return }
+        messages[0] = .init(
+            role: .assistant,
+            text: """
+            Hey! 👋 This is \(name.isEmpty ? "your tool" : name). Tell me what \
+            to change and I'll rebuild it.
+
+            You can try it here first if you want to see what it does now. \
+            Nothing changes until you press Save.
+            """
+        )
+    }
 
     func submit(_ text: String) async -> ToolBuilderSubmission? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -257,6 +281,7 @@ struct ToolBuilderChat: View {
     let onFix: () -> Void
 
     @State private var activityExpanded = false
+    @State private var pulse = false
     @FocusState private var composerFocused: Bool
     private let bottomAnchor = "tool-builder-chat-bottom"
 
@@ -273,7 +298,7 @@ struct ToolBuilderChat: View {
                         ForEach(session.messages) { message in
                             messageBubble(message)
                         }
-                        activityView
+                        thinkingLine
                         readyView
                         Color.clear
                             .frame(height: 1)
@@ -295,61 +320,91 @@ struct ToolBuilderChat: View {
         }
     }
 
+    /// Only your turn is a bubble. Gizmate's sits on the panel itself, because a
+    /// reply here is often several sentences and a slab that wide reads as a
+    /// dialog box rather than as someone talking back.
+    @ViewBuilder
     private func messageBubble(_ message: ToolBuilderChatMessage) -> some View {
-        HStack {
-            if message.role == .user { Spacer(minLength: 80) }
-            Text(message.text)
-                .font(.system(size: 12.5))
-                .foregroundStyle(FlowTheme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    // Your turn sits one step above the assistant's, so the
-                    // conversation reads as two heights rather than two colours.
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            message.role == .user
-                                ? FlowTheme.raised
-                                : FlowTheme.subtleFill
-                        )
-                )
-            if message.role == .assistant { Spacer(minLength: 80) }
+        if message.role == .user {
+            HStack {
+                Spacer(minLength: 80)
+                Text(message.text)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(FlowTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(FlowTheme.raised)
+                    )
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            assistantTurn {
+                Text(message.text)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(FlowTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Every one of Gizmate's turns — a reply, the status while it works, the
+    /// finished tool — hangs off the same mark at the same left edge. Putting
+    /// the avatar only on messages would step the other two out of the column.
+    private func assistantTurn<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(nsImage: Self.avatar)
+                .renderingMode(.template)
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .frame(width: 20, alignment: .center)
+                .padding(.top, 1)
+            content()
+            Spacer(minLength: 60)
         }
         .frame(maxWidth: .infinity)
     }
 
-    /// While a question is on screen the build is stopped on the user, not
-    /// working. Leaving the spinner and the last technical status up says the
-    /// opposite, and the last status is whatever internal step happened to run
-    /// before the question — so it reads as a hang and people wait it out.
+    /// The tinted silhouette, not the artwork: the mark is a black body and
+    /// would disappear into this panel. Same treatment as the menu bar.
+    private static let avatar: NSImage =
+        BrandMark.templateImage(height: 17) ?? NSApp.applicationIconImage
+
+    /// The work in progress takes the slot the answer will land in, as one line
+    /// of text, so the reply redraws over it instead of appearing underneath a
+    /// status card that then has to be dismissed. Click it for the steps so far.
+    ///
+    /// Nothing shows while a question is on screen: there the build is stopped
+    /// on the user, not working, and the question is already in the transcript.
+    /// A spinner over the last internal status would read as a hang and people
+    /// wait it out instead of answering.
     @ViewBuilder
-    private var activityView: some View {
-        if let current = session.isAwaitingAnswer ? "Waiting for your answer" : session.currentActivity {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    if session.isAwaitingAnswer {
-                        Image(systemName: "questionmark.circle")
-                            .foregroundStyle(FlowTheme.accent)
-                    } else if isBuilding {
-                        ProgressView().controlSize(.small)
-                    } else if session.hasError {
-                        Image(systemName: "exclamationmark.circle")
-                            .foregroundStyle(Color(red: 1.0, green: 0.62, blue: 0.62))
-                    } else {
-                        Image(systemName: "checkmark.circle")
-                    }
-                    Text(current)
-                        .font(.system(size: 11.5, weight: .medium))
+    private var thinkingLine: some View {
+        if isBuilding, !session.isAwaitingAnswer {
+            assistantTurn {
+            VStack(alignment: .leading, spacing: 5) {
+                Button { activityExpanded.toggle() } label: {
+                    Text(session.currentActivity ?? "Thinking")
+                        .font(.system(size: 12.5))
                         .foregroundStyle(FlowTheme.inkSecondary)
-                    Spacer()
-                    Button("Activity") { activityExpanded.toggle() }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(FlowTheme.accent)
-                        .accessibilityLabel(activityExpanded ? "Hide activity" : "Show activity")
+                        .opacity(pulse ? 0.45 : 1)
+                        // Scoped to the opacity with `value:` rather than driven
+                        // by `withAnimation` at onAppear: a repeatForever curve
+                        // opened as a transaction also catches the layout
+                        // settling in that same pass, and then the row's height
+                        // oscillates forever and the scroller breathes with it.
+                        .animation(
+                            .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                            value: pulse
+                        )
                 }
+                .buttonStyle(.plain)
+                .help(activityExpanded ? "Hide the steps so far" : "Show the steps so far")
                 if activityExpanded {
-                    ForEach(Array(session.activity.enumerated()), id: \.offset) {
+                    ForEach(Array(session.activity.dropLast().enumerated()), id: \.offset) {
                         _, item in
                         Text(item)
                             .font(.system(size: 10.5))
@@ -357,11 +412,9 @@ struct ToolBuilderChat: View {
                     }
                 }
             }
-            .padding(11)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.04))
-            )
+            .onAppear { pulse = true }
+            .onDisappear { pulse = false }
+            }
         }
     }
 
@@ -393,9 +446,9 @@ struct ToolBuilderChat: View {
             }
             .font(.system(size: 12.5))
             .foregroundStyle(FlowTheme.ink)
-            .padding(.leading, 7)
-            .padding(.vertical, 6)
-            .padding(.trailing, 48)
+            .padding(.leading, 14)
+            .padding(.vertical, 12)
+            .padding(.trailing, 52)
             .frame(minHeight: 76, alignment: .topLeading)
             .focused($composerFocused)
             .accessibilityLabel("Tool request")
@@ -432,7 +485,7 @@ struct ToolBuilderChat: View {
         if let readyMessage = session.readyMessage,
            let preview,
            !isBuilding {
-            HStack {
+            assistantTurn {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(readyMessage)
                         .font(.system(size: 12.5))
@@ -441,14 +494,7 @@ struct ToolBuilderChat: View {
                     preview
                     readyActions
                 }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(FlowTheme.subtleFill)
-                )
-                Spacer(minLength: 80)
             }
-            .frame(maxWidth: .infinity)
         }
     }
 
@@ -471,23 +517,23 @@ struct ToolBuilderChat: View {
         }
     }
 
+    /// Deliberately `SecondaryButton`'s metrics, differing only in fill and
+    /// weight: the pair sits on one row, so anything else — a taller box, a
+    /// stroke the other one lacks — reads as two unrelated controls rather than
+    /// as a default and its alternative.
     private func primaryButton(
         _ title: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
+                .padding(.vertical, 7)
                 .padding(.horizontal, 14)
-                .frame(height: 44)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(FlowTheme.raisedStrong)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .strokeBorder(FlowTheme.edge, lineWidth: 1)
-                        )
                 )
         }
         .buttonStyle(.plain)

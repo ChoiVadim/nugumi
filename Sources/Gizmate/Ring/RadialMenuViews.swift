@@ -231,10 +231,21 @@ final class RadialMenuLabelBubbleView: NSView {
     private static let hPad: CGFloat = 9
     private static let vPad: CGFloat = 5
     private static let corner: CGFloat = 9
-    private static let textAttributes: [NSAttributedString.Key: Any] = [
-        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-        .foregroundColor: NSColor.black,
-    ]
+    private static let textAttributes: [NSAttributedString.Key: Any] = {
+        let paragraph = NSMutableParagraphStyle()
+        // The frame is capped (see `maxTextWidth`), so a label too long for it
+        // ends in an ellipsis rather than running out past the panel edge.
+        paragraph.lineBreakMode = .byTruncatingTail
+        return [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.black,
+            .paragraphStyle: paragraph,
+        ]
+    }()
+    /// Text room left inside the widest bubble the panel reserves space for.
+    private static var maxTextWidth: CGFloat {
+        RadialMenuLayoutPolicy.bubbleMaxWidth - hPad * 2 - tailLength
+    }
 
     private let text: String
     /// The bubble edge carrying the tail — the edge that faces the circle.
@@ -246,7 +257,7 @@ final class RadialMenuLabelBubbleView: NSView {
 
         let textSize = (text as NSString).size(withAttributes: Self.textAttributes)
         var size = NSSize(
-            width: ceil(textSize.width) + Self.hPad * 2,
+            width: min(ceil(textSize.width), Self.maxTextWidth) + Self.hPad * 2,
             height: ceil(textSize.height) + Self.vPad * 2
         )
         switch tailEdge {
@@ -270,6 +281,14 @@ final class RadialMenuLabelBubbleView: NSView {
     }
 
     required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// A callout never takes the mouse. It is parked invisible over the band
+    /// the next orbit fans into, and a hit there would swallow the hover that
+    /// grows those buttons — a bubble nobody can see blocking buttons everyone
+    /// can.
+    override func hitTest(_ point: NSPoint) -> NSView? {
         nil
     }
 
@@ -355,8 +374,15 @@ final class RadialMenuLabelBubbleView: NSView {
         path.fill()
         tail.fill()
 
+        // Drawn into a rect rather than at a point: that is what gives the
+        // paragraph style somewhere to truncate against.
         (text as NSString).draw(
-            at: NSPoint(x: body.minX + Self.hPad, y: body.minY + Self.vPad),
+            in: NSRect(
+                x: body.minX + Self.hPad,
+                y: body.minY + Self.vPad,
+                width: body.width - Self.hPad * 2,
+                height: body.height - Self.vPad * 2
+            ),
             withAttributes: Self.textAttributes
         )
     }

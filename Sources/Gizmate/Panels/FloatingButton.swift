@@ -489,9 +489,9 @@ final class FloatingTranslateButtonView: NSView {
         let name: String
         switch mode {
         case .selection, .revise, .reviseMessage, .summarizeChat, .summarizePage, .custom:
-            // The mascot, not a generic sparkles glyph: the button that
+            // The gizmo, not a generic sparkles glyph: the button that
             // opens the radial menu wears the app's own mark.
-            return mascotGlyphImage()
+            return gizmoGlyphImage()
         case .draftMessage:
             name = "text.insert"
         case .smartReply:
@@ -500,22 +500,29 @@ final class FloatingTranslateButtonView: NSView {
         return glyphImage(symbolName: name)
     }
 
-    /// The mascot centered in a button-sized canvas, same baked-in padding
+    /// The gizmo centered in a button-sized canvas, same baked-in padding
     /// contract as `glyphImage(symbolName:)` so frame animations scale it.
-    /// The mascot renders once up front — the drawing handler can re-run at
-    /// draw time and must not build views.
-    private static func mascotGlyphImage() -> NSImage {
-        guard let mark = PetMascotView.markImage(height: 18) else {
+    ///
+    /// `BrandMark.templateImage` rather than the full-colour artwork: the mark
+    /// is a black body, which would vanish into this bar. The template is the
+    /// silhouette with the two slots punched back out, tinted white here the
+    /// same way a symbol glyph is. It also caches per height, so the mark is
+    /// built once even though this handler can re-run at draw time.
+    private static func gizmoGlyphImage() -> NSImage {
+        guard let mark = BrandMark.templateImage(height: 18) else {
             return glyphImage(symbolName: "sparkles")
         }
         let side = AskGizmateFloatingTargetPresentationPolicy.buttonSize
         return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            mark.draw(in: NSRect(
+            let target = NSRect(
                 x: rect.midX - mark.size.width / 2,
                 y: rect.midY - mark.size.height / 2,
                 width: mark.size.width,
                 height: mark.size.height
-            ))
+            )
+            mark.draw(in: target)
+            NSColor.white.set()
+            target.fill(using: .sourceAtop)
             return true
         }
     }

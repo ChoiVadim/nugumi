@@ -90,6 +90,35 @@ final class ToolSecretsTests: XCTestCase {
         XCTAssertTrue(withSecretJSON.contains("OPENAI_API_KEY"))
     }
 
+    /// The capability description tells the model to include `secretNames` in
+    /// every Python candidate, so a tool that needs no key sends `[]`. The
+    /// validator accepts a candidate by re-encoding it and comparing byte for
+    /// byte, and an empty array that re-encodes to *nothing* fails that
+    /// comparison — which rejects the action before any candidate exists, with
+    /// "the model returned an invalid agent action" as the only symptom.
+    func testCandidateWithExplicitlyEmptySecretNamesIsStillValid() {
+        let action = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Slugify","brief":"Turns text into a URL slug.","symbolName":"link","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false,"secretNames":[]}}}
+            """#
+        XCTAssertTrue(ToolAgentModelActionValidator.isValid(action))
+    }
+
+    /// The other half of the same contract: a candidate written without the key
+    /// at all — every shape the model already knew — has to keep working.
+    func testCandidateWithNoSecretNamesKeyIsStillValid() {
+        let action = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Slugify","brief":"Turns text into a URL slug.","symbolName":"link","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+        XCTAssertTrue(ToolAgentModelActionValidator.isValid(action))
+    }
+
+    func testCandidateWithRealSecretNamesIsStillValid() {
+        let action = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Ask","brief":"Asks a model.","symbolName":"sparkles","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":true,"secretNames":["OPENAI_API_KEY"]}}}
+            """#
+        XCTAssertTrue(ToolAgentModelActionValidator.isValid(action))
+    }
+
     /// A manifest is a file on disk and the names in it reach `ToolSecrets`, so
     /// the shape is enforced on the way in too.
     func testManifestDecodeDropsUnusableSecretNames() throws {

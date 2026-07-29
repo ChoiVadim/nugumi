@@ -1,3 +1,4 @@
+import GizmateToolAgentCore
 import XCTest
 
 @testable import Gizmate
@@ -32,5 +33,58 @@ final class ToolContextInputTests: XCTestCase {
     func testAskRawValueIsStable() {
         XCTAssertEqual(ToolInput.ask.rawValue, "ask")
         XCTAssertEqual(ToolInput(rawValue: "ask"), .ask)
+    }
+
+    /// A prompt tool works on text the user is looking at, and there are three
+    /// ways for that to arrive. The sidecar's own schema and the capability
+    /// description have always offered all three, so the host has to accept all
+    /// three — a candidate the model was told to write must not come back as
+    /// invalid.
+    func testPromptCandidateAcceptsEveryInputTheModelIsOffered() throws {
+        for input in [
+            ToolAgentCandidateInputV1.selection,
+            .ask,
+            .screenshotText,
+        ] {
+            XCTAssertNoThrow(
+                try ToolAgentCandidateV1(
+                    kind: .prompt,
+                    name: "Explain",
+                    brief: "Explains the text.",
+                    symbolName: "sparkles",
+                    input: input,
+                    output: .panel,
+                    trigger: .always,
+                    prompt: "Explain this.",
+                    appliesTargetLanguage: true
+                ),
+                "prompt candidate should accept \(input.rawValue) input"
+            )
+        }
+    }
+
+    /// The inputs a prompt tool cannot work on: it only ever sees text, so a
+    /// file list or a PNG path is not something it can be handed.
+    func testPromptCandidateStillRejectsNonTextInputs() {
+        for input in [
+            ToolAgentCandidateInputV1.files,
+            .screenshot,
+            .clipboardURL,
+        ] {
+            XCTAssertThrowsError(
+                try ToolAgentCandidateV1(
+                    kind: .prompt,
+                    name: "Explain",
+                    brief: "Explains the text.",
+                    symbolName: "sparkles",
+                    input: input,
+                    output: .panel,
+                    trigger: .always,
+                    prompt: "Explain this.",
+                    appliesTargetLanguage: true
+                ),
+                "prompt candidate should reject \(input.rawValue) input"
+            )
+        }
     }
 }

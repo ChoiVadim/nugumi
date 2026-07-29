@@ -222,7 +222,14 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     /// environment variables. Names only — a value never crosses this protocol
     /// in either direction, so the model can write `os.environ["OPENAI_API_KEY"]`
     /// without ever being shown the key.
-    public let secretNames: [String]
+    ///
+    /// Optional for the same reason `outputDirectory` is:
+    /// `ToolAgentModelActionValidator` accepts a candidate by re-encoding it and
+    /// comparing byte for byte against what the model sent, and a plain array
+    /// cannot tell `"secretNames":[]` from an absent key — they decode to the
+    /// same value and one of them would not survive the trip back. nil is
+    /// "didn't say", `[]` is "said none", and both mean no secrets.
+    public let secretNames: [String]?
     /// `.agent` only: how many scripts the agent may run before it must answer.
     public let maxSteps: Int
 
@@ -245,7 +252,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         outputDirectory: String? = nil,
         timeoutSeconds: Int = 120,
         declaresNetwork: Bool = false,
-        secretNames: [String] = [],
+        secretNames: [String]? = nil,
         maxSteps: Int = 8
     ) throws {
         try Self.validate(
@@ -368,7 +375,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         let secretNames = try container.decodeIfPresent(
             [String].self,
             forKey: .secretNames
-        ) ?? []
+        )
         let maxSteps = try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
         guard schemaVersion == 1 else {
             throw ToolAgentFailureCodeV1.invalidCandidate
@@ -446,17 +453,13 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // against what the model sent, so a key the model had no reason to
             // write must not appear on the way back — and a tool with no secrets
             // keeps the exact fingerprint it had before secrets existed.
-            if !secretNames.isEmpty {
-                try container.encode(secretNames, forKey: .secretNames)
-            }
+            try container.encodeIfPresent(secretNames, forKey: .secretNames)
         case .agent:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(fixtures, forKey: .fixtures)
             try container.encode(maxSteps, forKey: .maxSteps)
             try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
-            if !secretNames.isEmpty {
-                try container.encode(secretNames, forKey: .secretNames)
-            }
+            try container.encodeIfPresent(secretNames, forKey: .secretNames)
         }
     }
 
@@ -477,9 +480,12 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         fixtures: [ToolAgentFixtureV1],
         outputDirectory: String?,
         timeoutSeconds: Int,
-        secretNames: [String],
+        secretNames: [String]?,
         maxSteps: Int
     ) throws {
+        // nil and [] both mean "no secrets". Only the wire format tells them
+        // apart, and that distinction is the encoder's business, not this one's.
+        let declared = secretNames ?? []
         guard !name.isEmpty,
               !brief.isEmpty,
               !symbolName.isEmpty,
@@ -502,9 +508,9 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
               // Shape is not checked here — the alphabet is enforced where it
               // actually matters, in `ToolSecrets`, which resolves these into a
               // path and refuses anything that could leave its directory.
-              secretNames.count <= ToolAgentProtocolLimitsV1.maximumSecretNameCount,
-              Set(secretNames).count == secretNames.count,
-              secretNames.allSatisfy({
+              declared.count <= ToolAgentProtocolLimitsV1.maximumSecretNameCount,
+              Set(declared).count == declared.count,
+              declared.allSatisfy({
                   !$0.isEmpty
                       && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumSecretNameBytes
               }),
@@ -519,7 +525,13 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // Only a Python tool reads a process environment, so a prompt or
             // native candidate that declares secrets has misunderstood what it
             // is building rather than found a way to use one.
-            guard input == .selection || input == .ask,
+            // Three ways for text the user is looking at to arrive: selected,
+            // read off the screen by Vision, or typed when the tool runs. The
+            // sidecar's schema and the capability description have always
+            // offered all three; this guard used to accept only the first, so a
+            // screenshotText prompt candidate — which the model was explicitly
+            // told to write — came back as invalidCandidate.
+            guard input == .selection || input == .ask || input == .screenshotText,
                   output != .files,
                   output != .notify,
                   !prompt.isEmpty,
@@ -528,7 +540,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                   target.isEmpty,
                   source.isEmpty,
                   fixtures.isEmpty,
-                  secretNames.isEmpty,
+                  declared.isEmpty,
                   outputDirectory == nil else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
@@ -538,7 +550,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                   prompt.isEmpty,
                   source.isEmpty,
                   fixtures.isEmpty,
-                  secretNames.isEmpty,
+                  declared.isEmpty,
                   outputDirectory == nil,
                   target.utf8.count <= ToolAgentProtocolLimitsV1.maximumTargetBytes,
                   !nativeAction.needsTarget || !target.isEmpty else {
@@ -819,7 +831,13 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
 
         switch kind {
         case .prompt:
-            guard input == .selection || input == .ask,
+            // Three ways for text the user is looking at to arrive: selected,
+            // read off the screen by Vision, or typed when the tool runs. The
+            // sidecar's schema and the capability description have always
+            // offered all three; this guard used to accept only the first, so a
+            // screenshotText prompt candidate — which the model was explicitly
+            // told to write — came back as invalidCandidate.
+            guard input == .selection || input == .ask || input == .screenshotText,
                   output != .files,
                   output != .notify,
                   !prompt.isEmpty,

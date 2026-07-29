@@ -116,6 +116,43 @@ final class RingFolderTests: XCTestCase {
         XCTAssertGreaterThan(first?.x ?? 0, 0)
     }
 
+    /// Every button on every orbit names itself on hover, and the outermost
+    /// orbit's callouts are the furthest thing the panel has to hold. The panel
+    /// is the only thing clipping them — it does not scroll and has no overflow
+    /// — so a callout that does not fit here is a label cut in half on screen.
+    func testThePanelHoldsACalloutOnEveryOrbit() {
+        let policy = RadialMenuLayoutPolicy.self
+        let half = policy.panelSide / 2
+        // The widest bubble the view will ever build, at the tallest a single
+        // line of its 11pt label runs.
+        let widest = NSSize(width: policy.bubbleMaxWidth, height: 26)
+
+        for radius in [policy.ringRadius, policy.outerRingRadius, policy.thirdRingRadius] {
+            let count = RingLayout.capacity(atDepth: radius == policy.ringRadius ? 0 : 1)
+            for center in policy.orbitSlotCenters(radius: radius, count: count) {
+                let button = NSRect(
+                    x: center.x - policy.buttonDiameter / 2,
+                    y: center.y - policy.buttonDiameter / 2,
+                    width: policy.buttonDiameter,
+                    height: policy.buttonDiameter
+                )
+                let origin = policy.bubbleOrigin(
+                    for: policy.labelPlacement(for: center),
+                    buttonFrame: button,
+                    bubbleSize: widest
+                )
+                // Measured from the ring's centre, which is the panel's centre.
+                let bubble = NSRect(origin: origin, size: widest)
+                    .insetBy(dx: -policy.bubbleShadowRoom, dy: -policy.bubbleShadowRoom)
+                XCTAssertLessThanOrEqual(
+                    max(abs(bubble.minX), abs(bubble.maxX), abs(bubble.minY), abs(bubble.maxY)),
+                    half,
+                    "callout at radius \(radius), slot \(center) runs past the panel edge"
+                )
+            }
+        }
+    }
+
     /// Centre-to-centre distance between two adjacent positions.
     private func neighbourDistance(_ centers: [CGPoint]) -> CGFloat {
         guard centers.count > 1 else { return 0 }

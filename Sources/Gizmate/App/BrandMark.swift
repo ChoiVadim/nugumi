@@ -20,6 +20,19 @@ enum BrandMark {
         return NSImage(contentsOf: url)
     }()
 
+    /// The same artwork with its transparent margin cropped off. The shipped
+    /// PNG keeps a wide margin because `Scripts/generate-icon.swift` builds the
+    /// Dock `.icns` from it and macOS expects that padding on the icon grid —
+    /// but next to a word at 30-odd points the margin just reads as a gap.
+    static let trimmedIcon: NSImage? = {
+        guard let source = appIcon,
+              let tiff = source.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let (_, box) = maskBounds(from: rep),
+              let cropped = rep.cgImage?.cropping(to: box) else { return appIcon }
+        return NSImage(cgImage: cropped, size: box.size)
+    }()
+
     /// Cached because building the mask walks the full 500×500 artwork.
     private static var cache: [CGFloat: NSImage] = [:]
 

@@ -9,7 +9,12 @@ final class ToolBuilderChatTests: XCTestCase {
 
         XCTAssertEqual(session.messages.count, 1)
         XCTAssertEqual(session.messages[0].role, .assistant)
-        XCTAssertTrue(session.messages[0].text.contains("describe"))
+        XCTAssertFalse(session.messages[0].text.isEmpty)
+        // The one promise this greeting has to keep, and what the test is named
+        // for: nothing reaches the user's Ring until they press Save. The rest
+        // of the wording is copy — asserting on a particular verb only breaks
+        // the suite every time someone rewrites the sentence, which is what it
+        // just did.
         XCTAssertTrue(session.messages[0].text.contains("Save"))
         XCTAssertFalse(session.isAwaitingAnswer)
         XCTAssertNil(session.readyMessage)

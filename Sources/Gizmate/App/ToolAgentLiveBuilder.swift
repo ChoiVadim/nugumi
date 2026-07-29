@@ -798,7 +798,7 @@ enum ToolAgentLiveBuilder {
             // invents `STRIPE_KEY` must not leave a tool permanently declaring a
             // secret nobody has, where the only symptom is a None at run time.
             secretNames: kind == .python || kind == .agent
-                ? candidate.secretNames.filter(stored.contains)
+                ? (candidate.secretNames ?? []).filter(stored.contains)
                 : [],
             maxSteps: candidate.maxSteps,
             brief: candidate.brief

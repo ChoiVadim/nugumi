@@ -18,9 +18,14 @@ import Vision
 enum RadialMenuLayoutPolicy {
     static let ringRadius: CGFloat = 78
     static let buttonDiameter: CGFloat = 46
-    /// Room around the ring for hover label bubbles AND the outermost
-    /// hover-revealed orbit (`thirdRingRadius` + a button + margin).
-    static let panelPadding: CGFloat = 160
+    /// Room around the ring for the outermost hover-revealed orbit AND the
+    /// label bubble that hangs off a button out there. Derived rather than
+    /// typed in: the third orbit's bubbles are the far corner of the panel, so
+    /// a wider bubble or a further orbit has to move the wall with it or it
+    /// clips.
+    static var panelPadding: CGFloat {
+        thirdRingRadius - ringRadius + bubbleGap + bubbleMaxWidth + bubbleShadowRoom
+    }
 
     static var panelSide: CGFloat {
         (ringRadius + buttonDiameter / 2 + panelPadding) * 2
@@ -113,6 +118,14 @@ enum RadialMenuLayoutPolicy {
     // Wide enough that the hover scale-up (+16% of the disc, ~4pt of radius)
     // still leaves visible air between the disc and its label bubble.
     static let bubbleGap: CGFloat = 10
+
+    /// Widest a label bubble may draw; longer labels truncate. A bubble is
+    /// what decides how far the panel has to reach past the outermost orbit,
+    /// so letting one grow with its text would let a long tool name push the
+    /// wall out — or, once the wall stops moving, clip against it.
+    static let bubbleMaxWidth: CGFloat = 144
+    /// The bubble's drop shadow draws outside its frame.
+    static let bubbleShadowRoom: CGFloat = 6
 
     /// Where a hover bubble's frame starts so it sits outside the ring on
     /// the button's side, tail toward the circle. For diagonals the bubble's
@@ -221,6 +234,10 @@ final class RadialActionMenuController {
         var origin: NSPoint
         var buttons: [RadialMenuButtonView] = []
         var targets: [NSRect] = []
+        /// Each button's hover callout, parallel to `buttons`. `nil` where the
+        /// button opens an orbit of its own — the callout would sit exactly
+        /// where that orbit fans out — or carries no label at all.
+        var bubbles: [RadialMenuLabelBubbleView?] = []
         /// Orbits owned by this orbit's own expandable buttons, by position.
         var children: [Int: Orbit] = [:]
     }
@@ -330,20 +347,12 @@ final class RadialActionMenuController {
             // An empty label means "highlight only, no callout" — the app
             // summarize button carries its identity in its app icon, so its
             // hover shows just the glass highlight (no "Telegram" bubble).
-            guard !item.label.isEmpty else { continue }
-
-            let placement = RadialMenuLayoutPolicy.labelPlacement(for: offset)
-            let bubble = RadialMenuLabelBubbleView(
-                text: item.label,
-                tailEdge: placement.opposite
-            )
-            bubble.setFrameOrigin(RadialMenuLayoutPolicy.bubbleOrigin(
-                for: placement,
+            guard let bubble = makeBubble(
+                for: item,
+                at: offset,
                 buttonFrame: button.frame,
-                bubbleSize: bubble.frame.size
-            ))
-            bubble.alphaValue = 0
-            container.addSubview(bubble)
+                in: container
+            ) else { continue }
             button.onHoverChange = { [weak self, weak bubble] hovered in
                 // The collapse animation flies every button into the center —
                 // right under the cursor when the ✕ was clicked — and each
@@ -352,12 +361,7 @@ final class RadialActionMenuController {
                 // Hovering any other first-ring button dismisses the open
                 // orbit (the only thing that closes it besides picking).
                 if hovered { self.hideOrbit() }
-                NSAnimationContext.runAnimationGroup { context in
-                    // Ease the bubble in gently; hide fast so it never lags
-                    // behind the cursor leaving the button.
-                    context.duration = hovered ? 0.3 : 0.15
-                    bubble?.animator().alphaValue = hovered ? 1 : 0
-                }
+                Self.fade(bubble, to: hovered)
             }
         }
 
@@ -481,10 +485,22 @@ final class RadialActionMenuController {
             subButton.alphaValue = 0
             subButton.suppressHoverTint = true
             subButton.onHoverChange = { [weak self] hovered in
-                self?.subHoverChanged(index: index, hovered: hovered)
+                self?.subHoverChanged(index: index, depth: depth, hovered: hovered)
             }
             container.addSubview(subButton)
             orbit.buttons.append(subButton)
+            // An expandable sub gets no callout: its own orbit fans out into
+            // exactly the space the callout would occupy.
+            orbit.bubbles.append(
+                expands
+                    ? nil
+                    : makeBubble(
+                        for: sub,
+                        at: entry.offset,
+                        buttonFrame: subButton.frame,
+                        in: container
+                    )
+            )
 
             if expands {
                 orbit.children[index] = buildOrbit(
@@ -517,12 +533,23 @@ final class RadialActionMenuController {
         hideChildOrbit()
     }
 
-    private func subHoverChanged(index: Int, hovered: Bool) {
+    /// `depth` says which orbit the hovered button belongs to — 1 is the ring
+    /// outside the main one, 2 the ring outside that. It has to be carried in:
+    /// without it every layer's hover was resolved against the second layer, so
+    /// a third-layer button grew its second-layer neighbour at the same index
+    /// and never grew itself.
+    private func subHoverChanged(index: Int, depth: Int, hovered: Bool) {
+        guard !isSubAnimating, !didClose else { return }
+        guard depth == 1 else {
+            childHoverChanged(index: index, hovered: hovered)
+            return
+        }
+        guard let orbit = openOrbit else { return }
+        Self.fade(orbit.bubbles[safe: index] ?? nil, to: hovered)
         // Sticky: hovering a sub moves the highlight to it and it STAYS there
         // after the cursor leaves into empty space. Only re-hovering the parent
-        // resets the default back to the middle (in `showOrbit`). Ignore hover
-        // while the fly-out animates.
-        guard !isSubAnimating, hovered, let orbit = openOrbit else { return }
+        // resets the default back to the middle (in `showOrbit`).
+        guard hovered else { return }
         hoveredSubIndex = index
         refreshSubHighlight()
         // An expandable sub opens its own orbit on hover; a plain one closes
@@ -531,6 +558,51 @@ final class RadialActionMenuController {
             showChildOrbit(index)
         } else {
             hideChildOrbit()
+        }
+    }
+
+    /// The third layer. Only one of its orbits is ever open, and its buttons
+    /// are the outermost thing on screen, so there is nothing further to reveal
+    /// — a hover here is just this button's own highlight and callout.
+    private func childHoverChanged(index: Int, hovered: Bool) {
+        guard let parentIndex = openChildIndex,
+              let child = openOrbit?.children[parentIndex]
+        else { return }
+        Self.fade(child.bubbles[safe: index] ?? nil, to: hovered)
+        guard hovered else { return }
+        for (i, sub) in child.buttons.enumerated() {
+            sub.setHighlighted(i == index)
+        }
+    }
+
+    /// A button's hover callout, parked outside it on the side it sits on, or
+    /// `nil` when the item carries no label to show.
+    private func makeBubble(
+        for item: RingItem,
+        at offset: CGPoint,
+        buttonFrame: NSRect,
+        in container: NSView
+    ) -> RadialMenuLabelBubbleView? {
+        guard !item.label.isEmpty else { return nil }
+        let placement = RadialMenuLayoutPolicy.labelPlacement(for: offset)
+        let bubble = RadialMenuLabelBubbleView(text: item.label, tailEdge: placement.opposite)
+        bubble.setFrameOrigin(RadialMenuLayoutPolicy.bubbleOrigin(
+            for: placement,
+            buttonFrame: buttonFrame,
+            bubbleSize: bubble.frame.size
+        ))
+        bubble.alphaValue = 0
+        container.addSubview(bubble)
+        return bubble
+    }
+
+    /// Ease the callout in gently; hide it fast so it never lags behind the
+    /// cursor leaving the button.
+    private static func fade(_ bubble: RadialMenuLabelBubbleView?, to visible: Bool) {
+        guard let bubble else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = visible ? 0.3 : 0.15
+            bubble.animator().alphaValue = visible ? 1 : 0
         }
     }
 
@@ -604,6 +676,9 @@ final class RadialActionMenuController {
     /// Collapse back INTO the parent button, mirroring the ring's own close.
     private func collapse(_ orbit: Orbit, restoringHighlight: Bool) {
         if restoringHighlight { orbit.parent?.setHighlighted(false) }
+        // The callouts go with the orbit. Letting one ride out the collapse
+        // leaves a label naming a button that is no longer on screen.
+        for bubble in orbit.bubbles { Self.fade(bubble, to: false) }
         for (sub, target) in zip(orbit.buttons, orbit.targets) {
             sub.setHighlighted(false)
             NSAnimationContext.runAnimationGroup({ context in
