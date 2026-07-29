@@ -24,7 +24,36 @@ extension GizmateApp {
             return .failed(ToolRunError.uvMissing.localizedDescription)
         }
 
-        let context = ToolContext.current(selection: "")
+        // An `.ask` tool has nothing to test until someone types its input, so
+        // the test asks for it exactly as the real run would.
+        var typed: String?
+        if tool.input.needsPrompt {
+            guard let answer = await promptForToolInput(tool) else {
+                return .failed("Nothing was typed, so there was nothing to run on.")
+            }
+            typed = answer
+        }
+
+        // A capture tool has nothing to test until the user drags out an area,
+        // so the test asks for one — the same drag the real run would.
+        var screenshot: ToolScreenshot?
+        if tool.input.needsCapture {
+            do {
+                screenshot = try await captureToolScreenshot(
+                    readingText: tool.input == .screenshotText
+                )
+            } catch {
+                guard !ScreenshotTranslationError.isCancellation(error) else {
+                    return .failed("The capture was cancelled, so there was nothing to run on.")
+                }
+                return .failed(error.localizedDescription)
+            }
+        }
+        defer {
+            screenshot.map { try? FileManager.default.removeItem(at: $0.imageURL) }
+        }
+
+        let context = ToolContext.current(selection: typed ?? "", screenshot: screenshot)
         guard let arguments = context.arguments(for: tool.input) else {
             return .failed(
                 (ToolRunError.noInput(tool.input).localizedDescription ?? "Nothing to work on.")
@@ -218,7 +247,11 @@ extension GizmateApp {
     /// installed, the context has to satisfy the tool's declared input, and the
     /// user has to have approved this exact script.
     @MainActor
-    func runScriptTool(_ tool: GizmateTool, selection: String) {
+    func runScriptTool(
+        _ tool: GizmateTool,
+        selection: String,
+        screenshot: ToolScreenshot? = nil
+    ) {
         guard let uv = uvBootstrap.executable else {
             presentSelectionTranslationError(
                 ToolRunError.uvMissing.localizedDescription,
@@ -237,8 +270,9 @@ extension GizmateApp {
             return
         }
 
-        let context = ToolContext.current(selection: selection)
+        let context = ToolContext.current(selection: selection, screenshot: screenshot)
         guard let arguments = context.arguments(for: tool.input) else {
+            screenshot.map { try? FileManager.default.removeItem(at: $0.imageURL) }
             presentSelectionTranslationError(
                 ToolRunError.noInput(tool.input).localizedDescription ?? "Nothing to work on.",
                 title: tool.name
@@ -246,25 +280,139 @@ extension GizmateApp {
             return
         }
 
-        let hash = toolsStore.scriptHash(for: tool.id)
-        guard ToolApprovals.isApproved(tool.id, hash: hash) else {
-            presentScriptApproval(tool, script: script, hash: hash) { [weak self] in
-                self?.execute(tool, script: script, arguments: arguments, uv: uv)
-            }
+        // The capture is this run's own file. Whatever happens to it — approved,
+        // refused, run, failed — it goes away with the run.
+        let temporaryFiles = screenshot.map { [$0.imageURL] } ?? []
+        let hash = toolsStore.approvalHash(for: tool)
+        guard ToolApprovals.isApproved(tool.id, hash: hash)
+            || presentScriptApproval(tool, script: script, hash: hash) else {
+            temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
             return
         }
-        execute(tool, script: script, arguments: arguments, uv: uv)
+        execute(
+            tool,
+            script: script,
+            arguments: arguments,
+            uv: uv,
+            temporaryFiles: temporaryFiles
+        )
+    }
+
+    /// Runs a `.agent` tool. Same three gates as a script tool — uv, an input,
+    /// an approval — but the approval is of a very different thing, so it has its
+    /// own dialog.
+    @MainActor
+    func runAgentTool(
+        _ tool: GizmateTool,
+        selection: String,
+        screenshot: ToolScreenshot? = nil
+    ) {
+        guard let uv = uvBootstrap.executable else {
+            presentSelectionTranslationError(
+                ToolRunError.uvMissing.localizedDescription,
+                title: tool.name
+            )
+            presentMainWindow(section: .ring)
+            return
+        }
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
+            handleTranslationFailure(setupError)
+            return
+        }
+
+        let context = ToolContext.current(selection: selection, screenshot: screenshot)
+        guard let arguments = context.arguments(for: tool.input) else {
+            screenshot.map { try? FileManager.default.removeItem(at: $0.imageURL) }
+            presentSelectionTranslationError(
+                ToolRunError.noInput(tool.input).localizedDescription ?? "Nothing to work on.",
+                title: tool.name
+            )
+            return
+        }
+
+        let temporaryFiles = screenshot.map { [$0.imageURL] } ?? []
+        let hash = toolsStore.approvalHash(for: tool)
+        guard ToolApprovals.isApproved(tool.id, hash: hash)
+            || presentAgentApproval(tool, hash: hash) else {
+            temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+            return
+        }
+
+        // A "files" input hands over several paths; the agent gets them one per
+        // line, which is what a Python script it writes will split on anyway.
+        let input = arguments.joined(separator: "\n")
+        let screenPoint = NSEvent.mouseLocation
+        let loadingBar = showInstantTranslationLoading(near: screenPoint)
+        let backend = askBackend
+        let thinkingLevel = askGizmateThinkingLevel
+
+        Task { @MainActor [weak self] in
+            defer {
+                self?.hideInstantTranslationLoading(loadingBar)
+                temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+            }
+            do {
+                let answer = try await AgentToolRunner.run(
+                    tool: tool,
+                    input: input,
+                    backend: backend,
+                    thinkingLevel: thinkingLevel,
+                    uv: uv
+                )
+                guard let self else { return }
+                self.deliver(
+                    ToolRunResult(exitCode: 0, stdout: answer, stderr: "", producedFiles: []),
+                    for: tool,
+                    near: screenPoint
+                )
+            } catch {
+                self?.presentToolFailure(tool, detail: error.localizedDescription)
+            }
+        }
+    }
+
+    /// The agent tool's review gate. Deliberately unlike the script one: there is
+    /// no code to show, because none exists yet, and offering a "Show code"
+    /// button would imply a review that cannot happen. What the user is agreeing
+    /// to is the instruction, the step budget and the keys — which is exactly
+    /// what `ToolsStore.approvalHash(for:)` covers, so changing any of them asks
+    /// again.
+    @MainActor
+    private func presentAgentApproval(_ tool: GizmateTool, hash: String?) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Run “\(tool.name)” for the first time?"
+        alert.informativeText = [
+            tool.brief.isEmpty ? nil : tool.brief,
+            "This tool writes and runs its own code, deciding as it goes. Nobody has "
+                + "read that code, because it doesn't exist until the tool runs.",
+            tool.secretNames.isEmpty
+                ? nil
+                : "Reads your secrets: \(tool.secretNames.sorted().joined(separator: ", "))",
+            "Steps: max \(tool.maxSteps)  ·  Stops after \(tool.timeoutSeconds)s",
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n\n")
+        alert.addButton(withTitle: "Run")
+        alert.addButton(withTitle: "Cancel")
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        ToolApprovals.approve(tool.id, hash: hash)
+        return true
     }
 
     /// The review gate. Shown before a script's first run and again whenever its
     /// code changes, because approval is of a specific script, not of a name.
+    ///
+    /// - Returns: whether the user approved. The sheet is modal, so the caller
+    ///   gets the answer in line and can clean up after a refusal.
     @MainActor
     private func presentScriptApproval(
         _ tool: GizmateTool,
         script: String,
-        hash: String?,
-        onApprove: @escaping () -> Void
-    ) {
+        hash: String?
+    ) -> Bool {
         // Reached only when nobody has run this exact script yet — a tool saved
         // without testing, or one whose file changed on disk. The normal path
         // (generate → Install & test → Save) approves itself and never lands here.
@@ -279,6 +427,12 @@ extension GizmateApp {
         alert.informativeText = [
             tool.brief.isEmpty ? nil : tool.brief,
             "It runs code on your Mac with your access — Gizmate doesn't restrict what it can do.",
+            // Its own line rather than appended to the row below: handing a
+            // script a key is the one thing here the user might refuse over, and
+            // it should not be the fourth item in a run-on sentence.
+            tool.secretNames.isEmpty
+                ? nil
+                : "Reads your secrets: \(tool.secretNames.sorted().joined(separator: ", "))",
             "Network: \(tool.declaresNetwork ? "yes" : "not declared")  ·  "
                 + "Saves to: \(tool.resolvedOutputDirectory?.lastPathComponent ?? "a temporary folder")  ·  "
                 + "Stops after \(tool.timeoutSeconds)s",
@@ -294,12 +448,12 @@ extension GizmateApp {
         case .alertFirstButtonReturn:
             break
         case .alertThirdButtonReturn:
-            guard Self.presentCode(script, name: tool.name) else { return }
+            guard Self.presentCode(script, name: tool.name) else { return false }
         default:
-            return
+            return false
         }
         ToolApprovals.approve(tool.id, hash: hash)
-        onApprove()
+        return true
     }
 
     /// The source, for the one person in ten who wants it. Returns whether they
@@ -331,13 +485,19 @@ extension GizmateApp {
         _ tool: GizmateTool,
         script: String,
         arguments: [String],
-        uv: URL
+        uv: URL,
+        /// Deleted once the run is over, whatever its outcome. A screen capture
+        /// belongs to the run that asked for it.
+        temporaryFiles: [URL] = []
     ) {
         let screenPoint = NSEvent.mouseLocation
         let loadingBar = showInstantTranslationLoading(near: screenPoint)
 
         Task { @MainActor [weak self] in
-            defer { self?.hideInstantTranslationLoading(loadingBar) }
+            defer {
+                self?.hideInstantTranslationLoading(loadingBar)
+                temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+            }
             do {
                 let result = try await ToolRunner.run(
                     tool: tool,

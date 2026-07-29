@@ -35,8 +35,31 @@ enum RingBuilder {
         handlers: RingActionHandlers,
         dismiss: @escaping () -> Void
     ) -> [RingItem?] {
-        configuration.layout.slots.map { slot in
-            switch slot {
+        items(
+            in: configuration.layout,
+            depth: 0,
+            configuration: configuration,
+            handlers: handlers,
+            dismiss: dismiss
+        )
+    }
+
+    /// One entry per slot of `ring`. `depth` counts how many folders deep this
+    /// ring already sits, which is what caps nesting at the three orbits the
+    /// radial menu can actually draw.
+    @MainActor
+    private static func items(
+        in ring: RingLayout,
+        depth: Int,
+        configuration: RingConfiguration,
+        handlers: RingActionHandlers,
+        dismiss: @escaping () -> Void
+    ) -> [RingItem?] {
+        // Driven by the depth's capacity, not by how long the stored array
+        // happens to be: an orbit has more positions than the ring, and a
+        // folder only ever stores as far as its last filled slot.
+        (0..<RingLayout.capacity(atDepth: depth)).map { index -> RingItem? in
+            switch ring.content(at: index) {
             case .empty:
                 return nil
             case .builtIn(let id):
@@ -52,8 +75,52 @@ enum RingBuilder {
                     dismiss()
                     run(tool)
                 }
+            case .folder(let id):
+                return folderItem(
+                    id,
+                    depth: depth,
+                    configuration: configuration,
+                    handlers: handlers,
+                    dismiss: dismiss
+                )
             }
         }
+    }
+
+    /// A folder becomes a hover-expandable button carrying its ring as
+    /// `subItems`. Sub-orbits are fanned, not positioned, so gaps are dropped
+    /// here rather than preserved the way the first ring preserves them.
+    @MainActor
+    private static func folderItem(
+        _ id: UUID,
+        depth: Int,
+        configuration: RingConfiguration,
+        handlers: RingActionHandlers,
+        dismiss: @escaping () -> Void
+    ) -> RingItem? {
+        guard depth < RingFolderDepth.maxNesting,
+              let folder = configuration.folders.first(where: { $0.id == id })
+        else { return nil }
+        let subItems = items(
+            in: folder.layout,
+            depth: depth + 1,
+            configuration: configuration,
+            handlers: handlers,
+            dismiss: dismiss
+        )
+        return RingItem(
+            label: folder.name,
+            image: RingIconKind.symbol(folder.resolvedSymbolName).image(),
+            // An empty folder still gets its button — vanishing from the ring
+            // is how a folder you just made looks like a bug. With nothing to
+            // open the menu treats it as an ordinary button, so give it the one
+            // sensible action: close, rather than swallow the click.
+            handler: { dismiss() },
+            // Gaps are kept: a folder's orbit is a ring, and slot 3 stays at
+            // slot 3's angle whether or not slots 1 and 2 are filled.
+            subItems: subItems,
+            subLayout: .slots
+        )
     }
 
     @MainActor

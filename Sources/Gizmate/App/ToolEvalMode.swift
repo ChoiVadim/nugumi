@@ -72,6 +72,28 @@ enum ToolEvalSuite {
             output: .files,
             declaresNetwork: true
         ),
+        // The two kinds most likely to be confused with each other. The first
+        // has a fixed procedure and must stay a script even though it sounds
+        // open-ended; the second genuinely branches on what it finds, and a
+        // script cannot express it. If the agent gets these the wrong way round
+        // the fix is in the capability description, never a recipe naming these
+        // requests.
+        ToolEvalCase(
+            name: "python-not-agent-word-count",
+            request: "посчитать сколько раз каждое слово встречается в выделенном тексте",
+            kind: .python,
+            input: .selection,
+            minimumAssurance: .verified,
+            liveInput: "one two two three three three"
+        ),
+        ToolEvalCase(
+            name: "agent-triage-copied-link",
+            request: "посмотри на скопированную ссылку, пойми что это за страница "
+                + "и в зависимости от этого дай мне или краткий пересказ, или "
+                + "список ингредиентов, или расписание",
+            kind: .agent,
+            input: .clipboardURL
+        ),
     ]
 }
 

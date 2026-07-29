@@ -139,6 +139,10 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
     private let textField: AskPromptTextField
     private let onSubmit: (String) -> Void
     private let onClose: () -> Void
+    /// What the empty field reads. A tool borrows this capsule for its own
+    /// input, and "Ask Gizmate" over a field that feeds "Draft reply" would be
+    /// a lie about where the text is going.
+    private let placeholder: String
     private var didClose = false
     private var isSubmitting = false
 
@@ -153,11 +157,13 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
 
     init(
         near screenPoint: NSPoint,
+        placeholder: String = "Ask Gizmate",
         onSubmit: @escaping (String) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.onSubmit = onSubmit
         self.onClose = onClose
+        self.placeholder = placeholder
 
         let layout = AskGizmateFloatingPromptMetrics.layout
         let origin = Self.origin(near: screenPoint, size: layout.panelSize)
@@ -269,7 +275,7 @@ final class AskPromptController: NSObject, NSWindowDelegate, NSTextFieldDelegate
         textField.onEscape = { [weak self] in
             self?.close()
         }
-        setPlaceholder("Ask Gizmate")
+        setPlaceholder(placeholder)
         textField.font = NSFont.systemFont(ofSize: 14, weight: .regular)
         textField.textColor = NSColor(calibratedWhite: 1.0, alpha: 0.88)
         textField.isBordered = false

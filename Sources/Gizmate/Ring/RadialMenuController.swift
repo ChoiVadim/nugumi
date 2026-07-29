@@ -52,6 +52,20 @@ enum RadialMenuLayoutPolicy {
     /// behind a picked messenger) — same ring-to-ring spacing again.
     static let thirdRingRadius: CGFloat = 226
 
+    /// `count` positions evenly spaced around a full circle of `radius`,
+    /// starting where the main ring starts (slot 0 pointing right) and running
+    /// counter-clockwise so the orbits share the ring's axes. Slot counts come
+    /// from `RingLayout.capacity(atDepth:)`, which picks them so neighbours sit
+    /// the same distance apart as they do in the main ring.
+    static func orbitSlotCenters(radius: CGFloat, count: Int) -> [CGPoint] {
+        guard count > 0 else { return [] }
+        let step = 2 * Double.pi / Double(count)
+        return (0..<count).map { index in
+            let angle = Double(index) * step
+            return CGPoint(x: radius * CGFloat(cos(angle)), y: radius * CGFloat(sin(angle)))
+        }
+    }
+
     /// Offsets (from the panel center) for an outer-orbit cluster: buttons sit
     /// on a concentric ring of `radius`, occupying the arc that points outward
     /// from the parent (`parentOffset`), fanned symmetrically around it. Their
@@ -193,33 +207,36 @@ final class RadialActionMenuController {
     private let slots: [RingItem?]
     private let onDismiss: () -> Void
     private var buttons: [RadialMenuButtonView] = []
-    /// Second-layer buttons for a hover-expandable item (the time-range orbit).
-    /// Kept separate from `buttons` so the open/close ring animations ignore
-    /// them — they show/hide only on hover.
-    private var subButtons: [RadialMenuButtonView] = []
-    /// The expandable (messenger) button that owns the second orbit, and the
-    /// index of the sub-button highlighted by default (the middle one).
-    private weak var expandableButton: RadialMenuButtonView?
-    private var middleSubIndex = 0
-    /// Which sub-button the cursor is currently over — overrides the default
-    /// middle highlight while hovered.
+    /// A hover-revealed orbit: the buttons behind one expandable parent, built
+    /// hidden at init and parked on that parent until revealed. Kept out of
+    /// `buttons` so the ring's own open/close animations ignore them.
+    ///
+    /// Keyed per parent rather than held as one shared set — the ring can carry
+    /// several expandable buttons at once (a Summarize plus any number of
+    /// folders), and hovering one must not reveal the others.
+    private struct Orbit {
+        /// The button this orbit belongs to — highlighted while it is open, and
+        /// the point its buttons spring out of and collapse back into.
+        weak var parent: RadialMenuButtonView?
+        var origin: NSPoint
+        var buttons: [RadialMenuButtonView] = []
+        var targets: [NSRect] = []
+        /// Orbits owned by this orbit's own expandable buttons, by position.
+        var children: [Int: Orbit] = [:]
+    }
+
+    /// Orbits owned by first-ring buttons, keyed by slot index.
+    private var orbits: [Int: Orbit] = [:]
+    /// Which first-ring orbit is open, and which of its buttons has opened a
+    /// further one. Only one of each at a time, as before.
+    private var openOrbitSlot: Int?
+    private var openChildIndex: Int?
+    /// Which button of the open orbit the cursor is over — overrides the
+    /// default middle highlight while hovered.
     private var hoveredSubIndex: Int?
-    private var subClusterVisible = false
-    /// The expandable button's center (sub-buttons spring out from / collapse
-    /// into it) and their final outer-ring frames. `isSubAnimating` ignores
-    /// hover while the fly-out plays so the highlight doesn't jump to a button
-    /// passing under the cursor.
-    private var subOrigin: NSPoint = .zero
-    private var subTargets: [NSRect] = []
+    /// Ignores hover while a fly-out plays, so the highlight doesn't jump to a
+    /// button passing under the cursor mid-flight.
     private var isSubAnimating = false
-    /// Third orbit — sub-items of an expandable SECOND-layer button (e.g. a
-    /// messenger in the app picker expanding into time ranges). Pre-built
-    /// hidden at init, keyed by the sub button's index; only one open at a
-    /// time (`expandedThirdIndex`).
-    private var thirdButtons: [Int: [RadialMenuButtonView]] = [:]
-    private var thirdTargets: [Int: [NSRect]] = [:]
-    private var thirdOrigins: [Int: NSPoint] = [:]
-    private var expandedThirdIndex: Int?
     private var dismissMonitors: [Any] = []
     private var didClose = false
 
@@ -260,8 +277,8 @@ final class RadialActionMenuController {
         )
         container.onEmptyClick = { [weak self] in self?.dismiss() }
         container.onCenterHoverChange = { [weak self] hovered in
-            // Hovering the center ✕ dismisses the open second orbit too.
-            if hovered { self?.hideSubCluster() }
+            // Hovering the center ✕ dismisses any open orbit too.
+            if hovered { self?.hideOrbit() }
             self?.onCenterHoverChange?(hovered)
         }
         let centerDiameter = RadialMenuLayoutPolicy.buttonDiameter
@@ -273,13 +290,15 @@ final class RadialActionMenuController {
         ))
 
         let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
-        for (slot, offset) in zip(slots, RadialMenuLayoutPolicy.buttonCenters(count: slots.count)) {
+        let ringCenters = RadialMenuLayoutPolicy.buttonCenters(count: slots.count)
+        for (slotIndex, pair) in zip(slots, ringCenters).enumerated() {
+            let (slot, offset) = pair
             guard let item = slot else { continue }
-            let isExpandable = !item.subItems.isEmpty
+            let isExpandable = item.expandsOnHover
             let button = RadialMenuButtonView(image: item.image) { [weak self] in
-                // Expandable parents (the messenger button) reveal their
-                // second layer instead of firing/closing — the first ring stays.
-                if isExpandable { self?.showSubCluster() } else { self?.finish(with: item) }
+                // Expandable parents (a folder, or the messenger button) reveal
+                // their orbit instead of firing/closing — the ring stays.
+                if isExpandable { self?.showOrbit(slotIndex) } else { self?.finish(with: item) }
             }
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,
@@ -289,74 +308,21 @@ final class RadialActionMenuController {
             buttons.append(button)
 
             if isExpandable {
-                // Hovering the messenger button opens the second orbit and keeps
-                // it open (sticky) — it closes only when a DIFFERENT first-ring
-                // button is hovered. The messenger and sub highlights are driven
-                // by the controller, not each button's own hover tint.
-                expandableButton = button
+                // Hovering an expandable button opens its orbit and keeps it
+                // open (sticky) — it closes only when a DIFFERENT first-ring
+                // button is hovered. Parent and sub highlights are driven by the
+                // controller, not each button's own hover tint.
                 button.suppressHoverTint = true
-                middleSubIndex = item.subItems.count / 2
-                subOrigin = NSPoint(x: panelCenter.x + offset.x, y: panelCenter.y + offset.y)
-                let subOffsets = RadialMenuLayoutPolicy.subClusterCenters(
-                    parentOffset: offset, count: item.subItems.count
+                orbits[slotIndex] = buildOrbit(
+                    for: item,
+                    parent: button,
+                    parentOffset: offset,
+                    depth: 1,
+                    panelCenter: panelCenter,
+                    container: container
                 )
-                for (index, pair) in zip(item.subItems, subOffsets).enumerated() {
-                    let (sub, subOffset) = pair
-                    let subButton = RadialMenuButtonView(image: sub.image) { [weak self] in
-                        // An expandable sub (messenger with time ranges)
-                        // reveals its third orbit on click; leaves fire.
-                        if sub.subItems.isEmpty {
-                            self?.finish(with: sub)
-                        } else {
-                            self?.showThirdCluster(index)
-                        }
-                    }
-                    subButton.setFrameOrigin(NSPoint(
-                        x: panelCenter.x + subOffset.x - subButton.frame.width / 2,
-                        y: panelCenter.y + subOffset.y - subButton.frame.height / 2
-                    ))
-                    subTargets.append(subButton.frame)
-                    subButton.isHidden = true
-                    subButton.alphaValue = 0
-                    subButton.suppressHoverTint = true
-                    subButton.onHoverChange = { [weak self] hovered in
-                        self?.subHoverChanged(index: index, hovered: hovered)
-                    }
-                    container.addSubview(subButton)
-                    subButtons.append(subButton)
-
-                    if !sub.subItems.isEmpty {
-                        let thirdOffsets = RadialMenuLayoutPolicy.subClusterCenters(
-                            parentOffset: subOffset,
-                            count: sub.subItems.count,
-                            radius: RadialMenuLayoutPolicy.thirdRingRadius
-                        )
-                        var thirds: [RadialMenuButtonView] = []
-                        var targets: [NSRect] = []
-                        for (subSub, thirdOffset) in zip(sub.subItems, thirdOffsets) {
-                            let thirdButton = RadialMenuButtonView(image: subSub.image) { [weak self] in
-                                self?.finish(with: subSub)
-                            }
-                            thirdButton.setFrameOrigin(NSPoint(
-                                x: panelCenter.x + thirdOffset.x - thirdButton.frame.width / 2,
-                                y: panelCenter.y + thirdOffset.y - thirdButton.frame.height / 2
-                            ))
-                            targets.append(thirdButton.frame)
-                            thirdButton.isHidden = true
-                            thirdButton.alphaValue = 0
-                            container.addSubview(thirdButton)
-                            thirds.append(thirdButton)
-                        }
-                        thirdButtons[index] = thirds
-                        thirdTargets[index] = targets
-                        thirdOrigins[index] = NSPoint(
-                            x: panelCenter.x + subOffset.x,
-                            y: panelCenter.y + subOffset.y
-                        )
-                    }
-                }
                 button.onHoverChange = { [weak self] hovered in
-                    if hovered { self?.showSubCluster() }
+                    if hovered { self?.showOrbit(slotIndex) }
                 }
                 continue
             }
@@ -384,8 +350,8 @@ final class RadialActionMenuController {
                 // pass fires a phantom mouseEntered. Dead ring, no bubbles.
                 guard let self, !self.didClose else { return }
                 // Hovering any other first-ring button dismisses the open
-                // second orbit (the only thing that closes it besides picking).
-                if hovered { self.hideSubCluster() }
+                // orbit (the only thing that closes it besides picking).
+                if hovered { self.hideOrbit() }
                 NSAnimationContext.runAnimationGroup { context in
                     // Ease the bubble in gently; hide fast so it never lags
                     // behind the cursor leaving the button.
@@ -455,165 +421,197 @@ final class RadialActionMenuController {
         item.handler()
     }
 
-    // MARK: - Hover-revealed second layer (sticky)
+    // MARK: - Hover-revealed orbits (sticky)
 
-    /// Opens the second orbit and keeps it open. Hovering the messenger button
-    /// calls this; it stays up until a DIFFERENT first-ring button is hovered,
-    /// the ring is dismissed, or a time button is picked. The messenger button
-    /// stays highlighted while it's open, and the middle sub-button is
-    /// highlighted by default.
-    private func showSubCluster() {
-        guard !didClose else { return }
-        expandableButton?.setHighlighted(true)
-        if !subClusterVisible {
-            subClusterVisible = true
-            isSubAnimating = true
-            // Stage the starting state (parked on the messenger button,
-            // invisible) and let this CA transaction commit BEFORE animating:
-            // animations scheduled in the same commit that unhides a layer are
-            // skipped by Core Animation — the reveal used to pop in fully
-            // settled while the collapse (already-visible layers) animated fine.
-            for (sub, target) in zip(subButtons, subTargets) {
-                sub.frame = NSRect(
-                    x: subOrigin.x - target.width / 2,
-                    y: subOrigin.y - target.height / 2,
-                    width: target.width,
-                    height: target.height
-                )
-                sub.isHidden = false
-                sub.alphaValue = 0
+    /// Builds one orbit's buttons, hidden and parked on their parent, plus the
+    /// orbits any of them own in turn. `depth` picks the radius: 1 is the orbit
+    /// outside the ring, 2 the one outside that.
+    private func buildOrbit(
+        for item: RingItem,
+        parent: RadialMenuButtonView,
+        parentOffset: CGPoint,
+        depth: Int,
+        panelCenter: NSPoint,
+        container: NSView
+    ) -> Orbit {
+        let radius = depth == 1
+            ? RadialMenuLayoutPolicy.outerRingRadius
+            : RadialMenuLayoutPolicy.thirdRingRadius
+        var orbit = Orbit(
+            parent: parent,
+            origin: NSPoint(x: panelCenter.x + parentOffset.x, y: panelCenter.y + parentOffset.y)
+        )
+
+        // `.slots` keeps every button on its own ring direction, so an empty
+        // slot leaves a gap; `.fan` packs what's there next to the parent.
+        let placed: [(item: RingItem, offset: CGPoint)]
+        switch item.subLayout {
+        case .slots:
+            let centers = RadialMenuLayoutPolicy.orbitSlotCenters(
+                radius: radius,
+                count: item.subItems.count
+            )
+            placed = item.subItems.enumerated().compactMap { index, sub in
+                guard let sub, let offset = centers[safe: index] else { return nil }
+                return (sub, offset)
             }
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.subClusterVisible, !self.didClose else { return }
-                for (sub, target) in zip(self.subButtons, self.subTargets) {
-                    // Spring out from the messenger button to the outer slot —
-                    // the same feel/timing as the first ring opening. Hover is
-                    // ignored until it settles (isSubAnimating) so the highlight
-                    // doesn't jump to a button passing under the cursor
-                    // mid-flight; tracking re-arms at the settled frame.
-                    NSAnimationContext.runAnimationGroup({ context in
-                        context.duration = 0.22
-                        context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
-                        sub.animator().frame = target
-                        sub.animator().alphaValue = 1
-                    }, completionHandler: { [weak self, weak sub] in
-                        sub?.updateTrackingAreas()
-                        self?.isSubAnimating = false
-                    })
-                }
+        case .fan:
+            let present = item.subItems.compactMap { $0 }
+            let centers = RadialMenuLayoutPolicy.subClusterCenters(
+                parentOffset: parentOffset,
+                count: present.count,
+                radius: radius
+            )
+            placed = Array(zip(present, centers))
+        }
+
+        for (index, entry) in placed.enumerated() {
+            let sub = entry.item
+            let expands = sub.expandsOnHover && depth < 2
+            let subButton = RadialMenuButtonView(image: sub.image) { [weak self] in
+                // An expandable sub reveals its own orbit on click; leaves fire.
+                if expands { self?.showChildOrbit(index) } else { self?.finish(with: sub) }
+            }
+            subButton.setFrameOrigin(NSPoint(
+                x: panelCenter.x + entry.offset.x - subButton.frame.width / 2,
+                y: panelCenter.y + entry.offset.y - subButton.frame.height / 2
+            ))
+            orbit.targets.append(subButton.frame)
+            subButton.isHidden = true
+            subButton.alphaValue = 0
+            subButton.suppressHoverTint = true
+            subButton.onHoverChange = { [weak self] hovered in
+                self?.subHoverChanged(index: index, hovered: hovered)
+            }
+            container.addSubview(subButton)
+            orbit.buttons.append(subButton)
+
+            if expands {
+                orbit.children[index] = buildOrbit(
+                    for: sub,
+                    parent: subButton,
+                    parentOffset: entry.offset,
+                    depth: depth + 1,
+                    panelCenter: panelCenter,
+                    container: container
+                )
             }
         }
+        return orbit
+    }
+
+    /// Opens the orbit behind first-ring slot `slotIndex` and keeps it open.
+    /// It stays up until a DIFFERENT first-ring button is hovered, the ring is
+    /// dismissed, or something in it is picked.
+    private func showOrbit(_ slotIndex: Int) {
+        guard !didClose, let orbit = orbits[slotIndex] else { return }
+        if openOrbitSlot != slotIndex {
+            // Only one orbit at a time: whatever was open collapses first.
+            hideOrbit()
+            openOrbitSlot = slotIndex
+            reveal(orbit)
+        }
+        orbit.parent?.setHighlighted(true)
         hoveredSubIndex = nil
         refreshSubHighlight()
-        hideThirdCluster()
+        hideChildOrbit()
     }
 
     private func subHoverChanged(index: Int, hovered: Bool) {
-        // Sticky: hovering a time button moves the highlight to it and it STAYS
-        // there after the cursor leaves into empty space. Only re-hovering the
-        // messenger button resets the default back to the middle (in
-        // `showSubCluster`). Ignore hover while the fly-out animates.
-        guard !isSubAnimating, hovered else { return }
+        // Sticky: hovering a sub moves the highlight to it and it STAYS there
+        // after the cursor leaves into empty space. Only re-hovering the parent
+        // resets the default back to the middle (in `showOrbit`). Ignore hover
+        // while the fly-out animates.
+        guard !isSubAnimating, hovered, let orbit = openOrbit else { return }
         hoveredSubIndex = index
         refreshSubHighlight()
-        // Expandable subs (messenger → ranges) open their third orbit on
-        // hover; hovering a plain sub (browser) closes any open one.
-        if thirdButtons[index] != nil {
-            showThirdCluster(index)
+        // An expandable sub opens its own orbit on hover; a plain one closes
+        // whichever was open.
+        if orbit.children[index] != nil {
+            showChildOrbit(index)
         } else {
-            hideThirdCluster()
+            hideChildOrbit()
         }
     }
 
-    /// Reveals the third orbit for the expandable sub at `index`, collapsing
-    /// any other open one. Same two-transaction reveal as `showSubCluster` —
-    /// animations scheduled in the commit that unhides a layer are skipped.
-    private func showThirdCluster(_ index: Int) {
-        guard !didClose, expandedThirdIndex != index else { return }
-        hideThirdCluster()
-        guard let thirds = thirdButtons[index],
-              let targets = thirdTargets[index],
-              let origin = thirdOrigins[index]
-        else { return }
-        expandedThirdIndex = index
-        for (third, target) in zip(thirds, targets) {
-            third.frame = NSRect(
-                x: origin.x - target.width / 2,
-                y: origin.y - target.height / 2,
+    private var openOrbit: Orbit? {
+        openOrbitSlot.flatMap { orbits[$0] }
+    }
+
+    /// Reveals the orbit owned by the open orbit's button at `index`,
+    /// collapsing any other open one.
+    private func showChildOrbit(_ index: Int) {
+        guard !didClose, openChildIndex != index else { return }
+        hideChildOrbit()
+        guard let child = openOrbit?.children[index] else { return }
+        openChildIndex = index
+        reveal(child)
+    }
+
+    private func hideChildOrbit() {
+        guard let index = openChildIndex else { return }
+        openChildIndex = nil
+        guard let child = openOrbit?.children[index] else { return }
+        collapse(child, restoringHighlight: false)
+    }
+
+    private func hideOrbit() {
+        hideChildOrbit()
+        guard let orbit = openOrbit else { return }
+        openOrbitSlot = nil
+        hoveredSubIndex = nil
+        isSubAnimating = true
+        collapse(orbit, restoringHighlight: true)
+    }
+
+    /// Springs the orbit out of its parent button — the same feel and timing as
+    /// the ring itself opening.
+    ///
+    /// Staged over two CA transactions: an animation scheduled in the same
+    /// commit that unhides a layer is skipped outright, which used to make the
+    /// reveal pop in fully settled while the collapse animated fine.
+    private func reveal(_ orbit: Orbit) {
+        isSubAnimating = true
+        for (sub, target) in zip(orbit.buttons, orbit.targets) {
+            sub.frame = NSRect(
+                x: orbit.origin.x - target.width / 2,
+                y: orbit.origin.y - target.height / 2,
                 width: target.width,
                 height: target.height
             )
-            third.isHidden = false
-            third.alphaValue = 0
+            sub.isHidden = false
+            sub.alphaValue = 0
         }
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.expandedThirdIndex == index, !self.didClose else { return }
-            for (third, target) in zip(thirds, targets) {
+            guard let self, !self.didClose else { return }
+            for (sub, target) in zip(orbit.buttons, orbit.targets) {
+                // Hover is ignored until it settles (isSubAnimating) so the
+                // highlight doesn't jump to a button passing under the cursor
+                // mid-flight; tracking re-arms at the settled frame.
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.22
                     context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
-                    third.animator().frame = target
-                    third.animator().alphaValue = 1
-                }, completionHandler: { [weak third] in
-                    third?.updateTrackingAreas()
+                    sub.animator().frame = target
+                    sub.animator().alphaValue = 1
+                }, completionHandler: { [weak self, weak sub] in
+                    sub?.updateTrackingAreas()
+                    self?.isSubAnimating = false
                 })
             }
         }
     }
 
-    private func hideThirdCluster() {
-        guard let index = expandedThirdIndex else { return }
-        expandedThirdIndex = nil
-        guard let thirds = thirdButtons[index],
-              let targets = thirdTargets[index],
-              let origin = thirdOrigins[index]
-        else { return }
-        for (third, target) in zip(thirds, targets) {
-            NSAnimationContext.runAnimationGroup({ context in
-                // Collapse back INTO the parent sub button, mirroring the
-                // second orbit's close.
-                context.duration = 0.15
-                context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-                third.animator().frame = NSRect(
-                    x: origin.x - target.width / 2,
-                    y: origin.y - target.height / 2,
-                    width: target.width,
-                    height: target.height
-                )
-                third.animator().alphaValue = 0
-            }, completionHandler: { [weak third] in
-                third?.isHidden = true
-                third?.frame = target   // reset for the next reveal
-            })
-        }
-    }
-
-    /// Highlights the hovered sub-button, or the middle one by default.
-    private func refreshSubHighlight() {
-        guard subClusterVisible else { return }
-        let active = hoveredSubIndex ?? middleSubIndex
-        for (i, sub) in subButtons.enumerated() {
-            sub.setHighlighted(i == active)
-        }
-    }
-
-    private func hideSubCluster() {
-        hideThirdCluster()
-        guard subClusterVisible else { return }
-        subClusterVisible = false
-        hoveredSubIndex = nil
-        isSubAnimating = true
-        expandableButton?.setHighlighted(false)
-        for (sub, target) in zip(subButtons, subTargets) {
+    /// Collapse back INTO the parent button, mirroring the ring's own close.
+    private func collapse(_ orbit: Orbit, restoringHighlight: Bool) {
+        if restoringHighlight { orbit.parent?.setHighlighted(false) }
+        for (sub, target) in zip(orbit.buttons, orbit.targets) {
             sub.setHighlighted(false)
             NSAnimationContext.runAnimationGroup({ context in
-                // Collapse back INTO the messenger button, mirroring the first
-                // ring's close.
                 context.duration = 0.15
                 context.timingFunction = CAMediaTimingFunction(name: .easeIn)
                 sub.animator().frame = NSRect(
-                    x: subOrigin.x - target.width / 2,
-                    y: subOrigin.y - target.height / 2,
+                    x: orbit.origin.x - target.width / 2,
+                    y: orbit.origin.y - target.height / 2,
                     width: target.width,
                     height: target.height
                 )
@@ -621,8 +619,19 @@ final class RadialActionMenuController {
             }, completionHandler: { [weak self, weak sub] in
                 sub?.isHidden = true
                 sub?.frame = target   // reset for the next reveal
-                self?.isSubAnimating = false
+                if restoringHighlight { self?.isSubAnimating = false }
             })
+        }
+    }
+
+    /// Highlights whichever button of the open orbit the cursor is actually on,
+    /// and none while it is still on the parent. Opening an orbit deliberately
+    /// pre-selects nothing: the highlight is a size bump, and bumping a button
+    /// the user never pointed at reads as the ring picking for them.
+    private func refreshSubHighlight() {
+        guard let orbit = openOrbit else { return }
+        for (i, sub) in orbit.buttons.enumerated() {
+            sub.setHighlighted(i == hoveredSubIndex)
         }
     }
 

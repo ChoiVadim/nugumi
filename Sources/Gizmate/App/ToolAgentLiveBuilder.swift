@@ -46,11 +46,15 @@ enum ToolAgentLiveBuilderError: LocalizedError {
     }
 }
 
-private struct ToolAgentRuntimeLocation {
+/// Where the Node runtime and a sidecar entry point live. `entry` is the file
+/// name inside `dist`: `agent.mjs` builds a tool, `run.mjs` runs an agent tool.
+/// Both ship in the same place and are found the same way.
+struct ToolAgentRuntimeLocation {
     let node: URL
     let agent: URL
 
     static func resolve(
+        entry: String = "agent.mjs",
         bundleURL: URL = Bundle.main.bundleURL,
         currentDirectory: URL = URL(
             fileURLWithPath: FileManager.default.currentDirectoryPath,
@@ -66,7 +70,7 @@ private struct ToolAgentRuntimeLocation {
                 .appendingPathComponent("Resources", isDirectory: true)
                 .appendingPathComponent("ToolAgent", isDirectory: true)
                 .appendingPathComponent("dist", isDirectory: true)
-                .appendingPathComponent("agent.mjs")
+                .appendingPathComponent(entry)
         )
         if packaged.isUsable {
             return packaged
@@ -97,10 +101,10 @@ private struct ToolAgentRuntimeLocation {
                 root
                     .appendingPathComponent("ToolAgent", isDirectory: true)
                     .appendingPathComponent("dist", isDirectory: true)
-                    .appendingPathComponent("agent.mjs"),
+                    .appendingPathComponent(entry),
                 runtime
                     .appendingPathComponent("dist", isDirectory: true)
-                    .appendingPathComponent("agent.mjs"),
+                    .appendingPathComponent(entry),
             ]
             for agent in candidates {
                 let development = Self(node: node, agent: agent)
@@ -207,6 +211,8 @@ enum ToolAgentHostCandidateValidator {
             }
         case .python:
             failureDetail = "Python candidates must be tested in the sandbox worker."
+        case .agent:
+            failureDetail = "Agent candidates are checked by running them."
         }
 
         if let failureDetail {
@@ -447,7 +453,9 @@ enum ToolAgentLiveBuilder {
             trigger: trigger,
             hosts: hosts,
             extensions: extensions,
-            prompt: kind == .prompt ? tool.prompt : "",
+            // An agent tool's instruction lives in the same field a prompt tool's
+            // prompt does, so both carry it into an edit.
+            prompt: kind == .prompt || kind == .agent ? tool.prompt : "",
             appliesTargetLanguage: kind == .prompt && tool.appliesTargetLanguage,
             nativeAction: kind == .native
                 ? ToolAgentNativeActionV1(rawValue: tool.nativeAction.rawValue)
@@ -455,8 +463,10 @@ enum ToolAgentLiveBuilder {
             target: kind == .native ? tool.target : "",
             source: kind == .python ? script : "",
             outputDirectory: kind == .python ? tool.outputDirectory : nil,
-            timeoutSeconds: kind == .python ? tool.timeoutSeconds : 120,
-            declaresNetwork: kind == .python && tool.declaresNetwork
+            timeoutSeconds: kind == .python || kind == .agent ? tool.timeoutSeconds : 120,
+            declaresNetwork: kind == .python && tool.declaresNetwork,
+            secretNames: kind == .python || kind == .agent ? tool.secretNames : [],
+            maxSteps: tool.maxSteps
         )
     }
 
@@ -483,7 +493,8 @@ enum ToolAgentLiveBuilder {
         let request = ToolBuildRequestV1(
             runID: runID,
             description: requestText,
-            budgets: .preview
+            budgets: .preview,
+            availableSecretNames: ToolSecrets.names()
         )
         return try await build(
             request: request,
@@ -522,7 +533,8 @@ enum ToolAgentLiveBuilder {
             budgets: .preview,
             operation: boundedFailure == nil ? .edit : .fix,
             currentTool: snapshot,
-            failure: boundedFailure
+            failure: boundedFailure,
+            availableSecretNames: ToolSecrets.names()
         )
         let generated = try await build(
             request: request,
@@ -617,6 +629,26 @@ enum ToolAgentLiveBuilder {
                     )
                     report = try await CandidateValidation.validate(
                         input,
+                        uv: uv
+                    )
+                case .agent:
+                    // An agent candidate cannot be checked the way the others
+                    // are: there is no code to compile and no output to compare,
+                    // because both are decided at run time. What can be checked
+                    // is that it runs at all — the sidecar starts, the model
+                    // drives it, and it reaches an answer. A candidate with no
+                    // fixture is one the model judged unsafe to trial (it sends,
+                    // publishes or deletes something), and is taken on structure
+                    // alone rather than doing that thing during a build.
+                    onStatus(
+                        input.candidate.fixtures.isEmpty
+                            ? "Checking how it is set up…"
+                            : "Running it once to see whether it gets there…"
+                    )
+                    report = try await AgentCandidateValidation.validate(
+                        input,
+                        backend: backend,
+                        thinkingLevel: thinkingLevel,
                         uv: uv
                     )
                 }
@@ -728,10 +760,12 @@ enum ToolAgentLiveBuilder {
     }
 
     static func generatedTool(from candidate: ToolAgentCandidateV1) -> GeneratedTool {
+        let stored = Set(ToolSecrets.names())
         let kind: ToolKind = switch candidate.kind {
         case .prompt: .prompt
         case .native: .native
         case .python: .python
+        case .agent: .agent
         }
         let input = ToolInput(rawValue: candidate.input.rawValue) ?? .none
         let output = ToolOutput(rawValue: candidate.output.rawValue) ?? .notify
@@ -760,6 +794,13 @@ enum ToolAgentLiveBuilder {
             outputDirectory: kind == .python ? candidate.outputDirectory : nil,
             timeoutSeconds: candidate.timeoutSeconds,
             declaresNetwork: kind == .python && candidate.declaresNetwork,
+            // Filtered against what the user actually stored: a model that
+            // invents `STRIPE_KEY` must not leave a tool permanently declaring a
+            // secret nobody has, where the only symptom is a None at run time.
+            secretNames: kind == .python || kind == .agent
+                ? candidate.secretNames.filter(stored.contains)
+                : [],
+            maxSteps: candidate.maxSteps,
             brief: candidate.brief
         )
         return GeneratedTool(

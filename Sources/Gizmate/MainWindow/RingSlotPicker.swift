@@ -2,13 +2,19 @@ import AppKit
 import SwiftUI
 
 /// What the Ring tab currently has open over the window.
+/// Which position, in which ring. `path` is empty for the root ring; each id
+/// descends into that folder. Slots outside the root ring exist as soon as a
+/// folder does, so an index alone can no longer name one.
 enum RingSheet: Equatable {
-    /// Choosing what goes in ring slot *i*.
-    case slot(Int)
+    /// Choosing what goes in one slot.
+    case slot(RingSlotAddress)
     /// Writing a prompt tool. `id` is nil for a new one; `assignTo` carries the
     /// slot the user came from, so "empty slot → New prompt tool → Save" lands
     /// the finished tool in that slot without a second trip through the picker.
-    case toolEditor(id: UUID?, assignTo: Int?)
+    case toolEditor(id: UUID?, assignTo: RingSlotAddress?)
+    /// Naming a sub-ring. `id` is nil for a new folder, in which case
+    /// `assignTo` is the slot it lands in; a non-nil `id` is a rename.
+    case folderEditor(id: UUID?, assignTo: RingSlotAddress?)
 }
 
 /// Dims the whole window and centers the active Ring panel. Same arrangement as
@@ -24,10 +30,12 @@ struct RingSheetOverlay: View {
                 .ignoresSafeArea()
                 .onTapGesture(perform: close)
             switch sheet {
-            case .slot(let index):
-                RingSlotPickerPanel(toolsStore: bridge.tools, slotIndex: index)
+            case .slot(let address):
+                RingSlotPickerPanel(toolsStore: bridge.tools, address: address)
             case .toolEditor(let id, let assignTo):
                 ToolEditorPanel(toolID: id, assignTo: assignTo)
+            case .folderEditor(let id, let assignTo):
+                RingFolderEditorPanel(folderID: id, assignTo: assignTo)
             }
         }
         .onExitCommand(perform: close)
@@ -48,7 +56,7 @@ private struct RingSlotPickerPanel: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
     /// Observed so the list refreshes the moment a tool is deleted.
     @ObservedObject var toolsStore: ToolsStore
-    let slotIndex: Int
+    let address: RingSlotAddress
 
     @State private var search = ""
     @State private var group: Group = .builtIn
@@ -60,8 +68,12 @@ private struct RingSlotPickerPanel: View {
         case tools = "Your tools"
     }
 
+    private var ring: RingLayout {
+        bridge.ringLayout.ring(at: address.path) ?? bridge.ringLayout.layout
+    }
+
     private var current: RingSlotContent {
-        bridge.ringLayout.layout.slots[safe: slotIndex] ?? .empty
+        ring.slots[safe: address.index] ?? .empty
     }
 
     private var builtIns: [RingActionID] {
@@ -157,24 +169,36 @@ private struct RingSlotPickerPanel: View {
             sourceTab(.builtIn, count: builtIns.count)
             sourceTab(.tools, count: tools.count)
             Spacer(minLength: 0)
-            Button {
-                bridge.ringSheet = .toolEditor(id: nil, assignTo: slotIndex)
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "plus.circle")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("New tool")
-                        .font(.system(size: 12.5, weight: .medium))
+            // The ring can draw three orbits, so a sub-ring only fits while
+            // there's still an orbit left to fan its contents into.
+            if RingFolderDepth.allowsFolder(at: address.path) {
+                newButton(symbol: RingFolder.defaultSymbolName, title: "New sub-ring") {
+                    bridge.ringSheet = .folderEditor(id: nil, assignTo: address)
                 }
-                .foregroundStyle(FlowTheme.accent)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 10)
-                .contentShape(Rectangle())
+                .help("Puts a button here that opens a ring of its own.")
             }
-            .buttonStyle(.plain)
+            newButton(symbol: "plus.circle", title: "New tool") {
+                bridge.ringSheet = .toolEditor(id: nil, assignTo: address)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private func newButton(symbol: String, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12.5, weight: .medium))
+            }
+            .foregroundStyle(FlowTheme.accent)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func sourceTab(_ value: Group, count: Int) -> some View {
@@ -309,7 +333,7 @@ private struct RingSlotPickerPanel: View {
 
     private var pendingIsAssignedElsewhere: Bool {
         guard let pending, pending != current else { return false }
-        return bridge.ringLayout.layout.slots.contains(pending)
+        return ring.slots.contains(pending)
     }
 
     private var footer: some View {
@@ -323,7 +347,7 @@ private struct RingSlotPickerPanel: View {
             SecondaryButton(title: "Cancel") { closePanel() }
             Button {
                 guard let pending else { return }
-                bridge.ringLayout.assign(pending, to: slotIndex)
+                bridge.ringLayout.assign(pending, to: address.index, in: address.path)
                 closePanel()
             } label: {
                 Text(pendingIsAssignedElsewhere ? "Move here" : "Assign")
@@ -384,6 +408,8 @@ private struct RingSlotPickerPanel: View {
             return id.displayName
         case .tool(let id):
             return bridge.tools.tool(id: id)?.name ?? "a deleted tool"
+        case .folder(let id):
+            return bridge.ringLayout.folder(id).map { "“\($0.name)” sub-ring" } ?? "a deleted sub-ring"
         }
     }
 }

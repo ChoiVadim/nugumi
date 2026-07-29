@@ -60,6 +60,11 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     var petController: PetController?
     var translationPanelController: TranslationPanelController?
     var askPromptController: AskPromptController?
+    /// The same capsule, borrowed by a `.ask` tool for its one input. Kept
+    /// apart from `askPromptController` on purpose: that one is wired to the
+    /// Ask flow's screen capture, drawing overlay and in-flight request, none
+    /// of which a tool wants.
+    var toolPromptController: AskPromptController?
     var askGizmateTask: Task<Void, Never>?
     var askGizmateRequestID: UUID?
     var askHistory: [AskGizmateTurn] = AskGizmateHistoryStore.load()
@@ -546,6 +551,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
                 // Unrunnable tools (no prompt, or a script tool with no script)
                 // are filtered here so the builder never has to consult the store.
                 tools: self.toolsStore.tools.filter(self.toolsStore.isRunnable),
+                folders: self.ringLayoutStore.folders,
                 context: ToolContext.current(selection: selection)
             )
         }

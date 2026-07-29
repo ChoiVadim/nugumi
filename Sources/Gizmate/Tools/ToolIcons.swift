@@ -25,6 +25,7 @@ enum ToolIcons {
         "lightbulb", "brain", "questionmark.circle", "book", "graduationcap",
         "magnifyingglass", "eye", "sparkle.magnifyingglass",
         // Structure and data
+        "circle.hexagonpath", "circle.circle", "circle.grid.2x2",
         "curlybraces", "list.bullet", "list.number", "tablecells", "chart.bar",
         "function", "number", "calendar", "clock",
         // Editing and cleanup
@@ -56,9 +57,40 @@ enum ToolIcons {
         return names
     }()
 
-    /// What the grid shows. An empty query keeps the shortlist — the curated set is
-    /// meant to be a decent starting shelf, not a ceiling. Any query searches the
-    /// whole catalog.
+    /// Browse order: the curated shelf first, then everything else. The shortlist
+    /// is a starting shelf, not a ceiling — scrolling past it keeps going into the
+    /// full catalog instead of dead-ending.
+    static let browsable: [String] = {
+        let shelf = Set(curated)
+        return curated + all.filter { !shelf.contains($0) }
+    }()
+
+    /// A symbol name as something to read rather than something to type.
+    ///
+    /// SF Symbol names are dotted lowercase identifiers — `arrow.down.circle`,
+    /// `bubble.left.and.bubble.right` — which is right for code and wrong in a
+    /// settings panel, where it reads as a leaked implementation detail. The
+    /// dots are word breaks, so removing them is most of the job.
+    ///
+    /// Deliberately generic rather than a lookup table. AppKit exposes no
+    /// human-readable name for a symbol, and the picker searches all eight
+    /// thousand of them, so any name can end up here — a hand-written dictionary
+    /// would cover the shortlist, rot as Apple adds glyphs, and still fall back
+    /// to this for everything else. Glued compounds like `archivebox` stay glued
+    /// ("Archivebox"), which is imperfect and still far better than the raw
+    /// identifier.
+    static func displayName(for symbolName: String) -> String {
+        let words = symbolName
+            .split(separator: ".")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard let first = words.first else { return symbolName }
+        return ([first.prefix(1).uppercased() + first.dropFirst()] + words.dropFirst())
+            .joined(separator: " ")
+    }
+
+    /// What the grid shows. An empty query browses the catalog curated-first; any
+    /// query searches all of it.
     ///
     /// Matching splits on dots as well as spaces, so "down arrow" finds
     /// `arrow.down.circle` and every term has to appear.
@@ -67,7 +99,7 @@ enum ToolIcons {
             .lowercased()
             .split(whereSeparator: { $0 == " " || $0 == "." })
             .map(String.init)
-        guard !terms.isEmpty else { return curated }
+        guard !terms.isEmpty else { return browsable }
         return all.filter { name in
             let haystack = name.lowercased()
             return terms.allSatisfy { haystack.contains($0) }

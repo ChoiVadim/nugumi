@@ -11,12 +11,17 @@ enum ToolKind: String, Codable, CaseIterable {
     case native
     /// A self-contained PEP 723 Python script run through `uv`.
     case python
+    /// An instruction carried out by an agent that decides as it goes, writing
+    /// and running Python until it has an answer. The only kind whose behavior
+    /// is not fixed before it runs — which is the point, and the risk.
+    case agent
 
     var displayName: String {
         switch self {
         case .prompt: return "Prompt"
         case .native: return "Action"
         case .python: return "Script"
+        case .agent: return "Agent"
         }
     }
 }
@@ -90,19 +95,45 @@ enum NativeAction: String, Codable, CaseIterable {
 /// What the tool is handed when it runs.
 enum ToolInput: String, Codable, CaseIterable {
     case selection
+    /// Text the user types into the Ask capsule when the tool runs. The tool
+    /// receives exactly what was typed and nothing else — the same one argument
+    /// `selection` gives it, so nothing downstream has to know the difference.
+    case ask
     case clipboardText
     case clipboardURL
     case files
+    /// A screen area the user drags out when the tool runs. The tool receives
+    /// the path to the captured PNG.
+    case screenshot
+    /// The same capture, read by Vision. The tool receives the recognised text,
+    /// so it looks exactly like `selection` to the script or prompt.
+    case screenshotText
     case none
 
     var displayName: String {
         switch self {
         case .selection: return "Selected text"
+        case .ask: return "Ask me"
         case .clipboardText: return "Clipboard text"
         case .clipboardURL: return "Copied link"
         case .files: return "Copied files"
+        case .screenshot: return "Screen area"
+        case .screenshotText: return "Text on screen"
         case .none: return "Nothing"
         }
+    }
+
+    /// Every other input is already sitting in the system when the ring opens.
+    /// These two have to be taken, which is why they are resolved at run time
+    /// rather than read off `ToolContext`'s snapshot.
+    var needsCapture: Bool {
+        self == .screenshot || self == .screenshotText
+    }
+
+    /// Same story as `needsCapture`, with a text field instead of a drag: the
+    /// input doesn't exist until the tool runs and the user types it.
+    var needsPrompt: Bool {
+        self == .ask
     }
 }
 
@@ -250,6 +281,17 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     /// The script says it needs network access. Shown to the user as a heads-up,
     /// NOT enforced — see `ToolRunner`'s note on the security posture.
     var declaresNetwork: Bool
+    /// Which of the user's stored secrets this tool is handed, as environment
+    /// variables. Declared rather than ambient: a tool that never says it wants
+    /// `OPENAI_API_KEY` never sees it, so one leaky script is not every key.
+    /// Part of the approval hash — see `ToolsStore.scriptHash(for:)`.
+    var secretNames: [String]
+
+    // MARK: .agent
+    /// How many scripts a `.agent` tool may run before it has to answer. The
+    /// only bound on a tool whose behavior nobody can read in advance, so it is
+    /// part of what the user approves.
+    var maxSteps: Int
     /// The plain-language request the tool was generated from. Kept so a saved
     /// tool can still be regenerated or repaired later, and empty for a tool the
     /// user wrote by hand.
@@ -272,6 +314,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         outputDirectory: String? = nil,
         timeoutSeconds: Int = 120,
         declaresNetwork: Bool = false,
+        secretNames: [String] = [],
+        maxSteps: Int = 8,
         brief: String = "",
         createdAt: Date = Date()
     ) {
@@ -291,6 +335,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         self.outputDirectory = outputDirectory
         self.timeoutSeconds = timeoutSeconds
         self.declaresNetwork = declaresNetwork
+        self.secretNames = secretNames
+        self.maxSteps = maxSteps
 
         self.brief = brief
         self.createdAt = createdAt
@@ -301,7 +347,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     var isUsable: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         switch kind {
-        case .prompt:
+        // An agent tool is its instruction: there is nothing else to run.
+        case .prompt, .agent:
             return !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .native:
             guard nativeAction.targetLabel != nil else { return true }
@@ -330,7 +377,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         case id, name, symbolName, kind, input, output, trigger
         case prompt, appliesTargetLanguage
         case nativeAction, target
-        case outputDirectory, timeoutSeconds, declaresNetwork, brief
+        case outputDirectory, timeoutSeconds, declaresNetwork, secretNames, brief
+        case maxSteps
         case createdAt
     }
 
@@ -360,6 +408,11 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         outputDirectory = try c.decodeIfPresent(String.self, forKey: .outputDirectory)
         timeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .timeoutSeconds) ?? 120
         declaresNetwork = try c.decodeIfPresent(Bool.self, forKey: .declaresNetwork) ?? false
+        // Filtered on the way in, not just on the way out: a manifest is a file
+        // on disk and `ToolSecrets` resolves these straight into a path.
+        secretNames = (try c.decodeIfPresent([String].self, forKey: .secretNames) ?? [])
+            .filter(ToolSecrets.isValidName)
+        maxSteps = max(1, min(24, try c.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8))
         brief = try c.decodeIfPresent(String.self, forKey: .brief) ?? ""
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }

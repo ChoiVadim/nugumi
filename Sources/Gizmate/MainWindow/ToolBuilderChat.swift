@@ -18,6 +18,21 @@ enum ToolBuilderSubmission: Equatable {
     case answeredClarification
 }
 
+/// What is still missing before saving would be an honest thing to offer.
+///
+/// Gizmate grades its own validation, and two of the three grades do not prove
+/// the tool produces the right answer — only that it compiles, or that it exits
+/// cleanly. For those the last check available is the person who asked for the
+/// tool running it once, so the chat asks for that instead of putting Save up
+/// as if the tool were proven.
+enum ToolBuilderTrial: Equatable {
+    /// Gizmate ran it and the output matched, or the kind has nothing to run.
+    case notNeeded
+    case untried
+    case passed
+    case failed
+}
+
 @MainActor
 final class ToolBuilderChatSession: ObservableObject {
     @Published private(set) var messages: [ToolBuilderChatMessage]
@@ -25,6 +40,7 @@ final class ToolBuilderChatSession: ObservableObject {
     @Published private(set) var isAwaitingAnswer = false
     @Published private(set) var readyMessage: String?
     @Published private(set) var hasError = false
+    @Published private(set) var trial: ToolBuilderTrial = .notNeeded
 
     private let answers: ToolBuilderAnswerBroker
     private let activityLimit: Int
@@ -90,20 +106,50 @@ final class ToolBuilderChatSession: ObservableObject {
     ///   is a question worth answering. Saying "ready" about a tool Gizmate only
     ///   compiled would be the same overclaim the old validator made by
     ///   refusing to build anything it could not run.
-    func candidateReady(_ name: String, note: String? = nil) {
+    /// - Parameter trial: `.untried` when that note is an admission rather than
+    ///   a result, which turns the next step from Save into one real run.
+    func candidateReady(
+        _ name: String,
+        note: String? = nil,
+        trial: ToolBuilderTrial = .notNeeded
+    ) {
         hasError = false
+        self.trial = trial
         readyMessage = [
             "\(name) is ready.",
             note,
-            "Review it, ask for a change, or save the tool.",
+            trial == .untried
+                ? "Run it once and tell me what happened — or save it as is."
+                : "Review it, ask for a change, or save the tool.",
         ]
         .compactMap { $0 }
         .joined(separator: " ")
     }
 
+    /// The user took the run. Finishing cleanly still isn't proof the answer is
+    /// the one they wanted — only they can say that — so passing asks rather
+    /// than declares.
+    func trialFinished(passed: Bool, report: String? = nil) {
+        trial = passed ? .passed : .failed
+        hasError = !passed
+        if passed {
+            readyMessage = "It ran and finished cleanly. If the result is what "
+                + "you wanted, save it — otherwise tell me what's off."
+            return
+        }
+        readyMessage = "That run failed. I can fix it from the error, or tell "
+            + "me what you saw."
+        // The full report lives on the script page; the tail is what says which
+        // failure this was.
+        if let report, !report.isEmpty {
+            messages.append(.init(role: .assistant, text: String(report.suffix(600))))
+        }
+    }
+
     func markCandidateStale() {
         hasError = false
         readyMessage = nil
+        trial = .notNeeded
     }
 
     func appendError(_ message: String) {
@@ -205,6 +251,10 @@ struct ToolBuilderChat: View {
     let preview: AnyView?
     let onSend: () -> Void
     let onSave: () -> Void
+    /// Runs the candidate for real, the same button the script page has.
+    let onTry: () -> Void
+    /// Hands the failed run's diagnostics back to the agent.
+    let onFix: () -> Void
 
     @State private var activityExpanded = false
     @FocusState private var composerFocused: Bool
@@ -389,23 +439,7 @@ struct ToolBuilderChat: View {
                         .foregroundStyle(FlowTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     preview
-                    Button(action: onSave) {
-                        Text("Save tool")
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .frame(height: 44)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(FlowTheme.raisedStrong)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                            .strokeBorder(FlowTheme.edge, lineWidth: 1)
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Save tool")
+                    readyActions
                 }
                 .padding(12)
                 .background(
@@ -416,6 +450,48 @@ struct ToolBuilderChat: View {
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    /// Save is the only button when Gizmate proved the tool itself. When it
+    /// could not, the run comes first and Save stays reachable but second —
+    /// nobody should be blocked from keeping a tool Gizmate merely couldn't test.
+    @ViewBuilder
+    private var readyActions: some View {
+        HStack(spacing: 8) {
+            switch session.trial {
+            case .untried:
+                primaryButton("Try it", action: onTry)
+                SecondaryButton(title: "Save anyway", action: onSave)
+            case .failed:
+                primaryButton("Fix it", action: onFix)
+                SecondaryButton(title: "Try again", action: onTry)
+            case .notNeeded, .passed:
+                primaryButton("Save tool", action: onSave)
+            }
+        }
+    }
+
+    private func primaryButton(
+        _ title: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(FlowTheme.raisedStrong)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(FlowTheme.edge, lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

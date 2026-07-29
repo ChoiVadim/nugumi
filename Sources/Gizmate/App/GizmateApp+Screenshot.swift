@@ -182,4 +182,38 @@ extension GizmateApp {
         ).showModal()
     }
 
+    /// Takes the screen area a `.screenshot` or `.screenshotText` tool runs on.
+    ///
+    /// Same drag and the same window-hiding as screen reading, for the same
+    /// reason: Gizmate's own panels are capturable, and their labels would end
+    /// up in the shot and in whatever Vision reads out of it. Vision runs only
+    /// when the tool actually asked for text — a tool that wants the PNG should
+    /// not pay for recognition it will never look at.
+    @MainActor
+    func captureToolScreenshot(readingText: Bool) async throws -> ToolScreenshot {
+        let sharingSnapshot = Self.hideAppWindowsFromScreenCapture()
+        let imageURL: URL
+        do {
+            imageURL = try await ScreenshotCapture.captureInteractiveArea()
+        } catch {
+            Self.restoreAppWindowSharing(sharingSnapshot)
+            throw error
+        }
+        Self.restoreAppWindowSharing(sharingSnapshot)
+
+        guard readingText else {
+            return ToolScreenshot(imageURL: imageURL, text: "")
+        }
+        do {
+            let text = try await ImageTextRecognizer.recognizeText(in: imageURL)
+            return ToolScreenshot(
+                imageURL: imageURL,
+                text: text.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        } catch {
+            try? FileManager.default.removeItem(at: imageURL)
+            throw error
+        }
+    }
+
 }

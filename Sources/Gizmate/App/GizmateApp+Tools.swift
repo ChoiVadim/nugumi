@@ -10,13 +10,100 @@ extension GizmateApp {
     @MainActor
     func runTool(_ tool: GizmateTool, selection: String) {
         guard tool.isUsable else { return }
+        if tool.input.needsPrompt {
+            askForToolInput(tool)
+            return
+        }
+        guard tool.input.needsCapture else {
+            dispatch(tool, selection: selection, screenshot: nil)
+            return
+        }
+        // The drag has to happen before anything else can run, and it is the one
+        // input the user can walk away from — a cancelled capture is a cancelled
+        // tool, not an error worth a dialog.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let shot = try await self.captureToolScreenshot(
+                    readingText: tool.input == .screenshotText
+                )
+                self.dispatch(
+                    tool,
+                    // From here on a capture tool looks like a selection tool:
+                    // prompt and native paths take their one input as text.
+                    selection: tool.input == .screenshotText
+                        ? shot.text
+                        : shot.imageURL.path,
+                    screenshot: shot
+                )
+            } catch {
+                guard !ScreenshotTranslationError.isCancellation(error) else { return }
+                self.presentScreenshotTranslationError(error)
+            }
+        }
+    }
 
+    /// Runs a `.ask` tool on whatever the user types into the capsule.
+    @MainActor
+    func askForToolInput(_ tool: GizmateTool) {
+        Task { @MainActor [weak self] in
+            guard let self, let typed = await self.promptForToolInput(tool) else { return }
+            self.dispatch(tool, selection: typed, screenshot: nil)
+        }
+    }
+
+    /// Borrows the Ask capsule for a `.ask` tool's one input, and returns what
+    /// was typed. nil when the capsule was dismissed — an input the user walked
+    /// away from is a cancelled tool, not an error worth a dialog, exactly as a
+    /// cancelled screen capture is.
+    @MainActor
+    func promptForToolInput(_ tool: GizmateTool) async -> String? {
+        toolPromptController?.close()
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            var resumed = false
+            let finish: (String?) -> Void = { value in
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: value)
+            }
+            let controller = AskPromptController(
+                near: NSEvent.mouseLocation,
+                placeholder: tool.name,
+                onSubmit: { [weak self] typed in
+                    // Answered before the capsule closes, because `close()` runs
+                    // `onClose` synchronously — the other way round and the
+                    // dismissal would resume with nil and eat the answer.
+                    finish(typed)
+                    self?.toolPromptController?.close()
+                },
+                onClose: { [weak self] in
+                    self?.toolPromptController = nil
+                    // The capsule holds focus, and a `.replace` tool has to type
+                    // into the app the user came from.
+                    SelfActivationGuard.relinquish()
+                    finish(nil)
+                }
+            )
+            toolPromptController = controller
+            controller.show()
+        }
+    }
+
+    @MainActor
+    private func dispatch(
+        _ tool: GizmateTool,
+        selection: String,
+        screenshot: ToolScreenshot?
+    ) {
         switch tool.kind {
         case .python:
-            runScriptTool(tool, selection: selection)
+            runScriptTool(tool, selection: selection, screenshot: screenshot)
             return
         case .native:
             runNativeTool(tool, selection: selection)
+            return
+        case .agent:
+            runAgentTool(tool, selection: selection, screenshot: screenshot)
             return
         case .prompt:
             break
@@ -25,6 +112,18 @@ extension GizmateApp {
         let armed = TextNormalizer.cleanedSelection(selection)
         if !armed.isEmpty {
             run(tool, on: armed, near: NSEvent.mouseLocation, selectionRect: nil)
+            return
+        }
+
+        // A capture tool has no second source of input. Falling through to the
+        // selection read would quietly run it on whatever text happens to be
+        // highlighted, which is not what the user just dragged a box around.
+        guard !tool.input.needsCapture else {
+            presentSelectionTranslationError(
+                ToolRunError.noInput(tool.input).localizedDescription
+                    ?? "Nothing to work on.",
+                title: tool.name
+            )
             return
         }
 

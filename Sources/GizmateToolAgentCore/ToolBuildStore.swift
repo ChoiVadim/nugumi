@@ -8,8 +8,18 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
     public let operation: ToolAgentOperationV1
     public let currentTool: ToolAgentInstalledToolV1?
     public let failure: String?
+    /// Names of the secrets the user has stored, offered to the model through
+    /// `read_build_context` so a candidate can read one instead of inventing a
+    /// place to put a key. Names only — a value never enters this process.
+    public let availableSecretNames: [String]
 
-    public init(runID: UUID = UUID(), description: String, budgets: ToolAgentBudgetsV1 = .preview, createdAt: Date = Date()) {
+    public init(
+        runID: UUID = UUID(),
+        description: String,
+        budgets: ToolAgentBudgetsV1 = .preview,
+        createdAt: Date = Date(),
+        availableSecretNames: [String] = []
+    ) {
         self.runID = runID
         self.description = description
         self.budgets = budgets
@@ -17,6 +27,7 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
         self.operation = .create
         self.currentTool = nil
         self.failure = nil
+        self.availableSecretNames = availableSecretNames
     }
 
     public init(
@@ -26,7 +37,8 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
         createdAt: Date = Date(),
         operation: ToolAgentOperationV1,
         currentTool: ToolAgentInstalledToolV1? = nil,
-        failure: String? = nil
+        failure: String? = nil,
+        availableSecretNames: [String] = []
     ) throws {
         try ToolAgentRequestContractV1.validate(
             operation: operation,
@@ -40,6 +52,7 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
         self.operation = operation
         self.currentTool = currentTool
         self.failure = failure
+        self.availableSecretNames = availableSecretNames
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -50,6 +63,7 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
         case operation
         case currentTool
         case failure
+        case availableSecretNames
     }
 
     public init(from decoder: Decoder) throws {
@@ -61,7 +75,8 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
             createdAt: container.decode(Date.self, forKey: .createdAt),
             operation: container.decodeIfPresent(ToolAgentOperationV1.self, forKey: .operation) ?? .create,
             currentTool: container.decodeIfPresent(ToolAgentInstalledToolV1.self, forKey: .currentTool),
-            failure: container.decodeIfPresent(String.self, forKey: .failure)
+            failure: container.decodeIfPresent(String.self, forKey: .failure),
+            availableSecretNames: container.decodeIfPresent([String].self, forKey: .availableSecretNames) ?? []
         )
     }
 
@@ -74,6 +89,7 @@ public struct ToolBuildRequestV1: Codable, Equatable, Sendable {
         try container.encode(operation, forKey: .operation)
         try container.encodeIfPresent(currentTool, forKey: .currentTool)
         try container.encodeIfPresent(failure, forKey: .failure)
+        try container.encode(availableSecretNames, forKey: .availableSecretNames)
     }
 }
 

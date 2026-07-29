@@ -89,6 +89,9 @@ extension GizmateApp {
 
         translateButtonController?.close()
         translateButtonController = nil
+        // A `.ask` tool is waiting on the same capsule. Two of them on screen at
+        // once is never what anyone meant by pressing the Ask shortcut.
+        toolPromptController?.close()
         closeAskAnnotationOverlay()
         translationPanelController?.close()
         translationPanelController = nil

@@ -48,11 +48,14 @@ extension ToolBuildSupervisor {
         switch envelope.request {
         case .readBuildContext:
             let charged = try await store.record(runID: request.runID)
-            response = .readBuildContext(.init(remaining: .init(
-                modelTurns: request.budgets.modelTurns - charged.counters.modelTurns,
-                toolCalls: request.budgets.toolCalls - charged.counters.toolCalls,
-                repairs: request.budgets.repairs - charged.counters.repairs
-            )))
+            response = .readBuildContext(.init(
+                remaining: .init(
+                    modelTurns: request.budgets.modelTurns - charged.counters.modelTurns,
+                    toolCalls: request.budgets.toolCalls - charged.counters.toolCalls,
+                    repairs: request.budgets.repairs - charged.counters.repairs
+                ),
+                secretNames: request.availableSecretNames
+            ))
         case .writeCandidate(let write):
             response = .writeCandidate(try await acceptWrite(write, request: request))
         case .runValidation(let validationRequest):

@@ -48,7 +48,7 @@ struct ToolEditorPanel: View {
 
     @EnvironmentObject var bridge: GizmateSettingsBridge
     let toolID: UUID?
-    let assignTo: Int?
+    let assignTo: RingSlotAddress?
 
     @State private var draft = GizmateTool()
     @State private var script = ""
@@ -95,7 +95,9 @@ struct ToolEditorPanel: View {
                     isBuilding: generating || test.isRunning,
                     preview: hasTool ? AnyView(summaryCard) : nil,
                     onSend: sendChatMessage,
-                    onSave: save
+                    onSave: save,
+                    onTry: runTest,
+                    onFix: repairScript
                 )
             } else {
                 ScrollView {
@@ -338,6 +340,7 @@ struct ToolEditorPanel: View {
             ) {
                 VStack(alignment: .leading, spacing: 18) {
                     nameAndIcon
+                    kindPicker
                 }
             }
 
@@ -411,6 +414,13 @@ struct ToolEditorPanel: View {
                     scriptSettings
                 }
                 editorSection(
+                    "Secrets",
+                    subtitle: "Keys this script may read from its environment. "
+                        + "It gets the ones ticked here and nothing else."
+                ) {
+                    ToolSecretsPicker(selection: $draft.secretNames)
+                }
+                editorSection(
                     "Test before saving",
                     subtitle: "Run this exact version once and inspect its output."
                 ) {
@@ -418,6 +428,45 @@ struct ToolEditorPanel: View {
                         consentNotice
                         testSection
                     }
+                }
+            case .agent:
+                editorSection(
+                    "Instruction",
+                    subtitle: "What the agent should accomplish. It decides how, "
+                        + "one step at a time."
+                ) {
+                    promptField
+                }
+                editorSection(
+                    "Availability and result",
+                    subtitle: "Choose when it appears, what it starts from, and "
+                        + "where its answer goes."
+                ) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        triggerPicker
+                        inputPicker
+                        resultPicker
+                    }
+                }
+                editorSection(
+                    "Limits",
+                    subtitle: "The only bound on a tool whose steps nobody can "
+                        + "read in advance."
+                ) {
+                    agentSettings
+                }
+                editorSection(
+                    "Secrets",
+                    subtitle: "Keys the agent's scripts may read from their "
+                        + "environment. They get the ones ticked here and nothing else."
+                ) {
+                    ToolSecretsPicker(selection: $draft.secretNames)
+                }
+                editorSection(
+                    "What you are agreeing to",
+                    subtitle: "Read this before you save."
+                ) {
+                    agentConsentNotice
                 }
             }
         }
@@ -458,6 +507,8 @@ struct ToolEditorPanel: View {
             return "One macOS action from a fixed list. No code, nothing to install."
         case .python:
             return "A Python script, run by uv with its own dependencies."
+        case .agent:
+            return "An instruction carried out step by step, writing and running its own code."
         }
     }
 
@@ -517,7 +568,7 @@ struct ToolEditorPanel: View {
             ToolApprovals.revoke(tool.id)
         }
         if let assignTo {
-            bridge.ringLayout.assign(.tool(tool.id), to: assignTo)
+            bridge.ringLayout.assign(.tool(tool.id), to: assignTo.index, in: assignTo.path)
         }
         dismiss()
     }
@@ -547,9 +598,14 @@ struct ToolEditorPanel: View {
                         .foregroundStyle(FlowTheme.ink)
                         .frame(width: 32, height: 32)
                         .background(Circle().fill(FlowTheme.subtleFill))
-                    Text(draft.symbolName)
-                        .font(.system(size: 11.5, design: .monospaced))
+                    // The exact identifier stays reachable on hover, for the one
+                    // person who wants to search for it or type it somewhere.
+                    Text(ToolIcons.displayName(for: draft.resolvedSymbolName))
+                        .font(.system(size: 12))
                         .foregroundStyle(FlowTheme.inkSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(draft.resolvedSymbolName)
                     Spacer(minLength: 0)
                     Button(showIconPicker ? "Done" : "Change") {
                         withAnimation(.easeOut(duration: 0.16)) {
@@ -568,37 +624,84 @@ struct ToolEditorPanel: View {
         }
     }
 
+    /// The builder normally decides the kind, but a tool is not locked into what
+    /// it was generated as — and without this there is no way to write an agent
+    /// tool by hand at all.
+    ///
+    /// On its own line rather than in a `SettingRow`: four pills are `.fixedSize`
+    /// at `minWidth: 78` each, so they demand ~320pt that they will not give
+    /// back. Sharing a row with a label and a sentence pushed the panel's whole
+    /// content wider than the panel and clipped it at both edges. The kind's
+    /// explanation is already the panel's subtitle, so there is nothing to
+    /// repeat here either.
+    private var kindPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            fieldLabel("Kind", hint: "What this tool does when you press it.")
+            PillPicker(
+                options: ToolKind.allCases,
+                selection: $draft.kind,
+                label: { $0.displayName }
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var resultPicker: some View {
         SettingRow("Result", subtitle: draft.output.explanation) {
             PillPicker(
-                options: draft.kind == .prompt ? Self.promptOutputs : ToolOutput.allCases,
+                options: Self.outputs(for: draft.kind),
                 selection: $draft.output,
                 label: { $0.displayName }
             )
         }
     }
 
-    /// A prompt tool only ever produces text, so `files` and `notify` aren't offered.
+    /// A prompt tool only ever produces text, so `files` and `notify` aren't
+    /// offered. An agent finishes with text too, but a side-effect agent that
+    /// only wants to say "done" is a real shape, so it keeps `notify`.
     private static let promptOutputs: [ToolOutput] = [.panel, .replace, .clipboard]
+    private static let agentOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notify]
 
-    // MARK: - Action mode
+    private static func outputs(for kind: ToolKind) -> [ToolOutput] {
+        switch kind {
+        case .prompt: return promptOutputs
+        case .agent: return agentOutputs
+        case .native, .python: return ToolOutput.allCases
+        }
+    }
 
-    private var actionPicker: some View {
+    // MARK: - Wrapping picker
+
+    /// A wrapping grid of choices, for pickers with more entries than a pill row
+    /// can hold.
+    ///
+    /// `PillPicker` is deliberately incapable of this: its pills are
+    /// `.fixedSize()` so a label like "Text on screen" keeps its full width and
+    /// never truncates. That is right for three or four choices and impossible
+    /// for eight — the row simply demands more than the 640pt panel has, and
+    /// what overflows is not the picker but the entire panel's content, clipped
+    /// at both edges. Anything past about five options belongs here instead.
+    private func wrappingPicker<Option: Hashable>(
+        _ title: String,
+        hint: String?,
+        options: [Option],
+        selection: Binding<Option>,
+        label: @escaping (Option) -> String
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            fieldLabel("Action", hint: draft.nativeAction.explanation)
-            // A wrapping grid rather than a pill row: six actions don't fit on
-            // one line at the panel's width.
+            fieldLabel(title, hint: hint)
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 150), spacing: 6)],
                 alignment: .leading,
                 spacing: 6
             ) {
-                ForEach(NativeAction.allCases, id: \.self) { action in
-                    let isSelected = draft.nativeAction == action
-                    Button { draft.nativeAction = action } label: {
-                        Text(action.displayName)
+                ForEach(options, id: \.self) { option in
+                    let isSelected = option == selection.wrappedValue
+                    Button { selection.wrappedValue = option } label: {
+                        Text(label(option))
                             .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
                             .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
+                            .lineLimit(1)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 7)
                             .background(
@@ -611,6 +714,19 @@ struct ToolEditorPanel: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Action mode
+
+    private var actionPicker: some View {
+        wrappingPicker(
+            "Action",
+            hint: draft.nativeAction.explanation,
+            options: NativeAction.allCases,
+            selection: $draft.nativeAction,
+            label: { $0.displayName }
+        )
     }
 
     private var targetField: some View {
@@ -705,7 +821,16 @@ struct ToolEditorPanel: View {
 
     private func candidateReady(_ name: String) {
         readyDraftFingerprint = currentDraftFingerprint
-        chat.candidateReady(name, note: generatedAssurance?.explanation)
+        chat.candidateReady(
+            name,
+            note: generatedAssurance?.explanation,
+            // Only `.verified` means Gizmate saw the right answer come out.
+            // `.smoke` proves the tool survives, `.unverified` proves it starts
+            // — for both, the one check left is the user running it.
+            trial: generatedAssurance == nil || generatedAssurance == .verified
+                ? .notNeeded
+                : .untried
+        )
     }
 
     private func generate(_ requestedTool: String? = nil) {
@@ -857,14 +982,16 @@ struct ToolEditorPanel: View {
         }
     }
 
+    /// Eight inputs, with labels as long as "Text on screen" — far past what a
+    /// pill row fits, which is what pushed the whole panel wider than itself.
     private var inputPicker: some View {
-        SettingRow("Input", subtitle: "What the script is handed when it runs.") {
-            PillPicker(
-                options: ToolInput.allCases,
-                selection: $draft.input,
-                label: { $0.displayName }
-            )
-        }
+        wrappingPicker(
+            "Input",
+            hint: "What the tool is handed when it runs.",
+            options: ToolInput.allCases,
+            selection: $draft.input,
+            label: { $0.displayName }
+        )
     }
 
     private var outputDirectoryField: some View {
@@ -908,6 +1035,66 @@ struct ToolEditorPanel: View {
                     .tint(FlowTheme.accent)
             }
         }
+    }
+
+    private var agentSettings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SettingRow(
+                "Steps",
+                subtitle: "How many scripts it may run before it has to answer."
+            ) {
+                Stepper(
+                    value: Binding(
+                        get: { draft.maxSteps },
+                        set: { draft.maxSteps = max(1, min(24, $0)) }
+                    ),
+                    in: 1...24
+                ) {
+                    Text("\(draft.maxSteps)")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(FlowTheme.ink)
+                }
+                .fixedSize()
+            }
+            SettingRow(
+                "Time limit",
+                subtitle: "The whole run is stopped after this many seconds."
+            ) {
+                Stepper(
+                    value: Binding(
+                        get: { draft.timeoutSeconds },
+                        set: { draft.timeoutSeconds = max(15, min(900, $0)) }
+                    ),
+                    in: 15...900,
+                    step: 15
+                ) {
+                    Text("\(draft.timeoutSeconds)s")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(FlowTheme.ink)
+                }
+                .fixedSize()
+            }
+        }
+    }
+
+    private var agentConsentNotice: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.42))
+            Text("An agent tool writes its own code and runs it, deciding what to do as it "
+                + "goes. There is no code to read before you allow it, because none exists "
+                + "until you press the button. What you approve is this instruction, the "
+                + "step budget and the secrets — change any of them and Gizmate asks again. "
+                + "Give it work you would be comfortable doing yourself without checking.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
     }
 
     private var consentNotice: some View {
@@ -993,6 +1180,9 @@ struct ToolEditorPanel: View {
         liveOutput = ""
         elapsed = 0
         test = .running
+        // The ready card hides while this runs, so without a line here the chat
+        // shows a spinner over whatever internal step happened to run last.
+        chat.recordActivity("Running it once, for real…")
         passedTestFingerprint = nil
         runningTestFingerprint = fingerprint
         // A visible clock, because "Running…" on its own can't tell a 3-second
@@ -1021,9 +1211,17 @@ struct ToolEditorPanel: View {
             }
             runningTestFingerprint = nil
             test = outcome
-            if case .passed = outcome {
+            let trialing = chat.trial != .notNeeded
+            switch outcome {
+            case .passed:
                 passedTestFingerprint = fingerprint
-            } else {
+                if trialing { chat.trialFinished(passed: true) }
+            case .failed(let report) where trialing:
+                // Keep the card up: a failed trial is where "Fix it" belongs,
+                // and it hands the agent the real diagnostics instead of making
+                // the user retype them.
+                chat.trialFinished(passed: false, report: report)
+            default:
                 readyDraftFingerprint = nil
                 chat.markCandidateStale()
             }
@@ -1179,16 +1377,26 @@ struct IconGrid: View {
     var height: CGFloat = 108
 
     @State private var query = ""
+    @State private var limit = IconGrid.pageSize
+    /// Held in state, not recomputed in `body`: every cell's `onAppear` reads it,
+    /// so a computed property meant re-scanning 8k names a couple hundred times
+    /// per page — which is exactly what made typing feel sticky.
+    @State private var matches: [String] = ToolIcons.matching("")
+
+    /// Twelve columns, so a page is ten rows — a couple of scrolls' worth.
+    private static let pageSize = 120
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 12)
 
-    private var results: [String] {
-        // Capped so a one-letter query doesn't try to lay out thousands of cells.
-        Array(ToolIcons.matching(query).prefix(600))
-    }
+    /// Paged, so a one-letter query doesn't try to lay out thousands of cells.
+    /// The last visible cell pulls the next page in, so the whole catalog is
+    /// still reachable by scrolling.
+    private var results: [String] { Array(matches.prefix(limit)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // One container, search bar docked on top of its own grid — two separate
+        // rounded boxes read as two text fields next to the name field above.
+        VStack(spacing: 0) {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 11, weight: .medium))
@@ -1206,10 +1414,10 @@ struct IconGrid: View {
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .padding(.horizontal, 10)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.white.opacity(0.05)))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+
+            Rectangle().fill(FlowTheme.hairline).frame(height: 1)
 
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 6) {
@@ -1228,6 +1436,12 @@ struct IconGrid: View {
                         }
                         .buttonStyle(.plain)
                         .help(name)
+                        // ponytail: last-cell onAppear instead of a scroll-offset
+                        // observer — .onScrollTargetVisibilityChange is macOS 15.
+                        .onAppear {
+                            guard name == results.last, results.count < matches.count else { return }
+                            limit += Self.pageSize
+                        }
                     }
                 }
                 .padding(8)
@@ -1239,8 +1453,13 @@ struct IconGrid: View {
                 }
             }
             .frame(height: height)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+        }
+        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+        .onChange(of: query) { _, newValue in
+            matches = ToolIcons.matching(newValue)
+            limit = Self.pageSize
         }
     }
 }

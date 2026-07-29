@@ -28,9 +28,12 @@ export function createTools(runtime: SidecarRuntime) {
     symbolName: Type.String({ maxLength: 128 }),
     input: Type.Union([
       Type.Literal("selection"),
+      Type.Literal("ask"),
       Type.Literal("clipboardText"),
       Type.Literal("clipboardURL"),
       Type.Literal("files"),
+      Type.Literal("screenshot"),
+      Type.Literal("screenshotText"),
       Type.Literal("none"),
     ]),
     output: Type.Union([
@@ -53,7 +56,11 @@ export function createTools(runtime: SidecarRuntime) {
     Type.Object({
       ...commonCandidate,
       kind: Type.Literal("prompt"),
-      input: Type.Literal("selection"),
+      input: Type.Union([
+        Type.Literal("selection"),
+        Type.Literal("ask"),
+        Type.Literal("screenshotText"),
+      ]),
       output: Type.Union([
         Type.Literal("panel"),
         Type.Literal("replace"),
@@ -95,6 +102,36 @@ export function createTools(runtime: SidecarRuntime) {
       outputDirectory: Type.Optional(Type.String({ maxLength: 8192 })),
       timeoutSeconds: Type.Integer({ minimum: 5, maximum: 1800 }),
       declaresNetwork: Type.Boolean(),
+      // Optional, not required-and-empty: most tools need no credential at all,
+      // and making every candidate carry `secretNames: []` would break every
+      // shape the model already knows how to write.
+      secretNames: Type.Optional(
+        Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8 }),
+      ),
+    }),
+    Type.Object({
+      ...commonCandidate,
+      kind: Type.Literal("agent"),
+      output: Type.Union([
+        Type.Literal("panel"),
+        Type.Literal("replace"),
+        Type.Literal("clipboard"),
+        Type.Literal("notify"),
+      ]),
+      prompt: Type.String({ maxLength: 16_384 }),
+      // At most one, with no expectedOutput: an agent's answer is not
+      // predictable, so the fixture is the input a harmless trial run should
+      // use, and none at all means running it for real would do something the
+      // user did not ask for yet.
+      fixtures: Type.Array(
+        Type.Object({ input: Type.String({ maxLength: 8192 }) }),
+        { minItems: 0, maxItems: 1 },
+      ),
+      maxSteps: Type.Integer({ minimum: 1, maximum: 24 }),
+      timeoutSeconds: Type.Integer({ minimum: 15, maximum: 900 }),
+      secretNames: Type.Optional(
+        Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8 }),
+      ),
     }),
   ]);
   const tool = <T extends ReturnType<typeof Type.Object>>(definition: {

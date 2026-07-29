@@ -1,4 +1,8 @@
-import { InMemoryCredentialStore, type Model, type Provider } from "@earendil-works/pi-ai";
+import {
+  InMemoryCredentialStore,
+  type Model,
+  type Provider,
+} from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -9,15 +13,38 @@ import {
 import { createInterface, type Interface } from "node:readline";
 import {
   parseInbound,
+  parseToolResponse,
   ProtocolError,
+  type Inbound,
+  type RunInbound,
   type StartPayload,
+  type ToolName,
 } from "./protocol.js";
-import { SidecarRuntime } from "./runtime.js";
+import { SidecarRuntime, type SessionInbound } from "./runtime.js";
 import { createTools } from "./tools.js";
 
 type ProviderBundle = {
   readonly provider: Provider<string>;
   readonly model: Model<string>;
+};
+
+/// Everything that differs between a tool *build* session and an agent tool's
+/// *run* session. The Pi wiring below — hermetic model runtime, no built-in
+/// tools, no extensions, no network — is identical for both and deliberately
+/// lives in exactly one place, so a run session cannot accidentally be granted
+/// something a build session was carefully denied.
+export type SidecarDefinition<TStart> = {
+  readonly parseLine: (line: string) => {
+    readonly runID: string;
+    readonly message: Inbound | RunInbound;
+  };
+  readonly parseResponse: (name: string, payload: unknown) => unknown;
+  readonly systemPrompt: string;
+  readonly makeTools: (
+    runtime: SidecarRuntime,
+  ) => ReturnType<typeof createTools>;
+  readonly initialPrompt: (start: TStart) => string;
+  readonly makeProvider: (runtime: SidecarRuntime) => ProviderBundle;
 };
 
 export function makeInitialPrompt(start: StartPayload): string {
@@ -29,45 +56,82 @@ export function makeInitialPrompt(start: StartPayload): string {
   });
 }
 
-export async function runSidecar(
+export const buildSystemPrompt =
+  "Build and verify one complete Gizmate tool using only the five available tools. For Create, Edit, and Fix, ask up to three short clarifications before the first candidate write only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.";
+
+export function buildDefinition(
   makeProvider: (runtime: SidecarRuntime) => ProviderBundle,
+): SidecarDefinition<StartPayload> {
+  return {
+    parseLine: parseInbound,
+    parseResponse: (name, payload) =>
+      parseToolResponse(name as ToolName, payload),
+    systemPrompt: buildSystemPrompt,
+    makeTools: createTools,
+    initialPrompt: makeInitialPrompt,
+    makeProvider,
+  };
+}
+
+export async function runSidecar<TStart>(
+  definition: SidecarDefinition<TStart>,
 ): Promise<void> {
   let runtime: SidecarRuntime | undefined;
   let input: Interface | undefined;
   let timeout: NodeJS.Timeout | undefined;
   try {
-    input = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
+    input = createInterface({
+      input: process.stdin,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
     const iterator = input[Symbol.asyncIterator]();
     const first = await iterator.next();
     if (first.done) throw new ProtocolError("invalidProtocol", "missing start");
-    const parsed = parseInbound(first.value);
-    if (parsed.message.type !== "start") throw new ProtocolError("invalidProtocol", "first message must be start");
-    runtime = new SidecarRuntime(parsed.runID, parsed.message.payload);
+    const parsed = definition.parseLine(first.value);
+    if (parsed.message.type !== "start")
+      throw new ProtocolError("invalidProtocol", "first message must be start");
+    const start = parsed.message.payload as unknown as TStart & {
+      readonly budgets: StartPayload["budgets"];
+    };
+    runtime = new SidecarRuntime(
+      parsed.runID,
+      start,
+      undefined,
+      definition.parseResponse,
+    );
     const activeRuntime = runtime;
     const pump = (async () => {
       for await (const line of iterator) {
-        const next = parseInbound(line);
-        if (next.runID !== activeRuntime.runID || next.message.type === "start") {
+        const next = definition.parseLine(line);
+        if (
+          next.runID !== activeRuntime.runID ||
+          next.message.type === "start"
+        ) {
           throw new ProtocolError("invalidProtocol", "invalid run message");
         }
-        activeRuntime.receive(next.message);
+        activeRuntime.receive(next.message as SessionInbound);
       }
     })();
     void pump.catch((error: unknown) => {
-      activeRuntime.fail("invalidProtocol", error instanceof Error ? error.message : "input failure");
+      activeRuntime.fail(
+        "invalidProtocol",
+        error instanceof Error ? error.message : "input failure",
+      );
     });
     timeout = setTimeout(
       () => activeRuntime.abortController.abort("deadlineExceeded"),
       activeRuntime.start.budgets.durationSeconds * 1000,
     );
-    const bundle = makeProvider(activeRuntime);
+    const bundle = definition.makeProvider(activeRuntime);
     const modelRuntime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
       modelsPath: null,
       allowModelNetwork: false,
     });
     modelRuntime.registerNativeProvider(bundle.provider);
-    const settings = SettingsManager.inMemory({ compaction: { enabled: false } });
+    const settings = SettingsManager.inMemory({
+      compaction: { enabled: false },
+    });
     const loader = new DefaultResourceLoader({
       cwd: "/",
       agentDir: "/",
@@ -77,11 +141,10 @@ export async function runSidecar(
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      systemPrompt:
-        "Build and verify one complete Gizmate tool using only the five available tools. For Create, Edit, and Fix, ask up to three short clarifications before the first candidate write only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.",
+      systemPrompt: definition.systemPrompt,
     });
     await loader.reload();
-    const tools = createTools(activeRuntime);
+    const tools = definition.makeTools(activeRuntime);
     const { session } = await createAgentSession({
       cwd: "/",
       modelRuntime,
@@ -99,7 +162,7 @@ export async function runSidecar(
       { once: true },
     );
     activeRuntime.emit("state", { state: "understanding" });
-    const prompt = session.prompt(makeInitialPrompt(activeRuntime.start), {
+    const prompt = session.prompt(definition.initialPrompt(start), {
       expandPromptTemplates: false,
     });
     await Promise.race([prompt, activeRuntime.waitForFailure()]);
@@ -121,7 +184,10 @@ export async function runSidecar(
           : error instanceof ProtocolError && error.message.includes("budget")
             ? "budgetExhausted"
             : "invalidProtocol";
-    runtime?.fail(code, error instanceof Error ? error.message : "sidecar failure");
+    runtime?.fail(
+      code,
+      error instanceof Error ? error.message : "sidecar failure",
+    );
     if (runtime === undefined) process.exitCode = 1;
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);

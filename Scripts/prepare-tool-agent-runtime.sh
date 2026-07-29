@@ -173,6 +173,10 @@ PNPM_VERSION="$(
     fail "ToolAgent build did not emit dist/agent.mjs"
 [ -f "$BUILD_SOURCE/dist/gate.mjs" ] ||
     fail "ToolAgent build did not emit dist/gate.mjs"
+# The agent-tool run sidecar. Without it a packaged build looks fine until
+# someone presses an agent tool, which then reports the runtime as missing.
+[ -f "$BUILD_SOURCE/dist/run.mjs" ] ||
+    fail "ToolAgent build did not emit dist/run.mjs"
 [ -d "$DEPLOY_ROOT/node_modules" ] ||
     fail "pnpm deploy did not emit production node_modules"
 
@@ -198,6 +202,10 @@ AGENT_SHA256="$(
 )"
 GATE_SHA256="$(
     /usr/bin/shasum -a 256 "$STAGED_RUNTIME/dist/gate.mjs" |
+        /usr/bin/awk '{print $1}'
+)"
+RUN_SHA256="$(
+    /usr/bin/shasum -a 256 "$STAGED_RUNTIME/dist/run.mjs" |
         /usr/bin/awk '{print $1}'
 )"
 PACKAGE_JSON_SHA256="$(
@@ -230,6 +238,7 @@ PI_CODING_AGENT_VERSION="$(
     --arg piCodingAgentVersion "$PI_CODING_AGENT_VERSION" \
     --arg pnpmLockSHA256 "$PNPM_LOCK_SHA256" \
     --arg pnpmVersion "$PNPM_VERSION" \
+    --arg runSHA256 "$RUN_SHA256" \
     '{
         agentSHA256: $agentSHA256,
         architecture: $architecture,
@@ -242,7 +251,8 @@ PI_CODING_AGENT_VERSION="$(
         piAIVersion: $piAIVersion,
         piCodingAgentVersion: $piCodingAgentVersion,
         pnpmLockSHA256: $pnpmLockSHA256,
-        pnpmVersion: $pnpmVersion
+        pnpmVersion: $pnpmVersion,
+        runSHA256: $runSHA256
     }' >"$STAGED_RUNTIME/runtime.json"
 
 /usr/bin/jq -e '
@@ -258,7 +268,8 @@ PI_CODING_AGENT_VERSION="$(
         "piAIVersion",
         "piCodingAgentVersion",
         "pnpmLockSHA256",
-        "pnpmVersion"
+        "pnpmVersion",
+        "runSHA256"
     ] and
     all(.[]; type == "string") and
     all(.[]; test("^/") | not)

@@ -285,6 +285,12 @@ final class GizmateSettingsBridge: ObservableObject {
     /// Active tab inside the AI Engine section (0 = Models, 1 = Providers).
     /// Programmatic "go set up a provider" deep links set this to 1.
     @Published var aiEngineTab: Int = 0
+    /// Active tab inside Voice (0 = Style, 1 = Languages, 2 = About you).
+    @Published var voiceTab: Int = 0
+    /// Active tab inside Library (0 = Dictionary, 1 = Snippets).
+    @Published var libraryTab: Int = 0
+    /// Active tab inside Settings (0 = General, 1 = Shortcuts).
+    @Published var settingsTab: Int = 0
     /// Engine picked on the onboarding finale — that group's card leads the
     /// Providers tab. `nil` keeps the default order.
     @Published var engineSetupFocus: EngineSetupFocus?
@@ -468,31 +474,29 @@ enum EngineSetupFocus: String, CaseIterable, Hashable {
     case local, subscription, apiKeys
 }
 
+/// Sidebar destinations. Related settings live together behind one entry with a
+/// tab bar rather than as separate rows — `voice` covers how Gizmate writes,
+/// `library` the words it reuses, `settings` behaviour plus hotkeys.
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
-    case home, insights, dictionary, snippets, style, languages, aiEngine, shortcuts
-    case aboutYou
-    case ring
+    case home, ring, insights
+    case voice, library, aiEngine
     case settings, help
 
     var id: String { rawValue }
 
     static var primary: [MainWindowSection] {
-        [.home, .ring, .insights, .style, .languages, .aiEngine, .aboutYou, .dictionary, .snippets]
+        [.home, .ring, .insights, .voice, .library, .aiEngine]
     }
-    static var secondary: [MainWindowSection] { [.shortcuts, .settings, .help] }
+    static var secondary: [MainWindowSection] { [.settings, .help] }
 
     var title: String {
         switch self {
         case .home: return "Home"
         case .insights: return "Insights"
-        case .dictionary: return "Dictionary"
-        case .snippets: return "Snippets"
-        case .style: return "Style"
-        case .aboutYou: return "About you"
         case .ring: return "Ring"
-        case .languages: return "Languages"
+        case .voice: return "Voice"
+        case .library: return "Library"
         case .aiEngine: return "AI Engine"
-        case .shortcuts: return "Shortcuts"
         case .settings: return "Settings"
         case .help: return "Help"
         }
@@ -502,14 +506,10 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: return "house"
         case .insights: return "chart.bar"
-        case .dictionary: return "character.book.closed"
-        case .snippets: return "text.badge.plus"
-        case .style: return "textformat"
-        case .aboutYou: return "person.crop.circle"
         case .ring: return "circle.hexagongrid"
-        case .languages: return "globe"
+        case .voice: return "textformat"
+        case .library: return "books.vertical"
         case .aiEngine: return "cpu"
-        case .shortcuts: return "command"
         case .settings: return "gearshape"
         case .help: return "questionmark.circle"
         }
@@ -572,7 +572,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.titlebarSeparatorStyle = .none
-        window.isMovableByWindowBackground = true
+        // Deliberately NOT movable by its background: a press anywhere in the
+        // content would start dragging the window, which is the same press the
+        // Ring uses to carry a button to another slot. `WindowDragStrip` puts
+        // the drag back where it belongs — the header, alongside the traffic
+        // lights.
+        window.isMovableByWindowBackground = false
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 1000, height: 720)
         window.setFrameAutosaveName("GizmateMainWindowV5")
@@ -654,6 +659,13 @@ struct MainWindowRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The header is the whole window's drag handle now, so the content below
+        // it is free to use presses for its own purposes. It goes on before the
+        // panels, which cover the window while they are up and take the top
+        // band with it.
+        .overlay(alignment: .top) {
+            WindowDragStrip().frame(height: WindowDragStrip.height)
+        }
         .overlay {
             if let scope = bridge.modelPickerScope {
                 ModelPickerOverlay(
@@ -669,6 +681,39 @@ struct MainWindowRootView: View {
         .overlay {
             if let sheet = bridge.ringSheet {
                 RingSheetOverlay(sheet: sheet)
+            }
+        }
+    }
+}
+
+/// The strip of window across the top — the band the traffic lights sit in.
+/// Pressing it drags the window, the way pressing a title bar does; everything
+/// else is left to the content underneath.
+private struct WindowDragStrip: NSViewRepresentable {
+    /// A standard title bar's height. The sidebar and every detail card already
+    /// keep their contents clear of it.
+    static let height: CGFloat = 28
+
+    func makeNSView(context: Context) -> NSView { DragStripView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class DragStripView: NSView {
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
+
+        /// Dragging an inactive window shouldn't cost a click to focus it first.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        /// Claims presses and nothing else. Scrolling with the pointer up here,
+        /// or hovering something that peeks into the strip, still reaches
+        /// whatever is underneath.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            switch NSApp.currentEvent?.type {
+            case .leftMouseDown, .leftMouseUp, .leftMouseDragged:
+                return super.hitTest(point)
+            default:
+                return nil
             }
         }
     }
@@ -703,7 +748,7 @@ struct SidebarView: View {
             Image(nsImage: Self.brandIcon)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 24, height: 24)
+                .frame(width: 32, height: 32)
             // "Gizmate" with a small round β badge raised like a superscript.
             HStack(alignment: .top, spacing: 1) {
                 Text("Gizmate")
@@ -726,7 +771,7 @@ struct SidebarView: View {
                 .help("Update available - click to install")
             }
         }
-        .frame(height: 26)
+        .frame(height: 34)
     }
 
     private static let brandIcon: NSImage = BrandMark.appIcon ?? NSApp.applicationIconImage
@@ -825,6 +870,22 @@ struct DetailContainer<Content: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.accessory = nil
+        self.pinned = AnyView(pinned)
+        self.content = content
+    }
+
+    /// Tabbed section whose header button belongs to the selected tab — pass
+    /// `nil` for tabs that have no button of their own.
+    init<Pinned: View>(
+        _ title: String,
+        subtitle: String? = nil,
+        pinned: Pinned,
+        accessory: AnyView?,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.accessory = accessory
         self.pinned = AnyView(pinned)
         self.content = content
     }

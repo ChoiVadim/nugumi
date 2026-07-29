@@ -9,20 +9,38 @@ import Foundation
 /// file URLs on the general pasteboard, so file tools work with no Automation
 /// (AppleScript) permission at all. Nothing here is sent anywhere — it only
 /// decides which buttons the ring shows until the user picks one.
+/// One screen area a tool asked for, already taken.
+///
+/// Both readings are carried together rather than branching at capture time,
+/// because the same drag answers both questions and the tool's declared input
+/// decides which one it gets. `text` is empty for a `.screenshot` tool — Vision
+/// is only run when someone is going to read the result.
+struct ToolScreenshot: Equatable {
+    let imageURL: URL
+    let text: String
+}
+
 struct ToolContext: Equatable {
     var selection: String = ""
     var clipboardText: String?
     var clipboardURL: URL?
     var clipboardFiles: [URL] = []
+    /// Set only for a tool whose input needs one, and only after the user has
+    /// dragged it out. Nothing captures the screen to build a ring.
+    var screenshot: ToolScreenshot?
 
     static let empty = ToolContext()
 
     /// Reads the current pasteboard. `selection` comes from the presenter, which
     /// already has it armed.
     @MainActor
-    static func current(selection: String) -> ToolContext {
+    static func current(
+        selection: String,
+        screenshot: ToolScreenshot? = nil
+    ) -> ToolContext {
         let pasteboard = NSPasteboard.general
         var context = ToolContext(selection: selection.trimmingCharacters(in: .whitespacesAndNewlines))
+        context.screenshot = screenshot
 
         // File URLs first: a Finder copy carries both file URLs and a text
         // representation, and the files are the more specific reading.
@@ -59,7 +77,12 @@ struct ToolContext: Equatable {
     /// a script with no arguments). `.files` yields one entry per file.
     func arguments(for input: ToolInput) -> [String]? {
         switch input {
-        case .selection:
+        // `.ask` rides on `selection` rather than carrying a field of its own:
+        // the runner resolves the typed text before it builds a context and
+        // hands it over in exactly the slot a selection would occupy, so a
+        // script or prompt downstream cannot tell the two apart. That is the
+        // whole point — one argument, whoever typed it.
+        case .selection, .ask:
             return selection.isEmpty ? nil : [selection]
         case .clipboardText:
             guard let clipboardText, !clipboardText.isEmpty else { return nil }
@@ -69,6 +92,12 @@ struct ToolContext: Equatable {
             return [clipboardURL.absoluteString]
         case .files:
             return clipboardFiles.isEmpty ? nil : clipboardFiles.map(\.path)
+        case .screenshot:
+            guard let screenshot else { return nil }
+            return [screenshot.imageURL.path]
+        case .screenshotText:
+            guard let screenshot, !screenshot.text.isEmpty else { return nil }
+            return [screenshot.text]
         case .none:
             return []
         }

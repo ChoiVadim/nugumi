@@ -3,8 +3,8 @@ import {
   parseToolResponse,
   ProtocolError,
   type Inbound,
+  type RunInbound,
   type StartPayload,
-  type ToolName,
 } from "./protocol.js";
 
 type Pending =
@@ -17,10 +17,23 @@ type Pending =
   | {
       readonly kind: "tool";
       readonly id: string;
-      readonly name: ToolName;
+      readonly name: string;
       readonly resolve: (value: unknown) => void;
       readonly reject: (error: Error) => void;
     };
+
+/// Everything the transport needs from a start payload. A build session and an
+/// agent-tool run carry completely different requests but the same budgets, so
+/// the runtime is written against this and nothing else.
+export type SessionStart = Pick<StartPayload, "budgets">;
+
+/// The messages the host can send once a session is running. Identical for both
+/// session kinds apart from which tool names are legal, which the inbound schema
+/// has already checked by the time anything reaches here.
+export type SessionInbound = Exclude<
+  Inbound | RunInbound,
+  { readonly type: "start" }
+>;
 
 function sameUUID(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
@@ -38,18 +51,30 @@ export class SidecarRuntime {
   private turns = 0;
   private calls = 0;
   private writes = 0;
-  private finished:
-    | { readonly candidateID: string; readonly fingerprint: { readonly value: string } }
-    | undefined;
+  /// What this session will report in its `completed` envelope. A build sets it
+  /// through `attest`, which accepts only the host's exact candidateID and
+  /// fingerprint; an agent-tool run sets it through `finishWith`. Either way
+  /// `complete()` refuses to declare success without one.
+  private result: unknown | undefined;
 
   public constructor(
     readonly runID: string,
-    readonly start: StartPayload,
-    private readonly output: (line: string) => void = (line) => process.stdout.write(line),
+    readonly start: SessionStart,
+    private readonly output: (line: string) => void = (line) =>
+      process.stdout.write(line),
+    private readonly parseResponse: (
+      name: string,
+      payload: unknown,
+    ) => unknown = (name, payload) =>
+      parseToolResponse(
+        name as Parameters<typeof parseToolResponse>[0],
+        payload,
+      ),
   ) {}
 
   public emit(type: string, payload: unknown): void {
-    if (this.terminal === "open") this.output(encodeEnvelope(this.runID, type, payload));
+    if (this.terminal === "open")
+      this.output(encodeEnvelope(this.runID, type, payload));
   }
 
   public chargeTurn(): void {
@@ -60,7 +85,7 @@ export class SidecarRuntime {
     }
   }
 
-  private chargeTool(name: ToolName): void {
+  private chargeTool(name: string): void {
     this.calls += 1;
     if (this.calls > this.start.budgets.toolCalls) {
       this.fail("budgetExhausted", "tool call budget exhausted");
@@ -81,12 +106,16 @@ export class SidecarRuntime {
   ): Promise<string> {
     this.chargeTurn();
     const requestID = crypto.randomUUID();
-    this.emit("modelRequest", { requestID, system: context.system, user: context.user });
+    this.emit("modelRequest", {
+      requestID,
+      system: context.system,
+      user: context.user,
+    });
     return this.awaitResponse("model", requestID, undefined, signal);
   }
 
   public requestTool(
-    name: ToolName,
+    name: string,
     payload: Record<string, unknown>,
     callID: string,
     signal: AbortSignal | undefined,
@@ -105,20 +134,23 @@ export class SidecarRuntime {
   private awaitResponse(
     kind: "tool",
     id: string,
-    name: ToolName,
+    name: string,
     signal: AbortSignal | undefined,
   ): Promise<unknown>;
   private awaitResponse(
     kind: Pending["kind"],
     id: string,
-    name: ToolName | undefined,
+    name: string | undefined,
     signal: AbortSignal | undefined,
   ): Promise<unknown> {
     if (this.pending !== undefined) {
-      return Promise.reject(new ProtocolError("invalidProtocol", "concurrent request"));
+      return Promise.reject(
+        new ProtocolError("invalidProtocol", "concurrent request"),
+      );
     }
     return new Promise((resolve, reject) => {
-      const onAbort = () => reject(new ProtocolError("invalidProtocol", "cancelled"));
+      const onAbort = () =>
+        reject(new ProtocolError("invalidProtocol", "cancelled"));
       signal?.addEventListener("abort", onAbort, { once: true });
       const guardedResolve = (value: unknown) => {
         signal?.removeEventListener("abort", onAbort);
@@ -131,25 +163,40 @@ export class SidecarRuntime {
       this.pending =
         kind === "model"
           ? { kind, id, resolve: guardedResolve, reject: guardedReject }
-          : { kind, id, name: name ?? "read_build_context", resolve: guardedResolve, reject: guardedReject };
+          : {
+              kind,
+              id,
+              name: name ?? "read_build_context",
+              resolve: guardedResolve,
+              reject: guardedReject,
+            };
     });
   }
 
-  public receive(message: Exclude<Inbound, { readonly type: "start" }>): void {
+  public receive(message: SessionInbound): void {
     if (message.type === "cancel") {
       this.fail("cancelled", message.payload.reason);
       return;
     }
     const pending = this.pending;
-    if (pending === undefined) throw new ProtocolError("invalidProtocol", "unexpected response");
+    if (pending === undefined)
+      throw new ProtocolError("invalidProtocol", "unexpected response");
     if (message.type === "modelResponse") {
-      if (pending.kind !== "model" || !sameUUID(message.payload.requestID, pending.id)) {
-        throw new ProtocolError("invalidProtocol", "mismatched model response ID");
+      if (
+        pending.kind !== "model" ||
+        !sameUUID(message.payload.requestID, pending.id)
+      ) {
+        throw new ProtocolError(
+          "invalidProtocol",
+          "mismatched model response ID",
+        );
       }
       this.pending = undefined;
       if (message.payload.result.kind === "error") {
         this.fail(message.payload.result.error, "model bridge failed");
-        pending.reject(new ProtocolError("invalidProtocol", "model bridge failed"));
+        pending.reject(
+          new ProtocolError("invalidProtocol", "model bridge failed"),
+        );
       } else {
         pending.resolve(message.payload.result.text);
       }
@@ -163,7 +210,9 @@ export class SidecarRuntime {
       throw new ProtocolError("invalidProtocol", "mismatched tool response ID");
     }
     this.pending = undefined;
-    pending.resolve(parseToolResponse(pending.name, message.payload.result.payload));
+    pending.resolve(
+      this.parseResponse(pending.name, message.payload.result.payload),
+    );
   }
 
   public attest(expected: unknown, value: unknown): void {
@@ -194,11 +243,21 @@ export class SidecarRuntime {
       expected.fingerprint !== null &&
       "value" in expected.fingerprint &&
       expected.fingerprint.value === value.fingerprint.value;
-    if (!exact) throw new ProtocolError("invalidProtocol", "attestation mismatch");
-    this.finished = {
+    if (!exact)
+      throw new ProtocolError("invalidProtocol", "attestation mismatch");
+    this.result = {
       candidateID: value.candidateID,
       fingerprint: { value: value.fingerprint.value },
     };
+  }
+
+  /// An agent-tool run's equivalent of `attest`. There is nothing to attest —
+  /// the answer is whatever the agent worked out, not a candidate the host
+  /// independently validated — so this only records it. The host is the one that
+  /// decides whether to trust the answer, and it already decided when the user
+  /// approved the tool.
+  public finishWith(value: unknown): void {
+    this.result = value;
   }
 
   public rejectModelAction(error: Error): void {
@@ -211,15 +270,18 @@ export class SidecarRuntime {
   }
 
   public rejectFinalText(text: string): void {
-    if (this.finished === undefined) this.fail("invalidCandidate", text);
+    if (this.result === undefined) this.fail("invalidCandidate", text);
   }
 
   public complete(): void {
-    if (this.finished === undefined) {
-      throw new ProtocolError("invalidProtocol", "session ended without attestation");
+    if (this.result === undefined) {
+      throw new ProtocolError(
+        "invalidProtocol",
+        "session ended without attestation",
+      );
     }
     if (!this.transition("completed")) return;
-    this.output(encodeEnvelope(this.runID, "completed", this.finished));
+    this.output(encodeEnvelope(this.runID, "completed", this.result));
   }
 
   public get hasFailed(): boolean {
@@ -238,7 +300,9 @@ export class SidecarRuntime {
     this.pending?.reject(new ProtocolError("invalidProtocol", message));
     this.pending = undefined;
     const safeMessage = Buffer.from(message).subarray(0, 1024).toString();
-    this.output(encodeEnvelope(this.runID, "failed", { code, message: safeMessage }));
+    this.output(
+      encodeEnvelope(this.runID, "failed", { code, message: safeMessage }),
+    );
   }
 
   private transition(next: "failed" | "completed"): boolean {

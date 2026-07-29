@@ -8,6 +8,7 @@ HELPER="$APP/Contents/Resources/ToolAgent"
 NODE="$APP/Contents/Helpers/ToolAgentNode"
 AGENT_ENTRYPOINT="$HELPER/dist/agent.mjs"
 GATE_ENTRYPOINT="$HELPER/dist/gate.mjs"
+RUN_ENTRYPOINT="$HELPER/dist/run.mjs"
 MANIFEST="$HELPER/runtime.json"
 XPC="$APP/Contents/XPCServices/GizmateToolWorker.xpc"
 WORKER_EXECUTABLE="$XPC/Contents/MacOS/GizmateToolWorker"
@@ -194,7 +195,8 @@ mkdir -p "$GATE_DIR"
         "piAIVersion",
         "piCodingAgentVersion",
         "pnpmLockSHA256",
-        "pnpmVersion"
+        "pnpmVersion",
+        "runSHA256"
     ] and
     all(.[]; type == "string") and
     all(.[]; test("^/") | not)
@@ -216,6 +218,7 @@ require_value \
 require_digest "$NODE" '.nodeSHA256'
 require_digest "$AGENT_ENTRYPOINT" '.agentSHA256'
 require_digest "$GATE_ENTRYPOINT" '.gateSHA256'
+require_digest "$RUN_ENTRYPOINT" '.runSHA256'
 require_digest "$HELPER/package.json" '.packageJSONSHA256'
 
 SOURCE_LOCK_SHA="$(

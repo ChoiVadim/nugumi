@@ -14,6 +14,10 @@ public enum ToolAgentProtocolLimitsV1 {
     public static let maximumFixtureOutputBytes = 16 * 1_024
     public static let maximumDiagnosticBytes = 16 * 1_024
     public static let maximumFixtureCount = 3
+    /// A tool that claims it needs eight different credentials has misunderstood
+    /// the request, not found a use case.
+    public static let maximumSecretNameCount = 8
+    public static let maximumSecretNameBytes = 64
     public static let maximumFilterCount = 16
     public static let maximumFilterValueBytes = 255
     public static let maximumSafeMessageBytes = 1_024
@@ -138,6 +142,10 @@ public enum ToolAgentCandidateKindV1: String, Codable, Equatable, Sendable {
     case prompt
     case native
     case python
+    /// An instruction carried out at run time by an agent that writes and runs
+    /// its own Python. Unlike the other three, what it will actually do is not
+    /// decided until the user presses the button.
+    case agent
 }
 
 public enum ToolAgentOperationV1: String, Codable, CaseIterable, Equatable, Sendable {
@@ -148,9 +156,17 @@ public enum ToolAgentOperationV1: String, Codable, CaseIterable, Equatable, Send
 
 public enum ToolAgentCandidateInputV1: String, Codable, Equatable, Sendable {
     case selection
+    /// The user types the tool's input into a capsule when it runs; the tool is
+    /// handed exactly that text, in the slot a selection would occupy.
+    case ask
     case clipboardText
     case clipboardURL
     case files
+    /// The user drags out a screen area when the tool runs; the tool is handed
+    /// the path to the captured PNG.
+    case screenshot
+    /// The same drag, read by Vision; the tool is handed the recognised text.
+    case screenshotText
     case none
 }
 
@@ -202,6 +218,13 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     public let outputDirectory: String?
     public let timeoutSeconds: Int
     public let declaresNetwork: Bool
+    /// Names of the user's stored secrets this tool asks to be handed, as
+    /// environment variables. Names only — a value never crosses this protocol
+    /// in either direction, so the model can write `os.environ["OPENAI_API_KEY"]`
+    /// without ever being shown the key.
+    public let secretNames: [String]
+    /// `.agent` only: how many scripts the agent may run before it must answer.
+    public let maxSteps: Int
 
     public init(
         kind: ToolAgentCandidateKindV1,
@@ -221,7 +244,9 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         fixtures: [ToolAgentFixtureV1] = [],
         outputDirectory: String? = nil,
         timeoutSeconds: Int = 120,
-        declaresNetwork: Bool = false
+        declaresNetwork: Bool = false,
+        secretNames: [String] = [],
+        maxSteps: Int = 8
     ) throws {
         try Self.validate(
             kind: kind,
@@ -239,7 +264,9 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             source: source,
             fixtures: fixtures,
             outputDirectory: outputDirectory,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            secretNames: secretNames,
+            maxSteps: maxSteps
         )
         self.schemaVersion = 1
         self.kind = kind
@@ -260,6 +287,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.outputDirectory = outputDirectory
         self.timeoutSeconds = timeoutSeconds
         self.declaresNetwork = declaresNetwork
+        self.secretNames = secretNames
+        self.maxSteps = maxSteps
     }
 
     /// Keeps persisted phase-zero Python runs and existing protocol fixtures
@@ -336,6 +365,11 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .declaresNetwork
         ) ?? false
+        let secretNames = try container.decodeIfPresent(
+            [String].self,
+            forKey: .secretNames
+        ) ?? []
+        let maxSteps = try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
         guard schemaVersion == 1 else {
             throw ToolAgentFailureCodeV1.invalidCandidate
         }
@@ -355,7 +389,9 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             source: source,
             fixtures: fixtures,
             outputDirectory: outputDirectory,
-            timeoutSeconds: timeoutSeconds
+            timeoutSeconds: timeoutSeconds,
+            secretNames: secretNames,
+            maxSteps: maxSteps
         )
         self.schemaVersion = schemaVersion
         self.kind = kind
@@ -376,6 +412,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.outputDirectory = outputDirectory
         self.timeoutSeconds = timeoutSeconds
         self.declaresNetwork = declaresNetwork
+        self.secretNames = secretNames
+        self.maxSteps = maxSteps
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -403,6 +441,22 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             try container.encodeIfPresent(outputDirectory, forKey: .outputDirectory)
             try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
             try container.encode(declaresNetwork, forKey: .declaresNetwork)
+            // Omitted when empty, not written as `[]`. `ToolAgentModelActionValidator`
+            // accepts a candidate by re-encoding it and comparing byte for byte
+            // against what the model sent, so a key the model had no reason to
+            // write must not appear on the way back — and a tool with no secrets
+            // keeps the exact fingerprint it had before secrets existed.
+            if !secretNames.isEmpty {
+                try container.encode(secretNames, forKey: .secretNames)
+            }
+        case .agent:
+            try container.encode(prompt, forKey: .prompt)
+            try container.encode(fixtures, forKey: .fixtures)
+            try container.encode(maxSteps, forKey: .maxSteps)
+            try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
+            if !secretNames.isEmpty {
+                try container.encode(secretNames, forKey: .secretNames)
+            }
         }
     }
 
@@ -422,7 +476,9 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         source: String,
         fixtures: [ToolAgentFixtureV1],
         outputDirectory: String?,
-        timeoutSeconds: Int
+        timeoutSeconds: Int,
+        secretNames: [String],
+        maxSteps: Int
     ) throws {
         guard !name.isEmpty,
               !brief.isEmpty,
@@ -443,6 +499,15 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                           $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFixtureOutputBytes
                       }) ?? true
               }),
+              // Shape is not checked here — the alphabet is enforced where it
+              // actually matters, in `ToolSecrets`, which resolves these into a
+              // path and refuses anything that could leave its directory.
+              secretNames.count <= ToolAgentProtocolLimitsV1.maximumSecretNameCount,
+              Set(secretNames).count == secretNames.count,
+              secretNames.allSatisfy({
+                  !$0.isEmpty
+                      && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumSecretNameBytes
+              }),
               trigger != .link || input == .clipboardURL,
               trigger != .files || input == .files,
               trigger != .selection || input == .selection else {
@@ -451,7 +516,10 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
 
         switch kind {
         case .prompt:
-            guard input == .selection,
+            // Only a Python tool reads a process environment, so a prompt or
+            // native candidate that declares secrets has misunderstood what it
+            // is building rather than found a way to use one.
+            guard input == .selection || input == .ask,
                   output != .files,
                   output != .notify,
                   !prompt.isEmpty,
@@ -460,6 +528,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                   target.isEmpty,
                   source.isEmpty,
                   fixtures.isEmpty,
+                  secretNames.isEmpty,
                   outputDirectory == nil else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
@@ -469,6 +538,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                   prompt.isEmpty,
                   source.isEmpty,
                   fixtures.isEmpty,
+                  secretNames.isEmpty,
                   outputDirectory == nil,
                   target.utf8.count <= ToolAgentProtocolLimitsV1.maximumTargetBytes,
                   !nativeAction.needsTarget || !target.isEmpty else {
@@ -495,6 +565,31 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                   output != .files || outputDirectory != nil else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
+        case .agent:
+            // An agent tool is its instruction plus its bounds: no source,
+            // because it writes its own at run time, and no file output, because
+            // it finishes with text.
+            //
+            // Fixtures mean here what they mean for Python, with the same
+            // choice behind them: at most one, as the input a harmless trial run
+            // should use, and none at all when actually running the tool would
+            // do something to the user's data or to the outside world. An
+            // expected output is never allowed — an agent's answer is not
+            // predictable, and pretending otherwise would make every build fail
+            // on wording.
+            guard !prompt.isEmpty,
+                  prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
+                  output != .files,
+                  nativeAction == nil,
+                  target.isEmpty,
+                  source.isEmpty,
+                  fixtures.count <= 1,
+                  fixtures.allSatisfy({ $0.expectedOutput == nil }),
+                  outputDirectory == nil,
+                  (1...24).contains(maxSteps),
+                  (15...900).contains(timeoutSeconds) else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
         }
     }
 
@@ -518,6 +613,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         case outputDirectory
         case timeoutSeconds
         case declaresNetwork
+        case secretNames
+        case maxSteps
     }
 }
 
@@ -543,6 +640,11 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
     public let outputDirectory: String?
     public let timeoutSeconds: Int
     public let declaresNetwork: Bool
+    /// Which secrets the installed tool already reads, so an edit can keep them
+    /// rather than silently dropping the tool's credentials. Names only.
+    public let secretNames: [String]
+    /// `.agent` only, and preserved across an edit for the same reason.
+    public let maxSteps: Int
 
     public init(
         kind: ToolAgentCandidateKindV1,
@@ -561,7 +663,9 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         source: String = "",
         outputDirectory: String? = nil,
         timeoutSeconds: Int = 120,
-        declaresNetwork: Bool = false
+        declaresNetwork: Bool = false,
+        secretNames: [String] = [],
+        maxSteps: Int = 8
     ) throws {
         try Self.validate(
             kind: kind,
@@ -580,7 +684,9 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             source: source,
             outputDirectory: outputDirectory,
             timeoutSeconds: timeoutSeconds,
-            declaresNetwork: declaresNetwork
+            declaresNetwork: declaresNetwork,
+            secretNames: secretNames,
+            maxSteps: maxSteps
         )
         self.kind = kind
         self.name = name
@@ -599,6 +705,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         self.outputDirectory = outputDirectory
         self.timeoutSeconds = timeoutSeconds
         self.declaresNetwork = declaresNetwork
+        self.secretNames = secretNames
+        self.maxSteps = maxSteps
     }
 
     public init(from decoder: Decoder) throws {
@@ -621,7 +729,9 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             outputDirectory: try container.decodeIfPresent(String.self, forKey: .outputDirectory),
             timeoutSeconds: try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
                 ?? (try container.decode(ToolAgentCandidateKindV1.self, forKey: .kind) == .python ? 30 : 120),
-            declaresNetwork: try container.decodeIfPresent(Bool.self, forKey: .declaresNetwork) ?? false
+            declaresNetwork: try container.decodeIfPresent(Bool.self, forKey: .declaresNetwork) ?? false,
+            secretNames: try container.decodeIfPresent([String].self, forKey: .secretNames) ?? [],
+            maxSteps: try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
         )
     }
 
@@ -648,6 +758,18 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             try container.encodeIfPresent(outputDirectory, forKey: .outputDirectory)
             try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
             try container.encode(declaresNetwork, forKey: .declaresNetwork)
+            // Same as the candidate: absent rather than `[]`, so a tool with no
+            // secrets serialises exactly as it did before this field existed.
+            if !secretNames.isEmpty {
+                try container.encode(secretNames, forKey: .secretNames)
+            }
+        case .agent:
+            try container.encode(prompt, forKey: .prompt)
+            try container.encode(maxSteps, forKey: .maxSteps)
+            try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
+            if !secretNames.isEmpty {
+                try container.encode(secretNames, forKey: .secretNames)
+            }
         }
     }
 
@@ -668,7 +790,9 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         source: String,
         outputDirectory: String?,
         timeoutSeconds: Int,
-        declaresNetwork: Bool
+        declaresNetwork: Bool,
+        secretNames: [String],
+        maxSteps: Int
     ) throws {
         guard !name.isEmpty,
               !symbolName.isEmpty,
@@ -681,6 +805,12 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
                   !$0.isEmpty
                       && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFilterValueBytes
               }),
+              secretNames.count <= ToolAgentProtocolLimitsV1.maximumSecretNameCount,
+              Set(secretNames).count == secretNames.count,
+              secretNames.allSatisfy({
+                  !$0.isEmpty
+                      && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumSecretNameBytes
+              }),
               trigger != .link || input == .clipboardURL,
               trigger != .files || input == .files,
               trigger != .selection || input == .selection else {
@@ -689,7 +819,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
 
         switch kind {
         case .prompt:
-            guard input == .selection,
+            guard input == .selection || input == .ask,
                   output != .files,
                   output != .notify,
                   !prompt.isEmpty,
@@ -697,6 +827,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
                   nativeAction == nil,
                   target.isEmpty,
                   source.isEmpty,
+                  secretNames.isEmpty,
                   outputDirectory == nil,
                   timeoutSeconds == 120,
                   !declaresNetwork else {
@@ -708,6 +839,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
                   prompt.isEmpty,
                   !appliesTargetLanguage,
                   source.isEmpty,
+                  secretNames.isEmpty,
                   outputDirectory == nil,
                   timeoutSeconds == 120,
                   !declaresNetwork,
@@ -728,6 +860,19 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
                   }) ?? true,
                   (5...1_800).contains(timeoutSeconds),
                   output != .files || outputDirectory != nil else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        case .agent:
+            guard !prompt.isEmpty,
+                  prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
+                  output != .files,
+                  !appliesTargetLanguage,
+                  nativeAction == nil,
+                  target.isEmpty,
+                  source.isEmpty,
+                  outputDirectory == nil,
+                  (1...24).contains(maxSteps),
+                  (15...900).contains(timeoutSeconds) else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
         }
@@ -751,6 +896,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case outputDirectory
         case timeoutSeconds
         case declaresNetwork
+        case secretNames
+        case maxSteps
     }
 }
 

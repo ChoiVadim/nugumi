@@ -36,9 +36,12 @@ enum ToolRunError: LocalizedError {
         case .noInput(let input):
             switch input {
             case .selection: return "Select some text first."
+            case .ask: return "Nothing was typed."
             case .clipboardText: return "Copy some text first."
             case .clipboardURL: return "Copy a link first."
             case .files: return "Copy one or more files in Finder first."
+            case .screenshot: return "No screen area was captured."
+            case .screenshotText: return "No text was found in that screen area."
             case .none: return nil
             }
         case .timedOut(let seconds):
@@ -93,6 +96,11 @@ enum ToolRunner {
                 arguments: arguments,
                 workDir: workDir,
                 timeout: max(5, tool.timeoutSeconds),
+                // Derived here rather than passed in, so no call site can forget
+                // them and quietly hand the model a "None" to debug — and so a
+                // candidate under validation runs with the same keys the saved
+                // tool will have.
+                secrets: ToolSecrets.environment(for: tool.secretNames),
                 onOutput: onOutput
             )
         } catch {
@@ -143,6 +151,7 @@ enum ToolRunner {
         arguments: [String],
         workDir: URL,
         timeout: Int,
+        secrets: [String: String],
         onOutput: (@Sendable (String) -> Void)?
     ) async throws -> RawResult {
         let process = Process()
@@ -152,7 +161,11 @@ enum ToolRunner {
         // metadata, so the script's own dependency header is what gets resolved.
         process.arguments = ["run", "--no-project", "--script", scriptURL.path] + arguments
         process.currentDirectoryURL = workDir
-        process.environment = UVBootstrap.environment()
+        // Secrets go in the environment, never in argv: argv is readable by any
+        // process on the machine via `ps`. On a name collision the runtime wins
+        // — `PATH` and `HOME` are legal secret names, and a tool that shadowed
+        // either would break uv rather than authenticate anything.
+        process.environment = UVBootstrap.environment().merging(secrets) { runtime, _ in runtime }
 
         let outPipe = Pipe()
         let errPipe = Pipe()

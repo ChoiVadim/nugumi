@@ -66,9 +66,26 @@ public struct ToolAgentToolRequestEnvelopeV1: Codable, Equatable, Sendable {
 
 public struct ToolAgentReadBuildContextResponseV1: Codable, Equatable, Sendable {
     public let remaining: ToolAgentUsageCountersV1
+    /// The secrets the user has already stored, by name. A Python candidate may
+    /// read any of these from its environment provided it also lists them in
+    /// `secretNames`. Values are never sent — the model writes
+    /// `os.environ["OPENAI_API_KEY"]` without ever seeing the key.
+    public let secretNames: [String]
 
-    public init(remaining: ToolAgentUsageCountersV1) {
+    public init(remaining: ToolAgentUsageCountersV1, secretNames: [String] = []) {
         self.remaining = remaining
+        self.secretNames = secretNames
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.remaining = try container.decode(ToolAgentUsageCountersV1.self, forKey: .remaining)
+        self.secretNames = try container.decodeIfPresent([String].self, forKey: .secretNames) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case remaining
+        case secretNames
     }
 }
 

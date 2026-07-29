@@ -10,15 +10,11 @@ struct DetailRouter: View {
         switch section {
         case .home: HomeSection()
         case .insights: InsightsSection()
-        case .dictionary: DictionarySection()
-        case .snippets: SnippetsSection()
-        case .style: StyleSection()
-        case .aboutYou: AboutYouSection()
         case .ring: RingSection()
-        case .languages: LanguagesSection()
+        case .voice: VoiceSection()
+        case .library: LibrarySection()
         case .aiEngine: AIEngineSection()
-        case .shortcuts: ShortcutsSection()
-        case .settings: BehaviorSection()
+        case .settings: SettingsSection()
         case .help: HelpSection()
         }
     }
@@ -496,26 +492,49 @@ private struct DonutChart: View {
     }
 }
 
-// MARK: - Style
+// MARK: - Voice
 
-struct StyleSection: View {
+/// How Gizmate sounds: the register it writes in, the languages it answers in,
+/// and the background it keeps about you. Three tabs, one sidebar entry.
+struct VoiceSection: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
     var body: some View {
         DetailContainer(
-            "Style",
-            subtitle: "How Gizmate writes when it rewrites your messages and replies.",
-            accessory: HStack(spacing: 8) {
-                Text("Gen Z")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-                Toggle("", isOn: bridge.binding(\.genZMode) { .setGenZMode($0) })
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .tint(FlowTheme.accent)
-            }
-            .help("works both ways 💀 your texts come out in gen z AND gizmate explains everything back to you in it too, zero unc energy anywhere")
+            "Voice",
+            subtitle: "How Gizmate sounds when it writes for you.",
+            pinned: FlowTabBar(tabs: ["Style", "Languages", "About you"], selection: $bridge.voiceTab),
+            accessory: bridge.voiceTab == 0 ? AnyView(genZToggle) : nil
         ) {
+            switch bridge.voiceTab {
+            case 0: StyleTab()
+            case 1: LanguagesTab()
+            default: AboutYouTab()
+            }
+        }
+    }
+
+    private var genZToggle: some View {
+        HStack(spacing: 8) {
+            Text("Gen Z")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(FlowTheme.inkSecondary)
+            Toggle("", isOn: bridge.binding(\.genZMode) { .setGenZMode($0) })
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(FlowTheme.accent)
+        }
+        .help("works both ways 💀 your texts come out in gen z AND gizmate explains everything back to you in it too, zero unc energy anywhere")
+    }
+}
+
+// MARK: - Style
+
+private struct StyleTab: View {
+    @EnvironmentObject var bridge: GizmateSettingsBridge
+
+    var body: some View {
+        Group {
             PageBanner(
                 title: "Your voice, per place",
                 message: "Gizmate picks a category automatically from the app you're in. Set the register for each below.",
@@ -1092,11 +1111,11 @@ private struct FlowWrap: Layout {
 
 // MARK: - Languages
 
-struct LanguagesSection: View {
+private struct LanguagesTab: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
     var body: some View {
-        DetailContainer("Languages", subtitle: "The language Gizmate replies in.") {
+        Group {
             SubCard {
                 VStack(spacing: 18) {
                     SettingRow("Reading language",
@@ -1998,9 +2017,36 @@ private struct SetupStepRow: View {
     }
 }
 
+// MARK: - Settings
+
+/// How Gizmate behaves while you work, plus the hotkeys that reach it. Both
+/// answer "how is this thing set up", so they share one sidebar entry.
+struct SettingsSection: View {
+    @EnvironmentObject var bridge: GizmateSettingsBridge
+
+    var body: some View {
+        DetailContainer(
+            "Settings",
+            subtitle: bridge.settingsTab == 0
+                ? "How Gizmate shows up while you work."
+                : "Global hotkeys that work from any app.",
+            pinned: FlowTabBar(tabs: ["General", "Shortcuts"], selection: $bridge.settingsTab),
+            accessory: bridge.settingsTab == 1
+                ? AnyView(SecondaryButton(title: "Reset to defaults") { bridge.perform(.resetShortcuts) })
+                : nil
+        ) {
+            if bridge.settingsTab == 0 {
+                GeneralTab()
+            } else {
+                ShortcutsTab()
+            }
+        }
+    }
+}
+
 // MARK: - Shortcuts
 
-struct ShortcutsSection: View {
+private struct ShortcutsTab: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
     /// Actions bucketed into their display groups, preserving allCases order
@@ -2013,13 +2059,7 @@ struct ShortcutsSection: View {
     }
 
     var body: some View {
-        DetailContainer(
-            "Shortcuts",
-            subtitle: "Global hotkeys that work from any app.",
-            accessory: SecondaryButton(title: "Reset to defaults") {
-                bridge.perform(.resetShortcuts)
-            }
-        ) {
+        Group {
             ForEach(groups, id: \.group) { group, actions in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(group.title.uppercased())
@@ -2059,13 +2099,13 @@ struct ShortcutsSection: View {
     }
 }
 
-// MARK: - Behavior (Settings)
+// MARK: - General behaviour
 
-struct BehaviorSection: View {
+private struct GeneralTab: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
     var body: some View {
-        DetailContainer("Settings", subtitle: "How Gizmate shows up while you work.") {
+        Group {
             SubCard {
                 VStack(spacing: 18) {
                     SettingRow("Main mode",
@@ -2114,14 +2154,11 @@ struct BehaviorSection: View {
 /// pick the meaning most relevant to them (e.g. "RLS" → Row-Level Security for
 /// a developer). Written straight to UserDefaults — prompts read it at request
 /// time, so no bridge state is involved.
-struct AboutYouSection: View {
+private struct AboutYouTab: View {
     @State private var draft = UserAboutContext.text
 
     var body: some View {
-        DetailContainer(
-            "About you",
-            subtitle: "Background Gizmate keeps in mind when it answers you."
-        ) {
+        Group {
             PageBanner(
                 title: "Better answers, your context",
                 message: "When a term has several meanings, Gizmate picks the one most relevant to you - \"RLS\" means row-level security to a developer, not a sleep disorder.",
@@ -2203,23 +2240,53 @@ struct AboutYouSection: View {
     }
 }
 
-// MARK: - Snippets & Dictionary
+// MARK: - Library (Dictionary & Snippets)
 
-struct SnippetsSection: View {
+/// The words Gizmate reuses: names it must keep verbatim, and shorthand it
+/// expands. Both are the same list over a different `SnippetKind`.
+struct LibrarySection: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
-    var body: some View { SnippetsListContent(store: bridge.snippets, kind: .snippet) }
-}
+    /// Owned here, not in the list, because the "Add" button that flips it
+    /// lives in the section header alongside the tab bar.
+    @State private var isAddingNew = false
 
-struct DictionarySection: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
-    var body: some View { SnippetsListContent(store: bridge.snippets, kind: .dictionaryTerm) }
+    private var kind: SnippetKind { bridge.libraryTab == 0 ? .dictionaryTerm : .snippet }
+
+    var body: some View {
+        DetailContainer(
+            "Library",
+            subtitle: kind == .snippet
+                ? "Short phrases Gizmate expands before rewriting."
+                : "Words and names Gizmate keeps exactly as written.",
+            pinned: FlowTabBar(tabs: ["Dictionary", "Snippets"], selection: tabSelection),
+            accessory: AnyView(
+                SecondaryButton(title: kind == .snippet ? "Add snippet" : "Add word") {
+                    isAddingNew = true
+                }
+            )
+        ) {
+            SnippetsListContent(store: bridge.snippets, kind: kind, isAddingNew: $isAddingNew)
+                // Fresh identity per tab so a row left open for editing in one
+                // list doesn't reappear as an open editor in the other.
+                .id(kind)
+        }
+    }
+
+    /// Switching tabs abandons a half-written new entry rather than carrying
+    /// the open editor across to the other list.
+    private var tabSelection: Binding<Int> {
+        Binding(
+            get: { bridge.libraryTab },
+            set: { bridge.libraryTab = $0; isAddingNew = false }
+        )
+    }
 }
 
 private struct SnippetsListContent: View {
     @ObservedObject var store: SnippetsStore
     let kind: SnippetKind
+    @Binding var isAddingNew: Bool
 
-    @State private var isAddingNew = false
     @State private var editingID: UUID?
 
     /// Newest first, so a just-saved entry lands where the add editor was.
@@ -2229,22 +2296,8 @@ private struct SnippetsListContent: View {
             .sorted { $0.createdAt > $1.createdAt }
     }
 
-    private var title: String { kind == .snippet ? "Snippets" : "Dictionary" }
-    private var subtitle: String {
-        kind == .snippet
-            ? "Short phrases Gizmate expands before rewriting."
-            : "Words and names Gizmate keeps exactly as written."
-    }
-
     var body: some View {
-        DetailContainer(
-            title,
-            subtitle: subtitle,
-            accessory: SecondaryButton(title: kind == .snippet ? "Add snippet" : "Add word") {
-                editingID = nil
-                isAddingNew = true
-            }
-        ) {
+        Group {
             if items.isEmpty && !isAddingNew {
                 SubCard {
                     Text(kind == .snippet
@@ -2307,6 +2360,11 @@ private struct SnippetsListContent: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+        }
+        // The header's Add button can't reach `editingID`; close any open row
+        // editor when it opens the new-entry editor.
+        .onChange(of: isAddingNew) { _, adding in
+            if adding { editingID = nil }
         }
     }
 }

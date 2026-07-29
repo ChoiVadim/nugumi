@@ -18,6 +18,14 @@ export const LIMITS = {
   diagnosticBytes: 16 * 1024,
   filterCount: 16,
   filterValueBytes: 255,
+  // Mirrors ToolAgentProtocolLimitsV1.maximumSecretName*.
+  secretNameCount: 8,
+  secretNameBytes: 64,
+  // An agent tool's own input, and the answer it finishes with. The answer is
+  // roomier than a build session's finalText because it *is* the tool's output:
+  // it lands in the result panel or on the clipboard.
+  agentInputBytes: 64 * 1024,
+  agentResultBytes: 32 * 1024,
 } as const;
 
 export const TOOL_NAMES = [
@@ -29,6 +37,14 @@ export const TOOL_NAMES = [
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
+
+/// The tools an *agent tool* has while it runs, as opposed to the five a build
+/// session has. Deliberately two: everything an agent might want to reach — the
+/// network, the user's files, a subprocess — it reaches through Python, so a
+/// larger catalog would buy reach it already has.
+export const RUN_TOOL_NAMES = ["run_python", "finish"] as const;
+
+export type RunToolName = (typeof RUN_TOOL_NAMES)[number];
 
 const byteString = (maximum: number, allowEmpty = false) =>
   z
@@ -61,9 +77,12 @@ const commonCandidate = {
   symbolName: byteString(LIMITS.symbolBytes),
   input: z.enum([
     "selection",
+    "ask",
     "clipboardText",
     "clipboardURL",
     "files",
+    "screenshot",
+    "screenshotText",
     "none",
   ]),
   output: z.enum(["panel", "replace", "clipboard", "files", "notify"]),
@@ -78,7 +97,10 @@ const promptCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("prompt"),
-    input: z.literal("selection"),
+    // A prompt tool works on text the user is looking at. "screenshotText" is
+    // that same text, read off the screen instead of out of a selection, and
+    // "ask" is text the user types when the tool runs.
+    input: z.enum(["selection", "ask", "screenshotText"]),
     output: z.enum(["panel", "replace", "clipboard"]),
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
@@ -128,6 +150,35 @@ const pythonCandidate = z
     outputDirectory: byteString(LIMITS.targetBytes).optional(),
     timeoutSeconds: z.number().int().min(5).max(1800),
     declaresNetwork: z.boolean(),
+    // Names of the user's stored secrets this tool reads from its environment.
+    // Names only — the host never sends a value across this protocol.
+    secretNames: z
+      .array(byteString(LIMITS.secretNameBytes))
+      .max(LIMITS.secretNameCount)
+      .default([]),
+  })
+  .strict();
+
+const agentCandidate = z
+  .object({
+    ...commonCandidate,
+    kind: z.literal("agent"),
+    output: z.enum(["panel", "replace", "clipboard", "notify"]),
+    prompt: byteString(LIMITS.promptBytes),
+    // At most one, and never with an expectedOutput: an agent's answer is not
+    // predictable, so a fixture is the input a harmless trial run should use,
+    // and none at all means running it for real would do something to the
+    // user's data or to the outside world.
+    fixtures: z
+      .array(z.object({ input: byteString(LIMITS.fixtureInputBytes) }).strict())
+      .max(1)
+      .default([]),
+    maxSteps: z.number().int().min(1).max(24),
+    timeoutSeconds: z.number().int().min(15).max(900),
+    secretNames: z
+      .array(byteString(LIMITS.secretNameBytes))
+      .max(LIMITS.secretNameCount)
+      .default([]),
   })
   .strict();
 
@@ -136,6 +187,7 @@ export const candidateSchema = z
     promptCandidate,
     nativeCandidate,
     pythonCandidate,
+    agentCandidate,
   ])
   .superRefine((candidate, context) => {
     if (candidate.trigger === "selection" && candidate.input !== "selection") {
@@ -186,9 +238,12 @@ const commonInstalledTool = {
   symbolName: byteString(LIMITS.symbolBytes),
   input: z.enum([
     "selection",
+    "ask",
     "clipboardText",
     "clipboardURL",
     "files",
+    "screenshot",
+    "screenshotText",
     "none",
   ]),
   output: z.enum(["panel", "replace", "clipboard", "files", "notify"]),
@@ -203,7 +258,10 @@ const installedPromptTool = z
   .object({
     ...commonInstalledTool,
     kind: z.literal("prompt"),
-    input: z.literal("selection"),
+    // A prompt tool works on text the user is looking at. "screenshotText" is
+    // that same text, read off the screen instead of out of a selection, and
+    // "ask" is text the user types when the tool runs.
+    input: z.enum(["selection", "ask", "screenshotText"]),
     output: z.enum(["panel", "replace", "clipboard"]),
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
@@ -236,6 +294,27 @@ const installedPythonTool = z
     outputDirectory: byteString(LIMITS.targetBytes).optional(),
     timeoutSeconds: z.number().int().min(5).max(1800),
     declaresNetwork: z.boolean(),
+    // Names of the user's stored secrets this tool reads from its environment.
+    // Names only — the host never sends a value across this protocol.
+    secretNames: z
+      .array(byteString(LIMITS.secretNameBytes))
+      .max(LIMITS.secretNameCount)
+      .default([]),
+  })
+  .strict();
+
+const installedAgentTool = z
+  .object({
+    ...commonInstalledTool,
+    kind: z.literal("agent"),
+    output: z.enum(["panel", "replace", "clipboard", "notify"]),
+    prompt: byteString(LIMITS.promptBytes),
+    maxSteps: z.number().int().min(1).max(24),
+    timeoutSeconds: z.number().int().min(15).max(900),
+    secretNames: z
+      .array(byteString(LIMITS.secretNameBytes))
+      .max(LIMITS.secretNameCount)
+      .default([]),
   })
   .strict();
 
@@ -244,6 +323,7 @@ export const installedToolSchema = z
     installedPromptTool,
     installedNativeTool,
     installedPythonTool,
+    installedAgentTool,
   ])
   .superRefine((tool, context) => {
     if (tool.trigger === "selection" && tool.input !== "selection") {
@@ -302,6 +382,11 @@ export const toolResponsePayloadSchemas = {
           repairs: z.number().int().min(0),
         })
         .strict(),
+      // Which secrets the user has stored. Names only, never values.
+      secretNames: z
+        .array(byteString(LIMITS.secretNameBytes))
+        .max(LIMITS.secretNameCount)
+        .default([]),
     })
     .strict(),
   write_candidate: z.object({ candidateID: uuid, fingerprint }).strict(),
@@ -428,6 +513,55 @@ const inboundSchemas = {
     .strict(),
 } as const;
 
+/// Starting an *agent tool* run. Its own schema rather than a variant of the
+/// build start: a build is described by a request sentence, while a run carries
+/// a frozen instruction plus whatever the ring handed the tool, and the two have
+/// nothing in common but their budgets.
+export const runStartSchema = z
+  .object({
+    instruction: byteString(LIMITS.promptBytes),
+    input: byteString(LIMITS.agentInputBytes, true),
+    budgets,
+    // Names only. The values are already in the environment of every process
+    // the host runs for this agent; they never travel over this protocol.
+    secretNames: z
+      .array(byteString(LIMITS.secretNameBytes))
+      .max(LIMITS.secretNameCount)
+      .default([]),
+  })
+  .strict();
+
+const runInboundSchemas = {
+  start: runStartSchema,
+  modelResponse: inboundSchemas.modelResponse,
+  toolResponse: z
+    .object({
+      callID: uuid,
+      result: z
+        .object({ name: z.enum(RUN_TOOL_NAMES), payload: z.unknown() })
+        .strict(),
+    })
+    .strict(),
+  cancel: inboundSchemas.cancel,
+} as const;
+
+export type RunStartPayload = z.output<typeof runStartSchema>;
+
+export type RunInbound =
+  | { readonly type: "start"; readonly payload: RunStartPayload }
+  | {
+      readonly type: "modelResponse";
+      readonly payload: z.infer<typeof inboundSchemas.modelResponse>;
+    }
+  | {
+      readonly type: "toolResponse";
+      readonly payload: z.infer<(typeof runInboundSchemas)["toolResponse"]>;
+    }
+  | {
+      readonly type: "cancel";
+      readonly payload: z.infer<typeof inboundSchemas.cancel>;
+    };
+
 /** Allows legacy in-process callers to omit operation; parsed wire input is
  * normalized to create by the Zod default below. */
 export type StartPayload = z.input<(typeof inboundSchemas)["start"]>;
@@ -515,9 +649,13 @@ function rejectDuplicateKeys(text: string): void {
   }
 }
 
-export function parseInbound(line: string): {
+/// Frame size, duplicate-key rejection and the strict envelope, shared by both
+/// session kinds. Only the per-type payload schema differs between them, so this
+/// stays the single place those checks live.
+function decodeEnvelope(line: string): {
   readonly runID: string;
-  readonly message: Inbound;
+  readonly type: "start" | "modelResponse" | "toolResponse" | "cancel";
+  readonly payload: unknown;
 } {
   if (Buffer.byteLength(line) > LIMITS.frameBytes) {
     throw new ProtocolError("invalidProtocol", "frame too large");
@@ -542,11 +680,29 @@ export function parseInbound(line: string): {
     .safeParse(decoded);
   if (!envelope.success)
     throw new ProtocolError("invalidProtocol", "invalid envelope");
-  const { runID, type, payload } = envelope.data;
+  return envelope.data;
+}
+
+export function parseInbound(line: string): {
+  readonly runID: string;
+  readonly message: Inbound;
+} {
+  const { runID, type, payload } = decodeEnvelope(line);
   const parsed = inboundSchemas[type].safeParse(payload);
   if (!parsed.success)
     throw new ProtocolError("invalidProtocol", `invalid ${type} payload`);
   return { runID, message: { type, payload: parsed.data } as Inbound };
+}
+
+export function parseRunInbound(line: string): {
+  readonly runID: string;
+  readonly message: RunInbound;
+} {
+  const { runID, type, payload } = decodeEnvelope(line);
+  const parsed = runInboundSchemas[type].safeParse(payload);
+  if (!parsed.success)
+    throw new ProtocolError("invalidProtocol", `invalid ${type} payload`);
+  return { runID, message: { type, payload: parsed.data } as RunInbound };
 }
 
 export function encodeEnvelope<TPayload>(
@@ -563,6 +719,37 @@ export function encodeEnvelope<TPayload>(
 
 export function parseToolResponse(name: ToolName, payload: unknown): unknown {
   const parsed = toolResponsePayloadSchemas[name].safeParse(payload);
+  if (!parsed.success)
+    throw new ProtocolError("invalidProtocol", `invalid ${name} response`);
+  return parsed.data;
+}
+
+/// What the host sends back to an agent tool's two tools.
+///
+/// `run_python` reports the run the way a shell would — exit code, both streams,
+/// what it wrote — rather than a pass/fail verdict, because the agent is the one
+/// deciding what the result means. `finish` only acknowledges.
+export const runToolResponsePayloadSchemas = {
+  run_python: z
+    .object({
+      exitCode: z.number().int(),
+      stdout: byteString(LIMITS.agentResultBytes, true),
+      stderr: byteString(LIMITS.agentResultBytes, true),
+      truncated: z.boolean().default(false),
+      producedFiles: z
+        .array(byteString(LIMITS.targetBytes))
+        .max(64)
+        .default([]),
+    })
+    .strict(),
+  finish: z.object({ accepted: z.literal(true) }).strict(),
+} as const;
+
+export function parseRunToolResponse(
+  name: RunToolName,
+  payload: unknown,
+): unknown {
+  const parsed = runToolResponsePayloadSchemas[name].safeParse(payload);
   if (!parsed.success)
     throw new ProtocolError("invalidProtocol", `invalid ${name} response`);
   return parsed.data;

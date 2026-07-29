@@ -111,15 +111,28 @@ public actor JSONLProcess {
     }
 
     public func send(_ message: ToolAgentMessageV1) async throws {
+        try await sendLine(ToolAgentJSONLCodecV1.encode(message))
+    }
+
+    public func receive() async throws -> ToolAgentMessageV1? {
+        guard let line = try await receiveLine() else { return nil }
+        return try ToolAgentJSONLCodecV1.decode(line)
+    }
+
+    /// Framing without a message type, for the agent-tool run protocol: same
+    /// pipes, same newline framing, same size ceiling, a different vocabulary on
+    /// top. Keeping this here rather than making the whole actor generic keeps
+    /// one implementation of the parts that are easy to get wrong — the partial
+    /// read loop, the frame limit, the reaping.
+    public func sendLine(_ data: Data) async throws {
         guard !isCancelled else { throw JSONLProcessError.closed }
-        let data = try ToolAgentJSONLCodecV1.encode(message)
         let handle = input
         try await Task.detached {
             try handle.write(contentsOf: data)
         }.value
     }
 
-    public func receive() async throws -> ToolAgentMessageV1? {
+    public func receiveLine() async throws -> Data? {
         guard !isReceiving else { throw JSONLProcessError.concurrentReceive }
         guard !isCancelled else { return nil }
         isReceiving = true
@@ -130,7 +143,7 @@ public actor JSONLProcess {
                 let end = buffer.index(after: newline)
                 let line = Data(buffer[..<end])
                 buffer.removeSubrange(..<end)
-                return try ToolAgentJSONLCodecV1.decode(line)
+                return line
             }
             guard buffer.count < ToolAgentProtocolLimitsV1.maximumFrameBytes else {
                 throw ToolAgentProtocolErrorV1.frameTooLarge

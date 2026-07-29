@@ -45,14 +45,31 @@ enum RadialMenuLabelPlacement {
 /// an image (SF Symbol or, for contextual entries, an app icon), a hover
 /// label, and the action to run when picked. Labels avoid "translate"
 /// wording deliberately — house copy rule.
+/// How a hover-revealed orbit arranges the buttons behind its parent.
+enum RingSubLayout {
+    /// Fanned outward from the parent with gaps closed up — a short contextual
+    /// list, like Summarize's time ranges.
+    case fan
+    /// A full circle on the same eight directions the ring itself uses, empty
+    /// slots left as gaps. A folder is a ring, so it should read like one:
+    /// a button stays where it was put instead of sliding over to fill in.
+    case slots
+}
+
 struct RingItem {
     let label: String
     let image: NSImage
     let handler: () -> Void
-    /// When non-empty, this button is a hover-expandable parent: hovering (or
-    /// clicking) it reveals these buttons as a second-layer fan while the first
-    /// ring stays. The parent's own `handler` is then unused.
-    var subItems: [RingItem] = []
+    /// When any entry is non-nil, this button is a hover-expandable parent:
+    /// hovering (or clicking) it reveals these buttons as a further orbit while
+    /// the ring stays, and the parent's own `handler` goes unused. `nil` entries
+    /// are empty slots, kept so `.slots` can leave a gap where the user left one.
+    var subItems: [RingItem?] = []
+    var subLayout: RingSubLayout = .fan
+
+    /// An orbit with nothing in it is not worth opening — the button behaves
+    /// like any other and runs its own handler.
+    var expandsOnHover: Bool { subItems.contains { $0 != nil } }
 
     /// Builds a ring item from an SF Symbol, applying the same fixed
     /// size/weight the ring has always rendered its glyphs at.
@@ -120,7 +137,7 @@ struct RingSummarizeOption {
 /// sources expand into time ranges; browsers fire directly.
 @MainActor
 func summarizeRingItem(_ opt: RingSummarizeOption, dismiss: @escaping () -> Void) -> RingItem {
-    func rangeItems(_ run: @escaping (_ range: SummaryTimeRange) -> Void) -> [RingItem] {
+    func rangeItems(_ run: @escaping (_ range: SummaryTimeRange) -> Void) -> [RingItem?] {
         SummaryTimeRange.allCases.map { range in
             RingItem(label: range.label, image: RingTextBadge.image(range.label)) {
                 dismiss()
@@ -130,7 +147,7 @@ func summarizeRingItem(_ opt: RingSummarizeOption, dismiss: @escaping () -> Void
     }
 
     if let choices = opt.appChoices {
-        let subItems: [RingItem] = choices.map { choice in
+        let subItems: [RingItem?] = choices.map { choice in
             if let run = choice.run {
                 // Hovering the app choice opens its own (third) orbit of ranges.
                 return RingItem(label: choice.appLabel, image: choice.appIcon, handler: {}, subItems: rangeItems(run))

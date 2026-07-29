@@ -68,11 +68,47 @@ final class ToolsStore: ObservableObject {
         return !(script ?? "").isEmpty
     }
 
-    /// SHA-256 of the current script, used to re-ask for confirmation whenever the
-    /// code changes. nil for a prompt tool or a missing script.
+    /// SHA-256 of what the user is actually approving: the current script **and**
+    /// the secrets it will be handed. Used to re-ask for confirmation whenever
+    /// either changes — bolting `AWS_SECRET_KEY` onto an already-approved tool
+    /// widens what it can reach, and is not something to wave through on an
+    /// approval the user gave for a script that had no keys at all.
+    ///
+    /// nil for a prompt tool or a missing script. The secret names are folded in
+    /// only when there are some, so every tool approved before secrets existed
+    /// keeps its approval instead of re-prompting on upgrade.
     func scriptHash(for id: UUID) -> String? {
         guard let data = try? Data(contentsOf: scriptURL(for: id)) else { return nil }
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let names = tool(id: id)?.secretNames.sorted() ?? []
+        guard !names.isEmpty else {
+            return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        }
+        var hasher = SHA256()
+        hasher.update(data: data)
+        hasher.update(data: Data("\nsecrets:\(names.joined(separator: ","))".utf8))
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What the user's approval is *of*, which differs by kind. A script tool is
+    /// approved for its exact code; an agent tool has no code to approve, so the
+    /// approval covers the three things that decide what it may do — its
+    /// instruction, how many scripts it may run, and which keys it is handed.
+    /// A prompt or native tool needs no approval at all.
+    func approvalHash(for tool: GizmateTool) -> String? {
+        switch tool.kind {
+        case .python:
+            return scriptHash(for: tool.id)
+        case .agent:
+            var hasher = SHA256()
+            hasher.update(data: Data(tool.prompt.utf8))
+            hasher.update(data: Data("\nsteps:\(tool.maxSteps)".utf8))
+            hasher.update(
+                data: Data("\nsecrets:\(tool.secretNames.sorted().joined(separator: ","))".utf8)
+            )
+            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        case .prompt, .native:
+            return nil
+        }
     }
 
     // MARK: - Writes
