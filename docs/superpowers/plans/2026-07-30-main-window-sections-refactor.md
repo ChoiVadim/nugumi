@@ -380,7 +380,8 @@ import SwiftUI
 // unchanged.
 ```
 
-Keep `ModelTriggerLabel`, `modelSourceLabel`, `modelIsUsable`, and
+Promote `ModelTriggerLabel` to internal because `ModelScopeCard` consumes it
+from `AIEngineSection.swift`. Keep `modelSourceLabel`, `modelIsUsable`, and
 `ModelPickerPanel` private. Preserve the internal access of
 `ModelAvailability`, `ModelGrouping`, and `ModelPickerOverlay` because tests and
 the main window consume them.
