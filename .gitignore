@@ -14,3 +14,4 @@ sparkle_private_key.txt
 *.gpg
 *.key
 .gstack/
+.worktrees/
