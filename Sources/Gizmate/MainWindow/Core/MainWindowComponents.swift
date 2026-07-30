@@ -1,6 +1,3 @@
-import AppKit
-import Combine
-import GizmateToolAgentCore
 import SwiftUI
 
 // MARK: - Reusable building blocks
