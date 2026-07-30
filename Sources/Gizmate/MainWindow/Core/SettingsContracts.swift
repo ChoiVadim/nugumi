@@ -1,0 +1,156 @@
+import GizmateToolAgentCore
+
+// MARK: - Settings snapshot (reads)
+
+/// Plain value-type mirror of every window-configurable setting. The host builds
+/// one cheaply from UserDefaults; the bridge re-reads it after each mutation.
+struct SettingsSnapshot {
+    var targetLanguage: TranslationLanguage
+    var draftTargetLanguage: TranslationLanguage
+    var writingToggleAlternate: TranslationLanguage
+    var floatingDefaultMode: FloatingButtonDefaultMode
+    var selectionDisplayMode: SelectionDisplayMode
+    var cleanupLevel: CleanupLevel
+    var genZMode: Bool = false
+    /// The user's saved email voice sample (style reference for the email
+    /// category). Empty when unset.
+    var emailVoiceSample: String = ""
+    /// The user's free-text instruction for the custom style. Empty when unset.
+    var customStyleInstruction: String = ""
+    var invisibilityEnabled: Bool
+    var launchAtLogin: Bool = false
+    var writingStyles: [AppCategory: WritingStyle]
+    var textModelID: String
+    var askGizmateModelID: String
+    var textThinkingLevel: ThinkingLevel
+    var askGizmateThinkingLevel: ThinkingLevel
+    var shortcuts: [GlobalShortcutAction: GlobalShortcut]
+    var appsByCategory: [AppCategory: [AppRef]] = [:]
+
+    func writingStyle(for category: AppCategory) -> WritingStyle {
+        writingStyles[category] ?? category.defaultWritingStyle
+    }
+    func apps(for category: AppCategory) -> [AppRef] {
+        appsByCategory[category] ?? []
+    }
+    func modelID(for scope: ModelUseScope) -> String {
+        scope == .textActions ? textModelID : askGizmateModelID
+    }
+    func thinkingLevel(for scope: ModelUseScope) -> ThinkingLevel {
+        scope == .textActions ? textThinkingLevel : askGizmateThinkingLevel
+    }
+    func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
+        shortcuts[action] ?? action.defaultShortcut
+    }
+}
+
+/// One app shown in a category's icon strip. `isBuiltIn` apps come from the
+/// classifier's static map (removal suppresses them); others are user-added.
+struct AppRef: Equatable, Hashable {
+    let bundleID: String
+    let name: String
+    let isBuiltIn: Bool
+}
+
+// MARK: - Settings intents (writes with side effects)
+
+/// Every write the window can make. The host routes each case through the SAME
+/// code path the status-bar menu uses, so side effects (hotkey re-registration,
+/// sharing-type, status icon, analytics, cache invalidation) fire identically.
+enum SettingsIntent {
+    case setTargetLanguage(TranslationLanguage)
+    case setDraftTargetLanguage(TranslationLanguage)
+    case setWritingToggleAlternate(TranslationLanguage)
+    case setFloatingDefaultMode(FloatingButtonDefaultMode)
+    case setSelectionDisplayMode(SelectionDisplayMode)
+    case setCleanupLevel(CleanupLevel)
+    case setGenZMode(Bool)
+    case setEmailVoiceSample(String)
+    case setCustomStyleInstruction(String)
+    case setWritingStyle(WritingStyle, AppCategory)
+    case addAppToCategory(AppCategory)
+    case removeApp(String)
+    case setThinkingLevel(ThinkingLevel, ModelUseScope)
+    case chooseModel(String, ModelUseScope)
+    case toggleInvisibility
+    case setLaunchAtLogin(Bool)
+    case recordShortcut(GlobalShortcutAction)
+    case resetShortcuts
+    case signInCloud(CloudProvider)
+    case signOutCloud(CloudProvider)
+    case openOllamaInstall
+    case launchOllama
+    case openOllamaSignIn
+    case refreshBootstrap
+    case startModelPull(String)
+    case cancelModelPull(String)
+    case checkForUpdates
+    case contactSupport
+    case openPermissionsHelp
+    case resetSettings
+    case quit
+}
+
+// MARK: - Host
+
+/// Implemented by `GizmateApp` (in App.swift, where the private settings live).
+@MainActor
+protocol SettingsHost: AnyObject {
+    func makeSettingsSnapshot() -> SettingsSnapshot
+    func performSettingsIntent(_ intent: SettingsIntent)
+    var usageStats: UsageStatsStore { get }
+    var snippets: SnippetsStore { get }
+    var tools: ToolsStore { get }
+    var ringLayout: RingLayoutStore { get }
+    /// Whether the uv runtime script tools need is present.
+    var uvIsReady: Bool { get }
+    /// Installs uv if needed, then runs `script` once on the current context and
+    /// reports what happened — the editor's Install & test button. `onOutput`
+    /// receives stdout/stderr as they arrive, so a long run isn't a silent spinner.
+    func testScriptTool(
+        _ tool: GizmateTool,
+        script: String,
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async -> ToolTestState
+    /// Writes a tool from a plain-language description. Never runs it.
+    func generateScriptTool(
+        description: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error>
+    /// Amends an existing tool from one instruction. Never runs it.
+    func reviseScriptTool(
+        tool: GizmateTool,
+        script: String,
+        instruction: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error>
+    /// Repairs the complete tool after a failed run.
+    func repairScriptTool(
+        tool: GizmateTool,
+        script: String,
+        failure: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void
+    ) async -> Result<GeneratedTool, Error>
+    var history: TranslationHistoryStore { get }
+    func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
+    func runCloudTest(for provider: CloudProvider) async -> CloudTestResult
+    var bootstrapState: BootstrapState { get }
+    /// Re-run the live engine health detection (pings the Ollama server, checks
+    /// app presence, re-reads cloud keys). The window calls this on show/focus
+    /// so the setup card reflects current reality — a server that died after
+    /// launch must flip the steps back to "needs action".
+    func refreshBootstrap()
+    var ollamaModels: [OllamaModelOption] { get }
+    var appVersionString: String { get }
+    var isAppBundle: Bool { get }
+    /// Display version of a pending update found by a background check, or nil.
+    var availableUpdateVersion: String? { get }
+    /// Bring up the install dialog for the pending update.
+    func installAvailableUpdate()
+}
