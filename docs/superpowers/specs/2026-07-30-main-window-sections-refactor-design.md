@@ -52,8 +52,9 @@ Create `Sources/Gizmate/MainWindow/Sections/` with these files:
 | `SharedSectionControls.swift` | controls reused by multiple sections, including `MenuFieldLabel`, `ReadOnlyField`, `KeyCap`, `SecondaryButton`, `FlowTabBar`, and `RowIconButton` |
 | `HomeSection.swift` | home activity, history grouping, and history rows |
 | `InsightsSection.swift` | usage breakdowns, palette logic, and donut charts |
-| `VoiceSection.swift` | voice section routing plus built-in and custom writing-style cards |
-| `VoiceEditors.swift` | custom instructions, text-editor bridge, chat samples, app icons, and wrapping layout |
+| `VoiceSection.swift` | voice section routing, style-tab composition, and cleanup-level preview |
+| `VoiceStyleCards.swift` | built-in/custom style cards, instruction editor, text-editor bridge, and chat previews |
+| `VoiceAppAssignments.swift` | app assignment icons, email voice sample, and wrapping layout |
 | `LanguageSettings.swift` | reading and writing language controls |
 | `AIEngineSection.swift` | AI engine section routing, provider groups, and model scope cards |
 | `ModelPicker.swift` | model availability/grouping logic and the model picker overlay |
@@ -90,7 +91,7 @@ Extract one independently compilable section group at a time:
 
 1. router and shared controls;
 2. Home and Insights;
-3. Voice, voice editors, and language settings;
+3. Voice composition, style cards, app assignments, and language settings;
 4. AI Engine, model picker, and provider setup;
 5. Settings, Library, and Help;
 6. remove the empty original file.
