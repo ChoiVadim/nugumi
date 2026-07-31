@@ -88,6 +88,8 @@ public actor ToolBuildSupervisor {
         clarificationCount = 0
         pendingClarification = nil
         defer { clearActiveRun(request.runID) }
+        var deadline: Task<Void, Never>?
+        defer { deadline?.cancel() }
 
         do {
             try await store.create(request)
@@ -105,7 +107,7 @@ public actor ToolBuildSupervisor {
             ))
 
             let timeout = UInt64(request.budgets.durationSeconds) * 1_000_000_000
-            let deadline = Task { [weak self] in
+            deadline = Task { [weak self] in
                 do {
                     guard let self else { return }
                     try await self.sleep(timeout)
@@ -113,7 +115,6 @@ public actor ToolBuildSupervisor {
                     await self.expire(runID: request.runID)
                 } catch {}
             }
-            defer { deadline.cancel() }
 
             let result = try await withTaskCancellationHandler {
                 try await runLoop(request: request, process: process)
@@ -125,6 +126,9 @@ public actor ToolBuildSupervisor {
             await process.finish()
             return result
         } catch {
+            if case .failure(.timedOut)? = terminal {
+                await deadline?.value
+            }
             if let terminal {
                 return try terminal.get()
             }
