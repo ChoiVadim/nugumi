@@ -1,6 +1,4 @@
 import AppKit
-import AVKit
-import Combine
 import SwiftUI
 
 // MARK: - Window controller
