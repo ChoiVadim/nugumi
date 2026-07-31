@@ -137,4 +137,3 @@ Swift Package Manager, XCTest
 - [ ] Update the README source map from `GlobalShortcuts.swift` to the new
       `Shortcuts/` directory.
 - [ ] Request an independent read-only code review.
-

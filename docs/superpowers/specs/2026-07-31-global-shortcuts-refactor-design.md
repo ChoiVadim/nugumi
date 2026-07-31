@@ -111,4 +111,3 @@ At the end:
   access and annotations;
 - confirm only the recorder UI file exceeds roughly 400 lines;
 - request an independent read-only review.
-
