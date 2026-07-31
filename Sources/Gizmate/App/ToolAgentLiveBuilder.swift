@@ -59,7 +59,12 @@ struct ToolAgentRuntimeLocation {
         currentDirectory: URL = URL(
             fileURLWithPath: FileManager.default.currentDirectoryPath,
             isDirectory: true
-        )
+        ),
+        sourceRoot: URL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     ) throws -> Self {
         let contents = bundleURL.appendingPathComponent("Contents", isDirectory: true)
         let packaged = Self(
@@ -81,11 +86,6 @@ struct ToolAgentRuntimeLocation {
         guard bundleURL.pathExtension.lowercased() != "app" else {
             throw ToolAgentLiveBuilderError.runtimeUnavailable
         }
-        let sourceRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         for root in [currentDirectory, sourceRoot] {
             let runtime = root
                 .appendingPathComponent(".build", isDirectory: true)
