@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Foundation
 
+
 @MainActor
 final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelegate {
     private static let horizontalPadding: CGFloat = 16
