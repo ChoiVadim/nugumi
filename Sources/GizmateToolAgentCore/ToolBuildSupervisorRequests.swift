@@ -198,6 +198,8 @@ extension ToolBuildSupervisor {
 
     func acceptCompleted(_ completed: ToolAgentCompletedV1, request: ToolBuildRequestV1) async throws {
         let record = try await store.record(runID: request.runID)
+        await completionRecordReadHook?()
+        guard terminal == nil else { return }
         guard record.state == .candidateReady,
               let attestation,
               attestation.candidateID == completed.candidateID,
@@ -208,11 +210,14 @@ extension ToolBuildSupervisor {
             candidateID: completed.candidateID,
             fingerprint: completed.fingerprint
         )
-        terminal = .success(result)
+        let installedTerminal: Result<ToolBuildResultV1, ToolAgentFailureCodeV1> = .success(result)
+        terminal = installedTerminal
         do {
             try await store.complete(runID: request.runID, result: result)
         } catch {
-            terminal = nil
+            if terminal == installedTerminal {
+                terminal = nil
+            }
             throw error
         }
     }

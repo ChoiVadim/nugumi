@@ -51,6 +51,8 @@ public actor ToolBuildSupervisor {
     var attestation: ToolAgentAttestationV1?
     var clarificationCount = 0
     var pendingClarification: (runID: UUID, token: UUID, task: Task<ToolAgentAskUserResponseV1, Error>)?
+    var completionRecordReadHook: (@Sendable () async -> Void)?
+    var deadlineTaskCompletionHook: (@Sendable () -> Void)?
 
     public init(
         store: ToolBuildStore,
@@ -108,7 +110,9 @@ public actor ToolBuildSupervisor {
             ))
 
             let timeout = UInt64(request.budgets.durationSeconds) * 1_000_000_000
+            let deadlineTaskCompletionHook = self.deadlineTaskCompletionHook
             deadline = Task { [weak self] in
+                defer { deadlineTaskCompletionHook?() }
                 do {
                     guard let self else { return }
                     try await self.sleep(timeout)
@@ -209,6 +213,8 @@ public actor ToolBuildSupervisor {
         latestValidation = nil
         attestation = nil
         clarificationCount = 0
+        completionRecordReadHook = nil
+        deadlineTaskCompletionHook = nil
     }
 
     private func cancelPendingClarification(runID: UUID) async {
@@ -221,6 +227,14 @@ public actor ToolBuildSupervisor {
 
     func clearPendingClarification(runID: UUID, token: UUID) {
         if pendingClarification?.runID == runID, pendingClarification?.token == token { pendingClarification = nil }
+    }
+
+    func setCompletionRecordReadHook(_ hook: (@Sendable () async -> Void)?) {
+        completionRecordReadHook = hook
+    }
+
+    func setDeadlineTaskCompletionHook(_ hook: (@Sendable () -> Void)?) {
+        deadlineTaskCompletionHook = hook
     }
 
     private static func isValid(_ request: ToolBuildRequestV1, runtimeVersion: String, policyVersion: String) -> Bool {

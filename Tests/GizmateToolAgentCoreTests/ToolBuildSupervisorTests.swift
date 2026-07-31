@@ -83,6 +83,68 @@ final class ToolBuildSupervisorTests: XCTestCase {
         XCTAssertFalse(didCancel)
     }
 
+    func testCompletionCannotOverwriteHostDeadlineFailureAfterRecordRead() async throws {
+        let store = try temporaryStore()
+        let script = try RepairScript()
+        let request = ToolBuildRequestV1(description: "host deadline race")
+        let deadline = ManualDeadline()
+        let validator = ValidationStub()
+        let supervisor = ToolBuildSupervisor(
+            store: store,
+            runtimeVersion: "3.12.11",
+            policyVersion: "validation-v1",
+            makeProcess: { _ in script.client() },
+            model: { _ in .text(#"{"version":1,"action":"finalText","text":"continue"}"#) },
+            validation: { input in try await validator.validate(input) },
+            sleep: { _ in await deadline.wait() }
+        )
+        await supervisor.setCompletionRecordReadHook { [weak supervisor] in
+            guard let supervisor else { return }
+            await supervisor.expire(runID: request.runID)
+            await deadline.fire()
+        }
+
+        let result = await Task { try await supervisor.build(request) }.result
+
+        guard case .failure(let error) = result else {
+            return XCTFail("Expected host deadline failure")
+        }
+        XCTAssertEqual(error as? ToolAgentFailureCodeV1, .timedOut)
+        let record = try await store.record(runID: request.runID)
+        XCTAssertEqual(record.state, .failed)
+        XCTAssertEqual(record.failure, .timedOut)
+        XCTAssertNil(record.result)
+    }
+
+    func testCompletionCannotOverwriteCancellationAfterRecordRead() async throws {
+        let store = try temporaryStore()
+        let script = try RepairScript()
+        let request = ToolBuildRequestV1(description: "cancellation race")
+        let validator = ValidationStub()
+        let supervisor = ToolBuildSupervisor(
+            store: store,
+            runtimeVersion: "3.12.11",
+            policyVersion: "validation-v1",
+            makeProcess: { _ in script.client() },
+            model: { _ in .text(#"{"version":1,"action":"finalText","text":"continue"}"#) },
+            validation: { input in try await validator.validate(input) }
+        )
+        await supervisor.setCompletionRecordReadHook { [weak supervisor] in
+            _ = await supervisor?.cancel(runID: request.runID)
+        }
+
+        let result = await Task { try await supervisor.build(request) }.result
+
+        guard case .failure(let error) = result else {
+            return XCTFail("Expected cancellation")
+        }
+        XCTAssertEqual(error as? ToolAgentFailureCodeV1, .cancelled)
+        let record = try await store.record(runID: request.runID)
+        XCTAssertEqual(record.state, .cancelled)
+        XCTAssertEqual(record.failure, .cancelled)
+        XCTAssertNil(record.result)
+    }
+
     func testDrivesRealPiGateSidecarThroughRepair() async throws {
         let root = URL(
             fileURLWithPath: FileManager.default.currentDirectoryPath,
@@ -472,7 +534,19 @@ final class ToolBuildSupervisorTests: XCTestCase {
     func testWorkerTimeoutDoesNotJoinSleepingHostDeadline() async throws {
         let store = try temporaryStore()
         let request = ToolBuildRequestV1(description: "worker timeout")
-        let deadline = ManualDeadline()
+        let processCancellationStarted = expectation(description: "process cancellation started")
+        let processCancellationCompleted = expectation(description: "process cancellation completed")
+        let buildCompleted = expectation(description: "build completed")
+        let deadlineCancelled = expectation(description: "deadline task cancelled")
+        let deadlineTaskCompleted = expectation(description: "deadline task completed")
+        let lifecycle = WorkerTimeoutLifecycle(
+            processCancellationStarted: processCancellationStarted,
+            processCancellationCompleted: processCancellationCompleted,
+            buildCompleted: buildCompleted
+        )
+        let deadline = ObservableManualDeadline(
+            cancelled: deadlineCancelled
+        )
         let process = ToolBuildProcessClientV1(
             send: { _ in },
             receive: {
@@ -482,7 +556,7 @@ final class ToolBuildSupervisorTests: XCTestCase {
                     .init(code: .timedOut, message: "worker timed out")
                 )
             },
-            cancel: {}
+            cancel: { await lifecycle.cancelProcess() }
         )
         let supervisor = ToolBuildSupervisor(
             store: store,
@@ -493,19 +567,46 @@ final class ToolBuildSupervisorTests: XCTestCase {
             validation: { _ in throw ToolAgentFailureCodeV1.workerFailure },
             sleep: { _ in await deadline.wait() }
         )
+        await supervisor.setDeadlineTaskCompletionHook {
+            deadlineTaskCompleted.fulfill()
+        }
         let build = Task { try await supervisor.build(request) }
-        let completed = expectation(description: "worker timeout returns")
         let observer = Task {
-            _ = await build.result
-            completed.fulfill()
+            let result = await build.result
+            await lifecycle.buildDidComplete()
+            return result
         }
 
-        let waitResult = await XCTWaiter.fulfillment(of: [completed], timeout: 1)
+        let cancellationStartedResult = await XCTWaiter.fulfillment(
+            of: [processCancellationStarted],
+            timeout: 1
+        )
+        await lifecycle.releaseProcessCancellation()
+        let processAndBuildResult = await XCTWaiter.fulfillment(
+            of: [processCancellationCompleted, buildCompleted],
+            timeout: 1,
+            enforceOrder: true
+        )
+        let deadlineCancellationResult = await XCTWaiter.fulfillment(
+            of: [deadlineCancelled],
+            timeout: 1
+        )
         await deadline.fire()
-        let result = await build.result
-        _ = await observer.result
+        let deadlineCompletionResult = await XCTWaiter.fulfillment(
+            of: [deadlineTaskCompleted],
+            timeout: 1
+        )
+        let result = await observer.value
 
-        XCTAssertEqual(waitResult, .completed)
+        XCTAssertEqual(cancellationStartedResult, .completed)
+        XCTAssertEqual(processAndBuildResult, .completed)
+        XCTAssertEqual(deadlineCancellationResult, .completed)
+        XCTAssertEqual(deadlineCompletionResult, .completed)
+        let events = await lifecycle.events
+        XCTAssertEqual(
+            events,
+            [.processCancellationStarted, .processCancellationCompleted, .buildCompleted]
+        )
         guard case .failure(let error) = result else {
             return XCTFail("Expected worker deadline failure")
         }
@@ -763,6 +864,89 @@ private actor ManualDeadline {
         fired = true
         continuation?.resume()
         continuation = nil
+    }
+}
+
+private actor ObservableManualDeadline {
+    private let cancelled: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var fired = false
+    private var started = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(cancelled: XCTestExpectation) {
+        self.cancelled = cancelled
+    }
+
+    func wait() async {
+        started = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+        let cancelled = cancelled
+        await withTaskCancellationHandler {
+            if !fired {
+                await withCheckedContinuation { continuation = $0 }
+            }
+        } onCancel: {
+            cancelled.fulfill()
+        }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func fire() {
+        fired = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor WorkerTimeoutLifecycle {
+    enum Event: Equatable {
+        case processCancellationStarted
+        case processCancellationCompleted
+        case buildCompleted
+    }
+
+    private let processCancellationStarted: XCTestExpectation
+    private let processCancellationCompleted: XCTestExpectation
+    private let buildCompleted: XCTestExpectation
+    private var releaseCancellation = false
+    private var releaseWaiter: CheckedContinuation<Void, Never>?
+    private(set) var events: [Event] = []
+
+    init(
+        processCancellationStarted: XCTestExpectation,
+        processCancellationCompleted: XCTestExpectation,
+        buildCompleted: XCTestExpectation
+    ) {
+        self.processCancellationStarted = processCancellationStarted
+        self.processCancellationCompleted = processCancellationCompleted
+        self.buildCompleted = buildCompleted
+    }
+
+    func cancelProcess() async {
+        events.append(.processCancellationStarted)
+        processCancellationStarted.fulfill()
+        if !releaseCancellation {
+            await withCheckedContinuation { releaseWaiter = $0 }
+        }
+        events.append(.processCancellationCompleted)
+        processCancellationCompleted.fulfill()
+    }
+
+    func releaseProcessCancellation() {
+        releaseCancellation = true
+        releaseWaiter?.resume()
+        releaseWaiter = nil
+    }
+
+    func buildDidComplete() {
+        events.append(.buildCompleted)
+        buildCompleted.fulfill()
     }
 }
 
