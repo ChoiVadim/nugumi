@@ -102,7 +102,8 @@ hiding access-control mistakes.
 
 ## Verification
 
-The baseline before refactoring is 405 passing tests with one skipped test.
+The baseline before refactoring is 405 executed tests, 2 expected skips, and
+0 failures.
 
 Verification must include:
 

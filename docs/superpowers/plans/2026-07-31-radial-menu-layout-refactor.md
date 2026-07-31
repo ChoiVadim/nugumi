@@ -1,5 +1,8 @@
 # Radial Menu Layout Refactor Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 **Goal:** Extract the pure radial-menu geometry policy from the stateful
 controller without changing behavior or access.
 

@@ -1,5 +1,8 @@
 # Main Window Core Refactor Implementation Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:executing-plans` to implement this plan task by task.
 

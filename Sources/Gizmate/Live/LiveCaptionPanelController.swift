@@ -32,7 +32,7 @@ final class LiveCaptionPanelController: NSObject {
     private let textView = NSTextView()
     private let scrollView = OverlayScrollView()
 
-    // Glass palette — mirrors TranslationPanelPalette (which is private to App.swift)
+    // Glass palette — mirrors TranslationPanelPalette (defined in PanelChrome.swift)
     // so the captions window matches the translate window's white-on-glass look.
     private static let glassCornerRadius: CGFloat = 22
     private static let titleColor = NSColor(calibratedWhite: 1.0, alpha: 0.84)

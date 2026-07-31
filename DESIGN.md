@@ -17,8 +17,8 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 | Text/secondary | `FlowTheme.inkSecondary` | #BDBDBD | #BDBDBD | Supporting copy and secondary labels |
 | Text/tertiary | `FlowTheme.inkTertiary` | #8C8C8C | #8C8C8C | Disabled, metadata, inactive icons |
 | Border/hairline | `FlowTheme.hairline` | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines |
-| Accent/primary | `FlowTheme.accent` / `NSColor.nugumiAccent` | #11766E | #11766E | Success, selected state, primary setup progress |
-| Accent/soft | `FlowTheme.accentSoft` | rgba(17,118,110,0.22) | rgba(17,118,110,0.22) | Soft selected backgrounds |
+| Accent/primary | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9 | #C9C9C9 | Success, selected state, primary setup progress |
+| Accent/soft | `FlowTheme.accentSoft` | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds |
 | Status/error | inline status error | #FF8C8C | #FF8C8C | Failed setup status only |
 
 ### Rules

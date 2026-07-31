@@ -28,7 +28,7 @@ that pattern to the three API-key providers.
 ### 1. `CloudModelCache`
 
 Thread-safe per-provider cache of discovered model ids, placed next to
-`CodexModelCache` in App.swift.
+`CodexModelCache` (now in `Sources/Gizmate/LLM/ModelDiscovery.swift`).
 
 - Storage: `UserDefaults` key `cloud.discoveredModels.<provider rawValue>.v1`
   (one string array per provider).

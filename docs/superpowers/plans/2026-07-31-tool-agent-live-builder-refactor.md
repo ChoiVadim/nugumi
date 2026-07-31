@@ -1,5 +1,8 @@
 # Tool Agent Live Builder Refactor Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 **Goal:** Split independent Tool Agent support declarations out of
 `ToolAgentLiveBuilder.swift` while leaving the stateful coordinator intact.
 

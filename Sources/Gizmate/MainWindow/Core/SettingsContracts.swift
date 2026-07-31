@@ -93,7 +93,7 @@ enum SettingsIntent {
 
 // MARK: - Host
 
-/// Implemented by `GizmateApp` (in App.swift, where the private settings live).
+/// Implemented by `GizmateApp` in `GizmateApp+Settings.swift`.
 @MainActor
 protocol SettingsHost: AnyObject {
     func makeSettingsSnapshot() -> SettingsSnapshot

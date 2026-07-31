@@ -14,7 +14,7 @@ access only to reduce line count.
 | App preferences and updates | `Sources/Gizmate/App/GizmateApp+Preferences.swift`, `Sources/Gizmate/App/GizmateApp+Updates.swift` |
 | Global shortcuts | `Sources/Gizmate/App/Shortcuts/` |
 | Onboarding | `Sources/Gizmate/App/Onboarding/` |
-| Live translation pipeline | `Sources/Gizmate/Live/LiveTranslation*.swift`, `Sources/Gizmate/Live/LiveAudioPipeline.swift`, `Sources/Gizmate/Live/LiveCaption*.swift` |
+| Live translation pipeline | `Sources/Gizmate/Live/` |
 | Tool-agent coordinator | `Sources/Gizmate/App/ToolAgentLiveBuilder.swift` |
 | Tool-agent runtime/validation support | `Sources/Gizmate/App/ToolAgentRuntimeLocation.swift`, `Sources/Gizmate/App/ToolAgentFixtureHistory.swift`, `Sources/Gizmate/App/ToolAgentHostCandidateValidator.swift`, `Sources/Gizmate/App/ToolAgentModelActionValidation.swift` |
 | Tool-agent protocol foundations | `Sources/GizmateToolAgentCore/ToolAgentProtocolTypes.swift` |
@@ -69,5 +69,5 @@ For behavior-preserving source splits:
    `git diff --check`.
 6. Request an independent read-only review.
 
-As of 2026-07-31, the verified full-suite baseline is 413 executed tests,
+As of 2026-07-31, the verified full-suite baseline is 415 executed tests,
 2 expected skips, and 0 failures.

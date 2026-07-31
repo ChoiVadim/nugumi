@@ -39,7 +39,7 @@ final class OnboardingModel: ObservableObject {
     }
 
     /// Proxy for "initial setup finished": the key is consumed by
-    /// `showMainWindowOnFirstRunIfNeeded` in App.swift the first time the main
+    /// `showMainWindowOnFirstRunIfNeeded` in `GizmateApp.swift` the first time the main
     /// window auto-opens, which happens right after onboarding completes.
     /// While it's still false, completing permissions should land on the
     /// engine choice, not silently close.
@@ -299,7 +299,7 @@ final class OnboardingModel: ObservableObject {
 
     private func openFullDiskAccessSettings() {
         // Deliberately does NOT call closeBeforeSystemDialog(): that hides the
-        // window in anticipation of a "trust watcher" (App.swift) re-presenting
+        // window in anticipation of a "trust watcher" (GizmateApp+Permissions.swift) re-presenting
         // it once the permission lands — a mechanism that only exists for
         // Accessibility/Screen Recording. Full Disk Access has no equivalent
         // watcher and never restarts the app, so closing here would leave

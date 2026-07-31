@@ -1,5 +1,8 @@
 # Main Window Sections Refactor Implementation Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace `MainWindowSections.swift` with small, responsibility-focused files so settings code is easier and safer to locate and edit without changing runtime behavior.
@@ -16,7 +19,7 @@
 - No UI redesign, formatting sweep, feature work, or runtime-logic rewrite.
 - Each new source file must own one coherent responsibility and remain below roughly 400 lines.
 - Run `swift build` after every extraction task and stop immediately on a code-motion failure.
-- The pre-refactor baseline is 405 passing tests with one skipped test.
+- The pre-refactor baseline is 405 executed tests, 2 expected skips, and 0 failures.
 
 ---
 
@@ -68,7 +71,8 @@ git status --short --branch
 swift test
 ```
 
-Expected: the branch is clean; 405 tests pass and one test is skipped.
+Expected: the branch is clean; 405 tests execute, 2 expected tests are skipped,
+and there are 0 failures.
 
 - [ ] **Step 2: Create `DetailRouter.swift`**
 
@@ -560,7 +564,7 @@ Run:
 swift test
 ```
 
-Expected: 405 tests pass, one test is skipped, and there are no unexpected
+Expected: 405 tests execute, 2 expected tests are skipped, and there are 0
 failures.
 
 - [ ] **Step 2: Audit source size and ownership**

@@ -521,7 +521,9 @@ private final class RadialMenuButtonView: NSView {
 - [ ] **Step 2: Build**
 
 Run: `swift build 2>&1 | tail -5`
-Expected: `Build complete!`. If `.nugumiAccent` is unresolved, search for `nugumiAccent` in App.swift — it exists as an `NSColor` extension member (used by `continueButton.contentTintColor`); match its actual spelling.
+Expected: `Build complete!`. The historical `.nugumiAccent` token is now
+`.gizmateAccent`; its `NSColor` extension lives in
+`Sources/Gizmate/App/Bootstrap.swift`.
 
 - [ ] **Step 3: Commit**
 

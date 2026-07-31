@@ -1,5 +1,8 @@
 # Tool Agent Models Refactor Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 **Goal:** Split public protocol foundations and request/fingerprint contracts
 out of `ToolAgentModels.swift` without changing wire behavior or access.
 

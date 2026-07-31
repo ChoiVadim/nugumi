@@ -1,5 +1,8 @@
 # Ask Gizmate Refactor Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 **Goal:** Split the mixed Ask Gizmate domain file into response,
 conversation, and layout ownership without changing behavior or access.
 

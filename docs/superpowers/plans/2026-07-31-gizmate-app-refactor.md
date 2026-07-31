@@ -1,5 +1,8 @@
 # Gizmate App Refactor Plan
 
+**Status:** Implemented and verified. Checkboxes below preserve the original
+pre-implementation contract; they are not a live progress tracker.
+
 **Goal:** Split computed preferences and update delegates out of
 `GizmateApp.swift` while preserving stored state and app lifecycle behavior.
 

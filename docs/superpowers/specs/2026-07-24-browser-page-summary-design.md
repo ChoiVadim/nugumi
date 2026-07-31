@@ -15,7 +15,8 @@ the button fires immediately.
 - **Page text via Accessibility**, not Apple Events. Nugumi already holds the
   Accessibility permission; AppleScript would need a new entitlement, a TCC
   Automation prompt per browser, and the user manually enabling "Allow
-  JavaScript from Apple Events". `BrowserPageReader` (in App.swift) finds the
+  JavaScript from Apple Events". `BrowserPageReader` (now in
+  `Sources/Gizmate/Ring/BrowserPageReader.swift`) finds the
   largest `AXWebArea` in the focused window and collects `AXStaticText`
   values top-to-bottom, with node/char budgets (~12k tokens, same as chat).
 - **Chromium browsers** (Chrome, Edge, Brave, Arc, Whale, Vivaldi, Opera)
