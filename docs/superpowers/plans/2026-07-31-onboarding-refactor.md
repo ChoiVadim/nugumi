@@ -97,6 +97,7 @@ Package Manager, XCTest
 - `FeatureInstructionCard`
 - `IntroVideoPage`
 - `IntroPlayerView`
+- `loadOnboardingImage`
 - `PermissionPreviewPanel`
 - `FauxSystemDialog`
 - `FauxSettingsList`
