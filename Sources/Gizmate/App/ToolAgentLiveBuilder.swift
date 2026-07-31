@@ -53,6 +53,12 @@ struct ToolAgentRuntimeLocation {
     let node: URL
     let agent: URL
 
+    static let defaultSourceRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+
     static func resolve(
         entry: String = "agent.mjs",
         bundleURL: URL = Bundle.main.bundleURL,
@@ -60,11 +66,7 @@ struct ToolAgentRuntimeLocation {
             fileURLWithPath: FileManager.default.currentDirectoryPath,
             isDirectory: true
         ),
-        sourceRoot: URL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        sourceRoot: URL = ToolAgentRuntimeLocation.defaultSourceRoot
     ) throws -> Self {
         let contents = bundleURL.appendingPathComponent("Contents", isDirectory: true)
         let packaged = Self(

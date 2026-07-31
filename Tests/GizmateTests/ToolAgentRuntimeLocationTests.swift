@@ -4,6 +4,33 @@ import XCTest
 @testable import Gizmate
 
 final class ToolAgentRuntimeLocationTests: XCTestCase {
+    func testDefaultSourceRootIsAnchoredToProductionDeclaration() {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        XCTAssertEqual(
+            ToolAgentRuntimeLocation.defaultSourceRoot.standardizedFileURL.path,
+            repositoryRoot.standardizedFileURL.path
+        )
+    }
+
+    func testResolveAcceptsOmittedSourceRoot() throws {
+        let root = try temporaryDirectory()
+        let bundleURL = root.appendingPathComponent("Gizmate.app", isDirectory: true)
+        let currentDirectory = root.appendingPathComponent("current", isDirectory: true)
+        let packaged = try packagedRuntime(bundleURL: bundleURL)
+
+        let resolved = try ToolAgentRuntimeLocation.resolve(
+            bundleURL: bundleURL,
+            currentDirectory: currentDirectory
+        )
+
+        XCTAssertEqual(resolved.node.path, packaged.node.path)
+        XCTAssertEqual(resolved.agent.path, packaged.agent.path)
+    }
+
     func testPackagedRuntimePrecedesEveryDevelopmentCandidate() throws {
         let root = try temporaryDirectory()
         let bundleURL = root.appendingPathComponent("Gizmate.app", isDirectory: true)
