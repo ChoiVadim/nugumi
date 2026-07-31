@@ -179,6 +179,7 @@ swift test --filter LiveTranslationTests
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | App lifecycle, menu actions                   | `Sources/Gizmate/App/App.swift`                                                                                                                                 |
 | Providers, OAuth, LLM clients                 | `Sources/Gizmate/LLM/` (`LLMCore.swift`, `OllamaClient.swift`, `OpenAIChatClient.swift`, `CodexClient.swift`, `ClaudeCodeClient.swift`, `ModelDiscovery.swift`) |
+| Agent tool building and validation            | `Sources/Gizmate/App/ToolAgent*.swift`, `Sources/Gizmate/Tools/`, `Sources/GizmateToolAgentCore/`                                                               |
 | Modes, prompts, writing styles                | `Sources/Gizmate/Panels/TranslationModes.swift`                                                                                                                 |
 | Result panels and floating button             | `Sources/Gizmate/Panels/` (`TranslationPanel.swift`, `TranslationContentView.swift`, `FloatingButton.swift`)                                                    |
 | Selection capture and text pipeline           | `Sources/Gizmate/Selection/`                                                                                                                                    |
