@@ -170,6 +170,7 @@ swift test --filter LiveTranslationTests
 - Treat provider behavior as user-visible. Surface rejected keys, rate limits, model readiness, and missing vision support clearly.
 - Keep local and cloud paths distinct. Ollama setup, subscription sign-in, and API-key providers should not imply the same privacy or cost model.
 - Add or update focused tests when changing model routing, provider discovery, shortcuts, onboarding, permissions, live translation, or prompt behavior.
+- Check the [maintainability map](docs/maintainability-map.md) before splitting a large source file; several stateful controllers are intentionally kept cohesive.
 - Verify permission-sensitive behavior in a packaged `.app` when the change depends on macOS TCC prompts or relaunch behavior. `swift run` is useful for compilation and UI iteration, but it is not a full permission QA surface.
 - Do not commit generated or unrelated working-tree noise. This repo is often edited in parallel.
 
