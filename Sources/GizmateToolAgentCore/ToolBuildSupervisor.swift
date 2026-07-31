@@ -45,6 +45,7 @@ public actor ToolBuildSupervisor {
     var activeRequest: ToolBuildRequestV1?
     var activeProcess: ToolBuildProcessClientV1?
     var terminal: Result<ToolBuildResultV1, ToolAgentFailureCodeV1>?
+    var hostDeadlineRunID: UUID?
     var latestAttempt: ToolBuildAttemptV1?
     var latestValidation: ToolAgentValidationReportV1?
     var attestation: ToolAgentAttestationV1?
@@ -126,7 +127,7 @@ public actor ToolBuildSupervisor {
             await process.finish()
             return result
         } catch {
-            if case .failure(.timedOut)? = terminal {
+            if case .failure(.timedOut)? = terminal, hostDeadlineRunID == request.runID {
                 await deadline?.value
             }
             if let terminal {
@@ -151,6 +152,7 @@ public actor ToolBuildSupervisor {
     }
     func expire(runID: UUID) async {
         guard activeRequest?.runID == runID, terminal == nil else { return }
+        hostDeadlineRunID = runID
         let process = activeProcess
         terminal = .failure(.timedOut)
         await cancelPendingClarification(runID: runID)
@@ -202,6 +204,7 @@ public actor ToolBuildSupervisor {
         guard activeRequest?.runID == runID else { return }
         activeRequest = nil
         activeProcess = nil
+        hostDeadlineRunID = nil
         latestAttempt = nil
         latestValidation = nil
         attestation = nil

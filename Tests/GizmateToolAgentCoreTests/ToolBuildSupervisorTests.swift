@@ -469,6 +469,52 @@ final class ToolBuildSupervisorTests: XCTestCase {
         XCTAssertTrue(processWasCancelled)
     }
 
+    func testWorkerTimeoutDoesNotJoinSleepingHostDeadline() async throws {
+        let store = try temporaryStore()
+        let request = ToolBuildRequestV1(description: "worker timeout")
+        let deadline = ManualDeadline()
+        let process = ToolBuildProcessClientV1(
+            send: { _ in },
+            receive: {
+                await deadline.waitUntilStarted()
+                return .failed(
+                    runID: request.runID,
+                    .init(code: .timedOut, message: "worker timed out")
+                )
+            },
+            cancel: {}
+        )
+        let supervisor = ToolBuildSupervisor(
+            store: store,
+            runtimeVersion: "3.12.11",
+            policyVersion: "validation-v1",
+            makeProcess: { _ in process },
+            model: { _ in .error(.workerFailure) },
+            validation: { _ in throw ToolAgentFailureCodeV1.workerFailure },
+            sleep: { _ in await deadline.wait() }
+        )
+        let build = Task { try await supervisor.build(request) }
+        let completed = expectation(description: "worker timeout returns")
+        let observer = Task {
+            _ = await build.result
+            completed.fulfill()
+        }
+
+        let waitResult = await XCTWaiter.fulfillment(of: [completed], timeout: 1)
+        await deadline.fire()
+        let result = await build.result
+        _ = await observer.result
+
+        XCTAssertEqual(waitResult, .completed)
+        guard case .failure(let error) = result else {
+            return XCTFail("Expected worker deadline failure")
+        }
+        XCTAssertEqual(error as? ToolAgentFailureCodeV1, .timedOut)
+        let record = try await store.record(runID: request.runID)
+        XCTAssertEqual(record.state, .failed)
+        XCTAssertEqual(record.failure, .timedOut)
+    }
+
     func testOldCancellationCannotClearNextRunsPendingClarification() async throws {
         let store = try temporaryStore()
         let first = ToolBuildRequestV1(description: "first tool")
@@ -697,10 +743,20 @@ private actor NonCooperativeClarification {
 private actor ManualDeadline {
     private var continuation: CheckedContinuation<Void, Never>?
     private var fired = false
+    private var started = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
 
     func wait() async {
+        started = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
         if fired { return }
         await withCheckedContinuation { continuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { startWaiters.append($0) }
     }
 
     func fire() {
