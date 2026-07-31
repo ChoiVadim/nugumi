@@ -185,7 +185,7 @@ swift test --filter LiveTranslationTests
 | Selection capture and text pipeline           | `Sources/Gizmate/Selection/`                                                                                                                                    |
 | Pet mascot                                    | `Sources/Gizmate/Pet/`                                                                                                                                          |
 | Quick-menu ring                               | `Sources/Gizmate/Ring/`                                                                                                                                         |
-| Ask Gizmate prompt behavior                    | `Sources/Gizmate/Ask/` (`AskGizmate.swift`, `AskPrompt.swift`, `AskOverlays.swift`)                                                                              |
+| Ask Gizmate prompt behavior                    | `Sources/Gizmate/Ask/` (`AskGizmateResponse.swift`, `AskGizmateConversation.swift`, `AskGizmateLayout.swift`, `AskPrompt.swift`, `AskOverlays.swift`)              |
 | Settings window and AI Engine UI              | `Sources/Gizmate/MainWindow/Core/`, `Sources/Gizmate/MainWindow/Sections/`                                                                                        |
 | Shortcuts                                     | `Sources/Gizmate/App/Shortcuts/`                                                                                                                                |
 | Onboarding and permissions                    | `Sources/Gizmate/App/Onboarding/`                                                                                                                               |
