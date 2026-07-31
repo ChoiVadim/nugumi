@@ -177,7 +177,7 @@ swift test --filter LiveTranslationTests
 
 | Area                                          | Files                                                                                                                                                          |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App lifecycle, menu actions                   | `Sources/Gizmate/App/App.swift`                                                                                                                                 |
+| App lifecycle, menu actions                   | `Sources/Gizmate/App/GizmateApp.swift`, `Sources/Gizmate/App/GizmateApp+*.swift`                                                                                 |
 | Providers, OAuth, LLM clients                 | `Sources/Gizmate/LLM/` (`LLMCore.swift`, `OllamaClient.swift`, `OpenAIChatClient.swift`, `CodexClient.swift`, `ClaudeCodeClient.swift`, `ModelDiscovery.swift`) |
 | Agent tool building and validation            | `Sources/Gizmate/App/ToolAgent*.swift`, `Sources/Gizmate/Tools/`, `Sources/GizmateToolAgentCore/`                                                               |
 | Modes, prompts, writing styles                | `Sources/Gizmate/Panels/TranslationModes.swift`                                                                                                                 |
