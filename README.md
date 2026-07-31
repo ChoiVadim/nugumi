@@ -187,7 +187,7 @@ swift test --filter LiveTranslationTests
 | Ask Gizmate prompt behavior                    | `Sources/Gizmate/Ask/` (`AskGizmate.swift`, `AskPrompt.swift`, `AskOverlays.swift`)                                                                              |
 | Settings window and AI Engine UI              | `Sources/Gizmate/MainWindow/Core/`, `Sources/Gizmate/MainWindow/Sections/`                                                                                        |
 | Shortcuts                                     | `Sources/Gizmate/App/Shortcuts/`                                                                                                                                |
-| Onboarding and permissions                    | `Sources/Gizmate/App/Onboarding.swift`                                                                                                                          |
+| Onboarding and permissions                    | `Sources/Gizmate/App/Onboarding/`                                                                                                                               |
 | Ollama and provider readiness                 | `Sources/Gizmate/App/Bootstrap.swift`                                                                                                                           |
 | Live captions, summaries, follow-up questions | `Sources/Gizmate/Live/`                                                                                                                                         |
 | Chat archives (KakaoTalk, Telegram)           | `Sources/Gizmate/Archive/`                                                                                                                                      |
