@@ -215,6 +215,15 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     var kind: ToolKind
     var input: ToolInput
     var output: ToolOutput
+    /// Variants this gizmo offers. In the Ring its button expands into one
+    /// circle per option — the same second layer Summarize's time ranges use.
+    /// The label IS the value: "720p" is both what the button says and what the
+    /// gizmo is handed. Empty for a gizmo that does one thing.
+    var options: [String]
+    /// Which option this run picked. Deliberately absent from `CodingKeys`: it
+    /// belongs to a run, not to the saved gizmo. A gizmo that remembered the
+    /// last button pressed would be a setting nobody asked for.
+    var chosenOption: String?
 
     // MARK: .prompt
     var prompt: String
@@ -275,6 +284,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         kind: ToolKind = .prompt,
         input: ToolInput = .selection,
         output: ToolOutput = .panel,
+        options: [String] = [],
         prompt: String = "",
         appliesTargetLanguage: Bool = true,
         nativeAction: NativeAction = .openApp,
@@ -295,6 +305,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         self.kind = kind
         self.input = input
         self.output = output
+        self.options = Self.sanitizedOptions(options)
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
 
@@ -345,7 +356,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     // Lenient decoding, same reasoning as `Snippet`: a field added in a later
     // version must not throw away every tool the user already saved.
     private enum CodingKeys: String, CodingKey {
-        case id, name, symbolName, kind, input, output
+        case id, name, symbolName, kind, input, output, options
         case prompt, appliesTargetLanguage
         case nativeAction, target
         case outputDirectory, timeoutSeconds, declaresNetwork, secretNames, brief
@@ -372,6 +383,9 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         output = try c.decodeIfPresent(ToolOutput.self, forKey: .output)
             ?? legacy?.decodeIfPresent(ToolOutput.self, forKey: .result)
             ?? .panel
+        options = Self.sanitizedOptions(
+            try c.decodeIfPresent([String].self, forKey: .options) ?? []
+        )
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         appliesTargetLanguage = try c.decodeIfPresent(Bool.self, forKey: .appliesTargetLanguage) ?? true
         nativeAction = try c.decodeIfPresent(NativeAction.self, forKey: .nativeAction) ?? .openApp
@@ -390,5 +404,30 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         usesVoice = try c.decodeIfPresent(Bool.self, forKey: .usesVoice) ?? false
         usesNotes = try c.decodeIfPresent(Bool.self, forKey: .usesNotes) ?? false
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+    }
+
+    /// The option in force for this run: what the Ring picked, or the first one
+    /// for a run started from a hotkey or the quick menu, which never offered a
+    /// choice. nil for a gizmo with no options.
+    var activeOption: String? { chosenOption ?? options.first }
+
+    /// `template` with `{option}` filled in. A gizmo with no options gets its
+    /// template back untouched, so an author who typed `{option}` by mistake
+    /// sees the literal rather than an empty hole.
+    func resolvingOption(_ template: String) -> String {
+        guard let activeOption else { return template }
+        return template.replacingOccurrences(of: "{option}", with: activeOption)
+    }
+
+    /// Trimmed, de-duplicated and capped at five — more than that stops fanning
+    /// cleanly at the outer orbit. Fewer than two is dropped entirely: a
+    /// one-circle sub-orbit is a worse button than the one it replaced.
+    static func sanitizedOptions(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        let cleaned = raw
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .prefix(5)
+        return cleaned.count < 2 ? [] : Array(cleaned)
     }
 }
