@@ -24,6 +24,10 @@ struct ToolEvalCase {
     var output: ToolOutput?
     var declaresNetwork: Bool?
     var minimumAssurance: ToolAgentAssuranceV1?
+    /// How many options the finished gizmo must carry. The point of the case is
+    /// that the model reached for options unprompted, so this asserts the count,
+    /// not the labels — pinning "360p" would be pinning one right answer.
+    var minimumOptions: Int?
     /// When set, the finished tool is run for real on this argument. It has to
     /// exit cleanly, and produce a file if it declares a file output. This is
     /// the only assertion that proves the tool actually does its job.
@@ -65,6 +69,16 @@ enum ToolEvalSuite {
             declaresNetwork: true,
             minimumAssurance: .smoke,
             liveInput: "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+        ),
+        ToolEvalCase(
+            name: "python-download-youtube-quality",
+            request: "скачивать видео с youtube по ссылке, которую я вставлю, "
+                + "и чтобы я мог выбрать 360p, 480p или 720p",
+            kind: .python,
+            input: .ask,
+            output: .files,
+            declaresNetwork: true,
+            minimumOptions: 3
         ),
         ToolEvalCase(
             name: "python-download-instagram-photo",
@@ -327,6 +341,11 @@ struct ToolEvalMode: Equatable {
         check("input", testCase.input, generated.tool.input)
         check("output", testCase.output, generated.tool.output)
         check("declaresNetwork", testCase.declaresNetwork, generated.tool.declaresNetwork)
+        if let minimum = testCase.minimumOptions, generated.tool.options.count < minimum {
+            failures.append(
+                "options: expected at least \(minimum), got \(generated.tool.options.count)"
+            )
+        }
         if let minimum = testCase.minimumAssurance,
            strength(generated.assurance) < strength(minimum) {
             failures.append(

@@ -204,6 +204,20 @@ Every candidate also includes schemaVersion 1, kind, name, brief, symbolName,
 input, output, trigger, hosts, and extensions. Trigger "selection" requires
 selection input; "files" requires files input.
 
+When a request has an obvious axis of choice — quality, format, size, length,
+style, language — express it as options rather than hardcoding one value or
+spending an ask_user question on it. Two to five short labels, and the label is
+the value: "720p" is both what the button says and what the tool is handed. The
+Ring draws them as a second layer behind the tool's button, so the user picks one
+per run. Leave options out entirely when a request names exactly one way to do
+the thing.
+
+A Python tool reads the picked option from the environment, not from argv:
+os.environ.get("GIZMO_OPTION", "<your default>"). A prompt, agent or native tool
+writes {option} wherever the value belongs in its text or target, and the host
+substitutes it. Validation runs with the first option, so order them so the
+first is the sensible default.
+
 The input "ask" is typed rather than read. When the tool runs, a text field opens
 at the cursor and the tool is handed exactly what the user types, in the same
 single argument a selection would arrive in. Choose it when the request has no
