@@ -360,6 +360,10 @@ extension GizmateApp {
         // gizmo never passes through a `TranslationMode`, so this is where the
         // blocks the prompt path gets from `systemPrompt` are attached instead.
         var contextualized = tool
+        // Resolved before the context blocks are appended, so `{option}` in the
+        // user's own instruction is filled in and `{option}` inside a context
+        // block — which is not a template — is left alone.
+        contextualized.prompt = tool.resolvingOption(tool.prompt)
         contextualized.prompt += TranslationMode.contextSections(
             for: tool,
             targetLanguage: targetLanguage,

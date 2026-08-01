@@ -379,7 +379,8 @@ enum TranslationMode: Equatable {
         targetLanguage: TranslationLanguage,
         composition: CompositionSettings?
     ) -> String {
-        var body = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var body = tool.resolvingOption(tool.prompt)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if tool.appliesTargetLanguage {
             body += "\n\nWrite the output in \(targetLanguage.promptName)."
         }

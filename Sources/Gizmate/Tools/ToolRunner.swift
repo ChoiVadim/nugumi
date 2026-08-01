@@ -100,6 +100,7 @@ enum ToolRunner {
                 // candidate under validation runs with the same keys the saved
                 // tool will have.
                 secrets: ToolSecrets.environment(for: tool.secretNames),
+                option: tool.activeOption,
                 onOutput: onOutput
             )
         } catch {
@@ -151,6 +152,7 @@ enum ToolRunner {
         workDir: URL,
         timeout: Int,
         secrets: [String: String],
+        option: String?,
         onOutput: (@Sendable (String) -> Void)?
     ) async throws -> RawResult {
         let process = Process()
@@ -164,7 +166,14 @@ enum ToolRunner {
         // process on the machine via `ps`. On a name collision the runtime wins
         // — `PATH` and `HOME` are legal secret names, and a tool that shadowed
         // either would break uv rather than authenticate anything.
-        process.environment = UVBootstrap.environment().merging(secrets) { runtime, _ in runtime }
+        //
+        // The picked option rides the same channel, and for a different reason:
+        // a `.files` input already resolves to one argv entry per file, so a
+        // trailing argument would be indistinguishable from one more file.
+        // `GIZMO_OPTION` is not a secret — it is the user's own visible choice.
+        var environment = UVBootstrap.environment().merging(secrets) { runtime, _ in runtime }
+        if let option { environment["GIZMO_OPTION"] = option }
+        process.environment = environment
 
         let outPipe = Pipe()
         let errPipe = Pipe()

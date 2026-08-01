@@ -49,7 +49,11 @@ enum NativeToolRunner {
         context: ToolContext,
         notes: NotesStore
     ) async throws -> Result {
-        let target = tool.target.trimmingCharacters(in: .whitespacesAndNewlines)
+        // `{option}` is resolved here, once, so every action below sees a
+        // finished target — `openURL` percent-encodes only the `{input}` it
+        // substitutes afterwards, and `runShortcut` never substitutes at all.
+        let target = tool.resolvingOption(tool.target)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         if tool.nativeAction.targetLabel != nil, target.isEmpty {
             throw NativeToolError.missingTarget(tool.nativeAction)
         }

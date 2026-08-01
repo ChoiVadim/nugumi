@@ -60,4 +60,26 @@ final class GizmoOptionsTests: XCTestCase {
             "save at {option}"
         )
     }
+
+    /// The three text-substituted kinds all go through `resolvingOption`, and
+    /// the prompt path is the one a user sees most, so pin it here rather than
+    /// only trusting the helper's own test.
+    func testAPromptGizmoGetsItsOptionSubstitutedBeforeTheLanguageLine() {
+        var tool = GizmateTool(
+            name: "Summarise",
+            kind: .prompt,
+            options: ["short", "long"],
+            prompt: "Write a {option} version of the text.",
+            appliesTargetLanguage: false
+        )
+        tool.chosenOption = "long"
+
+        let system = TranslationMode.custom(tool).systemPrompt(
+            targetLanguage: TranslationLanguage.language(id: "en"),
+            appCategory: .other,
+            composition: nil
+        )
+        XCTAssertTrue(system.contains("Write a long version of the text."))
+        XCTAssertFalse(system.contains("{option}"))
+    }
 }
