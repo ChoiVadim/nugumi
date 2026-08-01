@@ -84,17 +84,23 @@ built-in resolves to can now differ from what shipped.
 
 ### 2. Prompt overrides — `Sources/Gizmate/Panels/TranslationModes.swift`
 
-Four built-ins have a prompt, reached through `TranslationMode`:
+Three built-ins get a prompt field, each owning exactly one `TranslationMode`:
 
-| built-in  | mode                                  |
-| --------- | ------------------------------------- |
-| Explain   | `.selection`                          |
-| Rewrite   | `.draftMessage`                       |
-| Reply     | `.smartReply`                         |
-| Summarize | `.summarizeChat` and `.summarizePage` |
+| built-in | mode            |
+| -------- | --------------- |
+| Explain  | `.selection`    |
+| Rewrite  | `.draftMessage` |
+| Reply    | `.smartReply`   |
+
+Summarize is deliberately excluded even though it is prompt-driven: it is one
+button standing in front of _two_ prompts (`.summarizeChat` for a chat
+transcript, `.summarizePage` for a web page), so a single text field cannot
+honestly represent it. Summarize therefore has no prompt field and no shortcut —
+it stays a pure name / icon / enabled entry. If per-surface prompt editing is
+ever wanted, it needs its own design, not a field that silently edits one of two.
 
 Their prompts are not strings, they are interpolated templates. `.selection`
-splices `\(targetLanguage.promptName)` in six places plus `\(appCategory.promptHint)`
+splices `\(targetLanguage.promptName)` in eight places plus `\(appCategory.promptHint)`
 and a Gen-Z block; `.draftMessage` and `.smartReply` additionally splice the
 writing style, voice sample, cleanup and glossary blocks. A user override stored
 as flat text would silently drop every one of those layers — Explain would stop
@@ -114,12 +120,39 @@ pass:
 | `{cleanup}`      | `composition?.cleanup.promptDescription` / `cleanupSection` |
 | `{glossary}`     | `TranslationMode.glossarySection(for:includeSnippets:)`     |
 
-Substitution is a `reduce` over a `[String: String]` built from the same three
-arguments `systemPrompt` already takes. Unknown tokens are left verbatim rather
-than erased, so a typo in an override shows up in the output instead of vanishing.
+Substitution is a **single pass** over the template, driven by a `[String: String]`
+built from the same three arguments `systemPrompt` already takes. Single pass
+rather than a `reduce` of `replacingOccurrences`, because the spliced values are
+user content: a glossary snippet or voice sample containing the literal text
+`{language}` would be rescanned and substituted by a later iteration. One pass
+means a value is never re-examined once written. Unknown tokens are left verbatim
+rather than erased, so a typo in an override shows up in the output instead of
+vanishing.
+
+The token map is built **per mode**, not once globally, because two modes spell
+the same concept differently: `.draftMessage` splices `cleanupSection(for:)`,
+which emits its own `"\n\nCleanup — "` heading, while `.smartReply` has the
+heading written into the prompt and splices only `cleanup.promptDescription`.
+Building the map alongside the template keeps both byte-identical.
+
+Overrides reach `systemPrompt` through a mutable static, the same way
+`AppCategoryClassifier.userOverrides` already works
+(`TranslationModes.swift:664`) — `GizmateApp` keeps it in sync from the store:
+
+```swift
+extension TranslationMode {
+    static var promptOverrides: [RingActionID: String] = [:]
+}
+```
+
+This keeps `systemPrompt`'s signature untouched, which matters: it is called from
+four LLM clients (`OllamaClient.swift:92`, `ClaudeCodeClient.swift:56`,
+`CodexClient.swift:81`, `OpenAIChatClient.swift:113`), none of which should learn
+about built-in overrides.
 
 `UserAboutContext.appending(to:)` still wraps the result, and `.revise`,
-`.reviseMessage` and `.custom` keep their current interpolated form untouched.
+`.reviseMessage`, `.summarizeChat`, `.summarizePage` and `.custom` keep their
+current interpolated form untouched.
 
 The editor seeds its text view with the token template, so what you edit is what
 ships, and "Reset to default" restores it exactly.
@@ -186,7 +219,7 @@ reachable from some screen.
   opening that sheet. No trash button — a built-in is disabled, never deleted.
 - `Sources/Gizmate/MainWindow/BuiltInEditor.swift` (new), styled after
   `RingFolderEditor` since both are small single-purpose panels. Fields: Name,
-  Icon, Enabled, Shortcut, and Prompt for the four that have one. One "Reset to
+  Icon, Enabled, Shortcut, and Prompt for the three that have one. One "Reset to
   default" clears the whole override.
 - The Shortcut row reuses `bridge.perform(.recordShortcut(action))` and the
   existing `KeyCap` + "Change" pairing from `ShortcutsTab`, so conflict checking
@@ -194,12 +227,13 @@ reachable from some screen.
 
 ## Testing
 
-- **Template fidelity (the important one).** For each of the five rewritten
+- **Template fidelity (the important one).** For each of the three rewritten
   prompts, assert that the tokenized template rendered with a fixed
   `(targetLanguage, appCategory, composition)` equals the exact string the old
-  interpolated version produced. This is a mechanical find-replace across roughly
-  2,000 words of prompt; without this test a dropped token degrades Explain
-  silently and nothing fails.
+  interpolated version produced, captured verbatim as a fixture before the
+  refactor. This is a mechanical find-replace across roughly 1,700 words of
+  prompt; without this test a dropped token degrades Explain silently and nothing
+  fails.
 - **Store round-trip.** Save an override against a scratch `UserDefaults` suite,
   read it back, clear it, confirm the shipped value returns.
 - **Disable propagation.** `RingBuilder.slots` omits a disabled built-in and
