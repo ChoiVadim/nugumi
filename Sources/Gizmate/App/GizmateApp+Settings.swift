@@ -96,6 +96,7 @@ extension GizmateApp: SettingsHost {
     var snippets: SnippetsStore { snippetsStore }
     var tools: ToolsStore { toolsStore }
     var ringLayout: RingLayoutStore { ringLayoutStore }
+    var builtInOverrides: BuiltInOverridesStore { builtInOverridesStore }
     var history: TranslationHistoryStore { translationHistoryStore }
     var isAppBundle: Bool { isRunningFromAppBundle }
     var appVersionString: String {

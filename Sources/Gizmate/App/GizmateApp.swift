@@ -129,6 +129,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     let toolsStore = ToolsStore()
     let uvBootstrap = UVBootstrap()
     let ringLayoutStore = RingLayoutStore()
+    let builtInOverridesStore = BuiltInOverridesStore()
     let translationHistoryStore = TranslationHistoryStore()
     lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
         baseURL: ollamaBaseURL,

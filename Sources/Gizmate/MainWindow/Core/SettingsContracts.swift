@@ -102,6 +102,7 @@ protocol SettingsHost: AnyObject {
     var snippets: SnippetsStore { get }
     var tools: ToolsStore { get }
     var ringLayout: RingLayoutStore { get }
+    var builtInOverrides: BuiltInOverridesStore { get }
     /// Whether the uv runtime script tools need is present.
     var uvIsReady: Bool { get }
     /// Installs uv if needed, then runs `script` once on the current context and

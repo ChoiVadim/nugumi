@@ -12,6 +12,7 @@ final class GizmateSettingsBridge: ObservableObject {
     let snippets: SnippetsStore
     let tools: ToolsStore
     let ringLayout: RingLayoutStore
+    let builtInOverrides: BuiltInOverridesStore
     let history: TranslationHistoryStore
 
     @Published var section: MainWindowSection = .home
@@ -49,6 +50,7 @@ final class GizmateSettingsBridge: ObservableObject {
         self.snippets = host.snippets
         self.tools = host.tools
         self.ringLayout = host.ringLayout
+        self.builtInOverrides = host.builtInOverrides
         self.history = host.history
         self.settings = host.makeSettingsSnapshot()
         self.bootstrap = host.bootstrapState
