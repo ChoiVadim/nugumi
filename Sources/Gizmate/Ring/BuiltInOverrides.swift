@@ -14,12 +14,42 @@ struct BuiltInOverride: Codable, Equatable {
     /// Token template replacing the shipped prompt. Only Explain, Rewrite and
     /// Reply have one — see `RingActionID.promptMode`.
     var prompt: String?
-    var isEnabled: Bool = true
+    /// Hands the built-in the user's writing style, cleanup level, dictionary
+    /// and snippets — the same "Use my Voice" a gizmo carries.
+    var usesVoice: Bool = true
+    /// Hands it the notes ticked in the Notes tab (see `NotesContext`).
+    var usesNotes: Bool = true
 
-    /// Nothing set and still switched on is indistinguishable from never having
-    /// been edited, so saving one is stored as a removal.
+    /// Nothing set and both context sources still on is indistinguishable from
+    /// never having been edited, so saving one is stored as a removal.
     var isShipped: Bool {
-        name == nil && symbol == nil && prompt == nil && isEnabled
+        name == nil && symbol == nil && prompt == nil && usesVoice && usesNotes
+    }
+
+    init(
+        name: String? = nil,
+        symbol: String? = nil,
+        prompt: String? = nil,
+        usesVoice: Bool = true,
+        usesNotes: Bool = true
+    ) {
+        self.name = name
+        self.symbol = symbol
+        self.prompt = prompt
+        self.usesVoice = usesVoice
+        self.usesNotes = usesNotes
+    }
+
+    /// Hand-written so a blob saved before these two toggles existed decodes as
+    /// "both on" instead of throwing and taking the user's edited prompts and
+    /// names down with it.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
+        usesVoice = try container.decodeIfPresent(Bool.self, forKey: .usesVoice) ?? true
+        usesNotes = try container.decodeIfPresent(Bool.self, forKey: .usesNotes) ?? true
     }
 }
 
@@ -62,13 +92,20 @@ final class BuiltInOverridesStore: ObservableObject {
         overrides[id]?.prompt
     }
 
-    func isEnabled(_ id: RingActionID) -> Bool {
-        overrides[id]?.isEnabled ?? true
-    }
-
     /// Every prompt the user has written, in the shape `TranslationMode` reads.
     func promptOverrides() -> [RingActionID: String] {
         overrides.compactMapValues(\.prompt)
+    }
+
+    /// Built-ins with a context source switched off, in the shape
+    /// `TranslationMode` reads. Off-lists rather than on-lists: both toggles
+    /// ship on, and an untouched built-in has no override stored at all.
+    func voiceOffBuiltIns() -> Set<RingActionID> {
+        Set(overrides.filter { !$0.value.usesVoice }.keys)
+    }
+
+    func notesOffBuiltIns() -> Set<RingActionID> {
+        Set(overrides.filter { !$0.value.usesNotes }.keys)
     }
 
     // MARK: - Writes

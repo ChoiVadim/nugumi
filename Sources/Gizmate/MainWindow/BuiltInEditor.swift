@@ -15,7 +15,8 @@ struct BuiltInEditorPanel: View {
     @State private var name = ""
     @State private var symbolName = ""
     @State private var prompt = ""
-    @State private var isEnabled = true
+    @State private var usesVoice = true
+    @State private var usesNotes = true
     @State private var loaded = false
     @FocusState private var nameFocused: Bool
 
@@ -50,7 +51,8 @@ struct BuiltInEditorPanel: View {
             name = store.displayName(for: actionID)
             symbolName = store.overrides[actionID]?.symbol ?? ""
             prompt = store.prompt(for: actionID) ?? shippedPrompt ?? ""
-            isEnabled = store.isEnabled(actionID)
+            usesVoice = store.overrides[actionID]?.usesVoice ?? true
+            usesNotes = store.overrides[actionID]?.usesNotes ?? true
             nameFocused = true
         }
     }
@@ -85,16 +87,6 @@ struct BuiltInEditorPanel: View {
     @ViewBuilder
     private var fields: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SettingRow("Enabled",
-                       subtitle: "Off hides it from the ring and frees its shortcut.") {
-                Toggle("", isOn: $isEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .tint(FlowTheme.accent)
-            }
-
-            Divider().background(FlowTheme.hairline)
-
             SettingRow("Name") {
                 TextField("", text: $name)
                     .textFieldStyle(.plain)
@@ -120,6 +112,34 @@ struct BuiltInEditorPanel: View {
             if shippedPrompt != nil {
                 Divider().background(FlowTheme.hairline)
                 promptSection
+                Divider().background(FlowTheme.hairline)
+                contextToggles
+            }
+        }
+    }
+
+    /// Same two context sources a gizmo carries, offered to the three built-ins
+    /// that brief the model. The rest are macOS actions with no prompt to hand
+    /// anything to — see `RingActionID.promptMode`.
+    private var contextToggles: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingRow(
+                "Use my Voice",
+                subtitle: "Writes in your register, with your cleanup level, dictionary, and snippets."
+            ) {
+                Toggle("", isOn: $usesVoice)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(FlowTheme.accent)
+            }
+            SettingRow(
+                "Use my notes",
+                subtitle: "Hands it the notes you ticked in the Notes tab as background."
+            ) {
+                Toggle("", isOn: $usesNotes)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(FlowTheme.accent)
             }
         }
     }
@@ -210,7 +230,8 @@ struct BuiltInEditorPanel: View {
                 symbol: symbolName.isEmpty ? nil : symbolName,
                 prompt: (trimmedPrompt.isEmpty || trimmedPrompt == shipped)
                     ? nil : trimmedPrompt,
-                isEnabled: isEnabled
+                usesVoice: usesVoice,
+                usesNotes: usesNotes
             ),
             for: actionID
         )

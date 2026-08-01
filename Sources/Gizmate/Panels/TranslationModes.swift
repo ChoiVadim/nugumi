@@ -71,10 +71,16 @@ enum TranslationMode: Equatable {
 
     var usesCompositionSettings: Bool {
         switch self {
-        case .selection, .revise, .summarizeChat, .summarizePage:
+        case .revise, .summarizeChat, .summarizePage:
             return false
-        case .draftMessage, .smartReply, .reviseMessage:
+        case .reviseMessage:
             return true
+        case .selection, .draftMessage, .smartReply:
+            // The three editable built-ins carry "Use my Voice" in their own
+            // editor. Off means Rewrite and Reply render their style tokens
+            // empty and Explain appends no style block — see
+            // `builtInContextSections`.
+            return usesVoiceContext
         case .custom(let tool):
             // The user's own prompt is authoritative, so composition stays off
             // unless they ticked "Use my Voice" on this gizmo — layering the
@@ -216,11 +222,31 @@ enum TranslationMode: Equatable {
     /// should have to learn about built-in overrides to pass one through.
     static var promptOverrides: [RingActionID: String] = [:]
 
+    /// Built-ins the user switched "Use my Voice" / "Use my notes" off for.
+    /// Off-lists because both ship on: an untouched built-in is in neither.
+    /// Kept current by `GizmateApp`, exactly like `promptOverrides`.
+    static var voiceOffBuiltIns: Set<RingActionID> = []
+    static var notesOffBuiltIns: Set<RingActionID> = []
+
+    /// The built-in whose editor owns this mode's prompt, if any.
+    private var owningBuiltIn: RingActionID? {
+        RingActionID.allCases.first { $0.promptMode == self }
+    }
+
+    private var usesVoiceContext: Bool {
+        guard let owningBuiltIn else { return false }
+        return !Self.voiceOffBuiltIns.contains(owningBuiltIn)
+    }
+
+    private var usesNotesContext: Bool {
+        guard let owningBuiltIn else { return false }
+        return !Self.notesOffBuiltIns.contains(owningBuiltIn)
+    }
+
     /// The template actually used: the user's, or the shipped one. A blank
     /// override is a cleared field, not a request for an empty system prompt.
     var promptTemplate: String? {
-        let userWritten = RingActionID.allCases
-            .first { $0.promptMode == self }
+        let userWritten = owningBuiltIn
             .flatMap { Self.promptOverrides[$0] }?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let userWritten, !userWritten.isEmpty { return userWritten }
@@ -305,13 +331,17 @@ enum TranslationMode: Equatable {
         // The three editable built-ins render from a template so a user's
         // override keeps the language, app-context and writing-style layers.
         if let template = promptTemplate {
-            return UserAboutContext.appending(to: TranslationMode.renderPrompt(
+            let rendered = TranslationMode.renderPrompt(
                 template,
                 tokens: promptTokens(
                     targetLanguage: targetLanguage,
                     appCategory: appCategory,
                     composition: composition
                 )
+            )
+            return UserAboutContext.appending(to: rendered + builtInContextSections(
+                targetLanguage: targetLanguage,
+                composition: composition
             ))
         }
         let base: String = switch self {
@@ -389,6 +419,30 @@ enum TranslationMode: Equatable {
             targetLanguage: targetLanguage,
             composition: composition
         )
+    }
+
+    /// The context blocks a built-in's editor toggles bring in, for the parts
+    /// its template does not already carry. Rewrite and Reply splice the Voice
+    /// through `{writingStyle}` / `{cleanup}` / `{glossary}` — a nil
+    /// composition is how "off" reaches them — so only Explain needs the block
+    /// appended. Gen Z is left out of it: Explain's template has its own
+    /// `{genZ}` token. No shipped template mentions notes, so those append for
+    /// all three.
+    private func builtInContextSections(
+        targetLanguage: TranslationLanguage,
+        composition: CompositionSettings?
+    ) -> String {
+        var sections = ""
+        if self == .selection, usesVoiceContext, let composition {
+            sections += "\n\nWriting style — "
+                + composition.writingStyleDirective(for: targetLanguage.id)
+                + Self.cleanupSection(for: composition.cleanup)
+                + Self.glossarySection(for: composition.snippets, includeSnippets: true)
+        }
+        if usesNotesContext {
+            sections = NotesContext.appending(to: sections)
+        }
+        return sections
     }
 
     /// The context blocks a user gizmo opted into: the user's Voice (register,

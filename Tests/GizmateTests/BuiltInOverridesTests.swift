@@ -23,7 +23,8 @@ final class BuiltInOverridesTests: XCTestCase {
         XCTAssertEqual(store.name(for: .dictate), RingActionID.dictate.label)
         XCTAssertEqual(store.icon(for: .explain), RingActionID.explain.icon)
         XCTAssertNil(store.prompt(for: .explain))
-        XCTAssertTrue(store.isEnabled(.dictate))
+        XCTAssertTrue(store.voiceOffBuiltIns().isEmpty)
+        XCTAssertTrue(store.notesOffBuiltIns().isEmpty)
     }
 
     @MainActor
@@ -32,13 +33,32 @@ final class BuiltInOverridesTests: XCTestCase {
         defer { cleanup() }
 
         store.save(
-            BuiltInOverride(name: "Speak", symbol: "waveform.circle", isEnabled: false),
+            BuiltInOverride(name: "Speak", symbol: "waveform.circle", usesNotes: false),
             for: .dictate
         )
 
         XCTAssertEqual(store.name(for: .dictate), "Speak")
         XCTAssertEqual(store.icon(for: .dictate), .symbol("waveform.circle"))
-        XCTAssertFalse(store.isEnabled(.dictate))
+        XCTAssertEqual(store.notesOffBuiltIns(), [.dictate])
+        XCTAssertTrue(store.voiceOffBuiltIns().isEmpty)
+    }
+
+    /// Blobs written before the two context toggles existed carry `isEnabled`
+    /// and neither new key. They must decode as "both on" — a throw here would
+    /// take the user's edited prompts and names down with them.
+    @MainActor
+    func testLegacyBlobDecodesWithBothContextSourcesOn() throws {
+        let suiteName = "BuiltInOverridesTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let legacy = #"{"dictate":{"name":"Speak","isEnabled":false}}"#
+        defaults.set(Data(legacy.utf8), forKey: "builtInOverrides.v1")
+
+        let store = BuiltInOverridesStore(defaults: defaults)
+        XCTAssertEqual(store.name(for: .dictate), "Speak")
+        XCTAssertTrue(store.voiceOffBuiltIns().isEmpty)
+        XCTAssertTrue(store.notesOffBuiltIns().isEmpty)
     }
 
     /// An unset field must fall through even when its neighbours are set —
@@ -52,7 +72,7 @@ final class BuiltInOverridesTests: XCTestCase {
 
         XCTAssertEqual(store.name(for: .dictate), "Speak")
         XCTAssertEqual(store.icon(for: .dictate), RingActionID.dictate.icon)
-        XCTAssertTrue(store.isEnabled(.dictate))
+        XCTAssertTrue(store.voiceOffBuiltIns().isEmpty)
     }
 
     @MainActor
@@ -72,11 +92,11 @@ final class BuiltInOverridesTests: XCTestCase {
         let (store, cleanup) = store()
         defer { cleanup() }
 
-        store.save(BuiltInOverride(name: "Speak", isEnabled: false), for: .dictate)
+        store.save(BuiltInOverride(name: "Speak", usesVoice: false), for: .dictate)
         store.resetToDefault(.dictate)
 
         XCTAssertEqual(store.name(for: .dictate), RingActionID.dictate.label)
-        XCTAssertTrue(store.isEnabled(.dictate))
+        XCTAssertTrue(store.voiceOffBuiltIns().isEmpty)
         XCTAssertNil(store.overrides[.dictate])
     }
 
@@ -98,26 +118,6 @@ final class BuiltInOverridesTests: XCTestCase {
             explain: {}, rewrite: {}, reply: {}, ask: {},
             capture: {}, dictate: {}, live: {}
         )
-    }
-
-    /// A disabled built-in leaves a gap. It must NOT shift the buttons after it
-    /// along — the ring draws slot i at position i, and a ring that reshuffles
-    /// is a ring nobody can aim at from muscle memory.
-    @MainActor
-    func testDisabledBuiltInLeavesItsSlotEmpty() {
-        let slots = RingBuilder.slots(
-            configuration: RingConfiguration(
-                layout: RingLayout(slots: [.builtIn(.explain), .builtIn(.dictate), .builtIn(.reply)]),
-                tools: [],
-                overrides: [.dictate: BuiltInOverride(isEnabled: false)]
-            ),
-            handlers: allHandlers,
-            dismiss: {}
-        )
-
-        XCTAssertEqual(slots[0]?.label, RingActionID.explain.label)
-        XCTAssertNil(slots[1])
-        XCTAssertEqual(slots[2]?.label, RingActionID.reply.label)
     }
 
     @MainActor

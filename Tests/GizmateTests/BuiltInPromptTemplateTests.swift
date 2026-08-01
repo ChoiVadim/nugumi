@@ -127,6 +127,33 @@ final class BuiltInPromptTemplateTests: XCTestCase {
         XCTAssertTrue(rendered(.selection).contains("curious ~12-year-old"))
     }
 
+    // MARK: - Context toggles
+
+    /// Explain's template has no writing-style token, so "Use my Voice" has to
+    /// append the block — and switching it off has to take it away again.
+    func testExplainVoiceToggleAddsAndRemovesTheStyleBlock() {
+        XCTAssertTrue(rendered(.selection).contains("Writing style — "))
+
+        TranslationMode.voiceOffBuiltIns = [.explain]
+        defer { TranslationMode.voiceOffBuiltIns = [] }
+
+        XCTAssertFalse(rendered(.selection).contains("Writing style — "))
+    }
+
+    /// Rewrite and Reply splice the style through tokens instead, so their
+    /// switch is `usesCompositionSettings` — off means the caller hands the
+    /// prompt no composition at all.
+    func testRewriteAndReplyVoiceToggleGatesComposition() {
+        XCTAssertTrue(TranslationMode.draftMessage.usesCompositionSettings)
+        XCTAssertTrue(TranslationMode.smartReply.usesCompositionSettings)
+
+        TranslationMode.voiceOffBuiltIns = [.rewrite, .reply]
+        defer { TranslationMode.voiceOffBuiltIns = [] }
+
+        XCTAssertFalse(TranslationMode.draftMessage.usesCompositionSettings)
+        XCTAssertFalse(TranslationMode.smartReply.usesCompositionSettings)
+    }
+
     /// Values are spliced in, never rescanned: a snippet or voice sample holding
     /// the literal text `{language}` must survive as written. A `reduce` of
     /// `replacingOccurrences` would substitute it.

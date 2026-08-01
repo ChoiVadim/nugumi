@@ -227,7 +227,6 @@ private struct RingSlotPickerPanel: View {
                 switch group {
                 case .builtIn:
                     ForEach(builtIns, id: \.self) { id in
-                        let isOff = !bridge.builtInOverrides.isEnabled(id)
                         optionRow(
                             content: .builtIn(id),
                             symbolImage: AnyView(
@@ -235,18 +234,12 @@ private struct RingSlotPickerPanel: View {
                                     .renderingMode(.template)
                             ),
                             title: bridge.builtInOverrides.displayName(for: id),
-                            detail: isOff
-                                ? "Switched off — open it to turn it back on."
-                                : id.summary,
-                            // A built-in is switched off, never deleted, so it
-                            // gets the gear gizmo rows have but no trash.
+                            detail: id.summary,
+                            // A built-in is taken out of the ring by replacing
+                            // the slot, never deleted, so it gets the gear
+                            // gizmo rows have but no trash.
                             onEdit: { bridge.ringSheet = .builtInEditor(id) }
                         )
-                        // Dimmed rather than hidden: a user who switched
-                        // something off still needs to find it to switch it back
-                        // on. The row stays selectable so the gear is
-                        // reachable; `assign` is what refuses to place it.
-                        .opacity(isOff ? 0.45 : 1)
                     }
                 case .tools:
                     if tools.isEmpty {
@@ -338,12 +331,8 @@ private struct RingSlotPickerPanel: View {
         .background(isPending ? Color.white.opacity(0.06) : Color.clear)
     }
 
-    /// A switched-off built-in would render as a permanent gap in the ring,
-    /// which reads as a bug rather than as a choice — so it can be selected and
-    /// edited from here, but a double-click won't land it in the slot.
     private func assign(_ content: RingSlotContent) {
         pending = content
-        if case .builtIn(let id) = content, !bridge.builtInOverrides.isEnabled(id) { return }
         bridge.ringLayout.assign(content, to: address.index, in: address.path)
         closePanel()
     }

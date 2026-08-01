@@ -201,6 +201,15 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         AppCategoryClassifier.suppressedBuiltIns = suppressedBuiltInApps()
     }
 
+    /// The prompt path is not `@MainActor` and is reached from four LLM
+    /// clients, so a built-in's edits arrive through statics the store keeps
+    /// current rather than through every call signature.
+    func applyBuiltInOverridesToPrompts() {
+        TranslationMode.promptOverrides = builtInOverridesStore.promptOverrides()
+        TranslationMode.voiceOffBuiltIns = builtInOverridesStore.voiceOffBuiltIns()
+        TranslationMode.notesOffBuiltIns = builtInOverridesStore.notesOffBuiltIns()
+    }
+
     func addCustomApp(bundleID: String, name: String, category: AppCategory) {
         var list = customAppAssignments().filter { $0.bundleID != bundleID }
         list.append(CustomAppAssignment(bundleID: bundleID, name: name, category: category))
@@ -361,13 +370,9 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         // The prompt path is not @MainActor and is reached from four LLM
         // clients, so overrides arrive through a static the store keeps current
         // rather than through every call signature.
-        TranslationMode.promptOverrides = builtInOverridesStore.promptOverrides()
+        applyBuiltInOverridesToPrompts()
         builtInOverridesStore.onChange = { [weak self] in
-            guard let self else { return }
-            TranslationMode.promptOverrides = self.builtInOverridesStore.promptOverrides()
-            // Switching a built-in off has to free its key immediately, not on
-            // the next launch. `setupGlobalHotKeys` rebuilds from scratch.
-            self.setupGlobalHotKeys()
+            self?.applyBuiltInOverridesToPrompts()
         }
         setupStatusItem()
         installMainMenu()

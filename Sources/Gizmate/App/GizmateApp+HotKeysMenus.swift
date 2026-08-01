@@ -50,12 +50,6 @@ extension GizmateApp {
         ]
 
         for (action, handler) in bindings {
-            // A built-in switched off in its editor must free its key, not leave
-            // a dead hotkey registered.
-            if let owner = RingActionID.allCases.first(where: { $0.shortcutAction == action }),
-               !builtInOverridesStore.isEnabled(owner) {
-                continue
-            }
             let shortcut = shortcut(for: action)
             switch shortcut.kind {
             case .combo:
@@ -386,10 +380,15 @@ extension GizmateApp {
     /// while the ⌃⌥T shortcut (nil) keeps following `floatingDefaultMode`.
     @MainActor
     func presentShortcutRecorder(for action: GlobalShortcutAction) {
-        // Suspend every double-tap detector so the recorder owns flagsChanged
-        // events while the panel is up; otherwise the very modifier the user
-        // is trying to bind would also fire its currently-bound action.
+        // Every listener goes quiet while the panel is up. A registered Carbon
+        // hotkey swallows its combination system-wide — the press arrives as a
+        // hotkey event and never reaches the app's NSEvent queue — so recording
+        // over an already-bound key used to fire that action and leave the
+        // recorder seeing nothing at all. The double-tap detectors and the
+        // spare-mouse-button tap eat their own inputs the same way.
+        globalHotKeys.forEach { $0.unregister() }
         modifierDetectors.forEach { $0.isEnabled = false }
+        mouseButtonMonitors.forEach { $0.stop() }
         shortcutRecorderWindowController?.close()
         let controller = ShortcutRecorderWindowController(
             action: action,
@@ -400,7 +399,9 @@ extension GizmateApp {
                 return didSet
             },
             onClose: { [weak self] in
-                self?.modifierDetectors.forEach { $0.isEnabled = true }
+                // Rebuild from the store rather than re-enabling in place: OK
+                // already saved the new key, Cancel changed nothing.
+                self?.setupGlobalHotKeys()
                 self?.shortcutRecorderWindowController = nil
             }
         )

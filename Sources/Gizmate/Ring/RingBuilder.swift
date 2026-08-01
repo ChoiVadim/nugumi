@@ -162,11 +162,6 @@ enum RingBuilder {
         handlers: RingActionHandlers,
         dismiss: @escaping () -> Void
     ) -> RingItem? {
-        // Switched off in the built-in's editor. Returning nil reuses the gap
-        // the ring already draws for an unavailable action rather than adding a
-        // path of its own — and it leaves the slot where it is, so the buttons
-        // after it keep their positions.
-        guard override?.isEnabled ?? true else { return nil }
         // Summarize builds its own item: an app icon plus the time-range or
         // app-picker orbits behind it.
         if id == .summarize {
