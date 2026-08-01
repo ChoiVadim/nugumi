@@ -28,6 +28,10 @@ struct ToolEvalCase {
     /// that the model reached for options unprompted, so this asserts the count,
     /// not the labels — pinning "360p" would be pinning one right answer.
     var minimumOptions: Int?
+    /// A ceiling on how many options the finished gizmo may carry. `0` is the
+    /// meaningful value: it pins a control case as proof that the axis-of-choice
+    /// rule did not make every gizmo grow buttons.
+    var maximumOptions: Int?
     /// When set, the finished tool is run for real on this argument. It has to
     /// exit cleanly, and produce a file if it declares a file output. This is
     /// the only assertion that proves the tool actually does its job.
@@ -68,6 +72,7 @@ enum ToolEvalSuite {
             output: .files,
             declaresNetwork: true,
             minimumAssurance: .smoke,
+            maximumOptions: 0,
             liveInput: "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
         ),
         ToolEvalCase(
@@ -78,7 +83,9 @@ enum ToolEvalSuite {
             input: .ask,
             output: .files,
             declaresNetwork: true,
-            minimumOptions: 3
+            minimumAssurance: .smoke,
+            minimumOptions: 3,
+            liveInput: "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
         ),
         ToolEvalCase(
             name: "python-download-instagram-photo",
@@ -344,6 +351,11 @@ struct ToolEvalMode: Equatable {
         if let minimum = testCase.minimumOptions, generated.tool.options.count < minimum {
             failures.append(
                 "options: expected at least \(minimum), got \(generated.tool.options.count)"
+            )
+        }
+        if let maximum = testCase.maximumOptions, generated.tool.options.count > maximum {
+            failures.append(
+                "options: expected at most \(maximum), got \(generated.tool.options.count)"
             )
         }
         if let minimum = testCase.minimumAssurance,
