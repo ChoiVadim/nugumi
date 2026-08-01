@@ -16,6 +16,25 @@ enum ToolEditorDraftVerification {
             .map { String(format: "%02x", $0) }
             .joined()
     }
+
+    /// Whether saving this draft also approves it for its first run.
+    ///
+    /// Code that has already run once in front of the user needs no second
+    /// consent, whoever pressed the button: Install & test, or the build itself,
+    /// which validates a candidate by running it. Anything else — saved without
+    /// testing, built without ever being run, or edited since — still meets the
+    /// run gate, because nobody has run *this* code yet.
+    ///
+    /// Only the two kinds that execute something have a gate to skip; a prompt
+    /// or a native action never had one.
+    static func savingApproves(
+        kind: ToolKind,
+        ranFingerprint: String?,
+        current: String
+    ) -> Bool {
+        guard kind == .python || kind == .agent else { return false }
+        return ranFingerprint == current
+    }
 }
 
 /// Draft-based tool editor: nothing reaches the store until Save, so Cancel and
@@ -70,6 +89,12 @@ struct ToolEditorPanel: View {
     /// Set only for a generated Python tool, where "did Gizmate actually run
     /// this?" has more than one possible answer.
     @State private var generatedAssurance: ToolAgentAssuranceV1?
+    /// A draft Gizmate itself executed while building it. Carries exactly the
+    /// standing a passed Install & test does: this precise code has already run
+    /// once, with the user watching the build, so the first-run gate has nothing
+    /// left to ask them. Compared against the current fingerprint at save time,
+    /// so editing the draft afterwards silently drops it.
+    @State private var builtAndRanFingerprint: String?
     @State private var generateTask: Task<Void, Never>?
     @State private var chatComposer = ""
     @StateObject private var chat = ToolBuilderChatSession()
@@ -581,18 +606,16 @@ struct ToolEditorPanel: View {
         tool.prompt = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         tool.brief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
         bridge.tools.save(tool, script: tool.kind == .python ? script : nil)
-        if tool.kind == .python {
-            // A script that just passed Install & test needs no second consent:
-            // the user pressed a button that ran this exact code and read the
-            // result. Saving it is the approval. Anything else — saved without
-            // testing, or a script edited outside the editor — still has to pass
-            // the run gate the first time, because nobody has run it yet.
-            if case .passed = test,
-               passedTestFingerprint == currentDraftFingerprint {
-                ToolApprovals.approve(tool.id, hash: bridge.tools.scriptHash(for: tool.id))
-            } else {
-                ToolApprovals.revoke(tool.id)
-            }
+        let ran: String? = {
+            if case .passed = test, let passedTestFingerprint { return passedTestFingerprint }
+            return builtAndRanFingerprint
+        }()
+        if ToolEditorDraftVerification.savingApproves(
+            kind: tool.kind,
+            ranFingerprint: ran,
+            current: currentDraftFingerprint
+        ) {
+            ToolApprovals.approve(tool.id, hash: bridge.tools.approvalHash(for: tool))
         } else {
             ToolApprovals.revoke(tool.id)
         }
@@ -868,6 +891,12 @@ struct ToolEditorPanel: View {
         generatedAssurance = generated.tool.kind == .python
             ? generated.assurance
             : nil
+        // "unverified" is the one build outcome where nothing ran — a tool whose
+        // real effects Gizmate refused to cause during a build is exactly the
+        // one the user should still be asked about.
+        builtAndRanFingerprint = generated.assurance == .unverified
+            ? nil
+            : currentDraftFingerprint
         stage = .ready
         page = .overview
         test = .idle
