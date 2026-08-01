@@ -387,10 +387,13 @@ git commit -m "Expand a gizmo with options into a fanned orbit"
 
 **Files:**
 
-- Modify: `Sources/Gizmate/Tools/ToolRunner.swift:74-105` and `:148-168`
-- Modify: `Sources/Gizmate/Panels/TranslationModes.swift:258-272`
-- Modify: `Sources/Gizmate/App/GizmateApp+ScriptTools.swift:356`
+- Modify: `Sources/Gizmate/Tools/ToolRunner.swift` — the `execute` call inside `run(...)` (near `secrets: ToolSecrets.environment(...)`, ~line 102) and `execute`'s own signature and `process.environment` line (~lines 153 and 167)
+- Modify: `Sources/Gizmate/Panels/TranslationModes.swift` — `customPrompt(_:targetLanguage:composition:)`, the `var body = tool.prompt...` line (~line 382)
+- Modify: `Sources/Gizmate/App/GizmateApp+ScriptTools.swift` — `var contextualized = tool` in the agent branch (~line 362)
 - Modify: `Sources/Gizmate/Tools/NativeToolRunner.swift:52`
+
+Line numbers are hints only — anchor on the quoted code, which was re-verified against the tree after commit `cf25263` retired the clipboard inputs.
+
 - Test: `Tests/GizmateTests/GizmoOptionsTests.swift` (extend)
 
 **Interfaces:**
@@ -873,14 +876,21 @@ In `ToolEvalSuite.all`, after the `python-download-youtube` case:
 ```swift
         ToolEvalCase(
             name: "python-download-youtube-quality",
-            request: "скачивать видео с youtube по скопированной ссылке, "
+            request: "скачивать видео с youtube по ссылке, которую я вставлю, "
                 + "и чтобы я мог выбрать 360p, 480p или 720p",
             kind: .python,
-            input: .clipboardURL,
+            input: .ask,
             output: .files,
+            declaresNetwork: true,
             minimumOptions: 3
         ),
 ```
+
+`input: .ask` and the wording deliberately mirror the existing
+`python-download-youtube` case: commit `cf25263` retired the `clipboardText` and
+`clipboardURL` inputs, so a pasted link now arrives through the Ask capsule. The
+only difference between the two cases is the axis of choice — which is exactly
+what the case is measuring.
 
 - [ ] **Step 4: Build, then run just this eval case**
 
