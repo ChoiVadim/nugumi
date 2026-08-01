@@ -32,6 +32,7 @@ final class GizmateSettingsBridge: ObservableObject {
     @Published var modelPickerScope: ModelUseScope?
     /// Non-nil while the Ring tab's slot picker or prompt-tool editor is open.
     /// Same reason as `modelPickerScope`: the scrim belongs at the window root.
+    /// Closed through `closeRingSheet()`, never by assigning `nil` directly.
     @Published var ringSheet: RingSheet?
     @Published private(set) var settings: SettingsSnapshot
     @Published private(set) var bootstrap: BootstrapState
@@ -89,6 +90,25 @@ final class GizmateSettingsBridge: ObservableObject {
         guard let host else { return }
         settings = host.makeSettingsSnapshot()
         bootstrap = host.bootstrapState
+    }
+
+    /// The one way a Ring panel goes away — every panel routes its Save, Cancel,
+    /// ✕ and Esc through here.
+    ///
+    /// Two things have to happen in this order or the window's SwiftUI content
+    /// goes deaf: every click still reaches the window, AppKit stays healthy,
+    /// and nothing responds until the window is closed and reopened (the same
+    /// failure `MainWindowInputControlTests` guards against for `TextEditor`).
+    ///
+    /// 1. Hand the first responder back to the main window, targeted by class
+    ///    rather than through `NSApp.keyWindow` — a panel or an alert can be key
+    ///    at teardown time, and then the handoff silently no-ops.
+    /// 2. Let the click that asked for the close finish before the views it
+    ///    landed on are removed. Closing straight out of a tap handler is what
+    ///    double-clicking a row in the slot picker was doing.
+    func closeRingSheet() {
+        NSApp.windows.first { $0 is MainWindow }?.makeFirstResponder(nil)
+        DispatchQueue.main.async { [weak self] in self?.ringSheet = nil }
     }
 
     /// Run a connectivity test for a cloud provider and return the result so the

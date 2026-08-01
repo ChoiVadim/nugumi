@@ -155,15 +155,14 @@ struct ToolEditorPanel: View {
         }
     }
 
-    /// The one way out of this panel. Hands the first responder back to the window
-    /// and kills anything still in flight — a running test (which also kills its
-    /// process tree), a generation, and the elapsed-time ticker, which would
-    /// otherwise loop for the rest of the session.
+    /// The one way out of this panel. Kills anything still in flight — a running
+    /// test (which also kills its process tree), a generation, and the
+    /// elapsed-time ticker, which would otherwise loop for the rest of the
+    /// session — then closes through the bridge like every other Ring panel.
     private func dismiss() {
         nameFocused = false
         cancelInFlightWork()
-        NSApp.windows.first { $0 is MainWindow }?.makeFirstResponder(nil)
-        bridge.ringSheet = nil
+        bridge.closeRingSheet()
     }
 
     /// Escape stops the work first and closes second. A build runs for minutes

@@ -45,12 +45,8 @@ struct RingSheetOverlay: View {
         .onExitCommand(perform: close)
     }
 
-    /// Both panels hold text fields; the responder has to come back to the window
-    /// before they're torn down or the window stops routing clicks. See
-    /// `ToolEditorPanel.dismiss()`.
     private func close() {
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        bridge.ringSheet = nil
+        bridge.closeRingSheet()
     }
 }
 
@@ -357,11 +353,8 @@ private struct RingSlotPickerPanel: View {
         if pending == .tool(tool.id) { pending = nil }
     }
 
-    /// Same responder handoff as the editor: a text field losing the window's
-    /// first responder while being removed leaves the window ignoring clicks.
     private func closePanel() {
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        bridge.ringSheet = nil
+        bridge.closeRingSheet()
     }
 
     private func describe(_ content: RingSlotContent) -> String {

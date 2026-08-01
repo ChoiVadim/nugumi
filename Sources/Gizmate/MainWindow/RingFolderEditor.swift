@@ -176,12 +176,8 @@ struct RingFolderEditorPanel: View {
             : RingFolder.defaultSymbolName
     }
 
-    /// The text field has to hand the window's first responder back before it
-    /// is torn down, or the window stops routing clicks — same as the tool
-    /// editor and the slot picker.
     private func dismiss() {
         nameFocused = false
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        bridge.ringSheet = nil
+        bridge.closeRingSheet()
     }
 }

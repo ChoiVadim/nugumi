@@ -243,12 +243,8 @@ struct BuiltInEditorPanel: View {
         dismiss()
     }
 
-    /// Same responder handoff the other Ring panels do: a text field losing the
-    /// window's first responder while being torn down leaves the window
-    /// ignoring clicks.
     private func dismiss() {
         nameFocused = false
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        bridge.ringSheet = nil
+        bridge.closeRingSheet()
     }
 }
