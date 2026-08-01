@@ -134,12 +134,14 @@ extension GizmateApp {
         return menu
     }
 
-    /// The brand mark, plain. It used to be the pet mascot carrying a badge for
+    /// The brand mark, plain. It used to carry a badge for
     /// the current default mode; the mode now reads from the menu itself, which
     /// keeps the status item a single template glyph that tints correctly on a
     /// light and a dark menu bar.
     private func makeStatusBarIcon(for mode: FloatingButtonDefaultMode) -> NSImage {
-        BrandMark.templateImage(height: 18) ?? NSApp.applicationIconImage
+        // ponytail: 15pt matches the cap height of stock menu bar glyphs (Wi-Fi,
+        // battery, input source) in the 22pt bar. 18 read as oversized.
+        BrandMark.templateImage(height: 15) ?? NSApp.applicationIconImage
     }
 
     func refreshStatusBarIcon() {
