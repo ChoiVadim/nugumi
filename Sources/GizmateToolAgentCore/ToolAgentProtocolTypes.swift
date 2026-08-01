@@ -17,6 +17,11 @@ public enum ToolAgentProtocolLimitsV1 {
     /// the request, not found a use case.
     public static let maximumSecretNameCount = 8
     public static let maximumSecretNameBytes = 64
+    /// Mirrors LIMITS.optionCount / LIMITS.optionBytes in protocol.ts. Five is
+    /// what the outer orbit fans cleanly; two is the smallest real choice.
+    public static let maximumOptionCount = 5
+    public static let minimumOptionCount = 2
+    public static let maximumOptionBytes = 64
     public static let maximumFilterCount = 16
     public static let maximumFilterValueBytes = 255
     public static let maximumSafeMessageBytes = 1_024

@@ -25,6 +25,12 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     public let trigger: ToolAgentCandidateTriggerV1
     public let hosts: [String]
     public let extensions: [String]
+    /// Variants the finished gizmo offers, drawn as a second orbit behind its
+    /// Ring button. Optional for the same reason `secretNames` is: the
+    /// validator re-encodes a candidate and compares byte for byte, and a plain
+    /// array cannot tell `"options":[]` from an absent key. nil is "didn't
+    /// say", and a gizmo with no options keeps the fingerprint it always had.
+    public let options: [String]?
     public let prompt: String
     public let appliesTargetLanguage: Bool
     public let nativeAction: ToolAgentNativeActionV1?
@@ -59,6 +65,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         trigger: ToolAgentCandidateTriggerV1,
         hosts: [String] = [],
         extensions: [String] = [],
+        options: [String]? = nil,
         prompt: String = "",
         appliesTargetLanguage: Bool = false,
         nativeAction: ToolAgentNativeActionV1? = nil,
@@ -81,6 +88,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             trigger: trigger,
             hosts: hosts,
             extensions: extensions,
+            options: options,
             prompt: prompt,
             nativeAction: nativeAction,
             target: target,
@@ -101,6 +109,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.trigger = trigger
         self.hosts = hosts
         self.extensions = extensions
+        self.options = options
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
         self.nativeAction = nativeAction
@@ -161,6 +170,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         ) ?? .always
         let hosts = try container.decodeIfPresent([String].self, forKey: .hosts) ?? []
         let extensions = try container.decodeIfPresent([String].self, forKey: .extensions) ?? []
+        let options = try container.decodeIfPresent([String].self, forKey: .options)
         let prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         let appliesTargetLanguage = try container.decodeIfPresent(
             Bool.self,
@@ -206,6 +216,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             trigger: trigger,
             hosts: hosts,
             extensions: extensions,
+            options: options,
             prompt: prompt,
             nativeAction: nativeAction,
             target: target,
@@ -226,6 +237,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.trigger = trigger
         self.hosts = hosts
         self.extensions = extensions
+        self.options = options
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
         self.nativeAction = nativeAction
@@ -251,6 +263,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         try container.encode(trigger, forKey: .trigger)
         try container.encode(hosts, forKey: .hosts)
         try container.encode(extensions, forKey: .extensions)
+        try container.encodeIfPresent(options, forKey: .options)
         switch kind {
         case .prompt:
             try container.encode(prompt, forKey: .prompt)
@@ -289,6 +302,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         trigger: ToolAgentCandidateTriggerV1,
         hosts: [String],
         extensions: [String],
+        options: [String]?,
         prompt: String,
         nativeAction: ToolAgentNativeActionV1?,
         target: String,
@@ -333,6 +347,20 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
               trigger != .files || input == .files,
               trigger != .selection || input == .selection else {
             throw ToolAgentFailureCodeV1.invalidCandidate
+        }
+
+        if let options {
+            var seen = Set<String>()
+            guard options.count >= ToolAgentProtocolLimitsV1.minimumOptionCount,
+                  options.count <= ToolAgentProtocolLimitsV1.maximumOptionCount,
+                  options.allSatisfy({
+                      !$0.isEmpty
+                          && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumOptionBytes
+                          && seen.insert($0).inserted
+                  })
+            else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
         }
 
         switch kind {
@@ -432,6 +460,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         case trigger
         case hosts
         case extensions
+        case options
         case prompt
         case appliesTargetLanguage
         case nativeAction
@@ -460,6 +489,12 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
     public let trigger: ToolAgentCandidateTriggerV1
     public let hosts: [String]
     public let extensions: [String]
+    /// Variants the finished gizmo offers, drawn as a second orbit behind its
+    /// Ring button. Optional for the same reason `secretNames` is: the
+    /// validator re-encodes a candidate and compares byte for byte, and a plain
+    /// array cannot tell `"options":[]` from an absent key. nil is "didn't
+    /// say", and a gizmo with no options keeps the fingerprint it always had.
+    public let options: [String]?
     public let prompt: String
     public let appliesTargetLanguage: Bool
     public let nativeAction: ToolAgentNativeActionV1?
@@ -484,6 +519,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         trigger: ToolAgentCandidateTriggerV1,
         hosts: [String] = [],
         extensions: [String] = [],
+        options: [String]? = nil,
         prompt: String = "",
         appliesTargetLanguage: Bool = false,
         nativeAction: ToolAgentNativeActionV1? = nil,
@@ -505,6 +541,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             trigger: trigger,
             hosts: hosts,
             extensions: extensions,
+            options: options,
             prompt: prompt,
             appliesTargetLanguage: appliesTargetLanguage,
             nativeAction: nativeAction,
@@ -525,6 +562,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         self.trigger = trigger
         self.hosts = hosts
         self.extensions = extensions
+        self.options = options
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
         self.nativeAction = nativeAction
@@ -549,6 +587,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             trigger: try container.decode(ToolAgentCandidateTriggerV1.self, forKey: .trigger),
             hosts: try container.decodeIfPresent([String].self, forKey: .hosts) ?? [],
             extensions: try container.decodeIfPresent([String].self, forKey: .extensions) ?? [],
+            options: try container.decodeIfPresent([String].self, forKey: .options),
             prompt: try container.decodeIfPresent(String.self, forKey: .prompt) ?? "",
             appliesTargetLanguage: try container.decodeIfPresent(Bool.self, forKey: .appliesTargetLanguage) ?? false,
             nativeAction: try container.decodeIfPresent(ToolAgentNativeActionV1.self, forKey: .nativeAction),
@@ -574,6 +613,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         try container.encode(trigger, forKey: .trigger)
         try container.encode(hosts, forKey: .hosts)
         try container.encode(extensions, forKey: .extensions)
+        try container.encodeIfPresent(options, forKey: .options)
         switch kind {
         case .prompt:
             try container.encode(prompt, forKey: .prompt)
@@ -611,6 +651,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         trigger: ToolAgentCandidateTriggerV1,
         hosts: [String],
         extensions: [String],
+        options: [String]?,
         prompt: String,
         appliesTargetLanguage: Bool,
         nativeAction: ToolAgentNativeActionV1?,
@@ -642,6 +683,20 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
               trigger != .files || input == .files,
               trigger != .selection || input == .selection else {
             throw ToolAgentFailureCodeV1.invalidCandidate
+        }
+
+        if let options {
+            var seen = Set<String>()
+            guard options.count >= ToolAgentProtocolLimitsV1.minimumOptionCount,
+                  options.count <= ToolAgentProtocolLimitsV1.maximumOptionCount,
+                  options.allSatisfy({
+                      !$0.isEmpty
+                          && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumOptionBytes
+                          && seen.insert($0).inserted
+                  })
+            else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
         }
 
         switch kind {
@@ -722,6 +777,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case trigger
         case hosts
         case extensions
+        case options
         case prompt
         case appliesTargetLanguage
         case nativeAction

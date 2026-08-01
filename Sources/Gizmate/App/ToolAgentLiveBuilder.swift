@@ -147,6 +147,7 @@ enum ToolAgentLiveBuilder {
             trigger: .always,
             hosts: [],
             extensions: [],
+            options: tool.options.isEmpty ? nil : tool.options,
             // An agent tool's instruction lives in the same field a prompt tool's
             // prompt does, so both carry it into an edit.
             prompt: kind == .prompt || kind == .agent ? tool.prompt : "",
@@ -487,6 +488,7 @@ enum ToolAgentLiveBuilder {
             kind: kind,
             input: input,
             output: output,
+            options: candidate.options ?? [],
             prompt: candidate.prompt,
             appliesTargetLanguage: candidate.appliesTargetLanguage,
             nativeAction: nativeAction,

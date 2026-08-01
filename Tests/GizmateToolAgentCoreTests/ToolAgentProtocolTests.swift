@@ -543,6 +543,66 @@ final class ToolAgentProtocolTests: XCTestCase {
         )
     }
 
+    /// Options are optional on the wire on purpose: the validator compares a
+    /// re-encoded candidate byte for byte against what the model sent, so a
+    /// candidate with no options must not grow an `"options":[]` key it never
+    /// wrote — that would change the fingerprint of every gizmo built so far.
+    func testOptionsAreOmittedWhenAbsentAndRoundTripWhenPresent() throws {
+        let plain = try ToolAgentCandidateV1(
+            kind: .prompt,
+            name: "Plain",
+            brief: "Does one thing.",
+            symbolName: "sparkles",
+            input: .selection,
+            output: .panel,
+            trigger: .always,
+            prompt: "Do the thing."
+        )
+        let plainJSON = String(data: try JSONEncoder().encode(plain), encoding: .utf8) ?? ""
+        XCTAssertFalse(plainJSON.contains("options"))
+
+        let varied = try ToolAgentCandidateV1(
+            kind: .prompt,
+            name: "Varied",
+            brief: "Does it three ways.",
+            symbolName: "sparkles",
+            input: .selection,
+            output: .panel,
+            trigger: .always,
+            options: ["short", "medium", "long"],
+            prompt: "Write a {option} version."
+        )
+        let decoded = try JSONDecoder().decode(
+            ToolAgentCandidateV1.self,
+            from: try JSONEncoder().encode(varied)
+        )
+        XCTAssertEqual(decoded.options, ["short", "medium", "long"])
+    }
+
+    /// One option is not a choice, six do not fan cleanly, and a blank circle is
+    /// a button with no name. All three are the model's mistake to fix, not
+    /// something to quietly repair on the way in.
+    func testOptionsOutsideTheAllowedShapeAreRejected() {
+        func candidate(_ options: [String]) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .prompt,
+                name: "Varied",
+                brief: "Does it several ways.",
+                symbolName: "sparkles",
+                input: .selection,
+                output: .panel,
+                trigger: .always,
+                options: options,
+                prompt: "Write a {option} version."
+            )
+        }
+        XCTAssertThrowsError(try candidate(["only"]))
+        XCTAssertThrowsError(try candidate(["a", "b", "c", "d", "e", "f"]))
+        XCTAssertThrowsError(try candidate(["a", ""]))
+        XCTAssertThrowsError(try candidate(["a", "a"]))
+        XCTAssertThrowsError(try candidate(["a", String(repeating: "x", count: 65)]))
+    }
+
     private func makeCandidate(
         name: String = "Uppercase",
         brief: String = "Uppercases clipboard text.",

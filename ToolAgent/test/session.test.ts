@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { test } from "node:test";
 import { parseModelAction } from "../dist/model-bridge.js";
+import { parseInbound } from "../dist/protocol.js";
 import { SidecarRuntime } from "../dist/runtime.js";
 
 const runID = "11111111-1111-4111-8111-111111111111";
@@ -303,6 +304,59 @@ test("model action contract accepts every runnable candidate shape and rejects i
         action({ ...python, output: "files", outputDirectory: "x".repeat(8_193) }),
       ),
     /invalid tool arguments/,
+  );
+  assert.doesNotThrow(() =>
+    parseModelAction(action({ ...python, options: ["360p", "480p", "720p"] })),
+  );
+  assert.throws(
+    () => parseModelAction(action({ ...python, options: ["720p"] })),
+    /invalid tool arguments/,
+  );
+  assert.throws(
+    () =>
+      parseModelAction(
+        action({ ...python, options: ["a", "b", "c", "d", "e", "f"] }),
+      ),
+    /invalid tool arguments/,
+  );
+  assert.throws(
+    () => parseModelAction(action({ ...python, options: ["a", "x".repeat(65)] })),
+    /invalid tool arguments/,
+  );
+});
+
+test("an edit session's current tool carries its options, bounded the same way a candidate's are", () => {
+  const editWithOptions = {
+    version: 1,
+    runID,
+    type: "start",
+    payload: {
+      operation: "edit",
+      description: "Add more resolutions.",
+      budgets: start.payload.budgets,
+      currentTool: {
+        ...fixStart.payload.currentTool,
+        options: ["360p", "480p", "720p"],
+      },
+    },
+  };
+
+  assert.doesNotThrow(() => parseInbound(JSON.stringify(editWithOptions)));
+  assert.throws(
+    () =>
+      parseInbound(
+        JSON.stringify({
+          ...editWithOptions,
+          payload: {
+            ...editWithOptions.payload,
+            currentTool: {
+              ...editWithOptions.payload.currentTool,
+              options: ["720p"],
+            },
+          },
+        }),
+      ),
+    /invalid start payload/,
   );
 });
 

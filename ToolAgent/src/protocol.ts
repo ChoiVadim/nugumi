@@ -21,6 +21,9 @@ export const LIMITS = {
   // Mirrors ToolAgentProtocolLimitsV1.maximumSecretName*.
   secretNameCount: 8,
   secretNameBytes: 64,
+  // Mirrors ToolAgentProtocolLimitsV1.maximumOption*.
+  optionBytes: 64,
+  optionCount: 5,
   // An agent tool's own input, and the answer it finishes with. The answer is
   // roomier than a build session's finalText because it *is* the tool's output:
   // it lands in the result panel or on the clipboard.
@@ -90,6 +93,16 @@ const commonCandidate = {
   extensions: z
     .array(byteString(LIMITS.filterValueBytes))
     .max(LIMITS.filterCount),
+  // Variants the gizmo offers, drawn as a second orbit behind its Ring button.
+  // Optional rather than defaulted to []: the host re-encodes a candidate and
+  // compares byte for byte, so a key the model did not write must not appear.
+  // `.min(2)` is why this cannot carry a `.default([])` the way secretNames
+  // does — one option is not a choice, and an empty default would fail it.
+  options: z
+    .array(byteString(LIMITS.optionBytes))
+    .min(2)
+    .max(LIMITS.optionCount)
+    .optional(),
 } as const;
 
 const promptCandidate = z
@@ -246,6 +259,15 @@ const commonInstalledTool = {
   extensions: z
     .array(byteString(LIMITS.filterValueBytes))
     .max(LIMITS.filterCount),
+  // Variants the gizmo offers, carried into an edit session so a rename does
+  // not silently strip them. Optional and bounded exactly as on a candidate:
+  // the host re-encodes and compares byte for byte, and one option is not a
+  // choice.
+  options: z
+    .array(byteString(LIMITS.optionBytes))
+    .min(2)
+    .max(LIMITS.optionCount)
+    .optional(),
 } as const;
 
 const installedPromptTool = z
