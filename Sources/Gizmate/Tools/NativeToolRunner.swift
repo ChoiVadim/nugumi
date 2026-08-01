@@ -77,14 +77,14 @@ enum NativeToolRunner {
             return Result(message: "Sent to \(app)")
 
         case .revealInFinder:
-            guard !context.clipboardFiles.isEmpty else {
+            guard !context.files.isEmpty else {
                 throw ToolRunError.noInput(.files)
             }
-            NSWorkspace.shared.activateFileViewerSelecting(context.clipboardFiles)
+            NSWorkspace.shared.activateFileViewerSelecting(context.files)
             return Result(
-                message: "Showing \(context.clipboardFiles.count) in Finder",
+                message: "Showing \(context.files.count) in Finder",
                 text: nil,
-                files: context.clipboardFiles
+                files: context.files
             )
 
         case .openURL:

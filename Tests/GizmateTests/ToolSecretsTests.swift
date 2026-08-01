@@ -61,7 +61,7 @@ final class ToolSecretsTests: XCTestCase {
             name: "Uppercase",
             brief: "Uppercases text.",
             symbolName: "textformat",
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             trigger: .always,
             source: "print('OK')",
@@ -77,7 +77,7 @@ final class ToolSecretsTests: XCTestCase {
             name: "Uppercase",
             brief: "Uppercases text.",
             symbolName: "textformat",
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             trigger: .always,
             source: "print('OK')",
@@ -98,7 +98,7 @@ final class ToolSecretsTests: XCTestCase {
     /// "the model returned an invalid agent action" as the only symptom.
     func testCandidateWithExplicitlyEmptySecretNamesIsStillValid() {
         let action = #"""
-            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Slugify","brief":"Turns text into a URL slug.","symbolName":"link","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false,"secretNames":[]}}}
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Slugify","brief":"Turns text into a URL slug.","symbolName":"link","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false,"secretNames":[]}}}
             """#
         XCTAssertTrue(ToolAgentModelActionValidator.isValid(action))
     }
@@ -107,14 +107,14 @@ final class ToolSecretsTests: XCTestCase {
     /// at all — every shape the model already knew — has to keep working.
     func testCandidateWithNoSecretNamesKeyIsStillValid() {
         let action = #"""
-            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Slugify","brief":"Turns text into a URL slug.","symbolName":"link","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false}}}
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Slugify","brief":"Turns text into a URL slug.","symbolName":"link","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false}}}
             """#
         XCTAssertTrue(ToolAgentModelActionValidator.isValid(action))
     }
 
     func testCandidateWithRealSecretNamesIsStillValid() {
         let action = #"""
-            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Ask","brief":"Asks a model.","symbolName":"sparkles","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":true,"secretNames":["OPENAI_API_KEY"]}}}
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Ask","brief":"Asks a model.","symbolName":"sparkles","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('ok')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":true,"secretNames":["OPENAI_API_KEY"]}}}
             """#
         XCTAssertTrue(ToolAgentModelActionValidator.isValid(action))
     }
@@ -206,7 +206,7 @@ final class ToolSecretApprovalTests: XCTestCase {
             name: "Ask",
             brief: "Asks a model.",
             symbolName: "sparkles",
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             trigger: .always,
             source: "print('OK')",

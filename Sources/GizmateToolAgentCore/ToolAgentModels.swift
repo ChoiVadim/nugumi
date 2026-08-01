@@ -128,7 +128,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             name: name,
             brief: brief,
             symbolName: symbolName,
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             trigger: .always,
             source: source,
@@ -150,7 +150,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         let input = try container.decodeIfPresent(
             ToolAgentCandidateInputV1.self,
             forKey: .input
-        ) ?? .clipboardText
+        ) ?? .selection
         let output = try container.decodeIfPresent(
             ToolAgentCandidateOutputV1.self,
             forKey: .output
@@ -330,7 +330,6 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                   !$0.isEmpty
                       && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumSecretNameBytes
               }),
-              trigger != .link || input == .clipboardURL,
               trigger != .files || input == .files,
               trigger != .selection || input == .selection else {
             throw ToolAgentFailureCodeV1.invalidCandidate
@@ -640,7 +639,6 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
                   !$0.isEmpty
                       && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumSecretNameBytes
               }),
-              trigger != .link || input == .clipboardURL,
               trigger != .files || input == .files,
               trigger != .selection || input == .selection else {
             throw ToolAgentFailureCodeV1.invalidCandidate

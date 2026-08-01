@@ -27,7 +27,7 @@ final class ToolBuilderChatTests: XCTestCase {
         XCTAssertTrue(session.hasError)
         XCTAssertEqual(
             session.currentActivity,
-            "Stopped before a verified tool was ready."
+            "Stopped before a verified gizmo was ready."
         )
         let messageCount = session.messages.count
 
@@ -36,7 +36,7 @@ final class ToolBuilderChatTests: XCTestCase {
         XCTAssertFalse(session.hasError)
         XCTAssertEqual(
             session.readyMessage,
-            "Send to Notes is ready. Review it, ask for a change, or save the tool."
+            "Send to Notes is ready. Review it, ask for a change, or save the gizmo."
         )
         XCTAssertEqual(session.messages.count, messageCount)
 

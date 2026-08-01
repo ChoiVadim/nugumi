@@ -17,9 +17,9 @@ final class AgentToolCandidateTests: XCTestCase {
             name: "Triage",
             brief: "Reads a link and answers in kind.",
             symbolName: "sparkles",
-            input: .clipboardURL,
+            input: .selection,
             output: output,
-            trigger: .link,
+            trigger: .always,
             prompt: prompt,
             source: source,
             fixtures: fixtures,
@@ -92,7 +92,7 @@ final class AgentToolApprovalTests: XCTestCase {
         GizmateTool(
             name: "Triage",
             kind: .agent,
-            input: .clipboardURL,
+            input: .selection,
             output: .panel,
             prompt: "Read the link and answer accordingly.",
             brief: "Reads a link."

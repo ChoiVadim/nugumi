@@ -50,16 +50,17 @@ enum ToolEvalSuite {
         ),
         ToolEvalCase(
             name: "python-slugify",
-            request: "convert the copied text into a url slug",
+            request: "convert the selected text into a url slug",
             kind: .python,
-            input: .clipboardText,
+            input: .selection,
             minimumAssurance: .verified,
             liveInput: "Привет Мир! Hello World"
         ),
         ToolEvalCase(
             name: "python-download-youtube",
-            request: "скачивать видео по скопированной ссылке с youtube",
+            request: "скачивать видео с youtube по ссылке, которую я вставлю",
             kind: .python,
+            input: .ask,
             output: .files,
             declaresNetwork: true,
             minimumAssurance: .smoke,
@@ -67,7 +68,7 @@ enum ToolEvalSuite {
         ),
         ToolEvalCase(
             name: "python-download-instagram-photo",
-            request: "download the photo from a copied instagram link",
+            request: "download the photo from an instagram link I paste in",
             kind: .python,
             output: .files,
             declaresNetwork: true
@@ -87,12 +88,12 @@ enum ToolEvalSuite {
             liveInput: "one two two three three three"
         ),
         ToolEvalCase(
-            name: "agent-triage-copied-link",
-            request: "посмотри на скопированную ссылку, пойми что это за страница "
+            name: "agent-triage-link",
+            request: "посмотри на выделенную ссылку, пойми что это за страница "
                 + "и в зависимости от этого дай мне или краткий пересказ, или "
                 + "список ингредиентов, или расписание",
             kind: .agent,
-            input: .clipboardURL
+            input: .selection
         ),
     ]
 }

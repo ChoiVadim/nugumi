@@ -54,7 +54,7 @@ final class CandidateValidationRunTests: XCTestCase {
             name: "Test Tool",
             brief: "Exercises the real validation path.",
             symbolName: "curlybraces",
-            input: .clipboardText,
+            input: .selection,
             output: output,
             trigger: .always,
             source: source,

@@ -7,7 +7,7 @@ final class ToolsStoreTests: XCTestCase {
         var tool = GizmateTool(
             name: "Uppercase",
             kind: .python,
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             brief: "Uppercases text."
         )
@@ -36,7 +36,7 @@ final class ToolsStoreTests: XCTestCase {
         let tool = GizmateTool(
             name: "Uppercase",
             kind: .python,
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard
         )
 
@@ -63,7 +63,7 @@ final class ToolsStoreTests: XCTestCase {
         var tool = GizmateTool(
             name: "Uppercase",
             kind: .python,
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             brief: "Uppercases text."
         )

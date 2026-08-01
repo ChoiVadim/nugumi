@@ -90,7 +90,6 @@ final class ToolContextInputTests: XCTestCase {
         for input in [
             ToolAgentCandidateInputV1.files,
             .screenshot,
-            .clipboardURL,
         ] {
             XCTAssertThrowsError(
                 try ToolAgentCandidateV1(

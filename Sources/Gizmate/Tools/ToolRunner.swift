@@ -38,9 +38,7 @@ enum ToolRunError: LocalizedError {
             case .selection: return "Select some text first."
             case .ask: return "Nothing was typed."
             case .dictation: return "Nothing was heard."
-            case .clipboardText: return "Copy some text first."
-            case .clipboardURL: return "Copy a link first."
-            case .files: return "Copy one or more files in Finder first."
+            case .files: return "Select one or more files in Finder first."
             case .screenshot: return "No screen area was captured."
             case .screenshotText: return "No text was found in that screen area."
             case .none: return nil

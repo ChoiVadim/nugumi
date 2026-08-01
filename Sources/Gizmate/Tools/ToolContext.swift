@@ -1,14 +1,6 @@
 import AppKit
 import Foundation
 
-/// What is in front of the user at the moment the ring opens. Built once per ring
-/// so every trigger test sees the same snapshot, and so the clipboard is read at
-/// most once per ring rather than per tool.
-///
-/// The clipboard is deliberately the universal input channel: ⌘C in Finder puts
-/// file URLs on the general pasteboard, so file tools work with no Automation
-/// (AppleScript) permission at all. Nothing here is sent anywhere — it only
-/// decides which buttons the ring shows until the user picks one.
 /// One screen area a tool asked for, already taken.
 ///
 /// Both readings are carried together rather than branching at capture time,
@@ -20,56 +12,49 @@ struct ToolScreenshot: Equatable {
     let text: String
 }
 
+/// What a gizmo is handed when it runs. Built per run, not per ring: the two
+/// readings that cost something — Finder's selection and the screen capture —
+/// only happen for a gizmo that declared it wants them.
 struct ToolContext: Equatable {
     var selection: String = ""
-    var clipboardText: String?
-    var clipboardURL: URL?
-    var clipboardFiles: [URL] = []
+    var files: [URL] = []
     /// Set only for a tool whose input needs one, and only after the user has
     /// dragged it out. Nothing captures the screen to build a ring.
     var screenshot: ToolScreenshot?
 
     static let empty = ToolContext()
 
-    /// Reads the current pasteboard. `selection` comes from the presenter, which
-    /// already has it armed.
+    /// `selection` comes from the presenter, which already has it armed. Pass
+    /// the running tool's `input` to have the file sources read — without it
+    /// nothing asks Finder anything, so a prompt gizmo never trips the
+    /// Automation prompt.
     @MainActor
     static func current(
         selection: String,
-        screenshot: ToolScreenshot? = nil
+        screenshot: ToolScreenshot? = nil,
+        for input: ToolInput? = nil
     ) -> ToolContext {
-        let pasteboard = NSPasteboard.general
         var context = ToolContext(selection: selection.trimmingCharacters(in: .whitespacesAndNewlines))
         context.screenshot = screenshot
-
-        // File URLs first: a Finder copy carries both file URLs and a text
-        // representation, and the files are the more specific reading.
-        let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: fileOptions) as? [URL],
-           !urls.isEmpty {
-            context.clipboardFiles = urls
-        }
-
-        let text = pasteboard.string(forType: .string)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let text, !text.isEmpty {
-            context.clipboardText = text
-            context.clipboardURL = Self.webURL(from: text)
+        if input?.needsFiles == true {
+            context.files = readFiles()
         }
         return context
     }
 
-    /// A single http(s) URL and nothing else. Deliberately strict: a paragraph
-    /// that happens to contain a link is text, not a link, and shouldn't light up
-    /// a "download this video" button.
-    private static func webURL(from text: String) -> URL? {
-        guard !text.contains(where: \.isWhitespace),
-              let url = URL(string: text),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host()?.isEmpty == false
-        else { return nil }
-        return url
+    /// What Finder has selected, or failing that what was copied out of it.
+    /// The fallback is not a nicety: it is the whole file story on a Mac where
+    /// the user declined Automation access, and it costs one pasteboard read.
+    @MainActor
+    private static func readFiles() -> [URL] {
+        let selected = FinderSelection.current()
+        if !selected.isEmpty { return selected }
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        let copied = NSPasteboard.general.readObjects(
+            forClasses: [NSURL.self],
+            options: options
+        ) as? [URL]
+        return copied ?? []
     }
 
     /// The argv a tool's declared input resolves to, or nil when the context can't
@@ -85,14 +70,8 @@ struct ToolContext: Equatable {
         // was produced.
         case .selection, .ask, .dictation:
             return selection.isEmpty ? nil : [selection]
-        case .clipboardText:
-            guard let clipboardText, !clipboardText.isEmpty else { return nil }
-            return [clipboardText]
-        case .clipboardURL:
-            guard let clipboardURL else { return nil }
-            return [clipboardURL.absoluteString]
         case .files:
-            return clipboardFiles.isEmpty ? nil : clipboardFiles.map(\.path)
+            return files.isEmpty ? nil : files.map(\.path)
         case .screenshot:
             guard let screenshot else { return nil }
             return [screenshot.imageURL.path]

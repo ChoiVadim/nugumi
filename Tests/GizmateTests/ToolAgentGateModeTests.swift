@@ -43,11 +43,11 @@ final class ToolAgentGateModeTests: XCTestCase {
         )
         XCTAssertEqual(
             report.firstAttempt.fingerprint,
-            "304feb5fccc7394bb9bb2294ca65e7a1bad47c37faa0833f4fbdb41a955ca640"
+            "316702b255b6ccb785cfc177b7ff7f112b3d712b73e57fc9fb65eaa5066a9955"
         )
         XCTAssertEqual(
             report.secondAttempt.fingerprint,
-            "3c28f8691996f4f67863d79f69a763d10f1d415446704feebb8fb5dcc5779667"
+            "0657b1b788a15a0ddca96bdfb9bcb907e675e1ed560fad92501fa7cfd70950a2"
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -250,7 +250,7 @@ final class ToolAgentGateModeTests: XCTestCase {
     private func candidate(source: String) throws -> ToolAgentCandidateV1 {
         try ToolAgentCandidateV1(
             name: "Uppercase",
-            brief: "Uppercases copied text",
+            brief: "Uppercases selected text",
             symbolName: "textformat",
             source: source,
             fixtures: [.init(input: "hello", expectedOutput: "HELLO")]

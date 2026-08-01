@@ -113,11 +113,11 @@ reject them merely because their runtime effect opens a browser, lets the
 destination app use the network, reveals a file, or runs a named Shortcut.
 
 For openURL, target is a URL template. The runtime replaces every "{input}" in
-target with the selected or copied link and opens the result in the user's
-default browser. To open the input link unchanged, set target to exactly
+target with the tool's input and opens the result in the user's default
+browser. To open the input link unchanged, set target to exactly
 "{input}". For selected or highlighted text, use input "selection", trigger
-"selection", output "notify", hosts [], and extensions []. For a copied link,
-use input "clipboardURL", trigger "link", and output "notify". openURL is a
+"selection", output "notify", hosts [], and extensions []. A link the user has
+not selected is typed per run: input "ask", trigger "always". openURL is a
 complete supported native action and does not require Python, a subprocess, or
 preview-verifier browser automation.
 
@@ -202,7 +202,7 @@ Return a complete replacement candidate, not a diff. Preserve behavior and field
 
 Every candidate also includes schemaVersion 1, kind, name, brief, symbolName,
 input, output, trigger, hosts, and extensions. Trigger "selection" requires
-selection input; "link" requires clipboardURL; "files" requires files input.
+selection input; "files" requires files input.
 
 The input "ask" is typed rather than read. When the tool runs, a text field opens
 at the cursor and the tool is handed exactly what the user types, in the same
@@ -219,6 +219,12 @@ anything that merely has no fixed subject. It requires trigger "always" for the
 same reason "ask" does, and it costs the user the microphone permission plus an
 OpenAI key, so never pick it to be helpful.
 
+The input "files" is what the user has selected in Finder — Gizmate asks Finder
+directly, and falls back to files copied with Command-C. The tool is handed one
+path per file in sys.argv[1:]. It requires trigger "always" or "files". There is
+no clipboard-text and no clipboard-link input: text the user is looking at is
+"selection", and anything else they supply per run is "ask".
+
 Two more inputs are taken rather than read. When the tool runs, the user drags a
 box over part of the screen, and that capture is the input:
 - "screenshotText": the tool is handed the text Vision read out of the capture.
@@ -228,8 +234,8 @@ box over part of the screen, and that capture is the input:
   Choose it only when the tool needs the picture itself, for example to crop it,
   convert it, upload it, or read a barcode out of it. A tool that only wants the
   words wants "screenshotText".
-Both require trigger "always" — there is nothing in the user's clipboard or
-selection to detect them by. A Python candidate reads either one from sys.argv[1]
+Both require trigger "always" — there is nothing in the user's selection to
+detect them by. A Python candidate reads either one from sys.argv[1]
 exactly like any other input; the path is a real file that exists for the length
 of the run and is deleted afterwards, so copy it if the tool needs to keep it.
 Fixtures for a "screenshot" tool cannot be written, because no PNG exists until

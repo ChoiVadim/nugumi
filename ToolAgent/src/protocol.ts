@@ -79,15 +79,13 @@ const commonCandidate = {
     "selection",
     "ask",
     "dictation",
-    "clipboardText",
-    "clipboardURL",
     "files",
     "screenshot",
     "screenshotText",
     "none",
   ]),
   output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes"]),
-  trigger: z.enum(["always", "selection", "link", "files"]),
+  trigger: z.enum(["always", "selection", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
     .array(byteString(LIMITS.filterValueBytes))
@@ -198,12 +196,6 @@ export const candidateSchema = z
         message: "selection trigger needs selection input",
       });
     }
-    if (candidate.trigger === "link" && candidate.input !== "clipboardURL") {
-      context.addIssue({
-        code: "custom",
-        message: "link trigger needs clipboard URL input",
-      });
-    }
     if (candidate.trigger === "files" && candidate.input !== "files") {
       context.addIssue({
         code: "custom",
@@ -243,15 +235,13 @@ const commonInstalledTool = {
     "selection",
     "ask",
     "dictation",
-    "clipboardText",
-    "clipboardURL",
     "files",
     "screenshot",
     "screenshotText",
     "none",
   ]),
   output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes"]),
-  trigger: z.enum(["always", "selection", "link", "files"]),
+  trigger: z.enum(["always", "selection", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
     .array(byteString(LIMITS.filterValueBytes))
@@ -335,12 +325,6 @@ export const installedToolSchema = z
       context.addIssue({
         code: "custom",
         message: "selection trigger needs selection input",
-      });
-    }
-    if (tool.trigger === "link" && tool.input !== "clipboardURL") {
-      context.addIssue({
-        code: "custom",
-        message: "link trigger needs clipboard URL input",
       });
     }
     if (tool.trigger === "files" && tool.input !== "files") {

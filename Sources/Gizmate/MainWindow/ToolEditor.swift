@@ -1014,7 +1014,7 @@ struct ToolEditorPanel: View {
         script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Eight inputs, with labels as long as "Text on screen" — far past what a
+    /// Seven inputs, with labels as long as "Text on screen" — far past what a
     /// pill row fits, which is what pushed the whole panel wider than itself.
     private var inputPicker: some View {
         wrappingPicker(

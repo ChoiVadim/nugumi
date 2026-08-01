@@ -161,8 +161,7 @@ public enum ToolAgentCandidateInputV1: String, Codable, Equatable, Sendable {
     /// The same slot again, spoken instead of typed: the user talks while the
     /// tool runs and it is handed the transcript.
     case dictation
-    case clipboardText
-    case clipboardURL
+    /// The files selected in Finder. One argument per file.
     case files
     /// The user drags out a screen area when the tool runs; the tool is handed
     /// the path to the captured PNG.
@@ -185,6 +184,5 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {
     case always
     case selection
-    case link
     case files
 }

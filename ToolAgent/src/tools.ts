@@ -30,8 +30,6 @@ export function createTools(runtime: SidecarRuntime) {
       Type.Literal("selection"),
       Type.Literal("ask"),
       Type.Literal("dictation"),
-      Type.Literal("clipboardText"),
-      Type.Literal("clipboardURL"),
       Type.Literal("files"),
       Type.Literal("screenshot"),
       Type.Literal("screenshotText"),
@@ -48,7 +46,6 @@ export function createTools(runtime: SidecarRuntime) {
     trigger: Type.Union([
       Type.Literal("always"),
       Type.Literal("selection"),
-      Type.Literal("link"),
       Type.Literal("files"),
     ]),
     hosts: Type.Array(Type.String({ maxLength: 255 }), { maxItems: 16 }),

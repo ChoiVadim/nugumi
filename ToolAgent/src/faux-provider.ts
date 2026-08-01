@@ -13,7 +13,7 @@ const badCandidate = {
   name: "Uppercase",
   brief: "Uppercases copied text",
   symbolName: "textformat",
-  input: "clipboardText",
+  input: "selection",
   output: "clipboard",
   trigger: "always",
   hosts: [],

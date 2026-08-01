@@ -59,7 +59,7 @@ extension GizmateApp {
             screenshot.map { try? FileManager.default.removeItem(at: $0.imageURL) }
         }
 
-        let context = ToolContext.current(selection: typed ?? "", screenshot: screenshot)
+        let context = ToolContext.current(selection: typed ?? "", screenshot: screenshot, for: tool.input)
         guard let arguments = context.arguments(for: tool.input) else {
             return .failed(
                 (ToolRunError.noInput(tool.input).localizedDescription ?? "Nothing to work on.")
@@ -229,7 +229,7 @@ extension GizmateApp {
     /// from a closed catalog, so there is no arbitrary code to review.
     @MainActor
     func runNativeTool(_ tool: GizmateTool, selection: String) {
-        let context = ToolContext.current(selection: selection)
+        let context = ToolContext.current(selection: selection, for: tool.input)
         // Captured strongly: a `.saveToNote` run that outlives the app delegate
         // must still land the note, and the store is what owns it.
         let notes = notesStore
@@ -287,7 +287,7 @@ extension GizmateApp {
             return
         }
 
-        let context = ToolContext.current(selection: selection, screenshot: screenshot)
+        let context = ToolContext.current(selection: selection, screenshot: screenshot, for: tool.input)
         guard let arguments = context.arguments(for: tool.input) else {
             screenshot.map { try? FileManager.default.removeItem(at: $0.imageURL) }
             presentSelectionTranslationError(
@@ -337,7 +337,7 @@ extension GizmateApp {
             return
         }
 
-        let context = ToolContext.current(selection: selection, screenshot: screenshot)
+        let context = ToolContext.current(selection: selection, screenshot: screenshot, for: tool.input)
         guard let arguments = context.arguments(for: tool.input) else {
             screenshot.map { try? FileManager.default.removeItem(at: $0.imageURL) }
             presentSelectionTranslationError(

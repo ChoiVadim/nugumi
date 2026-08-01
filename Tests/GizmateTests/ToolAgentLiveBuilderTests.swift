@@ -52,7 +52,7 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
             name: "Open copied link",
             symbolName: "link",
             kind: .native,
-            input: .clipboardURL,
+            input: .selection,
             output: .notify,
             nativeAction: .openURL,
             target: "{input}",
@@ -302,7 +302,7 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
             name: "Uppercase",
             brief: "Uppercases copied text",
             symbolName: "textformat",
-            input: .clipboardText,
+            input: .selection,
             output: .clipboard,
             trigger: .always,
             source: """
@@ -323,7 +323,7 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(generated.tool.name, candidate.name)
         XCTAssertEqual(generated.tool.symbolName, candidate.symbolName)
         XCTAssertEqual(generated.tool.kind, .python)
-        XCTAssertEqual(generated.tool.input, .clipboardText)
+        XCTAssertEqual(generated.tool.input, .selection)
         XCTAssertEqual(generated.tool.output, .clipboard)
         XCTAssertEqual(generated.tool.timeoutSeconds, 45)
         XCTAssertFalse(generated.tool.declaresNetwork)
@@ -371,13 +371,13 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
             {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"native","name":"Open Link","brief":"Opens a selected link.","symbolName":"link","input":"selection","output":"panel","trigger":"selection","hosts":[],"extensions":[],"nativeAction":"openURL","target":"{input}"}}}
             """#
         let validPythonWithoutDirectory = #"""
-            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"timeoutSeconds":30,"declaresNetwork":false}}}
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"timeoutSeconds":30,"declaresNetwork":false}}}
             """#
         let emptyPythonDirectory = #"""
             {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Write File","brief":"Writes a file.","symbolName":"folder","input":"files","output":"files","trigger":"files","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"outputDirectory":"","timeoutSeconds":30,"declaresNetwork":false}}}
             """#
         let nullPythonDirectory = #"""
-            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"clipboardText","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"outputDirectory":null,"timeoutSeconds":30,"declaresNetwork":false}}}
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"outputDirectory":null,"timeoutSeconds":30,"declaresNetwork":false}}}
             """#
         let oversizedDirectory = String(
             repeating: "x",

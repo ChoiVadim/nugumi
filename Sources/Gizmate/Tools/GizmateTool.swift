@@ -107,8 +107,8 @@ enum ToolInput: String, Codable, CaseIterable {
     /// the tool waits, and the tool is handed the transcript. Nothing
     /// downstream can tell it from a selection either.
     case dictation
-    case clipboardText
-    case clipboardURL
+    /// What Finder has selected, or what was copied out of it when Automation
+    /// access was declined. One argument per file.
     case files
     /// A screen area the user drags out when the tool runs. The tool receives
     /// the path to the captured PNG.
@@ -123,9 +123,7 @@ enum ToolInput: String, Codable, CaseIterable {
         case .selection: return "Selected text"
         case .ask: return "Ask me"
         case .dictation: return "Spoken text"
-        case .clipboardText: return "Clipboard text"
-        case .clipboardURL: return "Copied link"
-        case .files: return "Copied files"
+        case .files: return "Selected files"
         case .screenshot: return "Screen area"
         case .screenshotText: return "Text on screen"
         case .none: return "Nothing"
@@ -149,6 +147,22 @@ enum ToolInput: String, Codable, CaseIterable {
     /// runs", a REC pill instead of a field.
     var needsDictation: Bool {
         self == .dictation
+    }
+
+    /// Whether building this tool's context should go looking for files. Gated
+    /// because the lookup asks Finder over an Apple event, and a gizmo that
+    /// never wanted files must not make the user answer for that.
+    var needsFiles: Bool {
+        self == .files
+    }
+
+    /// Gizmos that predate an input being retired keep working instead of
+    /// disappearing: `ToolsStore` decodes each tool with `try?`, so one unknown
+    /// string would delete a gizmo the user built. The clipboard inputs were
+    /// text and a link, and selected text is the closest surviving thing.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = ToolInput(rawValue: raw) ?? .selection
     }
 }
 
