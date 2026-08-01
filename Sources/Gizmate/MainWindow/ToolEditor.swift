@@ -103,6 +103,9 @@ struct ToolEditorPanel: View {
     @State private var page: EditorPage = .overview
     @State private var showIconPicker = false
     @State private var readyDraftFingerprint: String?
+    /// Mirrors `draft.options` with stable per-row identity for `optionsEditor`.
+    /// See `OptionRow` for why an array index can't serve as that identity.
+    @State private var optionRows: [OptionRow] = []
 
     private var isNew: Bool { toolID == nil }
 
@@ -397,7 +400,7 @@ struct ToolEditorPanel: View {
             editorSection(
                 "Options",
                 subtitle: "Variants this gizmo offers. The Ring shows them as a "
-                    + "second layer behind its button, and the first one is used "
+                    + "second orbit behind its button, and the first one is used "
                     + "when you run the gizmo from a shortcut."
             ) {
                 optionsEditor
@@ -534,45 +537,72 @@ struct ToolEditorPanel: View {
         }
     }
 
+    /// A row of `optionsEditor`, identified by a `UUID` rather than its
+    /// position in the list. `ForEach` diffs by identity, not position: keying
+    /// rows by array index makes removing row *k* look, to the diff, like the
+    /// *last* row disappeared, since the id set just shrinks by one from the
+    /// top. Every row below `k` then keeps its on-screen identity — and any
+    /// keyboard focus in it — while silently starting to display and edit the
+    /// next row's text. A `UUID` per row survives a sibling's removal intact.
+    private struct OptionRow: Identifiable {
+        let id = UUID()
+        var value: String
+    }
+
+    private func bindingForOption(_ row: OptionRow) -> Binding<String> {
+        Binding(
+            get: { optionRows.first(where: { $0.id == row.id })?.value ?? "" },
+            set: { newValue in
+                guard let index = optionRows.firstIndex(where: { $0.id == row.id }) else { return }
+                optionRows[index].value = newValue
+                draft.options = optionRows.map(\.value)
+            }
+        )
+    }
+
     /// A plain list of variant labels. Rows are edited in place and sanitized
     /// on the way into the draft, so a blank or duplicate row simply doesn't
-    /// become an option rather than becoming a broken button.
+    /// become an option rather than becoming a broken button. `optionRows`
+    /// holds the editable, identity-stable copy; `draft.options` is written
+    /// back on every edit and re-read whenever something outside this view
+    /// (loading a tool, the builder chat regenerating one) replaces it wholesale.
     private var optionsEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(draft.options.enumerated()), id: \.offset) { index, option in
+            ForEach(optionRows) { row in
                 HStack(spacing: 8) {
-                    TextField("720p", text: Binding(
-                        get: { index < draft.options.count ? draft.options[index] : "" },
-                        set: { newValue in
-                            guard index < draft.options.count else { return }
-                            var edited = draft.options
-                            edited[index] = newValue
-                            draft.options = edited
-                        }
-                    ))
-                    .textFieldStyle(.roundedBorder)
+                    TextField("720p", text: bindingForOption(row))
+                        .textFieldStyle(.roundedBorder)
                     Button {
-                        var edited = draft.options
-                        edited.remove(at: index)
-                        draft.options = edited
+                        optionRows.removeAll { $0.id == row.id }
+                        draft.options = optionRows.map(\.value)
                     } label: {
                         Image(systemName: "minus.circle")
                     }
                     .buttonStyle(.plain)
-                    .help("Remove \(option)")
+                    .help("Remove \(row.value)")
                 }
             }
-            if draft.options.count < 5 {
+            if optionRows.count < 5 {
                 Button {
                     // Two at a time from nothing: one option is not a choice, so
                     // a list that starts at one can never be saved.
-                    draft.options += draft.options.isEmpty ? ["", ""] : [""]
+                    optionRows += optionRows.isEmpty
+                        ? [OptionRow(value: ""), OptionRow(value: "")]
+                        : [OptionRow(value: "")]
+                    draft.options = optionRows.map(\.value)
                 } label: {
                     Label("Add an option", systemImage: "plus.circle")
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(FlowTheme.inkTertiary)
             }
+        }
+        .onAppear {
+            optionRows = draft.options.map { OptionRow(value: $0) }
+        }
+        .onChange(of: draft.options) { _, latest in
+            guard latest != optionRows.map(\.value) else { return }
+            optionRows = latest.map { OptionRow(value: $0) }
         }
     }
 
