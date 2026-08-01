@@ -108,6 +108,11 @@ extension GizmateApp {
         selection: String,
         screenshot: ToolScreenshot?
     ) {
+        // The one funnel every kind of gizmo passes through, whichever way it
+        // was started — ring, hotkey, quick menu. Counted here rather than at
+        // each `run*` so a new kind can't quietly stop being counted.
+        usageStatsStore.recordGizmoRun(name: tool.name)
+
         switch tool.kind {
         case .python:
             runScriptTool(tool, selection: selection, screenshot: screenshot)
@@ -200,24 +205,32 @@ extension GizmateApp {
                 near: screenPoint,
                 mode: .custom(tool)
             )
-        case .clipboard:
-            runPromptToolToClipboard(tool, on: text, near: screenPoint)
-        case .files, .notify:
-            // Both are script-tool result modes. A prompt tool only ever produces
-            // text, so the nearest honest behavior is to hand that text over.
-            runPromptToolToClipboard(tool, on: text, near: screenPoint)
+        case .clipboard, .files, .notify:
+            // `.files` and `.notify` are script-tool result modes. A prompt tool
+            // only ever produces text, so the nearest honest behavior is to hand
+            // that text over.
+            runPromptToolForText(tool, on: text, near: screenPoint) { answer in
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(answer, forType: .string)
+                ToastHUD.shared.show(text: "\(tool.name) — copied")
+            }
+        case .notes:
+            runPromptToolForText(tool, on: text, near: screenPoint) { [weak self] answer in
+                guard let self else { return }
+                self.keepNote(answer, title: tool.name, tagID: self.gizmoNoteTagID)
+            }
         }
     }
 
-    /// Clipboard tools have no panel and nothing to type back, so this is the
-    /// one result mode with its own request. Shaped exactly like
-    /// `runInstantTranslation`, but the answer lands on the pasteboard and the
-    /// user is told via the shared toast.
+    /// The result modes that have no panel and nothing to type back: the answer
+    /// is fetched and handed to `deliver`. Shaped exactly like
+    /// `runInstantTranslation`, minus the replacement.
     @MainActor
-    private func runPromptToolToClipboard(
+    private func runPromptToolForText(
         _ tool: GizmateTool,
         on text: String,
-        near screenPoint: NSPoint
+        near screenPoint: NSPoint,
+        deliver: @escaping @MainActor (String) -> Void
     ) {
         if let setupError = translationErrorIfBootstrapNeedsSetup() {
             handleTranslationFailure(setupError)
@@ -261,8 +274,7 @@ extension GizmateApp {
                         )
                         return
                     }
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(cleaned, forType: .string)
+                    deliver(cleaned)
                     self.recordTranslation(
                         source: text,
                         result: cleaned,
@@ -274,7 +286,6 @@ extension GizmateApp {
                         targetLanguageID: language.id,
                         modelID: self.textModelID
                     )
-                    ToastHUD.shared.show(text: "\(tool.name) — copied")
                 }
             } catch {
                 await MainActor.run {

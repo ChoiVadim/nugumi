@@ -33,11 +33,9 @@ valuable than a cross-file extension split.
 
 | File | Lines | Why it stays together | Requirement before a meaningful split |
 | --- | ---: | --- | --- |
-| `Sources/Gizmate/Pet/PetController.swift` | 1,537 | One controller owns panel, prompt, animation, and interaction state; private helper types are direct collaborators. | Introduce tested controller collaborators and verify the packaged pet/Ring UI. |
 | `Sources/Gizmate/MainWindow/ToolEditor.swift` | 1,466 | The 1,289-line editor panel is one state-heavy SwiftUI view with private nested state and actions. | Define editor submodels/components with focused state-transition tests. |
 | `Sources/Gizmate/Panels/TranslationContentView.swift` | 1,391 | Nearly the whole file is one stateful content view/controller surface. | Extract explicit rendering or interaction collaborators instead of widening private members. |
 | `Sources/Gizmate/Live/LiveCaptionPanelController.swift` | 895 | Delegate callbacks depend on private follow-up controls and submission behavior. | Add controller interaction coverage, then extract a cohesive collaborator. |
-| `Sources/Gizmate/Pet/PetMascotView.swift` | 741 | Drawing and animation state form one view implementation. | Separate a tested animation/render model before moving methods. |
 | `Sources/Gizmate/App/Onboarding/OnboardingViews.swift` | 919 | This is already the coherent view cluster after model/support/controller extraction. | Split only when a view becomes an independently owned feature. |
 
 Large `GizmateApp+*.swift` files are already domain extensions. Do not split

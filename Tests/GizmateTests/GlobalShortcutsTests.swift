@@ -6,12 +6,15 @@ final class GlobalShortcutsTests: XCTestCase {
     // Every combo action defaults to ⌃⌥ + its mnemonic letter.
     func testComboDefaultsUseControlOptionBase() {
         let expected: [GlobalShortcutAction: String] = [
-            .translateOrReply: "T",
+            .explainSelection: "T",
+            .replyToSelection: "Y",
             .translateSelection: "R",
             .toggleWritingLanguage: "G",
             .screenshotArea: "S",
             .liveTranslation: "L",
             .toggleInvisibility: "I",
+            .dictate: "D",
+            .saveNote: "N",
         ]
         for (action, letter) in expected {
             let shortcut = action.defaultShortcut

@@ -22,36 +22,33 @@ private struct InsightsContent: View {
                             Text("Insights")
                                 .font(FlowTheme.serif(30))
                                 .foregroundStyle(FlowTheme.ink)
-                            Text("Your work, by the numbers.")
+                            Text("What your gizmos got done.")
                                 .font(.system(size: 14))
                                 .foregroundStyle(FlowTheme.inkSecondary)
                         }
 
                         HStack(spacing: 12) {
-                            StatTile(value: "\(snapshot.currentMonthWords)", label: "words this month", accent: true)
-                            StatTile(value: "\(snapshot.longestStreak)", label: "longest streak")
-                            StatTile(value: "\(snapshot.activeDays)", label: "active days")
-                            StatTile(value: "\(snapshot.averageWordsPerActiveDay)", label: "avg / day")
+                            StatTile(value: "\(snapshot.totalRuns)", label: "runs", accent: true)
+                            StatTile(value: "\(snapshot.distinctGizmos)", label: "gizmos")
+                            StatTile(value: "\(snapshot.currentStreak)", label: "day streak")
+                            StatTile(value: "\(snapshot.busiestDay?.runCount ?? 0)", label: "best day")
                         }
 
-                        // Two equal-height cards: breakdowns (left) and the activity calendar (right).
+                        // Two equal-height cards: the top-gizmo mix (left) and the
+                        // activity calendar (right).
                         HStack(alignment: .top, spacing: 12) {
                             SubCard(padding: 18, fillHeight: true) {
                                 VStack(alignment: .leading, spacing: 18) {
                                     Spacer(minLength: 0)
                                     breakdownColumn(
-                                        title: "Workflow mix",
-                                        rows: snapshot.modeBreakdown
+                                        title: "Top gizmos",
+                                        // Six is what the donut can separate by
+                                        // lightness alone; past that the ramp
+                                        // bottoms out and slices stop reading.
+                                        rows: snapshot.gizmoBreakdown
                                             .filter { $0.count > 0 }
-                                            .map { ($0.kind.title, "\($0.count)", $0.fraction) },
-                                        donutSize: donutSize
-                                    )
-                                    breakdownColumn(
-                                        title: "Languages",
-                                        rows: snapshot.languageBreakdown
-                                            .filter { $0.count > 0 }
-                                            .prefix(5)
-                                            .map { ($0.displayName.isEmpty ? "Unknown" : $0.displayName, "\($0.count)", $0.fraction) },
+                                            .prefix(6)
+                                            .map { ($0.name, "\($0.count)", $0.fraction) },
                                         donutSize: donutSize
                                     )
                                     Spacer(minLength: 0)
@@ -67,13 +64,13 @@ private struct InsightsContent: View {
                                             .font(.system(size: 14, weight: .semibold))
                                             .foregroundStyle(FlowTheme.ink)
                                         Spacer()
-                                        Text("\(snapshot.currentStreak)-day streak")
+                                        Text("\(snapshot.longestStreak)-day best")
                                             .font(.system(size: 11))
                                             .foregroundStyle(FlowTheme.inkTertiary)
                                     }
                                     ActivityHeatmap(weeks: snapshot.heatmapWeeks)
-                                    if let busiest = snapshot.busiestDay, busiest.wordCount > 0 {
-                                        Text("Busiest day · \(busiest.date.formatted(.dateTime.month().day())) - \(busiest.wordCount) words")
+                                    if let busiest = snapshot.busiestDay, busiest.runCount > 0 {
+                                        Text("Busiest day · \(busiest.date.formatted(.dateTime.month().day())) - \(busiest.runCount) runs")
                                             .font(.system(size: 11))
                                             .foregroundStyle(FlowTheme.inkTertiary)
                                     }
@@ -100,7 +97,7 @@ private struct InsightsContent: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(FlowTheme.ink)
             if rows.isEmpty {
-                Text("Nothing yet.")
+                Text("No gizmos run yet.")
                     .font(.system(size: 12))
                     .foregroundStyle(FlowTheme.inkSecondary)
             } else {

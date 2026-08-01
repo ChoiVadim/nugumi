@@ -24,7 +24,6 @@ extension GizmateApp {
         updateMenuState()
         translateButtonController?.close()
         translateButtonController = nil
-        petController?.clearReady()
         translationPanelController?.close()
         translationPanelController = nil
 
@@ -90,8 +89,7 @@ extension GizmateApp {
                         mode: mode,
                         useCache: mode == .selection,
                         usageKind: usageKind,
-                        panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true
+                        panelSide: panelSide
                     )
                 }
             } catch {

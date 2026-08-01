@@ -191,4 +191,49 @@ final class ToolSecretApprovalTests: XCTestCase {
             .joined()
         XCTAssertEqual(store.scriptHash(for: tool.id), plain)
     }
+
+    /// The build asks for a key exactly once, only for the names that are not
+    /// already on disk. Asking again for a stored key would put a pointless
+    /// field in front of the user in the middle of every rebuild.
+    func testOnlyUnstoredSecretsAreAskedFor() async throws {
+        let present = "GIZMATE_TEST_PRESENT_KEY"
+        let absent = "GIZMATE_TEST_ABSENT_KEY"
+        XCTAssertTrue(ToolSecrets.set("sk-test", for: present))
+        defer { ToolSecrets.delete(present) }
+
+        let candidate = try ToolAgentCandidateV1(
+            kind: .python,
+            name: "Ask",
+            brief: "Asks a model.",
+            symbolName: "sparkles",
+            input: .clipboardText,
+            output: .clipboard,
+            trigger: .always,
+            source: "print('OK')",
+            timeoutSeconds: 30,
+            declaresNetwork: true,
+            secretNames: [present, absent]
+        )
+
+        let asked = AskedSecretNames()
+        await ToolAgentLiveBuilder.collectMissingSecrets(
+            for: candidate,
+            request: { name in
+                await asked.record(name)
+                return false
+            },
+            onStatus: { _ in }
+        )
+
+        let names = await asked.names
+        XCTAssertEqual(names, [absent])
+    }
+}
+
+private actor AskedSecretNames {
+    private(set) var names: [String] = []
+
+    func record(_ name: String) {
+        names.append(name)
+    }
 }

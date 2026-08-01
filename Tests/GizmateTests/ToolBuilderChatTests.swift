@@ -193,6 +193,56 @@ final class ToolBuilderChatTests: XCTestCase {
         XCTAssertEqual(session.messages.last?.text, "Save selected text to Notes")
     }
 
+    func testSecretRequestParksTheBuildUntilTheKeyRowAnswers() async {
+        let session = ToolBuilderChatSession()
+
+        let asked = Task { await session.requestSecret("GEMINI_API_KEY") }
+        while session.pendingSecret == nil { await Task.yield() }
+
+        XCTAssertEqual(session.pendingSecret, "GEMINI_API_KEY")
+        XCTAssertEqual(session.messages.last?.role, .assistant)
+        XCTAssertEqual(session.messages.last?.text.contains("GEMINI_API_KEY"), true)
+
+        session.resolveSecret(true)
+
+        let stored = await asked.value
+        XCTAssertTrue(stored)
+        XCTAssertNil(session.pendingSecret)
+    }
+
+    /// The whole point of the continuation is that something is suspended on it.
+    /// A panel closed while the key row is up must not leave the validation
+    /// handler waiting for an answer that can never arrive.
+    func testCancelReleasesAPendingKeyRequest() async {
+        let session = ToolBuilderChatSession()
+
+        let asked = Task { await session.requestSecret("GEMINI_API_KEY") }
+        while session.pendingSecret == nil { await Task.yield() }
+
+        await session.cancel()
+
+        let stored = await asked.value
+        XCTAssertFalse(stored)
+        XCTAssertNil(session.pendingSecret)
+    }
+
+    /// A candidate may declare two keys. The second request must not strand the
+    /// first waiter, or the build hangs with no row on screen.
+    func testASecondKeyRequestReleasesTheFirst() async {
+        let session = ToolBuilderChatSession()
+
+        let first = Task { await session.requestSecret("GEMINI_API_KEY") }
+        while session.pendingSecret == nil { await Task.yield() }
+        let second = Task { await session.requestSecret("TELEGRAM_BOT_TOKEN") }
+        while session.pendingSecret != "TELEGRAM_BOT_TOKEN" { await Task.yield() }
+
+        let firstAnswer = await first.value
+        XCTAssertFalse(firstAnswer)
+
+        session.resolveSecret(true)
+        let secondAnswer = await second.value
+        XCTAssertTrue(secondAnswer)
+    }
 }
 
 private actor AnswerRegistrationGate {

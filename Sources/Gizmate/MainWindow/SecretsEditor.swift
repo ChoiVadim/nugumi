@@ -34,7 +34,7 @@ struct ToolSecretsPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if stored.isEmpty && !isAdding {
-                Text("No secrets stored. Add one to let this tool read an API key "
+                Text("No secrets stored. Add one to let this gizmo read an API key "
                     + "from its environment instead of carrying the key in its code.")
                     .font(.system(size: 12))
                     .foregroundStyle(FlowTheme.inkSecondary)
@@ -64,7 +64,7 @@ struct ToolSecretsPicker: View {
             }
 
             if !selection.isEmpty {
-                Text("This tool reads \(selection.sorted().joined(separator: ", ")) "
+                Text("This gizmo reads \(selection.sorted().joined(separator: ", ")) "
                     + "from its environment. You are asked to confirm again whenever "
                     + "that list changes.")
                     .font(.system(size: 11.5))

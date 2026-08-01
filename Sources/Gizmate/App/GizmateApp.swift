@@ -57,7 +57,6 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// question is in flight. Unlike the pill, it has no outside-click
     /// monitors, so clicking elsewhere can't dismiss the in-flight request.
     var askFloatingLoadingBar: FloatingTranslateButtonController?
-    var petController: PetController?
     var translationPanelController: TranslationPanelController?
     var askPromptController: AskPromptController?
     /// The same capsule, borrowed by a `.ask` tool for its one input. Kept
@@ -126,18 +125,18 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     let usageStatsStore = UsageStatsStore()
     let analyticsClient = AnalyticsClient()
     let snippetsStore = SnippetsStore()
+    let notesStore = NotesStore()
     let toolsStore = ToolsStore()
     let uvBootstrap = UVBootstrap()
     let ringLayoutStore = RingLayoutStore()
     let builtInOverridesStore = BuiltInOverridesStore()
-    let translationHistoryStore = TranslationHistoryStore()
     lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
         baseURL: ollamaBaseURL,
         models: LLMModel.ollamaModels
     )
     var snippetsWindowController: SnippetsWindowController?
     var mainWindowController: MainWindowController?
-    /// Ollama model whose pull the user kicked off from the AI Engine setup card.
+    /// Ollama model whose pull the user kicked off from the Providers setup card.
     /// When it finishes we promote it to the everyday-text default once, mirroring
     /// the retired onboarding window's `onOllamaReady` behavior.
     var pendingOllamaAutoSelectID: String?
@@ -355,8 +354,20 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
                 // Unrunnable tools (no prompt, or a script tool with no script)
                 // are filtered here so the builder never has to consult the store.
                 tools: self.toolsStore.tools.filter(self.toolsStore.isRunnable),
-                folders: self.ringLayoutStore.folders
+                folders: self.ringLayoutStore.folders,
+                overrides: self.builtInOverridesStore.overrides
             )
+        }
+        // The prompt path is not @MainActor and is reached from four LLM
+        // clients, so overrides arrive through a static the store keeps current
+        // rather than through every call signature.
+        TranslationMode.promptOverrides = builtInOverridesStore.promptOverrides()
+        builtInOverridesStore.onChange = { [weak self] in
+            guard let self else { return }
+            TranslationMode.promptOverrides = self.builtInOverridesStore.promptOverrides()
+            // Switching a built-in off has to free its key immediately, not on
+            // the next launch. `setupGlobalHotKeys` rebuilds from scratch.
+            self.setupGlobalHotKeys()
         }
         setupStatusItem()
         installMainMenu()
@@ -418,8 +429,11 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             else { return }
             UserDefaults.standard.set(true, forKey: key)
             // Fresh installs have no model ready yet — land on setup directly.
-            let section: MainWindowSection? = self.bootstrap.isReady(for: self.textModelID) ? nil : .aiEngine
-            self.presentMainWindow(section: section)
+            if self.bootstrap.isReady(for: self.textModelID) {
+                self.presentMainWindow()
+            } else {
+                self.presentEngineSetup()
+            }
         }
     }
 
@@ -429,11 +443,11 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let self else { return }
             // While onboarding is up, don't stack the main window on top of
-            // it — the onboarding close handler opens it (on AI Engine when
+            // it — the onboarding close handler opens it (on Settings → Providers when
             // no model is ready) via showMainWindowOnFirstRunIfNeeded.
             guard self.onboardingWindowController == nil else { return }
             if !self.bootstrap.isReady(for: self.textModelID) {
-                self.presentMainWindow(section: .aiEngine)
+                self.presentEngineSetup()
             }
         }
     }
@@ -453,7 +467,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let self else { return }
             if !self.bootstrap.isReady(for: self.textModelID) {
-                self.presentMainWindow(section: .aiEngine)
+                self.presentEngineSetup()
             }
         }
     }
@@ -474,7 +488,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             previous: lastObservedModelReadyState, current: state.modelReady)
         lastObservedModelReadyState = ModelReadyTransition.merge(
             into: lastObservedModelReadyState, current: state.modelReady)
-        // A pull the user started from the AI Engine setup card just finished —
+        // A pull the user started from the Providers setup card just finished —
         // promote it to the everyday-text default, once. Runs before the
         // preset so an explicit pull wins the text slot.
         if let pendingID = pendingOllamaAutoSelectID,
@@ -547,7 +561,6 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         if let keyboardMonitor {
             NSEvent.removeMonitor(keyboardMonitor)
         }
-        petController?.close()
         modifierDetectors.forEach { $0.stop() }
         modifierDetectors.removeAll()
         globalHotKeys.forEach { $0.unregister() }

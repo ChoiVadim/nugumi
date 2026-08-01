@@ -40,7 +40,6 @@ extension GizmateApp {
                 }
                 self.translateButtonController?.close()
                 self.translateButtonController = nil
-                self.petController?.clearReady()
                 return
             }
 
@@ -116,7 +115,6 @@ extension GizmateApp {
                     )
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.petController?.clearReady()
                     return
                 }
 
@@ -128,7 +126,6 @@ extension GizmateApp {
                 else {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.petController?.clearReady()
                     return
                 }
 
@@ -154,22 +151,9 @@ extension GizmateApp {
 
     @MainActor
     func applySelectionDisplayMode() {
-        switch selectionDisplayMode {
-        case .floatingBar:
-            petController?.close()
-            petController = nil
-        case .off:
-            petController?.close()
-            petController = nil
+        if selectionDisplayMode == .off {
             translateButtonController?.close()
             translateButtonController = nil
-        case .pet:
-            translateButtonController?.close()
-            translateButtonController = nil
-            if petController == nil {
-                petController = PetController(initialMode: floatingDefaultMode.translationMode)
-            }
-            petController?.show()
         }
 
         updateMenuState()
@@ -273,7 +257,6 @@ extension GizmateApp {
                     }
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.petController?.clearReady()
                     return
                 }
 
@@ -290,7 +273,6 @@ extension GizmateApp {
                 else {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.petController?.clearReady()
                     return
                 }
 

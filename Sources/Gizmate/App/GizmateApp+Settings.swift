@@ -72,7 +72,6 @@ extension GizmateApp {
         translationCache = TranslationCache()
         translationPanelController?.close()
         translationPanelController = nil
-        petController?.setActionMode(floatingDefaultMode.translationMode)
         refreshStatusBarIcon()
         applySelectionDisplayMode()
         setupGlobalHotKeys()
@@ -94,10 +93,10 @@ extension GizmateApp {
 extension GizmateApp: SettingsHost {
     var usageStats: UsageStatsStore { usageStatsStore }
     var snippets: SnippetsStore { snippetsStore }
+    var notes: NotesStore { notesStore }
     var tools: ToolsStore { toolsStore }
     var ringLayout: RingLayoutStore { ringLayoutStore }
     var builtInOverrides: BuiltInOverridesStore { builtInOverridesStore }
-    var history: TranslationHistoryStore { translationHistoryStore }
     var isAppBundle: Bool { isRunningFromAppBundle }
     var appVersionString: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0"
@@ -238,7 +237,6 @@ extension GizmateApp: SettingsHost {
             writingToggleAlternate = language
         case .setFloatingDefaultMode(let mode):
             floatingDefaultMode = mode
-            petController?.setActionMode(mode.translationMode)
             refreshStatusBarIcon()
             updateMenuState()
         case .setSelectionDisplayMode(let mode):
@@ -297,7 +295,7 @@ extension GizmateApp: SettingsHost {
                 guard let self else { return }
                 // Just connected from the Providers tab → take the user to
                 // Models so they can pick one of the newly-available models.
-                if saved { self.mainWindowController?.bridge.aiEngineTab = 0 }
+                if saved { self.mainWindowController?.bridge.settingsTab = 1 }
                 self.mainWindowController?.bridge.refreshFromHost()
             }
         case .signOutCloud(let provider):

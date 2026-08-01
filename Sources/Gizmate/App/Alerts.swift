@@ -43,7 +43,7 @@ final class GizmateInputAlertController: NSWindowController, NSWindowDelegate {
     private static let verticalPadding: CGFloat = 18
     private static let shadowMargin: CGFloat = 30
     private static let cornerRadius: CGFloat = 28
-    private static let mascotSize = NSSize(width: 42, height: 34)
+    private static let iconSize = NSSize(width: 42, height: 34)
     private static let textGap: CGFloat = 10
     private static let fieldHeight: CGFloat = 30
     private static let buttonHeight: CGFloat = 30
@@ -162,12 +162,12 @@ final class GizmateInputAlertController: NSWindowController, NSWindowDelegate {
         rootView.addSubview(glass)
         let contentView = glass.contentView
 
-        let mascotColumn = NSView()
-        mascotColumn.translatesAutoresizingMaskIntoConstraints = false
+        let iconColumn = NSView()
+        iconColumn.translatesAutoresizingMaskIntoConstraints = false
 
-        let mascotView = PetMascotView(frame: NSRect(origin: .zero, size: Self.mascotSize))
-        mascotView.apply(state: .idle, mode: .selection)
-        mascotView.translatesAutoresizingMaskIntoConstraints = false
+        let iconView = NSImageView(image: NSApp.applicationIconImage)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title_)
         titleLabel.font = Self.titleFont
@@ -218,8 +218,8 @@ final class GizmateInputAlertController: NSWindowController, NSWindowDelegate {
             buttons.append(tertiary)
         }
 
-        contentView.addSubview(mascotColumn)
-        mascotColumn.addSubview(mascotView)
+        contentView.addSubview(iconColumn)
+        iconColumn.addSubview(iconView)
         contentView.addSubview(titleLabel)
         contentView.addSubview(messageLabel)
         contentView.addSubview(field)
@@ -231,18 +231,18 @@ final class GizmateInputAlertController: NSWindowController, NSWindowDelegate {
             glass.widthAnchor.constraint(equalToConstant: cardSize.width),
             glass.heightAnchor.constraint(equalToConstant: cardSize.height),
 
-            mascotColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
-            mascotColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
-            mascotColumn.widthAnchor.constraint(equalToConstant: Self.mascotSize.width),
-            mascotColumn.heightAnchor.constraint(equalToConstant: Self.mascotSize.height),
+            iconColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
+            iconColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
+            iconColumn.widthAnchor.constraint(equalToConstant: Self.iconSize.width),
+            iconColumn.heightAnchor.constraint(equalToConstant: Self.iconSize.height),
 
-            mascotView.centerXAnchor.constraint(equalTo: mascotColumn.centerXAnchor),
-            mascotView.centerYAnchor.constraint(equalTo: mascotColumn.centerYAnchor),
-            mascotView.widthAnchor.constraint(equalToConstant: Self.mascotSize.width),
-            mascotView.heightAnchor.constraint(equalToConstant: Self.mascotSize.height),
+            iconView.centerXAnchor.constraint(equalTo: iconColumn.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: iconColumn.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: Self.iconSize.width),
+            iconView.heightAnchor.constraint(equalToConstant: Self.iconSize.height),
 
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding + 1),
-            titleLabel.leadingAnchor.constraint(equalTo: mascotColumn.trailingAnchor, constant: Self.textGap),
+            titleLabel.leadingAnchor.constraint(equalTo: iconColumn.trailingAnchor, constant: Self.textGap),
             titleLabel.widthAnchor.constraint(equalToConstant: Self.textColumnWidth),
 
             messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
@@ -307,8 +307,8 @@ final class GizmateInputAlertController: NSWindowController, NSWindowDelegate {
         let buttonsBlock = CGFloat(buttons.count) * buttonHeight
             + CGFloat(max(0, buttons.count - 1)) * buttonStackSpacing
         let inner = titleHeight + 4 + messageHeight + 12 + fieldHeight + 12 + buttonsBlock
-        let height = verticalPadding * 2 + max(mascotSize.height, inner)
-        let width = horizontalPadding * 2 + mascotSize.width + textGap + textColumnWidth
+        let height = verticalPadding * 2 + max(iconSize.height, inner)
+        let width = horizontalPadding * 2 + iconSize.width + textGap + textColumnWidth
         return NSSize(width: ceil(width), height: ceil(height))
     }
 }
@@ -318,7 +318,7 @@ final class GizmateAlertController: NSWindowController, NSWindowDelegate {
     private static let verticalPadding: CGFloat = 16
     private static let shadowMargin: CGFloat = 30
     private static let cornerRadius: CGFloat = 28
-    private static let mascotSize = NSSize(width: 42, height: 34)
+    private static let iconSize = NSSize(width: 42, height: 34)
     private static let textGap: CGFloat = 10
     private static let minTextWidth: CGFloat = 168
     private static let maxTextWidth: CGFloat = 300
@@ -427,12 +427,12 @@ final class GizmateAlertController: NSWindowController, NSWindowDelegate {
         rootView.addSubview(glass)
         let contentView = glass.contentView
 
-        let mascotColumn = NSView()
-        mascotColumn.translatesAutoresizingMaskIntoConstraints = false
+        let iconColumn = NSView()
+        iconColumn.translatesAutoresizingMaskIntoConstraints = false
 
-        let mascotView = PetMascotView(frame: NSRect(origin: .zero, size: Self.mascotSize))
-        mascotView.apply(state: .idle, mode: .selection)
-        mascotView.translatesAutoresizingMaskIntoConstraints = false
+        let iconView = NSImageView(image: NSApp.applicationIconImage)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = Self.titleFont
@@ -449,8 +449,8 @@ final class GizmateAlertController: NSWindowController, NSWindowDelegate {
 
         let primaryButton = makeButton(title: primaryButtonTitle, action: #selector(primaryTapped))
 
-        contentView.addSubview(mascotColumn)
-        mascotColumn.addSubview(mascotView)
+        contentView.addSubview(iconColumn)
+        iconColumn.addSubview(iconView)
         contentView.addSubview(titleLabel)
         contentView.addSubview(messageLabel)
         contentView.addSubview(primaryButton)
@@ -461,18 +461,18 @@ final class GizmateAlertController: NSWindowController, NSWindowDelegate {
             glass.widthAnchor.constraint(equalToConstant: layout.cardSize.width),
             glass.heightAnchor.constraint(equalToConstant: layout.cardSize.height),
 
-            mascotColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
-            mascotColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
-            mascotColumn.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.verticalPadding),
-            mascotColumn.widthAnchor.constraint(equalToConstant: Self.mascotSize.width),
+            iconColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
+            iconColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
+            iconColumn.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.verticalPadding),
+            iconColumn.widthAnchor.constraint(equalToConstant: Self.iconSize.width),
 
-            mascotView.centerXAnchor.constraint(equalTo: mascotColumn.centerXAnchor),
-            mascotView.centerYAnchor.constraint(equalTo: mascotColumn.centerYAnchor),
-            mascotView.widthAnchor.constraint(equalToConstant: Self.mascotSize.width),
-            mascotView.heightAnchor.constraint(equalToConstant: Self.mascotSize.height),
+            iconView.centerXAnchor.constraint(equalTo: iconColumn.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: iconColumn.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: Self.iconSize.width),
+            iconView.heightAnchor.constraint(equalToConstant: Self.iconSize.height),
 
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding + 1),
-            titleLabel.leadingAnchor.constraint(equalTo: mascotColumn.trailingAnchor, constant: Self.textGap),
+            titleLabel.leadingAnchor.constraint(equalTo: iconColumn.trailingAnchor, constant: Self.textGap),
             titleLabel.widthAnchor.constraint(equalToConstant: layout.textWidth),
 
             messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
@@ -558,8 +558,8 @@ final class GizmateAlertController: NSWindowController, NSWindowDelegate {
             attributes: [.font: messageFont]
         ).height)
         let textBlockHeight = ceil(titleFont.boundingRectForFont.height) + 4 + messageHeight
-        let height = verticalPadding + max(mascotSize.height, textBlockHeight + 12 + 30) + verticalPadding
-        let width = horizontalPadding * 2 + mascotSize.width + textGap + textWidth
+        let height = verticalPadding + max(iconSize.height, textBlockHeight + 12 + 30) + verticalPadding
+        let width = horizontalPadding * 2 + iconSize.width + textGap + textWidth
         return AlertLayout(
             cardSize: NSSize(width: ceil(width), height: max(112, ceil(height))),
             textWidth: textWidth

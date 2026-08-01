@@ -64,6 +64,32 @@ private actor ToolAgentModelFailure {
 enum ToolAgentLiveBuilder {
     typealias ClarificationCancellation = @Sendable () async -> Void
 
+    /// Asked when a candidate declares a secret the user has not stored yet.
+    ///
+    /// The declaration *is* the request: a model that writes
+    /// `os.environ["GEMINI_API_KEY"]` has said what it needs more precisely than
+    /// any question could, and it can say it at any point in the build rather
+    /// than only in the three clarifications it is allowed before writing code.
+    /// Returning false means the user declined — the validation run then fails
+    /// on the missing key like any other error, which is the truth.
+    typealias SecretRequest = @Sendable (String) async -> Bool
+
+    /// Fills in any secret a candidate declares but the user has not stored,
+    /// before anything tries to run it. Without this the run reaches
+    /// `generatedTool`, which drops the unstored name, and the script dies on a
+    /// `KeyError` the model then tries to "repair" by removing the key it needs.
+    static func collectMissingSecrets(
+        for candidate: ToolAgentCandidateV1,
+        request: SecretRequest,
+        onStatus: @Sendable (String) -> Void
+    ) async {
+        for name in candidate.secretNames ?? []
+        where ToolSecrets.isValidName(name) && ToolSecrets.value(for: name) == nil {
+            onStatus("Waiting for \(name)…")
+            _ = await request(name)
+        }
+    }
+
     static func makeSupervisor(
         store: ToolBuildStore,
         runtimeVersion: String,
@@ -84,7 +110,10 @@ enum ToolAgentLiveBuilder {
             model: model,
             validation: validation,
             clarification: clarification,
-            clarificationCancellation: clarificationCancellation
+            clarificationCancellation: clarificationCancellation,
+            // Read at call time, not from the request: the user may have stored
+            // the key seconds ago, in the row this very build put in front of them.
+            secretNames: { ToolSecrets.names() }
         )
     }
 
@@ -146,7 +175,8 @@ enum ToolAgentLiveBuilder {
         clarification: @escaping ToolBuildClarificationHandlerV1 = {
             _ in throw ToolAgentFailureCodeV1.invalidProtocol
         },
-        clarificationCancellation: @escaping ClarificationCancellation = {}
+        clarificationCancellation: @escaping ClarificationCancellation = {},
+        secretRequest: @escaping SecretRequest = { _ in false }
     ) async throws -> GeneratedTool {
         let requestText = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requestText.isEmpty else {
@@ -168,7 +198,8 @@ enum ToolAgentLiveBuilder {
             uv: uv,
             onStatus: onStatus,
             clarification: clarification,
-            clarificationCancellation: clarificationCancellation
+            clarificationCancellation: clarificationCancellation,
+            secretRequest: secretRequest
         )
     }
 
@@ -185,7 +216,8 @@ enum ToolAgentLiveBuilder {
         clarification: @escaping ToolBuildClarificationHandlerV1 = {
             _ in throw ToolAgentFailureCodeV1.invalidProtocol
         },
-        clarificationCancellation: @escaping ClarificationCancellation = {}
+        clarificationCancellation: @escaping ClarificationCancellation = {},
+        secretRequest: @escaping SecretRequest = { _ in false }
     ) async throws -> GeneratedTool {
         let requestText = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !requestText.isEmpty else {
@@ -208,7 +240,8 @@ enum ToolAgentLiveBuilder {
             uv: uv,
             onStatus: onStatus,
             clarification: clarification,
-            clarificationCancellation: clarificationCancellation
+            clarificationCancellation: clarificationCancellation,
+            secretRequest: secretRequest
         )
         return preservingIdentity(of: tool, in: generated)
     }
@@ -221,7 +254,8 @@ enum ToolAgentLiveBuilder {
         uv: URL,
         onStatus: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping ClarificationCancellation
+        clarificationCancellation: @escaping ClarificationCancellation,
+        secretRequest: @escaping SecretRequest = { _ in false }
     ) async throws -> GeneratedTool {
         let runtime = try ToolAgentRuntimeLocation.resolve()
         let store = try ToolBuildStore(directoryURL: GizmatePaths.toolAgentRuns)
@@ -261,6 +295,14 @@ enum ToolAgentLiveBuilder {
                 }
             },
             validation: { input in
+                // Before the switch, because every kind below that runs anything
+                // resolves its environment through `generatedTool`, which keeps
+                // only the secrets that exist on disk at that moment.
+                await collectMissingSecrets(
+                    for: input.candidate,
+                    request: secretRequest,
+                    onStatus: onStatus
+                )
                 let report: ToolAgentValidationReportV1
                 switch input.candidate.kind {
                 case .prompt:

@@ -41,7 +41,14 @@ enum NativeToolRunner {
         var files: [URL] = []
     }
 
-    static func run(_ tool: GizmateTool, context: ToolContext) async throws -> Result {
+    /// - Parameter notes: the store `.saveToNote` writes into. Passed rather
+    ///   than reached for globally so the action stays in this catalog with the
+    ///   rest of them instead of being special-cased at the call site.
+    static func run(
+        _ tool: GizmateTool,
+        context: ToolContext,
+        notes: NotesStore
+    ) async throws -> Result {
         let target = tool.target.trimmingCharacters(in: .whitespacesAndNewlines)
         if tool.nativeAction.targetLabel != nil, target.isEmpty {
             throw NativeToolError.missingTarget(tool.nativeAction)
@@ -94,6 +101,23 @@ enum NativeToolRunner {
                 message: output.isEmpty ? "Ran \(target)" : "\(target) — done",
                 text: output.isEmpty ? nil : output
             )
+
+        case .saveToNote:
+            guard let text = arguments.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty
+            else {
+                throw ToolRunError.noInput(tool.input)
+            }
+            // No title: the user is mid-flow in another app and has nothing to
+            // type one into. `Note.displayTitle` stands the first line up as one,
+            // and the Notes tab is where a real title gets added if it's wanted.
+            // Filed under the fixed "Other" tag, or untagged once the user has
+            // deleted it — a gizmo runs unattended and has nobody to ask.
+            notes.add(text: text, tagID: notes.tag(NoteTag.otherID)?.id)
+            // No `text` on the way out: saving is the whole point of the action,
+            // so every output mode collapses to the toast rather than pasting
+            // the note back over the selection it came from.
+            return Result(message: "Saved to notes")
         }
     }
 

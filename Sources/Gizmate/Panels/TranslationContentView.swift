@@ -382,7 +382,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
 
     /// Markdown resolved to plain text (list markers survive as glyphs,
     /// emphasis/table syntax is consumed) — for surfaces that can't render
-    /// rich text, like the pet's pixel-font answer bubble.
+    /// rich text.
     static func flattenedMarkdown(_ text: String) -> String {
         renderedMarkdownText(
             text,

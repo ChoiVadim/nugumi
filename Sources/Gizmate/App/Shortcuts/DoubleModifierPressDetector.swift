@@ -92,7 +92,7 @@ final class DoubleModifierPressDetector {
             }
         }
         // Local monitor: fires while Gizmate itself is the active app (e.g.
-        // right after the pet prompt was shown and clicked). Without this the
+        // right after the Ask prompt was shown and clicked). Without this the
         // detector goes deaf once the app activates and never recovers until
         // another app regains focus. Must return the event unmodified.
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in

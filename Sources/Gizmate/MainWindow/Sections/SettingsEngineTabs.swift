@@ -1,35 +1,58 @@
 import SwiftUI
 
-struct AIEngineSection: View {
+// MARK: - Settings: Models & Providers tabs
+
+/// Which model does the thinking, per use scope.
+struct ModelsTab: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
     var body: some View {
-        DetailContainer(
-            "AI Engine",
-            subtitle: "Which model does the thinking - and how hard.",
-            pinned: FlowTabBar(tabs: ["Models", "Providers"], selection: $bridge.aiEngineTab)
-        ) {
-            if bridge.aiEngineTab == 0 {
-                ModelScopeCard(scope: .textActions,
-                               title: "Everyday text",
-                               subtitle: "Translate, rewrite, and smart replies.",
-                               onOpenPicker: { bridge.modelPickerScope = .textActions })
-                ModelScopeCard(scope: .askGizmate,
-                               title: "Ask Gizmate",
-                               subtitle: "Screenshot questions. Vision-capable models only.",
-                               onOpenPicker: { bridge.modelPickerScope = .askGizmate })
-            } else {
-                ForEach(orderedProviderGroups, id: \.self) { group in
+        Group {
+            ModelScopeCard(scope: .textActions,
+                           title: "Everyday text",
+                           subtitle: "Translate, rewrite, and smart replies.",
+                           onOpenPicker: { bridge.modelPickerScope = .textActions })
+            ModelScopeCard(scope: .askGizmate,
+                           title: "Ask Gizmate",
+                           subtitle: "Screenshot questions. Vision-capable models only.",
+                           onOpenPicker: { bridge.modelPickerScope = .askGizmate })
+        }
+    }
+}
+
+/// Where those models come from. Signing in with a plan you already pay for is
+/// the path almost everyone wants, so it stands alone; running Ollama locally or
+/// pasting raw API keys is the escape hatch, folded behind "Advanced".
+struct ProvidersTab: View {
+    @EnvironmentObject var bridge: GizmateSettingsBridge
+    @State private var showAdvanced = false
+
+    var body: some View {
+        Group {
+            providerGroupCard(for: .subscription)
+
+            AdvancedToggle(isOn: $showAdvanced)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            if showAdvanced {
+                ForEach(advancedGroups, id: \.self) { group in
                     providerGroupCard(for: group)
                 }
+            }
+        }
+        // Someone who picked local or API keys on the onboarding finale meant it
+        // — open the drawer for them rather than hiding what they just chose.
+        .onAppear {
+            if let focus = bridge.engineSetupFocus, focus != .subscription {
+                showAdvanced = true
             }
         }
     }
 
     /// Default order, except the engine picked during onboarding leads.
-    private var orderedProviderGroups: [EngineSetupFocus] {
-        let base = EngineSetupFocus.allCases
-        guard let focus = bridge.engineSetupFocus else { return base }
+    private var advancedGroups: [EngineSetupFocus] {
+        let base: [EngineSetupFocus] = [.local, .apiKeys]
+        guard let focus = bridge.engineSetupFocus, base.contains(focus) else { return base }
         return [focus] + base.filter { $0 != focus }
     }
 
@@ -65,6 +88,25 @@ struct AIEngineSection: View {
             guard model.isOllama, model.isCloud else { return nil }
             return seen.insert(model.id).inserted ? model : nil
         }
+    }
+}
+
+/// Quiet text link under the Subscriptions card. Deliberately not a
+/// `SecondaryButton`: a filled pill reads as an equal option to signing in,
+/// which is the opposite of what this is.
+private struct AdvancedToggle: View {
+    @Binding var isOn: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            Text(isOn ? "Hide advanced" : "Advanced")
+                .font(.system(size: 12.5))
+                .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkTertiary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 

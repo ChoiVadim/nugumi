@@ -2,27 +2,39 @@ import SwiftUI
 
 // MARK: - Settings
 
-/// How Gizmate behaves while you work, plus the hotkeys that reach it. Both
-/// answer "how is this thing set up", so they share one sidebar entry.
+/// How Gizmate behaves while you work, the hotkeys that reach it, and the engine
+/// behind it. All answer "how is this thing set up", so they share one sidebar
+/// entry.
 struct SettingsSection: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
     var body: some View {
         DetailContainer(
             "Settings",
-            subtitle: bridge.settingsTab == 0
-                ? "How Gizmate shows up while you work."
-                : "Global hotkeys that work from any app.",
-            pinned: FlowTabBar(tabs: ["General", "Shortcuts"], selection: $bridge.settingsTab),
-            accessory: bridge.settingsTab == 1
+            subtitle: subtitle,
+            pinned: FlowTabBar(
+                tabs: ["General", "Models", "Providers", "Shortcuts"],
+                selection: $bridge.settingsTab
+            ),
+            accessory: bridge.settingsTab == 3
                 ? AnyView(ResetDiscButton(accessibilityTitle: "Reset shortcuts to defaults") { bridge.perform(.resetShortcuts) })
                 : nil
         ) {
-            if bridge.settingsTab == 0 {
-                GeneralTab()
-            } else {
-                ShortcutsTab()
+            switch bridge.settingsTab {
+            case 0: GeneralTab()
+            case 1: ModelsTab()
+            case 2: ProvidersTab()
+            default: ShortcutsTab()
             }
+        }
+    }
+
+    private var subtitle: String {
+        switch bridge.settingsTab {
+        case 0: return "How Gizmate shows up while you work."
+        case 1: return "Which model does the thinking - and how hard."
+        case 2: return "Where those models come from. Stored locally on this Mac."
+        default: return "Global hotkeys that work from any app."
         }
     }
 }
@@ -32,32 +44,19 @@ struct SettingsSection: View {
 private struct ShortcutsTab: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
-    /// Actions bucketed into their display groups, preserving allCases order
-    /// within each group.
-    private var groups: [(group: ShortcutGroup, actions: [GlobalShortcutAction])] {
-        ShortcutGroup.allCases.compactMap { group in
-            let actions = GlobalShortcutAction.allCases.filter { $0.group == group }
-            return actions.isEmpty ? nil : (group, actions)
-        }
+    /// App-level hotkeys only. Everything a tool does is bound from that tool's
+    /// own settings, so grouping by `ShortcutGroup` no longer buys anything —
+    /// one card, one group.
+    private var actions: [GlobalShortcutAction] {
+        GlobalShortcutAction.allCases.filter { $0.group == .app }
     }
 
     var body: some View {
-        Group {
-            ForEach(groups, id: \.group) { group, actions in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(group.title.uppercased())
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(0.6)
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .padding(.leading, 4)
-                    SubCard {
-                        VStack(spacing: 18) {
-                            ForEach(Array(actions.enumerated()), id: \.element) { index, action in
-                                if index > 0 { Divider().background(FlowTheme.hairline) }
-                                shortcutRow(action)
-                            }
-                        }
-                    }
+        SubCard {
+            VStack(spacing: 18) {
+                ForEach(Array(actions.enumerated()), id: \.element) { index, action in
+                    if index > 0 { Divider().background(FlowTheme.hairline) }
+                    shortcutRow(action)
                 }
             }
         }
@@ -68,11 +67,6 @@ private struct ShortcutsTab: View {
         SettingRow(action.menuTitle) {
             HStack(spacing: 8) {
                 KeyCap(text: bridge.settings.shortcut(for: action).displayString)
-                // Ask Gizmate also fires on a fixed ⌃⌥A alias — shown muted since
-                // "Change" only rebinds the primary (double-tap ⌃) shortcut.
-                if action == .askGizmate {
-                    KeyCap(text: GlobalShortcutAction.askGizmateAlias.displayString, muted: true)
-                }
                 SecondaryButton(title: "Change") {
                     bridge.perform(.recordShortcut(action))
                 }
@@ -91,13 +85,6 @@ private struct GeneralTab: View {
         Group {
             SubCard {
                 VStack(spacing: 18) {
-                    SettingRow("Main mode",
-                               subtitle: "What the floating button and pet do on a single click.") {
-                        PillPicker(options: [.translate, .smartReply],
-                                   selection: bridge.binding(\.floatingDefaultMode) { .setFloatingDefaultMode($0) },
-                                   label: { $0 == .translate ? "Translate" : "Reply" })
-                    }
-                    Divider().background(FlowTheme.hairline)
                     SettingRow("On selection",
                                subtitle: "What appears when you select text.") {
                         PillPicker(options: SelectionDisplayMode.allCases,
@@ -145,7 +132,8 @@ struct AboutYouTab: View {
             PageBanner(
                 title: "Better answers, your context",
                 message: "When a term has several meanings, Gizmate picks the one most relevant to you - \"RLS\" means row-level security to a developer, not a sleep disorder.",
-                symbol: "person.crop.circle"
+                symbol: "person.crop.circle",
+                dismissKey: "aboutYouBannerDismissed"
             )
 
             SubCard {

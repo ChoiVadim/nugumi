@@ -35,6 +35,7 @@ enum NativeAction: String, Codable, CaseIterable {
     case revealInFinder
     case openURL
     case runShortcut
+    case saveToNote
 
     var displayName: String {
         switch self {
@@ -44,6 +45,7 @@ enum NativeAction: String, Codable, CaseIterable {
         case .revealInFinder: return "Show in Finder"
         case .openURL: return "Open a link"
         case .runShortcut: return "Run a Shortcut"
+        case .saveToNote: return "Save to notes"
         }
     }
 
@@ -61,6 +63,8 @@ enum NativeAction: String, Codable, CaseIterable {
             return "Opens a link in your browser. Use {input} where the input goes."
         case .runShortcut:
             return "Runs one of your Shortcuts, handing it the input."
+        case .saveToNote:
+            return "Keeps the input as a new note in the Notes tab."
         }
     }
 
@@ -70,7 +74,7 @@ enum NativeAction: String, Codable, CaseIterable {
         case .openApp, .openAppFullScreen, .sendTextToApp: return "App"
         case .openURL: return "Link"
         case .runShortcut: return "Shortcut name"
-        case .revealInFinder: return nil
+        case .revealInFinder, .saveToNote: return nil
         }
     }
 
@@ -79,14 +83,14 @@ enum NativeAction: String, Codable, CaseIterable {
         case .openApp, .openAppFullScreen, .sendTextToApp: return "Safari"
         case .openURL: return "https://www.google.com/search?q={input}"
         case .runShortcut: return "My Shortcut"
-        case .revealInFinder: return ""
+        case .revealInFinder, .saveToNote: return ""
         }
     }
 
     /// Whether the action consumes the tool's input at all.
     var usesInput: Bool {
         switch self {
-        case .sendTextToApp, .revealInFinder, .openURL, .runShortcut: return true
+        case .sendTextToApp, .revealInFinder, .openURL, .runShortcut, .saveToNote: return true
         case .openApp, .openAppFullScreen: return false
         }
     }
@@ -160,6 +164,8 @@ enum ToolOutput: String, Codable, CaseIterable {
     case files
     /// Just a toast — for tools whose point is the side effect.
     case notify
+    /// Keeps the answer as a new note, titled with the gizmo's name.
+    case notes
 
     var displayName: String {
         switch self {
@@ -168,6 +174,7 @@ enum ToolOutput: String, Codable, CaseIterable {
         case .clipboard: return "Copy"
         case .files: return "Save files"
         case .notify: return "Notify"
+        case .notes: return "Save to notes"
         }
     }
 
@@ -183,6 +190,8 @@ enum ToolOutput: String, Codable, CaseIterable {
             return "Moves whatever the script produced into the folder below."
         case .notify:
             return "Shows a short confirmation and nothing else."
+        case .notes:
+            return "Keeps the answer as a new note, ready to read in the Notes tab."
         }
     }
 }
@@ -244,6 +253,19 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     /// user wrote by hand.
     var brief: String
 
+    // MARK: .prompt / .agent context
+    //
+    // Both default to off, and both are ignored by `.python` and `.native`,
+    // which have no model in the loop to hand context to.
+
+    /// Hands the gizmo the user's Voice settings — writing register, cleanup
+    /// level, dictionary and snippets. Off by default because a gizmo's own
+    /// prompt is authoritative: layering a register directive over "turn this
+    /// into JSON" corrupts the output rather than styling it.
+    var usesVoice: Bool
+    /// Hands the gizmo the notes ticked in the Notes tab (see `NotesContext`).
+    var usesNotes: Bool
+
     var createdAt: Date
 
     init(
@@ -263,6 +285,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         secretNames: [String] = [],
         maxSteps: Int = 8,
         brief: String = "",
+        usesVoice: Bool = false,
+        usesNotes: Bool = false,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -284,6 +308,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         self.maxSteps = maxSteps
 
         self.brief = brief
+        self.usesVoice = usesVoice
+        self.usesNotes = usesNotes
         self.createdAt = createdAt
     }
 
@@ -324,6 +350,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         case nativeAction, target
         case outputDirectory, timeoutSeconds, declaresNetwork, secretNames, brief
         case maxSteps
+        case usesVoice, usesNotes
         case createdAt
     }
 
@@ -358,6 +385,10 @@ struct GizmateTool: Codable, Equatable, Identifiable {
             .filter(ToolSecrets.isValidName)
         maxSteps = max(1, min(24, try c.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8))
         brief = try c.decodeIfPresent(String.self, forKey: .brief) ?? ""
+        // Absent in every gizmo saved before this existed, and false is what
+        // those gizmos have always behaved like.
+        usesVoice = try c.decodeIfPresent(Bool.self, forKey: .usesVoice) ?? false
+        usesNotes = try c.decodeIfPresent(Bool.self, forKey: .usesNotes) ?? false
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }

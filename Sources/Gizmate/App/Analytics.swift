@@ -278,7 +278,9 @@ extension AnalyticsClient {
             event = .rewriteCompleted
         case .smartReply:
             event = .smartReplyCompleted
-        case .replacement:
+        // Neither is a completed text action: a replacement is the follow-up to
+        // one, and a gizmo run never comes through here.
+        case .replacement, .gizmoRun:
             return
         }
 

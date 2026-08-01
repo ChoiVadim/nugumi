@@ -13,6 +13,9 @@ struct RingActionHandlers {
     var capture: (() -> Void)?
     var dictate: (() -> Void)?
     var live: (() -> Void)?
+    /// Note fans out into the user's tags, so like Summarize it arrives as an
+    /// option rather than a plain closure.
+    var saveNote: RingSaveNoteOption?
     /// Summarize carries its own sub-orbit structure, so it arrives as the
     /// option rather than a plain closure.
     var summarize: RingSummarizeOption?
@@ -21,7 +24,7 @@ struct RingActionHandlers {
 
 /// Turns a saved layout into the positioned slots the radial menu renders. The
 /// one place that knows what the ring contains — both presenters (the selection
-/// bar and the pet) go through here.
+/// bar and the quick menu) go through here.
 enum RingBuilder {
     /// One entry per layout slot, in slot order, `nil` wherever the slot is
     /// empty or its action is unavailable. Deliberately NOT compacted: the ring
@@ -63,13 +66,18 @@ enum RingBuilder {
             case .empty:
                 return nil
             case .builtIn(let id):
-                return builtInItem(id, handlers: handlers, dismiss: dismiss)
+                return builtInItem(
+                    id,
+                    override: configuration.overrides[id],
+                    handlers: handlers,
+                    dismiss: dismiss
+                )
             case .tool(let id):
-                guard let tool = configuration.tools.first(where: { $0.id == id }),
                 // Every gizmo the user placed stays where they put it, whatever
                 // is on the clipboard: a slot that comes and goes is a slot
                 // nobody can aim at. A gizmo run without its input says so
                 // instead (`ToolRunError.noInput`).
+                guard let tool = configuration.tools.first(where: { $0.id == id }),
                       let run = handlers.tool
                 else { return nil }
                 return RingItem.symbol(tool.resolvedSymbolName, label: tool.name) {
@@ -127,14 +135,26 @@ enum RingBuilder {
     @MainActor
     private static func builtInItem(
         _ id: RingActionID,
+        override: BuiltInOverride?,
         handlers: RingActionHandlers,
         dismiss: @escaping () -> Void
     ) -> RingItem? {
+        // Switched off in the built-in's editor. Returning nil reuses the gap
+        // the ring already draws for an unavailable action rather than adding a
+        // path of its own — and it leaves the slot where it is, so the buttons
+        // after it keep their positions.
+        guard override?.isEnabled ?? true else { return nil }
         // Summarize builds its own item: an app icon plus the time-range or
         // app-picker orbits behind it.
         if id == .summarize {
             guard let option = handlers.summarize else { return nil }
             return summarizeRingItem(option, dismiss: dismiss)
+        }
+        // Same story as Summarize: the button carries its own orbit, so it is
+        // built rather than wrapped around a bare closure.
+        if id == .saveNote {
+            guard let option = handlers.saveNote else { return nil }
+            return saveNoteRingItem(option, dismiss: dismiss)
         }
         let handler: (() -> Void)?
         switch id {
@@ -145,10 +165,15 @@ enum RingBuilder {
         case .capture:   handler = handlers.capture
         case .dictate:   handler = handlers.dictate
         case .live:      handler = handlers.live
-        case .summarize: handler = nil
+        case .saveNote, .summarize: handler = nil
         }
         guard let handler else { return nil }
-        return RingItem(label: id.label, image: id.icon.image()) {
+        // Summarize and Note wear bespoke buttons (an app icon, their own
+        // orbits), so a renamed label or swapped glyph only reaches the plain
+        // ones — which is every built-in that returns a handler here.
+        let label = override?.name ?? id.label
+        let icon = override?.symbol.map { RingIconKind.symbol($0) } ?? id.icon
+        return RingItem(label: label, image: icon.image()) {
             dismiss()
             handler()
         }

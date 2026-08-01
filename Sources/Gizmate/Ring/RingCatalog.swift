@@ -23,6 +23,7 @@ enum RingActionID: String, Codable, CaseIterable {
     case summarize
     case dictate
     case live
+    case saveNote
 
     /// Hover label in the live ring. Summarize is deliberately empty: its button
     /// wears the source app's own icon, which already names it.
@@ -36,6 +37,7 @@ enum RingActionID: String, Codable, CaseIterable {
         case .summarize: return ""
         case .dictate:   return "Dictate"
         case .live:      return "Live"
+        case .saveNote:  return "Note"
         }
     }
 
@@ -57,6 +59,7 @@ enum RingActionID: String, Codable, CaseIterable {
         case .summarize: return .symbol("list.bullet.rectangle")
         case .dictate:   return .symbol("mic")
         case .live:      return .symbol("waveform")
+        case .saveNote:  return .symbol("note.text.badge.plus")
         }
     }
 
@@ -80,6 +83,47 @@ enum RingActionID: String, Codable, CaseIterable {
             return "Dictate text with your voice."
         case .live:
             return "Start live translation."
+        case .saveNote:
+            return "Keep the selected text as a note."
+        }
+    }
+
+    /// The mode whose prompt this built-in owns, for the three that have an
+    /// editable one.
+    ///
+    /// Summarize is deliberately absent even though it is prompt-driven: one
+    /// button stands in front of two prompts (`.summarizeChat` for a transcript,
+    /// `.summarizePage` for a web page), so a single text field could not
+    /// honestly represent it.
+    ///
+    /// `default` rather than an exhaustive list on purpose — "this action has no
+    /// editable prompt" is the safe answer for anything added later.
+    var promptMode: TranslationMode? {
+        switch self {
+        case .explain: return .selection
+        case .rewrite: return .draftMessage
+        case .reply:   return .smartReply
+        default:       return nil
+        }
+    }
+
+    /// The global hotkey this built-in owns, so its editor can rebind it and
+    /// switching the built-in off can free the key.
+    ///
+    /// Summarize has none on purpose: it only appears in a supported chat app or
+    /// browser, so a global key that does nothing most of the time is a bug
+    /// report waiting to happen.
+    var shortcutAction: GlobalShortcutAction? {
+        switch self {
+        case .explain:   return .explainSelection
+        case .rewrite:   return .translateSelection
+        case .reply:     return .replyToSelection
+        case .ask:       return .askGizmate
+        case .capture:   return .screenshotArea
+        case .dictate:   return .dictate
+        case .live:      return .liveTranslation
+        case .saveNote:  return .saveNote
+        case .summarize: return nil
         }
     }
 }

@@ -10,19 +10,18 @@ final class GizmateSettingsBridge: ObservableObject {
     weak var host: (any SettingsHost)?
     let usageStats: UsageStatsStore
     let snippets: SnippetsStore
+    let notes: NotesStore
     let tools: ToolsStore
     let ringLayout: RingLayoutStore
     let builtInOverrides: BuiltInOverridesStore
-    let history: TranslationHistoryStore
 
     @Published var section: MainWindowSection = .home
-    /// Active tab inside the AI Engine section (0 = Models, 1 = Providers).
-    /// Programmatic "go set up a provider" deep links set this to 1.
-    @Published var aiEngineTab: Int = 0
     /// Active tab inside Voice (0 = Style, 1 = Languages, 2 = About you,
     /// 3 = Dictionary, 4 = Snippets).
     @Published var voiceTab: Int = 0
-    /// Active tab inside Settings (0 = General, 1 = Shortcuts).
+    /// Active tab inside Settings (0 = General, 1 = Models, 2 = Providers,
+    /// 3 = Shortcuts). Programmatic "go set up a provider" deep links land on 2
+    /// via `presentEngineSetup()`.
     @Published var settingsTab: Int = 0
     /// Engine picked on the onboarding finale — that group's card leads the
     /// Providers tab. `nil` keeps the default order.
@@ -48,10 +47,10 @@ final class GizmateSettingsBridge: ObservableObject {
         self.host = host
         self.usageStats = host.usageStats
         self.snippets = host.snippets
+        self.notes = host.notes
         self.tools = host.tools
         self.ringLayout = host.ringLayout
         self.builtInOverrides = host.builtInOverrides
-        self.history = host.history
         self.settings = host.makeSettingsSnapshot()
         self.bootstrap = host.bootstrapState
         self.ollamaModels = host.ollamaModels
@@ -149,14 +148,16 @@ final class GizmateSettingsBridge: ObservableObject {
         description: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
         guard let host else { return .failure(ToolGeneratorError.emptyDescription) }
         return await host.generateScriptTool(
             description: description,
             onPartial: onPartial,
             clarification: clarification,
-            clarificationCancellation: clarificationCancellation
+            clarificationCancellation: clarificationCancellation,
+            secretRequest: secretRequest
         )
     }
     func reviseScriptTool(
@@ -165,7 +166,8 @@ final class GizmateSettingsBridge: ObservableObject {
         instruction: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
         guard let host else { return .failure(ToolGeneratorError.emptyDescription) }
         return await host.reviseScriptTool(
@@ -174,7 +176,8 @@ final class GizmateSettingsBridge: ObservableObject {
             instruction: instruction,
             onPartial: onPartial,
             clarification: clarification,
-            clarificationCancellation: clarificationCancellation
+            clarificationCancellation: clarificationCancellation,
+            secretRequest: secretRequest
         )
     }
     func repairScriptTool(
@@ -183,7 +186,8 @@ final class GizmateSettingsBridge: ObservableObject {
         failure: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
         guard let host else { return .failure(ToolGeneratorError.emptyDescription) }
         return await host.repairScriptTool(
@@ -192,7 +196,8 @@ final class GizmateSettingsBridge: ObservableObject {
             failure: failure,
             onPartial: onPartial,
             clarification: clarification,
-            clarificationCancellation: clarificationCancellation
+            clarificationCancellation: clarificationCancellation,
+            secretRequest: secretRequest
         )
     }
     var appVersion: String { host?.appVersionString ?? "" }

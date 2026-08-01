@@ -355,8 +355,8 @@ final class AskDrawingOverlayController {
             backing: .buffered,
             defer: false
         )
-        // One notch below .floating so the Ask pill and pet panels (both
-        // .floating) stay clickable above the canvas.
+        // One notch below .floating so the Ask pill (.floating) stays
+        // clickable above the canvas.
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
@@ -426,7 +426,7 @@ final class AskDrawingOverlayController {
     // ⌘Z anywhere while the Ask UI is open undoes the user's most recent
     // action: a stroke on the canvas or an edit in the prompt field,
     // whichever came last. A local monitor works for both the pill and the
-    // pet prompt (whichever is key); non-⌘Z keystrokes are only observed to
+    // Ask prompt (whichever is key); non-⌘Z keystrokes are only observed to
     // timestamp text edits and always pass through.
     private func installUndoKeyMonitor() {
         undoKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in

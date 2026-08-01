@@ -41,7 +41,7 @@ enum RadialMenuLabelPlacement {
     }
 }
 
-/// One button on the radial menu that opens around the floating bar / pet:
+/// One button on the radial menu that opens around the floating bar:
 /// an image (SF Symbol or, for contextual entries, an app icon), a hover
 /// label, and the action to run when picked. Labels avoid "translate"
 /// wording deliberately — house copy rule.
@@ -131,8 +131,45 @@ struct RingSummarizeOption {
     var appChoices: [RingSummarizeOption]? = nil
 }
 
+/// What the ring's Note button needs: the tags to offer, and what to do with
+/// the one the user picks. Shaped after `RingSummarizeOption` because the
+/// button behaves the same way — a parent that fans out into choices rather
+/// than firing on its own.
+struct RingSaveNoteOption {
+    let tags: [NoteTag]
+    /// `nil` means the user has no tags left, so the note is filed untagged.
+    let run: (NoteTag?) -> Void
+}
+
+/// Builds the ring's Note item. With tags it is a hover-expandable parent whose
+/// orbit is one word-badge per tag; with none it is an ordinary button that
+/// saves straight away, so deleting every tag degrades to the plain behaviour
+/// rather than to a button that cannot be pressed.
+@MainActor
+func saveNoteRingItem(_ opt: RingSaveNoteOption, dismiss: @escaping () -> Void) -> RingItem {
+    let icon = RingActionID.saveNote.icon.image()
+    guard !opt.tags.isEmpty else {
+        return RingItem(label: RingActionID.saveNote.label, image: icon) {
+            dismiss()
+            opt.run(nil)
+        }
+    }
+    let subItems: [RingItem?] = opt.tags.map { tag in
+        RingItem(label: tag.name, image: RingTextBadge.image(tag.name)) {
+            dismiss()
+            opt.run(tag)
+        }
+    }
+    return RingItem(
+        label: RingActionID.saveNote.label,
+        image: icon,
+        handler: {},
+        subItems: subItems
+    )
+}
+
 /// Builds the ring's Summarize item from a `RingSummarizeOption`, shared by
-/// all three ring presenters (quick menu, pet, floating button). `dismiss`
+/// both ring presenters (quick menu, floating button). `dismiss`
 /// is the presenter's own teardown, run before any action fires. Chat
 /// sources expand into time ranges; browsers fire directly.
 @MainActor

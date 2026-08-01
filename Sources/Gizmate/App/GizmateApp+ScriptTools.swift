@@ -120,7 +120,8 @@ extension GizmateApp {
         description: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
         if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
             return .failure(setupError)
@@ -136,7 +137,8 @@ extension GizmateApp {
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
-                clarificationCancellation: clarificationCancellation
+                clarificationCancellation: clarificationCancellation,
+                secretRequest: secretRequest
             )
             analyticsClient.track(.toolGenerated, properties: [
                 "input": generated.tool.input.rawValue,
@@ -157,7 +159,8 @@ extension GizmateApp {
         instruction: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
         if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
             return .failure(setupError)
@@ -176,7 +179,8 @@ extension GizmateApp {
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
-                clarificationCancellation: clarificationCancellation
+                clarificationCancellation: clarificationCancellation,
+                secretRequest: secretRequest
             ))
         } catch {
             return .failure(error)
@@ -192,7 +196,8 @@ extension GizmateApp {
         failure: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
         if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
             return .failure(setupError)
@@ -211,7 +216,8 @@ extension GizmateApp {
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
-                clarificationCancellation: clarificationCancellation
+                clarificationCancellation: clarificationCancellation,
+                secretRequest: secretRequest
             )
             return .success(fixed)
         } catch {
@@ -224,9 +230,12 @@ extension GizmateApp {
     @MainActor
     func runNativeTool(_ tool: GizmateTool, selection: String) {
         let context = ToolContext.current(selection: selection)
+        // Captured strongly: a `.saveToNote` run that outlives the app delegate
+        // must still land the note, and the store is what owns it.
+        let notes = notesStore
         Task { @MainActor [weak self] in
             do {
-                let result = try await NativeToolRunner.run(tool, context: context)
+                let result = try await NativeToolRunner.run(tool, context: context, notes: notes)
                 guard let self else { return }
                 switch tool.output {
                 case .clipboard where result.text != nil:
@@ -237,6 +246,8 @@ extension GizmateApp {
                     self.lastReplacementSourcePID = NSWorkspace.shared
                         .frontmostApplication?.processIdentifier
                     self.replaceCurrentSelection(with: result.text ?? "")
+                case .notes where result.text != nil:
+                    self.keepNote(result.text ?? "", title: tool.name, tagID: self.gizmoNoteTagID)
                 default:
                     ToastHUD.shared.show(text: result.message)
                 }
@@ -263,7 +274,7 @@ extension GizmateApp {
                 ToolRunError.uvMissing.localizedDescription,
                 title: tool.name
             )
-            presentMainWindow(section: .ring)
+            presentMainWindow(section: .home)
             return
         }
         guard let script = toolsStore.script(for: tool.id),
@@ -318,7 +329,7 @@ extension GizmateApp {
                 ToolRunError.uvMissing.localizedDescription,
                 title: tool.name
             )
-            presentMainWindow(section: .ring)
+            presentMainWindow(section: .home)
             return
         }
         if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
@@ -344,6 +355,20 @@ extension GizmateApp {
             return
         }
 
+        // Context is folded into the instruction *after* the approval gate, so
+        // the hash the user approved stays the hash of what they read. An agent
+        // gizmo never passes through a `TranslationMode`, so this is where the
+        // blocks the prompt path gets from `systemPrompt` are attached instead.
+        var contextualized = tool
+        contextualized.prompt += TranslationMode.contextSections(
+            for: tool,
+            targetLanguage: targetLanguage,
+            composition: compositionSettings(
+                for: .custom(tool),
+                appCategory: AppCategoryClassifier.frontmostCategory()
+            )
+        )
+
         // A "files" input hands over several paths; the agent gets them one per
         // line, which is what a Python script it writes will split on anyway.
         let input = arguments.joined(separator: "\n")
@@ -359,7 +384,7 @@ extension GizmateApp {
             }
             do {
                 let answer = try await AgentToolRunner.run(
-                    tool: tool,
+                    tool: contextualized,
                     input: input,
                     backend: backend,
                     thinkingLevel: thinkingLevel,
@@ -570,6 +595,15 @@ extension GizmateApp {
             ToastHUD.shared.show(
                 text: text.isEmpty ? "\(tool.name) — done" : "\(tool.name) — \(text.prefix(60))"
             )
+        case .notes:
+            let text = result.text
+            guard !text.isEmpty else {
+                ToastHUD.shared.show(text: "\(tool.name) — no output")
+                return
+            }
+            // Titled with the gizmo rather than the answer's first line: a list
+            // of notes all called "Summary" is unreadable, "Summarize page" is not.
+            keepNote(text, title: tool.name, tagID: gizmoNoteTagID)
         }
     }
 

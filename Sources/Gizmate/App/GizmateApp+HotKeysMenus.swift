@@ -18,6 +18,7 @@ extension GizmateApp {
     }
 
     func setupGlobalHotKeys() {
+        GlobalShortcutStore.migrateRetiredSelectionShortcut()
         globalHotKeys.forEach { $0.unregister() }
         globalHotKeys.removeAll()
         modifierDetectors.forEach { $0.stop() }
@@ -28,15 +29,33 @@ extension GizmateApp {
         let bindings: [(GlobalShortcutAction, @MainActor () -> Void)] = [
             (.screenshotArea, { [weak self] in self?.startScreenshotTranslation() }),
             (.translateSelection, { [weak self] in self?.startSelectedTextTranslationForReplacement() }),
-            (.translateOrReply, { [weak self] in self?.startSelectionTranslateOrReply() }),
             (.toggleInvisibility, { [weak self] in self?.toggleInvisibilityMode() }),
             (.askGizmate, { [weak self] in self?.startAskGizmatePrompt() }),
             (.toggleWritingLanguage, { [weak self] in self?.toggleWritingLanguageAction() }),
             (.liveTranslation, { [weak self] in self?.toggleLiveTranslation() }),
-            (.quickMenu, { [weak self] in self?.toggleQuickMenuRing() })
+            (.quickMenu, { [weak self] in self?.toggleQuickMenuRing() }),
+            // Each built-in owns a key of its own. These two replaced the single
+            // mode-following `translateOrReply`, which could not honestly be
+            // presented as belonging to either of them.
+            (.explainSelection, { [weak self] in
+                self?.startSelectionTranslateOrReply(forcing: .translate)
+            }),
+            (.replyToSelection, { [weak self] in
+                self?.startSelectionTranslateOrReply(forcing: .smartReply)
+            }),
+            (.dictate, { [weak self] in self?.toggleDictation() }),
+            // The empty string routes through the read-the-selection-now branch
+            // in `saveSelectionToNote`, the same way the quick menu does.
+            (.saveNote, { [weak self] in self?.saveSelectionToNote("") })
         ]
 
         for (action, handler) in bindings {
+            // A built-in switched off in its editor must free its key, not leave
+            // a dead hotkey registered.
+            if let owner = RingActionID.allCases.first(where: { $0.shortcutAction == action }),
+               !builtInOverridesStore.isEnabled(owner) {
+                continue
+            }
             let shortcut = shortcut(for: action)
             switch shortcut.kind {
             case .combo:
@@ -191,7 +210,13 @@ extension GizmateApp {
             case .smartReply:
                 selectionItem.title = "Reply to selected text in \(draftTargetLanguage.displayName)..."
             }
-            applyShortcut(for: .translateOrReply, to: selectionItem)
+            // This item still follows the default mode, so it shows the key of
+            // whichever built-in it will actually run rather than a key of its
+            // own — there is no longer a mode-following shortcut to show.
+            applyShortcut(
+                for: floatingDefaultMode == .smartReply ? .replyToSelection : .explainSelection,
+                to: selectionItem
+            )
             selectionItem.isEnabled = trusted
         }
 
@@ -216,7 +241,7 @@ extension GizmateApp {
 
     @MainActor
     @objc private func openOnboardingWindow() {
-        presentMainWindow(section: .aiEngine)
+        presentEngineSetup()
     }
 
     @MainActor
@@ -242,9 +267,7 @@ extension GizmateApp {
         presentMainWindow()
     }
 
-    /// Opens (or focuses) the main window, optionally jumping to a section. This
-    /// is also the entry point for "setup" — the AI Engine section now hosts the
-    /// full backend setup flow that used to live in a standalone window.
+    /// Opens (or focuses) the main window, optionally jumping to a section.
     @MainActor
     func presentMainWindow(section: MainWindowSection? = nil) {
         let controller: MainWindowController
@@ -256,12 +279,17 @@ extension GizmateApp {
             }
             mainWindowController = controller
         }
-        // Programmatic jumps to AI Engine always mean "set up a provider" —
-        // land on the Providers tab. Sidebar clicks keep the Models tab.
-        if section == .aiEngine {
-            controller.bridge.aiEngineTab = 1
-        }
         controller.presentAndFocus(section: section)
+    }
+
+    /// The entry point for "setup" — the Providers tab hosts the full backend
+    /// setup flow that used to live in a standalone window. Every programmatic
+    /// jump there means "set up a provider", so it lands on Providers rather
+    /// than the General tab a bare `.settings` jump would show.
+    @MainActor
+    func presentEngineSetup() {
+        presentMainWindow(section: .settings)
+        mainWindowController?.bridge.settingsTab = 2
     }
 
     @MainActor

@@ -489,15 +489,15 @@ enum FloatingButtonDefaultMode: String {
     }
 }
 
+/// The old `pet` case is gone; a stored `"pet"` no longer parses and falls back
+/// to `.floatingBar` in `GizmateApp.selectionDisplayMode` — no migration needed.
 enum SelectionDisplayMode: String, CaseIterable {
     case floatingBar
-    case pet
     case off
 
     var menuTitle: String {
         switch self {
         case .floatingBar: return "Floating bar"
-        case .pet: return "Pet mode"
         case .off: return "Off"
         }
     }
@@ -505,7 +505,6 @@ enum SelectionDisplayMode: String, CaseIterable {
     var settingsTitle: String {
         switch self {
         case .floatingBar: return "Display: floating bar"
-        case .pet: return "Display: pet mode"
         case .off: return "Display: off"
         }
     }

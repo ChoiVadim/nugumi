@@ -50,15 +50,15 @@ enum TranslationMode: Equatable {
     case smartReply
     /// Internal re-render of an existing `.selection` result: the user typed a
     /// "revise or ask a follow-up" instruction and we regenerate the answer in
-    /// place. Never assigned to a pet/mascot surface — only the result panel.
+    /// place. Never assigned to a floating surface — only the result panel.
     case revise
     /// Revise/follow-up for an outgoing message — both `.smartReply` (a drafted
     /// reply) and `.draftMessage` (a polished draft). Keeps composition (writing
-    /// style/voice). Panel-only, never a pet/mascot surface.
+    /// style/voice). Panel-only, never a floating surface.
     case reviseMessage
     /// Summarizes a chat transcript (see `ChatTranscript.format`) into a
     /// TL;DR + key points + action items. Read-only, no composition settings.
-    /// Panel-only, never a pet/mascot surface.
+    /// Panel-only, never a floating surface.
     case summarizeChat
     /// Summarizes the web page open in the frontmost browser (text read off
     /// the AX tree — see `BrowserPageReader`). Same behavior contract as
@@ -75,10 +75,12 @@ enum TranslationMode: Equatable {
             return false
         case .draftMessage, .smartReply, .reviseMessage:
             return true
-        case .custom:
-            // The user's own prompt is authoritative — layering the writing
-            // style, cleanup, and glossary directives on top would fight it.
-            return false
+        case .custom(let tool):
+            // The user's own prompt is authoritative, so composition stays off
+            // unless they ticked "Use my Voice" on this gizmo — layering the
+            // writing style, cleanup, and glossary directives over "turn this
+            // into JSON" would fight it.
+            return tool.usesVoice
         }
     }
 
@@ -140,62 +142,181 @@ enum TranslationMode: Equatable {
         """
     }
 
+    // MARK: - Editable built-in prompts
+
+    private static let selectionTemplate = """
+        Translate the user's text into plain, accessible {language} aimed at a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. The goal is to make the content understandable, not to produce a literal word-for-word rendering. This applies whether the source is already in {language}, in another language entirely, or a mix of both.
+
+        Render any foreign-language parts into {language}, then simplify the whole result: break long sentences into shorter ones, replace jargon and rare or technical vocabulary with plain everyday words, unwind passive voice and nested clauses, and prefer concrete wording over abstract phrasing. Where a concept stays abstract after a plain-word swap, anchor it inline with a short concrete example or everyday analogy in parentheses or em-dashes — e.g. "a queue (like the line at a coffee shop — first in, first served)".
+
+        Match output complexity to source complexity. If the source is already a casual, simple message — a chat line, a greeting, a short sentence with no jargon, a menu item, a button label — translate it plainly and stop. Do not force analogies, examples, or expansions onto content that is already simple. The simplification rules are for when there is something genuinely complex to make accessible; short, plain inputs get short, plain outputs. (A single standalone word or term that the user is looking up is the exception — see the Lookup case below.)
+
+        Lookup case — if the source is a single word or a short standalone term (not a sentence, greeting, or casual phrase) and rendering it into {language} would leave it essentially unchanged — because it is already in {language}, or is a borrowed or technical term with no distinct {language} translation — then the user has selected it to understand what it means, not to translate it. Do not echo the word back unchanged. Instead, explain it in 1–2 short, plain {language} sentences: what it means in everyday words, and a quick concrete example if it helps. Keep it simple enough for a curious ~12-year-old. If the word has several common meanings, give the most everyday one first and you may note a field-specific sense in a few words. Do not add a dictionary header, the word itself as a title, pronunciation, or part-of-speech labels — just the plain explanation.
+
+        Treat a single `\\n` as a wrapped line inside one paragraph — join it silently. Treat a blank line (`\\n\\n`) as a deliberate paragraph break that the user wants to keep — render it as a blank line in the output. Clean repeated spaces, OCR artifacts, and hyphenated line wraps. If the source has no paragraph breaks but is long or dense, split the output into readable paragraphs instead of returning one wall of text.
+
+        Keep every fact, name, date, number, quotation, URL, proper noun, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your output differs from a literal translation only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms.
+
+        Context — the source text is from {app}{genZ}
+
+        Return only the {language} output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
+        """
+
+    private static let draftMessageTemplate = """
+        Translate the user's drafted outgoing message into natural {language}. Infer the user's actual intent, emotion, and social situation, then say it the way a native {language} speaker would send it in a chat or message. If the draft is already entirely in {language}, do not translate it; lightly rewrite/polish it only when needed so it sounds natural and sendable. If only part of the draft is in {language} and the rest is in one or more other languages, translate the foreign parts into {language} and weave everything into one cohesive, natural-sounding message — keep the {language} portions intact unless they need light polish to flow with the rest. Treat code-switching as the user reaching for words they didn't know in {language}, not as a stylistic choice to preserve.
+
+        The selected Writing style is authoritative. The source draft tells you meaning, intent, emotion, and how direct the user wants to be, but it must not override the selected Writing style. When goals conflict, follow this priority: (1) meaning, (2) selected Writing style, (3) intended directness and emotional signal within that style, (4) cultural naturalness — idioms, honorifics, word order, (5) surface details to preserve verbatim — emojis, URLs, usernames, product names, numbers, line breaks, (6) literal wording (always lowest). If the draft is blunt, keep the result concise and direct, but still use the selected Writing style. Do not pad a curt one-liner into a long paragraph unless the meaning requires it. If the draft is awkward or phrased like a direct translation, smooth it while keeping the same intent. If the draft is a fragment, return a natural sendable fragment without inventing extra context.
+
+        Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
+
+        Context — the user is composing this message in {app}
+
+        Writing style — {writingStyle}{genZ}{voice}{cleanup}{glossary}
+
+        Return only the final {language} message, with no commentary, labels, alternatives, quotes, or explanations.
+        """
+
+    private static let smartReplyTemplate = """
+        The user has selected text in another app. The text is either (a) a message they received — email, chat message, DM, comment, support ticket, or similar; or (b) a question they need to answer — a quiz item, exam question, multiple-choice question, or open question. Decide which it is from the text itself, then respond appropriately. Write your reply or answer in {language}, regardless of what language the source text is in.
+
+        If it is a received message: write a natural, ready-to-send reply as if the user is sending it now. Match the intent, emotional signal, and approximate length of the original, but use the selected Writing style below for register and formality. Be concise. Don't restate or quote the original. Don't add greetings or sign-offs unless the original suggests them. Don't address the user — produce only the message body they would paste into the reply field.
+
+        If it is a multiple-choice question: identify the correct option and respond with the option letter or number followed by the option text, then a brief one-sentence justification. Example: "B. Mitochondria — they generate most of the cell's ATP."
+
+        If it is an open question: give a clear, direct answer. Keep it short unless the question demands depth.
+
+        Context — the user is replying inside {app}
+
+        Writing style — {writingStyle}{genZ}{voice}
+
+        Cleanup — {cleanup}{glossary}
+
+        Return only the reply or answer text. No commentary, no labels, no preface, no explanation of what you're doing, no quotes around the answer.
+        """
+
+    /// The shipped prompt as an editable template. Tokens stand in for the
+    /// values `systemPrompt` splices — a user override is plain text, so without
+    /// them an edited Explain would stop targeting the writing language.
+    ///
+    /// nil for every mode that is not an editable built-in; those keep their
+    /// interpolated form.
+    var shippedPromptTemplate: String? {
+        switch self {
+        case .selection:    return Self.selectionTemplate
+        case .draftMessage: return Self.draftMessageTemplate
+        case .smartReply:   return Self.smartReplyTemplate
+        default:            return nil
+        }
+    }
+
+    /// Prompt templates the user wrote, keyed by the built-in that owns them.
+    /// Kept in sync by `GizmateApp` from `BuiltInOverridesStore` — the same
+    /// arrangement as `AppCategoryClassifier.userOverrides`, and for the same
+    /// reason: `systemPrompt` is called from four LLM clients, none of which
+    /// should have to learn about built-in overrides to pass one through.
+    static var promptOverrides: [RingActionID: String] = [:]
+
+    /// The template actually used: the user's, or the shipped one. A blank
+    /// override is a cleared field, not a request for an empty system prompt.
+    var promptTemplate: String? {
+        let userWritten = RingActionID.allCases
+            .first { $0.promptMode == self }
+            .flatMap { Self.promptOverrides[$0] }?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let userWritten, !userWritten.isEmpty { return userWritten }
+        return shippedPromptTemplate
+    }
+
+    /// Substitutes `{token}` placeholders in a single pass over the template.
+    ///
+    /// Single pass, not a `reduce` of `replacingOccurrences`, because the values
+    /// being spliced in are user content: a glossary snippet or voice sample
+    /// containing the literal text `{language}` would be rescanned and
+    /// substituted by a later iteration. One pass means a value is never
+    /// re-examined once written.
+    ///
+    /// An unknown token is left verbatim rather than erased, so a typo in a
+    /// user's override shows up in the output instead of silently vanishing.
+    static func renderPrompt(_ template: String, tokens: [String: String]) -> String {
+        var result = ""
+        var rest = Substring(template)
+        while let open = rest.firstIndex(of: "{") {
+            result += rest[rest.startIndex..<open]
+            rest = rest[rest.index(after: open)...]
+            guard let close = rest.firstIndex(of: "}"),
+                  let value = tokens[String(rest[rest.startIndex..<close])]
+            else {
+                result += "{"
+                continue
+            }
+            result += value
+            rest = rest[rest.index(after: close)...]
+        }
+        return result + rest
+    }
+
+    /// Built per mode, not once globally: `.draftMessage` splices
+    /// `cleanupSection(for:)`, which emits its own "Cleanup — " heading, while
+    /// `.smartReply` has that heading written into the prompt and splices only
+    /// `cleanup.promptDescription`. Same concept, different spelling — keeping
+    /// the maps separate is what makes both byte-identical to what shipped.
+    private func promptTokens(
+        targetLanguage: TranslationLanguage,
+        appCategory: AppCategory,
+        composition: CompositionSettings?
+    ) -> [String: String] {
+        var tokens: [String: String] = [
+            "language": targetLanguage.promptName,
+            "app": appCategory.promptHint,
+            "genZ": Self.genZSection(
+                for: targetLanguage.id,
+                enabled: composition?.genZ ?? false
+            ),
+        ]
+        switch self {
+        case .draftMessage:
+            tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
+            tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
+            tokens["cleanup"] = Self.cleanupSection(for: composition?.cleanup)
+            tokens["glossary"] = Self.glossarySection(
+                for: composition?.snippets ?? [],
+                includeSnippets: true
+            )
+        case .smartReply:
+            tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
+            tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
+            tokens["cleanup"] = composition?.cleanup.promptDescription ?? ""
+            tokens["glossary"] = Self.glossarySection(
+                for: composition?.snippets ?? [],
+                includeSnippets: true
+            )
+        default:
+            break
+        }
+        return tokens
+    }
+
+
     func systemPrompt(
         targetLanguage: TranslationLanguage,
         appCategory: AppCategory,
         composition: CompositionSettings?
     ) -> String {
+        // The three editable built-ins render from a template so a user's
+        // override keeps the language, app-context and writing-style layers.
+        if let template = promptTemplate {
+            return UserAboutContext.appending(to: TranslationMode.renderPrompt(
+                template,
+                tokens: promptTokens(
+                    targetLanguage: targetLanguage,
+                    appCategory: appCategory,
+                    composition: composition
+                )
+            ))
+        }
         let base: String = switch self {
-        case .selection:
-            """
-            Translate the user's text into plain, accessible \(targetLanguage.promptName) aimed at a curious ~12-year-old reader with no background in the field — accessible, but not babyish or condescending. The goal is to make the content understandable, not to produce a literal word-for-word rendering. This applies whether the source is already in \(targetLanguage.promptName), in another language entirely, or a mix of both.
-
-            Render any foreign-language parts into \(targetLanguage.promptName), then simplify the whole result: break long sentences into shorter ones, replace jargon and rare or technical vocabulary with plain everyday words, unwind passive voice and nested clauses, and prefer concrete wording over abstract phrasing. Where a concept stays abstract after a plain-word swap, anchor it inline with a short concrete example or everyday analogy in parentheses or em-dashes — e.g. "a queue (like the line at a coffee shop — first in, first served)".
-
-            Match output complexity to source complexity. If the source is already a casual, simple message — a chat line, a greeting, a short sentence with no jargon, a menu item, a button label — translate it plainly and stop. Do not force analogies, examples, or expansions onto content that is already simple. The simplification rules are for when there is something genuinely complex to make accessible; short, plain inputs get short, plain outputs. (A single standalone word or term that the user is looking up is the exception — see the Lookup case below.)
-
-            Lookup case — if the source is a single word or a short standalone term (not a sentence, greeting, or casual phrase) and rendering it into \(targetLanguage.promptName) would leave it essentially unchanged — because it is already in \(targetLanguage.promptName), or is a borrowed or technical term with no distinct \(targetLanguage.promptName) translation — then the user has selected it to understand what it means, not to translate it. Do not echo the word back unchanged. Instead, explain it in 1–2 short, plain \(targetLanguage.promptName) sentences: what it means in everyday words, and a quick concrete example if it helps. Keep it simple enough for a curious ~12-year-old. If the word has several common meanings, give the most everyday one first and you may note a field-specific sense in a few words. Do not add a dictionary header, the word itself as a title, pronunciation, or part-of-speech labels — just the plain explanation.
-
-            Treat a single `\\n` as a wrapped line inside one paragraph — join it silently. Treat a blank line (`\\n\\n`) as a deliberate paragraph break that the user wants to keep — render it as a blank line in the output. Clean repeated spaces, OCR artifacts, and hyphenated line wraps. If the source has no paragraph breaks but is long or dense, split the output into readable paragraphs instead of returning one wall of text.
-
-            Keep every fact, name, date, number, quotation, URL, proper noun, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your output differs from a literal translation only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms.
-
-            Context — the source text is from \(appCategory.promptHint)\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))
-
-            Return only the \(targetLanguage.promptName) output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
-            """
-        case .draftMessage:
-            """
-            Translate the user's drafted outgoing message into natural \(targetLanguage.promptName). Infer the user's actual intent, emotion, and social situation, then say it the way a native \(targetLanguage.promptName) speaker would send it in a chat or message. If the draft is already entirely in \(targetLanguage.promptName), do not translate it; lightly rewrite/polish it only when needed so it sounds natural and sendable. If only part of the draft is in \(targetLanguage.promptName) and the rest is in one or more other languages, translate the foreign parts into \(targetLanguage.promptName) and weave everything into one cohesive, natural-sounding message — keep the \(targetLanguage.promptName) portions intact unless they need light polish to flow with the rest. Treat code-switching as the user reaching for words they didn't know in \(targetLanguage.promptName), not as a stylistic choice to preserve.
-
-            The selected Writing style is authoritative. The source draft tells you meaning, intent, emotion, and how direct the user wants to be, but it must not override the selected Writing style. When goals conflict, follow this priority: (1) meaning, (2) selected Writing style, (3) intended directness and emotional signal within that style, (4) cultural naturalness — idioms, honorifics, word order, (5) surface details to preserve verbatim — emojis, URLs, usernames, product names, numbers, line breaks, (6) literal wording (always lowest). If the draft is blunt, keep the result concise and direct, but still use the selected Writing style. Do not pad a curt one-liner into a long paragraph unless the meaning requires it. If the draft is awkward or phrased like a direct translation, smooth it while keeping the same intent. If the draft is a fragment, return a natural sendable fragment without inventing extra context.
-
-            Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
-
-            Context — the user is composing this message in \(appCategory.promptHint)
-
-            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))\(TranslationMode.cleanupSection(for: composition?.cleanup))\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
-
-            Return only the final \(targetLanguage.promptName) message, with no commentary, labels, alternatives, quotes, or explanations.
-            """
-        case .smartReply:
-            """
-            The user has selected text in another app. The text is either (a) a message they received — email, chat message, DM, comment, support ticket, or similar; or (b) a question they need to answer — a quiz item, exam question, multiple-choice question, or open question. Decide which it is from the text itself, then respond appropriately. Write your reply or answer in \(targetLanguage.promptName), regardless of what language the source text is in.
-
-            If it is a received message: write a natural, ready-to-send reply as if the user is sending it now. Match the intent, emotional signal, and approximate length of the original, but use the selected Writing style below for register and formality. Be concise. Don't restate or quote the original. Don't add greetings or sign-offs unless the original suggests them. Don't address the user — produce only the message body they would paste into the reply field.
-
-            If it is a multiple-choice question: identify the correct option and respond with the option letter or number followed by the option text, then a brief one-sentence justification. Example: "B. Mitochondria — they generate most of the cell's ATP."
-
-            If it is an open question: give a clear, direct answer. Keep it short unless the question demands depth.
-
-            Context — the user is replying inside \(appCategory.promptHint)
-
-            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
-
-            Cleanup — \(composition?.cleanup.promptDescription ?? "")\(TranslationMode.glossarySection(for: composition?.snippets ?? [], includeSnippets: true))
-
-            Return only the reply or answer text. No commentary, no labels, no preface, no explanation of what you're doing, no quotes around the answer.
-            """
+        case .selection, .draftMessage, .smartReply:
+            ""   // Rendered above from the template; unreachable.
         case .revise:
             """
             You are refining a response you previously gave the user. Their message has three labeled parts: the original text they were looking at, your previous response to it, and a revision request.
@@ -240,7 +361,11 @@ enum TranslationMode: Equatable {
             summary — no preamble, no quotes.
             """
         case .custom(let tool):
-            TranslationMode.customPrompt(tool, targetLanguage: targetLanguage)
+            TranslationMode.customPrompt(
+                tool,
+                targetLanguage: targetLanguage,
+                composition: composition
+            )
         }
         return UserAboutContext.appending(to: base)
     }
@@ -251,11 +376,45 @@ enum TranslationMode: Equatable {
     /// corrupt their output.
     private static func customPrompt(
         _ tool: GizmateTool,
-        targetLanguage: TranslationLanguage
+        targetLanguage: TranslationLanguage,
+        composition: CompositionSettings?
     ) -> String {
-        let body = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard tool.appliesTargetLanguage else { return body }
-        return body + "\n\nWrite the output in \(targetLanguage.promptName)."
+        var body = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if tool.appliesTargetLanguage {
+            body += "\n\nWrite the output in \(targetLanguage.promptName)."
+        }
+        return body + contextSections(
+            for: tool,
+            targetLanguage: targetLanguage,
+            composition: composition
+        )
+    }
+
+    /// The context blocks a user gizmo opted into: the user's Voice (register,
+    /// cleanup, dictionary, snippets) and their ticked notes.
+    ///
+    /// Shared with `.agent` gizmos, which never pass through a `TranslationMode`
+    /// at all — `AgentToolRunner` gets its instruction assembled by the caller
+    /// and this is the one place that knows how the blocks are worded. Returns
+    /// an empty string when both toggles are off, so a gizmo that wants neither
+    /// sends byte-for-byte what it sent before this existed.
+    static func contextSections(
+        for tool: GizmateTool,
+        targetLanguage: TranslationLanguage,
+        composition: CompositionSettings?
+    ) -> String {
+        var sections = ""
+        if tool.usesVoice, let composition {
+            sections += "\n\nWriting style — "
+                + composition.writingStyleDirective(for: targetLanguage.id)
+                + genZSection(for: targetLanguage.id, enabled: composition.genZ)
+                + cleanupSection(for: composition.cleanup)
+                + glossarySection(for: composition.snippets, includeSnippets: true)
+        }
+        if tool.usesNotes {
+            sections = NotesContext.appending(to: sections)
+        }
+        return sections
     }
 
     private static func glossarySection(for snippets: [Snippet], includeSnippets: Bool) -> String {

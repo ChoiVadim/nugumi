@@ -169,11 +169,10 @@ extension GizmateApp {
                 }
 
                 // The summary is a terminal action, not tied to the armed
-                // selection — dismiss the floating bar/pet as the panel opens
+                // selection — dismiss the floating bar as the panel opens
                 // instead of keeping it "ready" behind the Summary window.
                 self.translateButtonController?.close()
                 self.translateButtonController = nil
-                self.petController?.clearReady()
                 self.translate(
                     transcript,
                     near: screenPoint,
@@ -181,7 +180,6 @@ extension GizmateApp {
                     useCache: false,
                     selectionRect: selectionRect,
                     panelSide: panelSide,
-                    keepPetReadyUntilPanelCloses: false,
                     restoresReadyOnUserDismiss: false
                 )
             } catch {
@@ -218,7 +216,6 @@ extension GizmateApp {
 
                 self.translateButtonController?.close()
                 self.translateButtonController = nil
-                self.petController?.clearReady()
                 self.translate(
                     page,
                     near: screenPoint,
@@ -226,7 +223,6 @@ extension GizmateApp {
                     useCache: false,
                     selectionRect: selectionRect,
                     panelSide: panelSide,
-                    keepPetReadyUntilPanelCloses: false,
                     restoresReadyOnUserDismiss: false
                 )
             } catch {

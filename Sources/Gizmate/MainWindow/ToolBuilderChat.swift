@@ -41,10 +41,14 @@ final class ToolBuilderChatSession: ObservableObject {
     @Published private(set) var readyMessage: String?
     @Published private(set) var hasError = false
     @Published private(set) var trial: ToolBuilderTrial = .notNeeded
+    /// The secret a candidate declared that the user has not stored. Non-nil
+    /// means the build is parked in front of a key field.
+    @Published private(set) var pendingSecret: String?
 
     private let answers: ToolBuilderAnswerBroker
     private let activityLimit: Int
     private var answerGeneration: ToolBuilderAnswerBroker.Generation?
+    private var secretContinuation: CheckedContinuation<Bool, Never>?
 
     init(activityLimit: Int = 8, beforeAnswerWaitRegistration:
          @escaping @Sendable () async -> Void = {}) {
@@ -77,7 +81,7 @@ final class ToolBuilderChatSession: ObservableObject {
         messages[0] = .init(
             role: .assistant,
             text: """
-            Hey! 👋 This is \(name.isEmpty ? "your tool" : name). Tell me what \
+            Hey! 👋 This is \(name.isEmpty ? "your gizmo" : name). Tell me what \
             to change and I'll rebuild it.
 
             You can try it here first if you want to see what it does now. \
@@ -117,6 +121,37 @@ final class ToolBuilderChatSession: ObservableObject {
         return try ToolAgentAskUserResponseV1(answer: answer)
     }
 
+    /// Parks the build in front of a key field and waits.
+    ///
+    /// Not an `ask_user` clarification: those are capped at three and are only
+    /// allowed before the first candidate is written, and a missing credential
+    /// is usually discovered exactly when the code that reads it gets written.
+    /// It also asks for the wrong thing — the user is holding a value, and being
+    /// asked to name it first is a step that does nothing.
+    ///
+    /// - Returns: whether the key is now on disk. `false` is a real answer: the
+    ///   validation run then fails on the missing key, which is the truth about
+    ///   a tool that cannot authenticate.
+    func requestSecret(_ name: String) async -> Bool {
+        // Never strand an earlier waiter: a candidate may declare two keys.
+        resolveSecret(false)
+        messages.append(.init(
+            role: .assistant,
+            text: "This gizmo needs \(name). Paste it below — it stays on your "
+                + "Mac, and only the name is ever sent to the model."
+        ))
+        pendingSecret = name
+        return await withCheckedContinuation { secretContinuation = $0 }
+    }
+
+    /// - Parameter stored: whether the value reached disk. Skipping is `false`.
+    func resolveSecret(_ stored: Bool) {
+        guard let continuation = secretContinuation else { return }
+        secretContinuation = nil
+        pendingSecret = nil
+        continuation.resume(returning: stored)
+    }
+
     func recordActivity(_ status: String) {
         let value = status.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, activity.last != value else { return }
@@ -144,7 +179,7 @@ final class ToolBuilderChatSession: ObservableObject {
             note,
             trial == .untried
                 ? "Run it once and tell me what happened — or save it as is."
-                : "Review it, ask for a change, or save the tool.",
+                : "Review it, ask for a change, or save the gizmo.",
         ]
         .compactMap { $0 }
         .joined(separator: " ")
@@ -179,11 +214,14 @@ final class ToolBuilderChatSession: ObservableObject {
     func appendError(_ message: String) {
         hasError = true
         messages.append(.init(role: .assistant, text: message))
-        recordActivity("Stopped before a verified tool was ready.")
+        recordActivity("Stopped before a verified gizmo was ready.")
     }
 
     func cancel() async {
         isAwaitingAnswer = false
+        // A build torn down while a key row is up would otherwise leave the
+        // validation handler suspended on a continuation nobody will resume.
+        resolveSecret(false)
         guard let answerGeneration else { return }
         self.answerGeneration = nil
         await answers.cancel(answerGeneration)
@@ -274,6 +312,8 @@ struct ToolBuilderChat: View {
     let isBuilding: Bool
     let preview: AnyView?
     let onSend: () -> Void
+    /// Cancels the build or the run in flight. Same thing Escape does.
+    let onStop: () -> Void
     let onSave: () -> Void
     /// Runs the candidate for real, the same button the script page has.
     let onTry: () -> Void
@@ -282,13 +322,25 @@ struct ToolBuilderChat: View {
 
     @State private var activityExpanded = false
     @State private var pulse = false
+    /// Set when the user opens the key row themselves, rather than the build
+    /// asking for a specific name.
+    @State private var addingKey = false
+    @State private var keyName = ""
+    @State private var keyValue = ""
+    @State private var keyProblem: String?
     @FocusState private var composerFocused: Bool
+    @FocusState private var keyFocused: Bool
     private let bottomAnchor = "tool-builder-chat-bottom"
 
     private var canSend: Bool {
         !composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (!isBuilding || session.isAwaitingAnswer)
     }
+
+    /// Exactly when the thinking line is up: work is in flight and nothing is
+    /// waiting on the user. While a question is on screen the build is stopped on
+    /// them, and the button that belongs there is Send.
+    private var showsStop: Bool { isBuilding && !session.isAwaitingAnswer }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -316,8 +368,154 @@ struct ToolBuilderChat: View {
                 .onChange(of: session.readyMessage) { _, _ in scrollToBottom(proxy) }
             }
             Divider().background(FlowTheme.hairline)
+            keyArea
             composerView
         }
+    }
+
+    // MARK: - Keys
+
+    /// A place to put an API key without leaving the build.
+    ///
+    /// The secrets picker in Details is not reachable from here — a new tool has
+    /// no Details tab, because there is no tool yet — and the one moment a user
+    /// needs to store a key is the moment the thing being built asks for one.
+    /// Before this row, the only way through was to abandon the build.
+    @ViewBuilder
+    private var keyArea: some View {
+        if let requested = session.pendingSecret {
+            keyRow(name: requested, fixed: true)
+        } else if addingKey {
+            keyRow(name: keyName, fixed: false)
+        } else if session.isAwaitingAnswer {
+            HStack {
+                Button {
+                    addingKey = true
+                    keyName = ""
+                    keyValue = ""
+                    keyProblem = nil
+                    keyFocused = true
+                } label: {
+                    Label("Save an API key", systemImage: "key.fill")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                }
+                .buttonStyle(.plain)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+        }
+    }
+
+    private func keyRow(name: String, fixed: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(FlowTheme.inkTertiary)
+
+                if fixed {
+                    Text(name)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(FlowTheme.ink)
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(FlowTheme.raised)
+                        )
+                } else {
+                    TextField("OPENAI_API_KEY", text: $keyName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(FlowTheme.ink)
+                        .frame(width: 170)
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(FlowTheme.subtleFill)
+                        )
+                }
+
+                // SecureField: the panel this sits in is one people screen-share
+                // while building a tool with someone watching.
+                SecureField("Paste the key", text: $keyValue)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(FlowTheme.ink)
+                    .focused($keyFocused)
+                    .onSubmit { saveKey(named: name, fixed: fixed) }
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(FlowTheme.subtleFill)
+                    )
+
+                SecondaryButton(title: "Save") { saveKey(named: name, fixed: fixed) }
+                SecondaryButton(title: fixed ? "Skip" : "Cancel") {
+                    keyValue = ""
+                    keyProblem = nil
+                    if fixed {
+                        session.resolveSecret(false)
+                    } else {
+                        addingKey = false
+                    }
+                }
+            }
+
+            Text(keyProblem
+                ?? "Stored on this Mac as a file only you can read. The model is "
+                    + "told the name, never the key.")
+                .font(.system(size: 11))
+                .foregroundStyle(keyProblem == nil
+                    ? FlowTheme.inkTertiary
+                    : Color(red: 0.92, green: 0.45, blue: 0.35))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(FlowTheme.subtleFill.opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(FlowTheme.hairline, lineWidth: 1)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .onAppear { keyFocused = true }
+    }
+
+    /// - Parameter fixed: whether the build asked for this exact name. When it
+    ///   did, the answer goes back to the waiting validation run; when the user
+    ///   opened the row themselves, it goes back as a chat reply, because what
+    ///   is waiting then is a question the agent asked.
+    private func saveKey(named name: String, fixed: Bool) {
+        let target = (fixed ? name : keyName)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ToolSecrets.isValidName(target) else {
+            keyProblem = "“\(target)” isn't a usable name. Uppercase letters, "
+                + "digits and underscores, starting with a letter."
+            return
+        }
+        guard ToolSecrets.set(keyValue, for: target) else {
+            keyProblem = "That value is empty, or the key couldn't be written to disk."
+            return
+        }
+        keyValue = ""
+        keyProblem = nil
+        if fixed {
+            session.resolveSecret(true)
+            return
+        }
+        addingKey = false
+        // Reuses the normal send path, so the answer appears in the transcript
+        // like any other and unblocks the question the agent is waiting on.
+        composer = "Saved it as \(target)."
+        onSend()
     }
 
     /// Only your turn is a bubble. Gizmate's sits on the panel itself, because a
@@ -430,7 +628,7 @@ struct ToolBuilderChat: View {
         TextField(
             session.isAwaitingAnswer
                 ? "Type your answer…"
-                : "Describe the tool or request a change…",
+                : "Describe the gizmo or request a change…",
             text: $composer,
             axis: .vertical
         )
@@ -438,7 +636,15 @@ struct ToolBuilderChat: View {
             .lineLimit(3, reservesSpace: true)
             .onKeyPress(.return, phases: .down) { keyPress in
                 if keyPress.modifiers.contains(.shift) {
-                    return .ignored
+                    // Letting AppKit have it does not insert a line: the field
+                    // editor binds Shift+Return to `insertNewline:`, which ends
+                    // editing in an NSTextField. Only Option+Return maps to the
+                    // line-break command, so send Shift+Return there too.
+                    guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else {
+                        return .ignored
+                    }
+                    editor.insertNewlineIgnoringFieldEditor(nil)
+                    return .handled
                 }
                 guard canSend else { return .handled }
                 onSend()
@@ -451,11 +657,14 @@ struct ToolBuilderChat: View {
             .padding(.trailing, 52)
             .frame(minHeight: 76, alignment: .topLeading)
             .focused($composerFocused)
-            .accessibilityLabel("Tool request")
+            .accessibilityLabel("Gizmo request")
+            // One button, two jobs: while Gizmate works there is nothing to send
+            // and the only thing anyone wants from that corner is a way out, so
+            // Send becomes Stop rather than sitting there greyed out.
             .overlay(alignment: .bottomTrailing) {
-                Button(action: onSend) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 12, weight: .bold))
+                Button(action: showsStop ? onStop : onSend) {
+                    Image(systemName: showsStop ? "stop.fill" : "arrow.up")
+                        .font(.system(size: showsStop ? 10 : 12, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(width: 32, height: 32)
                         .background(
@@ -465,11 +674,14 @@ struct ToolBuilderChat: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .disabled(!canSend)
-                .opacity(canSend ? 1 : 0.4)
+                .disabled(!showsStop && !canSend)
+                .opacity(showsStop || canSend ? 1 : 0.4)
                 .padding(8)
+                .help(showsStop ? "Stop (Esc)" : "")
                 .accessibilityLabel(
-                    session.isAwaitingAnswer ? "Send answer" : "Send tool request"
+                    showsStop
+                        ? "Stop"
+                        : (session.isAwaitingAnswer ? "Send answer" : "Send gizmo request")
                 )
             }
         .background(
@@ -512,7 +724,7 @@ struct ToolBuilderChat: View {
                 primaryButton("Fix it", action: onFix)
                 SecondaryButton(title: "Try again", action: onTry)
             case .notNeeded, .passed:
-                primaryButton("Save tool", action: onSave)
+                primaryButton("Save gizmo", action: onSave)
             }
         }
     }

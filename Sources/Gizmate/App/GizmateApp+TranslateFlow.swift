@@ -22,7 +22,6 @@ extension GizmateApp {
     ) {
         translationPanelController?.close()
         translateButtonController?.close()
-        petController?.clearReady()
 
         guard selectionDisplayMode != .off else {
             return
@@ -30,64 +29,6 @@ extension GizmateApp {
 
         let primaryMode = floatingDefaultMode.translationMode
         let summarizeOption = makeSummarizeOption(near: screenPoint, selectionRect: selectionRect, panelSide: panelSide)
-
-        if selectionDisplayMode == .pet {
-            if petController == nil {
-                petController = PetController(initialMode: primaryMode)
-            }
-            petController?.show()
-            petController?.showReady(
-                selectedText: selectedText,
-                initialMode: primaryMode,
-                onTranslate: { [weak self] text in
-                    self?.translate(
-                        text,
-                        near: screenPoint,
-                        selectionRect: selectionRect,
-                        panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true,
-                        restoresReadyOnUserDismiss: true
-                    )
-                },
-                onRewrite: { [weak self] text in
-                    self?.rewriteSelectedDraftText(
-                        text,
-                        near: screenPoint,
-                        selectionRect: selectionRect,
-                        panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true,
-                        restoresReadyOnUserDismiss: true
-                    )
-                },
-                onSmartReply: { [weak self] text in
-                    self?.replyToSelection(
-                        text,
-                        near: screenPoint,
-                        selectionRect: selectionRect,
-                        panelSide: panelSide,
-                        keepPetReadyUntilPanelCloses: true,
-                        restoresReadyOnUserDismiss: true
-                    )
-                },
-                onAsk: { [weak self] in
-                    self?.startAskGizmatePrompt()
-                },
-                onScreenshot: { [weak self] in
-                    self?.startScreenshotTranslation()
-                },
-                onLive: { [weak self] in
-                    self?.toggleLiveTranslation()
-                },
-                onDictate: { [weak self] in
-                    self?.toggleDictation()
-                },
-                summarizeOption: summarizeOption,
-                onTool: { [weak self] tool, text in
-                    self?.runTool(tool, selection: text)
-                }
-            )
-            return
-        }
 
         let controller = FloatingTranslateButtonController(
             screenPoint: screenPoint,
@@ -136,6 +77,10 @@ extension GizmateApp {
             onDictate: { [weak self] in
                 self?.toggleDictation()
             },
+            onSaveNote: { [weak self] text, tag in
+                self?.saveSelectionToNote(text, tag: tag)
+            },
+            noteTags: { [weak self] in self?.notesStore.tags ?? [] },
             summarizeOption: summarizeOption,
             onTool: { [weak self] tool, text in
                 self?.runTool(tool, selection: text)
@@ -169,7 +114,6 @@ extension GizmateApp {
         near screenPoint: NSPoint,
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
-        keepPetReadyUntilPanelCloses: Bool = false,
         restoresReadyOnUserDismiss: Bool = false
     ) {
         lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -178,7 +122,6 @@ extension GizmateApp {
         guard !cleanedDraft.isEmpty else {
             translateButtonController?.close()
             translateButtonController = nil
-            petController?.clearReady()
             presentSelectionTranslationError("Select text first, then run Rewrite my text.")
             return
         }
@@ -201,7 +144,6 @@ extension GizmateApp {
                 usageKind: .draftMessage,
                 selectionRect: selectionRect,
                 panelSide: panelSide,
-                keepPetReadyUntilPanelCloses: keepPetReadyUntilPanelCloses,
                 restoresReadyOnUserDismiss: restoresReadyOnUserDismiss,
                 onReplace: { [weak self] translation in
                     self?.replaceCurrentSelection(with: translation)
@@ -217,7 +159,6 @@ extension GizmateApp {
         near screenPoint: NSPoint,
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
-        keepPetReadyUntilPanelCloses: Bool = false,
         restoresReadyOnUserDismiss: Bool = false
     ) {
         // .unknown pastes blind, exactly like rewrite: broken-AX chat apps
@@ -247,7 +188,6 @@ extension GizmateApp {
             usageKind: .smartReply,
             selectionRect: selectionRect,
             panelSide: panelSide,
-            keepPetReadyUntilPanelCloses: keepPetReadyUntilPanelCloses,
             restoresReadyOnUserDismiss: restoresReadyOnUserDismiss
         )
     }
@@ -262,7 +202,6 @@ extension GizmateApp {
         usageKind: UsageStatsEventKind = .selection,
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
-        keepPetReadyUntilPanelCloses: Bool = false,
         restoresReadyOnUserDismiss: Bool = false,
         onReplace: ((String) -> Void)? = nil,
         replaceShortcutSourcePID: pid_t? = nil
@@ -310,14 +249,13 @@ extension GizmateApp {
             replaceShortcutSourcePID: replaceShortcutSourcePID,
             onClose: { [weak self] in
                 self?.translationPanelController = nil
-                self?.petController?.clearReady()
             }
         )
         translationPanelController?.close()
         translationPanelController = controller
         if restoresReadyOnUserDismiss {
             // The selection usually survives an Esc / ✕ / copy dismissal, so
-            // re-arm the pet/button for it. If the dismissing click actually
+            // re-arm the button for it. If the dismissing click actually
             // killed the selection, the global mouse-up re-read finds nothing
             // and clears the ready state right back.
             controller.onUserDismiss = { [weak self] in
@@ -328,9 +266,6 @@ extension GizmateApp {
                     panelSide: panelSide
                 )
             }
-        }
-        if keepPetReadyUntilPanelCloses {
-            holdPetReadyUntilActivePanelCloses(mode: mode)
         }
         let requestID = controller.showLoading()
         runTranslation(
@@ -376,19 +311,6 @@ extension GizmateApp {
             voiceSample: voiceSample.isEmpty ? nil : voiceSample,
             customInstruction: instruction.isEmpty ? nil : instruction
         )
-    }
-
-    @MainActor
-    private func holdPetReadyUntilActivePanelCloses(mode: TranslationMode) {
-        guard selectionDisplayMode == .pet else {
-            return
-        }
-
-        if petController == nil {
-            petController = PetController(initialMode: mode)
-        }
-        petController?.show()
-        petController?.holdReadyUntilPanelCloses(mode: mode)
     }
 
     @MainActor
@@ -553,7 +475,7 @@ extension GizmateApp {
         case .serverUnavailable, .modelMissing, .signInRequired:
             controller?.close()
             bootstrap.refresh()
-            presentMainWindow(section: .aiEngine)
+            presentEngineSetup()
             return true
         case .invalidAPIKey(let provider):
             controller?.close()

@@ -182,13 +182,20 @@ An agent candidate's fixture works like a Python one and is chosen the same way:
   candidate on its structure rather than doing that thing during a build.
 
 read_build_context returns secretNames: the credentials the user has already
-stored. A Python candidate may read any of them from its environment, for example
-os.environ["OPENAI_API_KEY"], provided it also lists the ones it reads in its own
-secretNames. A name that is not in that list is not present at run time. Never
-invent a name that read_build_context did not return, and never write a key into
-the source: there is no key to write, only the name of one. If the request needs
-a credential the user has not stored, say so through ask_user rather than
-guessing a name, and prefer failing with a clear message over a silent default.
+stored. A candidate reads one from its environment, for example
+os.environ["OPENAI_API_KEY"], and must list every name it reads in its own
+secretNames. A name it does not list is not present at run time. Never write a
+key into the source: there is no key to write, only the name of one, and never
+ask the user to type a key into the chat.
+
+When the tool needs a credential the user has not stored yet, list the name in
+secretNames anyway and write the code that reads it. Gizmate asks the user for
+the value before it runs anything, so by the time the tool executes the key is
+either there or the user declined. Choose the conventional environment-variable
+name for that service — GEMINI_API_KEY, OPENAI_API_KEY, GITHUB_TOKEN — rather
+than inventing one, list it once, and prefer failing with a clear message over a
+silent default. Do not spend an ask_user question on a credential: naming it in
+secretNames is how you ask for one, and it works at any point in the build.
 
 The initial user message is structured JSON with operation and instruction. For edit and fix it also includes currentTool, and fix includes failure.
 Return a complete replacement candidate, not a diff. Preserve behavior and fields the user did not ask to change. Change kind only when the instruction genuinely requires a different tool type.

@@ -58,6 +58,10 @@ extension GizmateApp {
             onDictate: { [weak self] in
                 self?.toggleDictation()
             },
+            onSaveNote: { [weak self] text, tag in
+                self?.saveSelectionToNote(text, tag: tag)
+            },
+            noteTags: { [weak self] in self?.notesStore.tags ?? [] },
             summarizeOption: makeSummarizeOption(near: cursor, selectionRect: nil, panelSide: .right),
             // The quick menu arms no selection, so the empty string routes
             // `runTool` through its read-the-selection-now branch.
@@ -79,9 +83,7 @@ extension GizmateApp {
         // Toggle: if any Ask Gizmate UI (prompt, loading, answer, or an
         // in-flight request) is already up, the shortcut dismisses it instead
         // of opening another one.
-        let askUIOpen = isAskGizmateRunning
-            || askPromptController != nil
-            || petController?.isPromptVisible == true
+        let askUIOpen = isAskGizmateRunning || askPromptController != nil
         if askUIOpen {
             dismissAskGizmate()
             return
@@ -95,16 +97,6 @@ extension GizmateApp {
         closeAskAnnotationOverlay()
         translationPanelController?.close()
         translationPanelController = nil
-
-        if selectionDisplayMode == .pet {
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.pendingAskGizmateCapture = await self.captureScreenBeforeAskPromptTakesFocus()
-                self.presentPetAskPrompt()
-                self.presentAskDrawingOverlay()
-            }
-            return
-        }
 
         let controller = AskPromptController(
             near: NSEvent.mouseLocation,
@@ -176,14 +168,12 @@ extension GizmateApp {
         let model = LLMModel.option(id: askGizmateModelID)
         guard model.supportsImages else {
             askPromptController?.showError("Ask Gizmate needs a vision model.")
-            petController?.showPromptError("Needs a vision model.")
             return
         }
 
         if let setupError = askGizmateSetupErrorIfNeeded(for: model) {
             let message = Self.translationPanelErrorMessage(for: setupError)
             askPromptController?.showError(message)
-            petController?.showPromptError(message)
             return
         }
 
@@ -192,16 +182,13 @@ extension GizmateApp {
         askGizmateRequestID = requestID
         isAskGizmateRunning = true
         askPromptController?.setLoading()
-        if petController?.isPromptVisible == true {
-            petController?.setPromptLoading()
-        }
 
         // Hide the wide "Ask Gizmate" pill and surface the round loading bar
         // instead — a compact "in flight" indicator that never intercepts
         // clicks (`ignoresMouseEvents = true`). If the request fails,
         // `AskPromptController.showError` calls `panel.makeKeyAndOrderFront`
         // and the pill reappears with the error text.
-        if selectionDisplayMode != .pet, let prompt = askPromptController {
+        if let prompt = askPromptController {
             let pillCenter = prompt.panelCenter
             prompt.hidePanel()
             showAskFloatingLoadingBar(at: pillCenter)
@@ -253,12 +240,8 @@ extension GizmateApp {
                         capture.annotated(with: strokes)
                     }.value
 
-                let shouldContinue = await MainActor.run { () -> Bool in
-                    guard let self, self.askGizmateRequestID == requestID else {
-                        return false
-                    }
-                    self.petController?.showThinking()
-                    return true
+                let shouldContinue = await MainActor.run {
+                    self?.askGizmateRequestID == requestID
                 }
                 guard shouldContinue else { return }
 
@@ -295,8 +278,7 @@ extension GizmateApp {
     /// Follow-up from the floating answer panel's input field — the Ask
     /// analog of `reviseCurrentPanel`. Reuses the open panel (loading → new
     /// answer in place) and keeps the dialog context (`askHistory`) plus a
-    /// fresh screen capture, so it continues the conversation just like pet
-    /// mode's "continue" does.
+    /// fresh screen capture, so the conversation continues in place.
     @MainActor
     private func submitAskGizmateFollowUp(_ instruction: String) {
         let clean = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -389,19 +371,13 @@ extension GizmateApp {
         translationPanelController?.close()
         translationPanelController = nil
 
-        if selectionDisplayMode == .pet {
-            presentPetAskGizmateResult(response, capture: capture)
-            return
-        }
-
-        petController?.clearPrompt()
         let controller = TranslationPanelController(
             anchor: .point(NSEvent.mouseLocation, panelSide: .right),
             sourceText: prompt,
             targetLanguage: targetLanguage,
             resultLabel: "Answer",
             // Same layout as the translate/reply modal: no source box, plus a
-            // follow-up field so the dialog can continue like it does in pet mode.
+            // follow-up field so the dialog can continue.
             showsSource: false,
             showsFollowUp: true,
             onFollowUp: { [weak self] instruction in
@@ -414,7 +390,6 @@ extension GizmateApp {
                 if self.isAskGizmateRunning { self.cancelAskGizmateRequest() }
                 self.translationPanelController = nil
                 self.closeAskAnnotationOverlay()
-                self.petController?.clearReady()
             }
         )
         translationPanelController = controller
@@ -486,31 +461,6 @@ extension GizmateApp {
     }
 
     @MainActor
-    private func presentPetAskGizmateResult(
-        _ response: AskGizmateResponse,
-        capture: AskGizmateScreenCapture
-    ) {
-        if petController == nil {
-            petController = PetController(initialMode: .selection)
-        }
-
-        guard let petController else { return }
-        // The pet's own answer-dismiss gesture (click/double-click/Escape)
-        // has no other route to the app delegate — see
-        // `PetController.onAnswerDismissedByUser`.
-        petController.onAnswerDismissedByUser = { [weak self] in
-            self?.closeAskAnnotationOverlay()
-        }
-        // The pixel-font bubble can't render rich text — resolve markdown to
-        // plain text so list markers survive and `**`/`|` never leak raw.
-        petController.showAnswer(
-            TranslationContentView.flattenedMarkdown(response.message),
-            emotion: nil
-        )
-        presentAskAnnotations(response.annotations, capture: capture)
-    }
-
-    @MainActor
     private func presentAskGizmateFailure(_ error: Error, requestID: UUID) {
         guard askGizmateRequestID == requestID else { return }
         clearAskGizmateRequestIfCurrent(requestID)
@@ -524,7 +474,6 @@ extension GizmateApp {
             ])
             askPromptController?.close()
             askPromptController = nil
-            petController?.clearPrompt()
             closeAskAnnotationOverlay()
             presentScreenshotTranslationError(screenshotError)
             return
@@ -534,7 +483,6 @@ extension GizmateApp {
         if routed {
             askPromptController?.close()
             askPromptController = nil
-            petController?.clearPrompt()
             closeAskAnnotationOverlay()
             return
         }
@@ -545,7 +493,6 @@ extension GizmateApp {
         // `showError` on the hidden pill calls `makeKeyAndOrderFront`, so
         // the pill reappears at its original spot carrying the error text.
         askPromptController?.showError(error.localizedDescription)
-        petController?.showPromptError(error.localizedDescription)
     }
 
     @MainActor
@@ -554,54 +501,11 @@ extension GizmateApp {
         askGizmateTask = nil
         askGizmateRequestID = nil
         isAskGizmateRunning = false
-        petController?.clearThinking()
-        petController?.clearPrompt()
         hideAskFloatingLoadingBar()
     }
 
-    /// Opens the pet prompt input wired to Ask Gizmate. Reused for the initial
-    /// shortcut-triggered prompt and for the answer bubble's "continue" button —
-    /// `askHistory` persists across launches (see `AskGizmateHistoryStore`) so
-    /// follow-ups keep context.
-    @MainActor
-    private func presentPetAskPrompt() {
-        if petController == nil {
-            petController = PetController(initialMode: .draftMessage)
-        }
-        petController?.onContinue = { [weak self] in
-            self?.continueAskGizmateDialog()
-        }
-        petController?.showPrompt(
-            onSubmit: { [weak self] prompt in
-                self?.submitAskGizmatePrompt(prompt)
-            },
-            onClose: { [weak self] in
-                guard let self else { return }
-                self.pendingAskGizmateCapture = nil
-                self.closeAskDrawingOverlay()
-                self.closeAskAnnotationOverlay()
-                if self.isAskGizmateRunning {
-                    self.cancelAskGizmateRequest()
-                }
-            }
-        )
-    }
-
-    /// "Continue dialog" affordance on the answer bubble: re-open the prompt
-    /// for a follow-up question in the same conversation.
-    @MainActor
-    private func continueAskGizmateDialog() {
-        guard !isAskGizmateRunning else { return }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.pendingAskGizmateCapture = await self.captureScreenBeforeAskPromptTakesFocus()
-            self.presentPetAskPrompt()
-            self.presentAskDrawingOverlay()
-        }
-    }
-
-    /// Tears down every Ask Gizmate surface (pet prompt/answer, standalone
-    /// prompt window, in-flight request). Used by the Ask Gizmate shortcut toggle.
+    /// Tears down every Ask Gizmate surface (prompt window, loading bar,
+    /// in-flight request). Used by the Ask Gizmate shortcut toggle.
     @MainActor
     private func dismissAskGizmate() {
         if isAskGizmateRunning {
@@ -611,7 +515,6 @@ extension GizmateApp {
         closeAskDrawingOverlay()
         askPromptController?.close()
         askPromptController = nil
-        petController?.clearPrompt()
         closeAskAnnotationOverlay()
         hideAskFloatingLoadingBar()
         // Nothing of ours needs focus now. Hand it back, or AppKit hands it to the
@@ -628,7 +531,6 @@ extension GizmateApp {
         let turn = AskGizmateTurn(question: trimmedQuestion, answer: trimmedAnswer)
         askHistory = AskGizmatePromptBuilder.appending(turn, to: askHistory)
         AskGizmateHistoryStore.save(askHistory)
-        translationHistoryStore.recordAsk(question: trimmedQuestion, answer: trimmedAnswer)
     }
 
     @MainActor
@@ -639,7 +541,6 @@ extension GizmateApp {
         targetLanguage: TranslationLanguage
     ) {
         usageStatsStore.recordUse(sourceText: source, resultText: result, kind: kind, targetLanguage: targetLanguage)
-        translationHistoryStore.record(sourceText: source, resultText: result, kind: kind, targetLanguage: targetLanguage)
     }
 
     static func hideAppWindowsFromScreenCapture() -> [WindowSharingSnapshot] {
@@ -664,7 +565,6 @@ extension GizmateApp {
         askGizmateTask = nil
         askGizmateRequestID = nil
         isAskGizmateRunning = false
-        petController?.clearThinking()
     }
 
     @MainActor

@@ -3,7 +3,6 @@ import Carbon.HIToolbox
 import Foundation
 
 enum GlobalShortcutAction: String, CaseIterable {
-    case translateOrReply
     case translateSelection
     case screenshotArea
     case toggleInvisibility
@@ -11,10 +10,19 @@ enum GlobalShortcutAction: String, CaseIterable {
     case toggleWritingLanguage
     case liveTranslation
     case quickMenu
+    /// Acting on the selection used to be one mode-following key
+    /// (`translateOrReply`, ⌃⌥T) because the built-ins had no keys of their own.
+    /// They do now, so it retired into these two — see
+    /// `migrateRetiredSelectionShortcut`.
+    case explainSelection
+    case replyToSelection
+    case dictate
+    case saveNote
 
     var id: UInt32 {
         switch self {
-        case .translateOrReply: return 1
+        // 1 was `translateOrReply`, retired. Not reused — a stale registration
+        // keyed by id is easier to reason about when ids stay unique over time.
         case .translateSelection: return 2
         case .screenshotArea: return 3
         case .toggleInvisibility: return 4
@@ -22,6 +30,12 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .toggleWritingLanguage: return 6
         case .liveTranslation: return 7
         case .quickMenu: return 8
+        // Continues the sequence, staying clear of the fixed id 100 the
+        // always-on ⌃⌥A Ask alias registers under.
+        case .explainSelection: return 9
+        case .replyToSelection: return 10
+        case .dictate: return 11
+        case .saveNote: return 12
         }
     }
 
@@ -31,7 +45,6 @@ enum GlobalShortcutAction: String, CaseIterable {
 
     var menuTitle: String {
         switch self {
-        case .translateOrReply: return "Translate selected text"
         case .translateSelection: return "Rewrite my text"
         case .screenshotArea: return "Translate screen area"
         case .toggleInvisibility: return "Toggle invisibility mode"
@@ -39,6 +52,10 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .toggleWritingLanguage: return "Toggle writing language"
         case .liveTranslation: return "Live translation captions"
         case .quickMenu: return "Open quick menu"
+        case .explainSelection: return "Explain selected text"
+        case .replyToSelection: return "Reply to selected text"
+        case .dictate: return "Dictate"
+        case .saveNote: return "Keep selection as a note"
         }
     }
 
@@ -46,23 +63,29 @@ enum GlobalShortcutAction: String, CaseIterable {
         "Set \(menuTitle) shortcut"
     }
 
+    /// Where this shortcut is edited. `.app` ones live in Settings → Shortcuts;
+    /// every other group belongs to a built-in and is bound from that built-in's
+    /// own editor, reached from the Ring's slot picker.
+    ///
+    /// `toggleWritingLanguage` is the only non-`.app` group member that stays in
+    /// Settings: it flips a global setting rather than running an action, so it
+    /// belongs to no built-in and has nowhere else to live.
     var group: ShortcutGroup {
         switch self {
-        case .translateOrReply, .translateSelection, .toggleWritingLanguage:
+        case .translateSelection, .explainSelection, .replyToSelection,
+             .dictate, .saveNote:
             return .text
         case .screenshotArea, .liveTranslation:
             return .capture
         case .askGizmate:
             return .assistant
-        case .toggleInvisibility, .quickMenu:
+        case .toggleInvisibility, .quickMenu, .toggleWritingLanguage:
             return .app
         }
     }
 
     var defaultShortcut: GlobalShortcut {
         switch self {
-        case .translateOrReply:
-            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_T), letter: "T")
         case .translateSelection:
             return Self.comboDefault(keyCode: UInt32(kVK_ANSI_R), letter: "R")
         case .screenshotArea:
@@ -83,6 +106,17 @@ enum GlobalShortcutAction: String, CaseIterable {
             // Middle click ("Mouse 3") — the ring opens at the cursor, so a
             // mouse trigger is the natural default. Rebindable to a key combo.
             return GlobalShortcut(mouseButton: 2)
+        case .explainSelection:
+            // Inherits ⌃⌥T from the retired `translateOrReply`. Explain is what
+            // that key already did for anyone on the default mode, so the
+            // majority of installs see no change at all.
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_T), letter: "T")
+        case .replyToSelection:
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_Y), letter: "Y")
+        case .dictate:
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_D), letter: "D")
+        case .saveNote:
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_N), letter: "N")
         }
     }
 

@@ -24,6 +24,13 @@ final class FloatingTranslateButtonController {
     private let onScreenshot: () -> Void
     private let onLive: () -> Void
     private let onDictate: () -> Void
+    /// Keeps the armed selection as a note under the picked tag. Takes the text
+    /// for the same reason `onTranslate` does — the quick menu passes an empty
+    /// string and the handler re-reads the selection.
+    private let onSaveNote: (String, NoteTag?) -> Void
+    /// The tags the Note button fans out into. Read at ring-open time so a tag
+    /// added in the Notes tab shows up on the very next ring.
+    private let noteTags: () -> [NoteTag]
     private let summarizeOption: RingSummarizeOption?
     /// Runs one of the user's prompt tools. Carries the armed selection the
     /// same way `onTranslate` does — the quick menu passes an empty string and
@@ -46,6 +53,8 @@ final class FloatingTranslateButtonController {
         onScreenshot: @escaping () -> Void = {},
         onLive: @escaping () -> Void = {},
         onDictate: @escaping () -> Void = {},
+        onSaveNote: @escaping (String, NoteTag?) -> Void = { _, _ in },
+        noteTags: @escaping () -> [NoteTag] = { [] },
         summarizeOption: RingSummarizeOption? = nil,
         onTool: ((GizmateTool, String) -> Void)? = nil
     ) {
@@ -57,6 +66,8 @@ final class FloatingTranslateButtonController {
         self.onScreenshot = onScreenshot
         self.onLive = onLive
         self.onDictate = onDictate
+        self.onSaveNote = onSaveNote
+        self.noteTags = noteTags
         self.summarizeOption = summarizeOption
         self.onTool = onTool
 
@@ -132,6 +143,7 @@ final class FloatingTranslateButtonController {
         let screenshot = onScreenshot
         let dictate = onDictate
         let live = onLive
+        let saveNote = onSaveNote
 
         var handlers = RingActionHandlers()
         handlers.explain = { translate(text) }
@@ -141,6 +153,11 @@ final class FloatingTranslateButtonController {
         handlers.capture = screenshot
         handlers.dictate = dictate
         handlers.live = live
+        // Carries the armed selection exactly as `explain` does, so the quick
+        // menu's empty string routes through the read-the-selection-now branch.
+        handlers.saveNote = RingSaveNoteOption(tags: noteTags()) { tag in
+            saveNote(text, tag)
+        }
         handlers.summarize = summarizeOption
         if let onTool {
             handlers.tool = { tool in onTool(tool, text) }
@@ -172,7 +189,7 @@ final class FloatingTranslateButtonController {
         radialMenu = nil
         if let onMenuClosed {
             // Transient quick-menu hub: it dies with the ring, so keep the
-            // ✕ glyph while everything fades instead of flashing the mascot
+            // ✕ glyph while everything fades instead of flashing the mark
             // for a beat first.
             onMenuClosed()
         } else {

@@ -95,6 +95,7 @@ struct ToolEditorPanel: View {
                     isBuilding: generating || test.isRunning,
                     preview: hasTool ? AnyView(summaryCard) : nil,
                     onSend: sendChatMessage,
+                    onStop: stopBuilding,
                     onSave: save,
                     onTry: runTest,
                     onFix: repairScript
@@ -121,6 +122,9 @@ struct ToolEditorPanel: View {
         .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
         .onAppear(perform: loadOnce)
         .onDisappear(perform: cancelInFlightWork)
+        // Closer to the focused field than the overlay's own handler, so this
+        // one gets Escape first.
+        .onExitCommand(perform: escapePressed)
         .onChange(of: currentDraftFingerprint) { _, fingerprint in
             draftDidChange(to: fingerprint)
         }
@@ -135,6 +139,27 @@ struct ToolEditorPanel: View {
         cancelInFlightWork()
         NSApp.windows.first { $0 is MainWindow }?.makeFirstResponder(nil)
         bridge.ringSheet = nil
+    }
+
+    /// Escape stops the work first and closes second. A build runs for minutes
+    /// and the panel is the only place its result exists, so spending the same
+    /// key on both means one reflex press throws the whole thing away. Nothing
+    /// is in flight — the press closes, as it always did.
+    private func escapePressed() {
+        guard generating || test.isRunning else {
+            dismiss()
+            return
+        }
+        stopBuilding()
+    }
+
+    /// Both cancellations reach real work: the generation unwinds through the
+    /// agent supervisor, the test kills the tool's process tree. Each task
+    /// reports its own stop into the chat when it lands, so nothing is said here
+    /// that the outcome might contradict.
+    private func stopBuilding() {
+        generateTask?.cancel()
+        runTask?.cancel()
     }
 
     /// Escape and click-outside dismiss the overlay without calling `dismiss()`.
@@ -172,7 +197,7 @@ struct ToolEditorPanel: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(isNew ? "New tool" : "Edit tool")
+                Text(isNew ? "New gizmo" : "Edit gizmo")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(FlowTheme.ink)
                 Text(headerSubtitle)
@@ -189,7 +214,7 @@ struct ToolEditorPanel: View {
             }
             .buttonStyle(.plain)
             .help("Close")
-            .accessibilityLabel("Close tool editor")
+            .accessibilityLabel("Close gizmo editor")
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
@@ -290,7 +315,7 @@ struct ToolEditorPanel: View {
                     .foregroundStyle(FlowTheme.ink)
                     .frame(width: 30, height: 30)
                     .background(Circle().fill(Color.white.opacity(0.08)))
-                Text(draft.name.isEmpty ? "Untitled tool" : draft.name)
+                Text(draft.name.isEmpty ? "Untitled gizmo" : draft.name)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(FlowTheme.ink)
                 RingTag(text: draft.kind.displayName, accent: true)
@@ -337,7 +362,7 @@ struct ToolEditorPanel: View {
 
             editorSection(
                 "General",
-                subtitle: "How this tool appears in your Ring."
+                subtitle: "How this gizmo appears in your Ring."
             ) {
                 VStack(alignment: .leading, spacing: 18) {
                     nameAndIcon
@@ -447,8 +472,14 @@ struct ToolEditorPanel: View {
                     }
                 }
                 editorSection(
+                    "Your context",
+                    subtitle: "What this gizmo knows about you before it starts."
+                ) {
+                    contextToggles
+                }
+                editorSection(
                     "Limits",
-                    subtitle: "The only bound on a tool whose steps nobody can "
+                    subtitle: "The only bound on a gizmo whose steps nobody can "
                         + "read in advance."
                 ) {
                     agentSettings
@@ -634,7 +665,7 @@ struct ToolEditorPanel: View {
     /// repeat here either.
     private var kindPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            fieldLabel("Kind", hint: "What this tool does when you press it.")
+            fieldLabel("Kind", hint: "What this gizmo does when you press it.")
             PillPicker(
                 options: ToolKind.allCases,
                 selection: $draft.kind,
@@ -657,8 +688,8 @@ struct ToolEditorPanel: View {
     /// A prompt tool only ever produces text, so `files` and `notify` aren't
     /// offered. An agent finishes with text too, but a side-effect agent that
     /// only wants to say "done" is a real shape, so it keeps `notify`.
-    private static let promptOutputs: [ToolOutput] = [.panel, .replace, .clipboard]
-    private static let agentOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notify]
+    private static let promptOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notes]
+    private static let agentOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notify, .notes]
 
     private static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {
@@ -756,12 +787,37 @@ struct ToolEditorPanel: View {
     private var languageToggle: some View {
         SettingRow(
             "Write the answer in the target language",
-            subtitle: "Leave this off for tools that transform text rather than translate it."
+            subtitle: "Leave this off for gizmos that transform text rather than translate it."
         ) {
             Toggle("", isOn: $draft.appliesTargetLanguage)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(FlowTheme.accent)
+        }
+    }
+
+    /// The two context toggles, offered to `.prompt` and `.agent` gizmos only —
+    /// a script or a macOS action has no model in the loop to hand context to.
+    private var contextToggles: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            SettingRow(
+                "Use my Voice",
+                subtitle: "Writes in your register, with your cleanup level, dictionary, and snippets."
+            ) {
+                Toggle("", isOn: $draft.usesVoice)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(FlowTheme.accent)
+            }
+            SettingRow(
+                "Use my notes",
+                subtitle: "Hands it the notes you ticked in the Notes tab as background."
+            ) {
+                Toggle("", isOn: $draft.usesNotes)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(FlowTheme.accent)
+            }
         }
     }
 
@@ -786,6 +842,9 @@ struct ToolEditorPanel: View {
                 return try await chat.ask(request)
             } clarificationCancellation: {
                 await chat.cancel()
+            } secretRequest: { name in
+                await MainActor.run { page = .overview }
+                return await chat.requestSecret(name)
             }
             generating = false
             generateTask = nil
@@ -845,6 +904,9 @@ struct ToolEditorPanel: View {
                 return try await chat.ask(clarification)
             } clarificationCancellation: {
                 await chat.cancel()
+            } secretRequest: { name in
+                await MainActor.run { page = .overview }
+                return await chat.requestSecret(name)
             }
             generating = false
             generateTask = nil
@@ -877,6 +939,9 @@ struct ToolEditorPanel: View {
                 return try await chat.ask(clarification)
             } clarificationCancellation: {
                 await chat.cancel()
+            } secretRequest: { name in
+                await MainActor.run { page = .overview }
+                return await chat.requestSecret(name)
             }
             generating = false
             generateTask = nil
@@ -954,7 +1019,7 @@ struct ToolEditorPanel: View {
     private var inputPicker: some View {
         wrappingPicker(
             "Input",
-            hint: "What the tool is handed when it runs.",
+            hint: "What the gizmo is handed when it runs.",
             options: ToolInput.allCases,
             selection: $draft.input,
             label: { $0.displayName }
@@ -1049,7 +1114,7 @@ struct ToolEditorPanel: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.42))
-            Text("An agent tool writes its own code and runs it, deciding what to do as it "
+            Text("An agent gizmo writes its own code and runs it, deciding what to do as it "
                 + "goes. There is no code to read before you allow it, because none exists "
                 + "until you press the button. What you approve is this instruction, the "
                 + "step budget and the secrets — change any of them and Gizmate asks again. "
@@ -1069,7 +1134,7 @@ struct ToolEditorPanel: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.42))
-            Text("A script tool runs real code with your account's access. What you set above is shown to you before each new version runs — it is not a restriction Gizmate enforces. Read the code before you allow it.")
+            Text("A script gizmo runs real code with your account's access. What you set above is shown to you before each new version runs — it is not a restriction Gizmate enforces. Read the code before you allow it.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(FlowTheme.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)

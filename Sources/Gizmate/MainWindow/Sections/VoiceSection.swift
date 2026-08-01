@@ -85,7 +85,8 @@ private struct StyleTab: View {
             PageBanner(
                 title: "Your voice, per place",
                 message: "Gizmate picks a category automatically from the app you're in. Set the register for each below.",
-                symbol: "textformat.alt"
+                symbol: "textformat.alt",
+                dismissKey: "styleBannerDismissed"
             )
 
             ForEach(AppCategory.allCases.filter { $0 != .custom }, id: \.self) { category in

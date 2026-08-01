@@ -70,7 +70,7 @@ final class OnboardingModel: ObservableObject {
     /// `markTourComplete`, which also runs mid-flow purely to persist the
     /// don't-replay flag across the Screen Recording restart.
     var onTourFinished: ((_ skipped: Bool) -> Void)?
-    /// Opens the main window on AI Engine → Providers so the user lands in
+    /// Opens the main window on Settings → Providers so the user lands in
     /// the setup flow for the engine they just picked on the finale page.
     var openEngineSetup: ((EngineSetupFocus) -> Void)?
 

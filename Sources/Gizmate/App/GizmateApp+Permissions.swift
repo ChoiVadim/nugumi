@@ -138,7 +138,7 @@ extension GizmateApp {
             mode: replay ? .replay : (force ? .review : .firstRun),
             onPickEngine: { [weak self] choice in
                 guard let self else { return }
-                self.presentMainWindow(section: .aiEngine)
+                self.presentEngineSetup()
                 self.mainWindowController?.bridge.engineSetupFocus = choice
             },
             onTourFinished: { [weak self] skipped in

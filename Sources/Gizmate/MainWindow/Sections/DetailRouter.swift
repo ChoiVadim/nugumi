@@ -5,11 +5,10 @@ struct DetailRouter: View {
 
     var body: some View {
         switch section {
-        case .home: HomeSection()
+        case .home: RingSection()
         case .insights: InsightsSection()
-        case .ring: RingSection()
         case .voice: VoiceSection()
-        case .aiEngine: AIEngineSection()
+        case .notes: NotesSection()
         case .settings: SettingsSection()
         case .help: HelpSection()
         }

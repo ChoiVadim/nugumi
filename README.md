@@ -184,7 +184,6 @@ swift test --filter LiveTranslationTests
 | Modes, prompts, writing styles                | `Sources/Gizmate/Panels/TranslationModes.swift`                                                                                                                 |
 | Result panels and floating button             | `Sources/Gizmate/Panels/` (`TranslationPanel.swift`, `TranslationContentView.swift`, `FloatingButton.swift`)                                                    |
 | Selection capture and text pipeline           | `Sources/Gizmate/Selection/`                                                                                                                                    |
-| Pet mascot                                    | `Sources/Gizmate/Pet/`                                                                                                                                          |
 | Quick-menu ring                               | `Sources/Gizmate/Ring/`                                                                                                                                         |
 | Ask Gizmate prompt behavior                    | `Sources/Gizmate/Ask/` (`AskGizmateResponse.swift`, `AskGizmateConversation.swift`, `AskGizmateLayout.swift`, `AskPrompt.swift`, `AskOverlays.swift`)              |
 | Settings window and AI Engine UI              | `Sources/Gizmate/MainWindow/Core/`, `Sources/Gizmate/MainWindow/Sections/`                                                                                        |

@@ -9,7 +9,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
     private static let verticalPadding: CGFloat = 16
     private static let shadowMargin: CGFloat = 30
     private static let cornerRadius: CGFloat = 28
-    private static let mascotSize = NSSize(width: 42, height: 34)
+    private static let iconSize = NSSize(width: 42, height: 34)
     private static let textGap: CGFloat = 10
     private static let cardSize = NSSize(width: 450, height: 176)
     private static let titleFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
@@ -115,12 +115,12 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         rootView.addSubview(glass)
         let contentView = glass.contentView
 
-        let mascotColumn = NSView()
-        mascotColumn.translatesAutoresizingMaskIntoConstraints = false
+        let iconColumn = NSView()
+        iconColumn.translatesAutoresizingMaskIntoConstraints = false
 
-        let mascotView = PetMascotView(frame: NSRect(origin: .zero, size: Self.mascotSize))
-        mascotView.apply(state: .idle, mode: .selection)
-        mascotView.translatesAutoresizingMaskIntoConstraints = false
+        let iconView = NSImageView(image: NSApp.applicationIconImage)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: "Set shortcut")
         titleLabel.font = Self.titleFont
@@ -172,8 +172,8 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         okButton.keyEquivalent = "\r" // Return
         okButton.translatesAutoresizingMaskIntoConstraints = false
 
-        contentView.addSubview(mascotColumn)
-        mascotColumn.addSubview(mascotView)
+        contentView.addSubview(iconColumn)
+        iconColumn.addSubview(iconView)
         contentView.addSubview(titleLabel)
         contentView.addSubview(messageLabel)
         contentView.addSubview(shortcutField)
@@ -186,18 +186,18 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
             glass.widthAnchor.constraint(equalToConstant: Self.cardSize.width),
             glass.heightAnchor.constraint(equalToConstant: Self.cardSize.height),
 
-            mascotColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
-            mascotColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
-            mascotColumn.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.verticalPadding),
-            mascotColumn.widthAnchor.constraint(equalToConstant: Self.mascotSize.width),
+            iconColumn.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding),
+            iconColumn.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
+            iconColumn.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.verticalPadding),
+            iconColumn.widthAnchor.constraint(equalToConstant: Self.iconSize.width),
 
-            mascotView.centerXAnchor.constraint(equalTo: mascotColumn.centerXAnchor),
-            mascotView.centerYAnchor.constraint(equalTo: mascotColumn.centerYAnchor),
-            mascotView.widthAnchor.constraint(equalToConstant: Self.mascotSize.width),
-            mascotView.heightAnchor.constraint(equalToConstant: Self.mascotSize.height),
+            iconView.centerXAnchor.constraint(equalTo: iconColumn.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: iconColumn.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: Self.iconSize.width),
+            iconView.heightAnchor.constraint(equalToConstant: Self.iconSize.height),
 
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.verticalPadding + 1),
-            titleLabel.leadingAnchor.constraint(equalTo: mascotColumn.trailingAnchor, constant: Self.textGap),
+            titleLabel.leadingAnchor.constraint(equalTo: iconColumn.trailingAnchor, constant: Self.textGap),
             titleLabel.widthAnchor.constraint(equalToConstant: textWidth),
 
             messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
@@ -254,7 +254,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
     private var textWidth: CGFloat {
         Self.cardSize.width
             - Self.horizontalPadding
-            - Self.mascotSize.width
+            - Self.iconSize.width
             - Self.textGap
             - Self.horizontalPadding
     }

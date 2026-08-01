@@ -100,6 +100,7 @@ protocol SettingsHost: AnyObject {
     func performSettingsIntent(_ intent: SettingsIntent)
     var usageStats: UsageStatsStore { get }
     var snippets: SnippetsStore { get }
+    var notes: NotesStore { get }
     var tools: ToolsStore { get }
     var ringLayout: RingLayoutStore { get }
     var builtInOverrides: BuiltInOverridesStore { get }
@@ -114,11 +115,16 @@ protocol SettingsHost: AnyObject {
         onOutput: @escaping @Sendable (String) -> Void
     ) async -> ToolTestState
     /// Writes a tool from a plain-language description. Never runs it.
+    ///
+    /// - Parameter secretRequest: called with the name of a credential the
+    ///   candidate declared and the user has not stored, before anything tries
+    ///   to run it. Answering false lets the run fail on the missing key.
     func generateScriptTool(
         description: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
     ) async -> Result<GeneratedTool, Error>
     /// Amends an existing tool from one instruction. Never runs it.
     func reviseScriptTool(
@@ -127,7 +133,8 @@ protocol SettingsHost: AnyObject {
         instruction: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
     ) async -> Result<GeneratedTool, Error>
     /// Repairs the complete tool after a failed run.
     func repairScriptTool(
@@ -136,9 +143,9 @@ protocol SettingsHost: AnyObject {
         failure: String,
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
-        clarificationCancellation: @escaping @Sendable () async -> Void
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
     ) async -> Result<GeneratedTool, Error>
-    var history: TranslationHistoryStore { get }
     func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool
     func runCloudTest(for provider: CloudProvider) async -> CloudTestResult
     var bootstrapState: BootstrapState { get }

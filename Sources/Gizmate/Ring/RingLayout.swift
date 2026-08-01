@@ -46,6 +46,38 @@ struct RingFolder: Codable, Equatable, Identifiable {
     /// Circles arranged on a ring — the shape the fan actually draws, so the
     /// button reads as "opens another ring" rather than as file storage.
     static let defaultSymbolName = "circle.hexagonpath"
+
+    /// Identity of the "More" folder that ships in the default ring.
+    ///
+    /// Fixed rather than generated, because `RingLayout.default` refers to it by
+    /// id and the two are persisted under **different** UserDefaults keys — a
+    /// fresh id per launch would leave the saved layout pointing at a folder
+    /// nobody can find. `6D6F7265` is "more" in ASCII. Covered by
+    /// `RingDefaultLayoutTests`, which is what catches a typo here rather than
+    /// a user seeing a blank slot.
+    static let moreID = UUID(uuidString: "6D6F7265-0000-4000-8000-000000000001")!
+
+    /// The folder the default ring ships with: Note plus Summarize.
+    ///
+    /// The indices are geometry, not order. An orbit slot sits at
+    /// `index × (2π / capacity)` counter-clockwise from "right"
+    /// (`RadialMenuLayoutPolicy.orbitSlotCenters`), and this orbit has sixteen
+    /// positions — so slot 0 is dead right and slot 8 is dead left. The folder
+    /// lives in the ring's left slot, so its contents start at 8 and fan onward;
+    /// putting them at 0 would open the folder on the opposite side of the ring.
+    static let more = RingFolder(
+        id: moreID,
+        name: "More",
+        symbolName: defaultSymbolName,
+        layout: RingLayout(slots: [
+            .empty, .empty, .empty, .empty, .empty, .empty, .empty, .empty,
+            .builtIn(.saveNote),   // 8 — 180°, straight out from the folder
+            .builtIn(.summarize),  // 9 — 202.5°, next along
+        ])
+    )
+
+    /// Seeded alongside `RingLayout.default` — see `RingLayoutStore.init`.
+    static let defaults: [RingFolder] = [.more]
 }
 
 /// How deep folders may go. The radial menu draws three orbits — the ring
@@ -111,15 +143,20 @@ struct RingLayout: Codable, Equatable {
         slots[index] = content
     }
 
-    /// The ring as it shipped: Summarize sixth, matching the old
-    /// `items.insert(…, at: 5)`.
+    /// The ring as it ships. Slot 5 is the left position, and it holds the
+    /// "More" folder rather than Summarize: eight positions, nine things worth
+    /// reaching, so the folder is where the ninth goes. Summarize is still one
+    /// assignment away in the Ring tab — it is simply not in the default.
+    ///
+    /// The folder is referenced by id and lives under a different defaults key,
+    /// so `RingLayoutStore` seeds `RingFolder.defaults` with it.
     static let `default` = RingLayout(slots: [
         .builtIn(.explain),
         .builtIn(.rewrite),
         .builtIn(.reply),
         .builtIn(.ask),
         .builtIn(.capture),
-        .builtIn(.summarize),
+        .folder(RingFolder.moreID),
         .builtIn(.dictate),
         .builtIn(.live),
     ])
@@ -141,6 +178,9 @@ struct RingConfiguration {
     var tools: [GizmateTool]
     /// Every sub-ring, flat. Slots reference these by id.
     var folders: [RingFolder] = []
+    /// The user's edits to the built-in actions — rename, re-icon, switch off.
+    /// Defaulted so every existing construction site keeps compiling unchanged.
+    var overrides: [RingActionID: BuiltInOverride] = [:]
 
     static let `default` = RingConfiguration(layout: .default, tools: [])
 }
@@ -174,8 +214,21 @@ final class RingLayoutStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        layout = Self.loaded(from: defaults) ?? .default
-        folders = Self.loadedFolders(from: defaults)
+        let layout = Self.loaded(from: defaults) ?? .default
+        self.layout = layout
+        folders = Self.seeded(Self.loadedFolders(from: defaults), for: layout)
+    }
+
+    /// A slot pointing at a folder that isn't in `folders` draws nothing at all,
+    /// so the default ring's "More" folder is supplied whenever a layout asks
+    /// for it and nothing saved provides one. That covers the first launch (no
+    /// folders key at all) and repairs an install whose folders key was lost
+    /// while its layout survived.
+    private static func seeded(_ folders: [RingFolder], for layout: RingLayout) -> [RingFolder] {
+        guard layout.slots.contains(.folder(RingFolder.moreID)),
+              !folders.contains(where: { $0.id == RingFolder.moreID })
+        else { return folders }
+        return folders + [.more]
     }
 
     // MARK: - Paths
@@ -319,7 +372,9 @@ final class RingLayoutStore: ObservableObject {
 
     func resetToDefault() {
         layout = .default
-        folders = []
+        // Not `[]`: the default layout's left slot is the More folder, and a
+        // reset that dropped it would leave that slot pointing at nothing.
+        folders = RingFolder.defaults
         defaults.removeObject(forKey: Self.defaultsKey)
         defaults.removeObject(forKey: Self.foldersKey)
         onChange?()

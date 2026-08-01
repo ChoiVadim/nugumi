@@ -87,12 +87,12 @@ extension GizmateApp {
         NSApp.activate(ignoringOtherApps: true)
         let response = GizmateAlertController(
             title: "OpenAI API key required",
-            message: "\(feature) runs on OpenAI's realtime model. Add an OpenAI API key under AI Engine → API key models, then try again.",
-            primaryButtonTitle: "Open AI Engine",
+            message: "\(feature) runs on OpenAI's realtime model. Add an OpenAI API key under Settings → Providers, then try again.",
+            primaryButtonTitle: "Open Settings",
             secondaryButtonTitle: "Cancel"
         ).showModal()
         guard response == .alertFirstButtonReturn else { return }
-        presentMainWindow(section: .aiEngine)
+        presentEngineSetup()
     }
 
     @MainActor

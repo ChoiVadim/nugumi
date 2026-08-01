@@ -9,12 +9,14 @@ enum RingSheet: Equatable {
     /// Choosing what goes in one slot.
     case slot(RingSlotAddress)
     /// Writing a prompt tool. `id` is nil for a new one; `assignTo` carries the
-    /// slot the user came from, so "empty slot → New prompt tool → Save" lands
+    /// slot the user came from, so "empty slot → New prompt gizmo → Save" lands
     /// the finished tool in that slot without a second trip through the picker.
     case toolEditor(id: UUID?, assignTo: RingSlotAddress?)
     /// Naming a sub-ring. `id` is nil for a new folder, in which case
     /// `assignTo` is the slot it lands in; a non-nil `id` is a rename.
     case folderEditor(id: UUID?, assignTo: RingSlotAddress?)
+    /// Editing one of the shipped actions: name, icon, prompt, shortcut, on/off.
+    case builtInEditor(RingActionID)
 }
 
 /// Dims the whole window and centers the active Ring panel. Same arrangement as
@@ -36,6 +38,8 @@ struct RingSheetOverlay: View {
                 ToolEditorPanel(toolID: id, assignTo: assignTo)
             case .folderEditor(let id, let assignTo):
                 RingFolderEditorPanel(folderID: id, assignTo: assignTo)
+            case .builtInEditor(let id):
+                BuiltInEditorPanel(actionID: id)
             }
         }
         .onExitCommand(perform: close)
@@ -65,7 +69,7 @@ private struct RingSlotPickerPanel: View {
 
     private enum Group: String, CaseIterable {
         case builtIn = "Built-in actions"
-        case tools = "Your tools"
+        case tools = "Your gizmos"
     }
 
     private var ring: RingLayout {
@@ -76,8 +80,12 @@ private struct RingSlotPickerPanel: View {
         ring.slots[safe: address.index] ?? .empty
     }
 
+    /// Searched by the name the user currently sees, so a renamed built-in is
+    /// findable by its new name as well as the one it shipped with.
     private var builtIns: [RingActionID] {
-        RingActionID.allCases.filter { matches($0.displayName, $0.summary) }
+        RingActionID.allCases.filter {
+            matches(bridge.builtInOverrides.displayName(for: $0), $0.displayName, $0.summary)
+        }
     }
 
     private var tools: [GizmateTool] {
@@ -150,7 +158,7 @@ private struct RingSlotPickerPanel: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(FlowTheme.inkTertiary)
-            TextField("Filter actions and tools", text: $search)
+            TextField("Filter actions and gizmos", text: $search)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundStyle(FlowTheme.ink)
@@ -177,7 +185,7 @@ private struct RingSlotPickerPanel: View {
                 }
                 .help("Puts a button here that opens a ring of its own.")
             }
-            newButton(symbol: "plus.circle", title: "New tool") {
+            newButton(symbol: "plus.circle", title: "New gizmo") {
                 bridge.ringSheet = .toolEditor(id: nil, assignTo: address)
             }
         }
@@ -230,19 +238,30 @@ private struct RingSlotPickerPanel: View {
                 switch group {
                 case .builtIn:
                     ForEach(builtIns, id: \.self) { id in
+                        let isOff = !bridge.builtInOverrides.isEnabled(id)
                         optionRow(
                             content: .builtIn(id),
                             symbolImage: AnyView(
-                                Image(nsImage: id.icon.image(pointSize: 15))
+                                Image(nsImage: bridge.builtInOverrides.icon(for: id).image(pointSize: 15))
                                     .renderingMode(.template)
                             ),
-                            title: id.displayName,
-                            detail: id.summary
+                            title: bridge.builtInOverrides.displayName(for: id),
+                            detail: isOff
+                                ? "Switched off — open it to turn it back on."
+                                : id.summary,
+                            // A built-in is switched off, never deleted, so it
+                            // gets the pencil gizmo rows have but no trash.
+                            onEdit: { bridge.ringSheet = .builtInEditor(id) }
                         )
+                        // Dimmed rather than hidden: a user who switched
+                        // something off still needs to find it to switch it back
+                        // on. The row stays clickable so the pencil is
+                        // reachable; the footer is what refuses to assign it.
+                        .opacity(isOff ? 0.45 : 1)
                     }
                 case .tools:
                     if tools.isEmpty {
-                        Text("No tools yet. Use “New tool” above.")
+                        Text("No gizmos yet. Use “New gizmo” above.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(FlowTheme.inkTertiary)
                             .padding(.horizontal, 14)
@@ -252,10 +271,10 @@ private struct RingSlotPickerPanel: View {
                         optionRow(
                             content: .tool(tool.id),
                             symbolImage: AnyView(Image(systemName: tool.resolvedSymbolName)),
-                            title: tool.name.isEmpty ? "Untitled tool" : tool.name,
+                            title: tool.name.isEmpty ? "Untitled gizmo" : tool.name,
                             detail: tool.isUsable
                                 ? tool.output.explanation
-                                : "Unfinished — this tool still needs a prompt.",
+                                : "Unfinished — this gizmo still needs a prompt.",
                             // Managing tools lives here: the Ring tab itself shows
                             // only the ring.
                             onEdit: {
@@ -328,7 +347,15 @@ private struct RingSlotPickerPanel: View {
     }
 
     private var canAssign: Bool {
-        pending != nil && pending != current
+        pending != nil && pending != current && !pendingIsSwitchedOff
+    }
+
+    /// A switched-off built-in would render as a permanent gap in the ring,
+    /// which reads as a bug rather than as a choice — so it can be opened and
+    /// edited from here, but not assigned to a slot.
+    private var pendingIsSwitchedOff: Bool {
+        guard case .builtIn(let id) = pending else { return false }
+        return !bridge.builtInOverrides.isEnabled(id)
     }
 
     private var pendingIsAssignedElsewhere: Bool {
@@ -338,7 +365,11 @@ private struct RingSlotPickerPanel: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            if pendingIsAssignedElsewhere {
+            if pendingIsSwitchedOff {
+                Text("Switched off. Turn it back on with the pencil to use it.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(FlowTheme.inkTertiary)
+            } else if pendingIsAssignedElsewhere {
                 Text("Already in another slot. Assigning moves it here.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(FlowTheme.inkTertiary)
@@ -407,7 +438,7 @@ private struct RingSlotPickerPanel: View {
         case .builtIn(let id):
             return id.displayName
         case .tool(let id):
-            return bridge.tools.tool(id: id)?.name ?? "a deleted tool"
+            return bridge.tools.tool(id: id)?.name ?? "a deleted gizmo"
         case .folder(let id):
             return bridge.ringLayout.folder(id).map { "“\($0.name)” sub-ring" } ?? "a deleted sub-ring"
         }

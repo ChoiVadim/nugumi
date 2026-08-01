@@ -69,7 +69,7 @@ private struct RingSectionContent: View {
             alert.alertStyle = .warning
             alert.messageText = "Remove “\(folder.name)”?"
             alert.informativeText = "The sub-ring and everything arranged inside it goes away. "
-                + "Your tools themselves are kept."
+                + "Your gizmos themselves are kept."
             alert.addButton(withTitle: "Remove")
             alert.addButton(withTitle: "Cancel")
             NSApp.activate(ignoringOtherApps: true)
@@ -351,7 +351,7 @@ struct RingDiagram: View {
         )
     }
 
-    /// Stand-in for the live ring's center: the bar or pet with the ✕ over it.
+    /// Stand-in for the live ring's center: the bar with the ✕ over it.
     /// Reaching it collapses every open orbit, exactly as it does in the ring.
     private var hub: some View {
         Image(systemName: "xmark")

@@ -111,32 +111,42 @@ struct FlowTabBar: View {
 /// laid out at full width the whole time and only fades in on hover, so the
 /// heading beside it never re-wraps as the pointer crosses in. It is deliberately
 /// outside the button: an invisible click target that wipes state is a trap.
+/// A quiet disc with a glyph, whose label fades in on hover. Named for its
+/// first use; `symbol` and `label` make it the generic header disc, which is
+/// what Notes' "Add note" uses.
 struct ResetDiscButton: View {
+    var symbol: String = "arrow.counterclockwise"
+    var label: String = "Reset to defaults"
     var accessibilityTitle: String = "Reset to defaults"
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text("Reset to defaults")
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkSecondary)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill))
+                .overlay(Circle().stroke(FlowTheme.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.15)) { hovering = inside }
+        }
+        .accessibilityLabel(accessibilityTitle)
+        // Drawn beside the disc, never laid out with it. An inline label keeps
+        // its width at zero opacity, which is invisible when the disc stands
+        // alone at a header's edge but shoves neighbouring discs apart the
+        // moment there are two. The offset clears the 30pt disc plus 8pt of gap.
+        .overlay(alignment: .trailing) {
+            Text(label)
                 .font(.system(size: 12))
                 .foregroundStyle(FlowTheme.inkSecondary)
                 .fixedSize()
                 .opacity(hovering ? 1 : 0)
                 .allowsHitTesting(false)
-            Button(action: action) {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkSecondary)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill))
-                    .overlay(Circle().stroke(FlowTheme.hairline, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .onHover { inside in
-                withAnimation(.easeOut(duration: 0.15)) { hovering = inside }
-            }
-            .accessibilityLabel(accessibilityTitle)
+                .offset(x: -38)
         }
     }
 }

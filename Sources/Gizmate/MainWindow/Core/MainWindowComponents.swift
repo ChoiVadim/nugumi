@@ -152,8 +152,23 @@ struct PageBanner: View {
     let title: String
     let message: String
     var symbol: String = "sparkles"
+    /// Set to let the reader dismiss this banner for good. The flag is stored
+    /// under this key, so a banner without one stays put — which is what every
+    /// existing caller wants and gets by saying nothing.
+    var dismissKey: String? = nil
+
+    @State private var dismissed = false
+    @State private var hovering = false
 
     var body: some View {
+        if dismissed || (dismissKey.map { UserDefaults.standard.bool(forKey: $0) } ?? false) {
+            EmptyView()
+        } else {
+            banner
+        }
+    }
+
+    private var banner: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
@@ -180,6 +195,30 @@ struct PageBanner: View {
                     )
                 )
         )
+        .overlay(alignment: .topTrailing) {
+            if let dismissKey {
+                Button {
+                    UserDefaults.standard.set(true, forKey: dismissKey)
+                    withAnimation(.easeOut(duration: 0.15)) { dismissed = true }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(.black.opacity(0.22)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(8)
+                .opacity(hovering ? 1 : 0)
+                .help("Hide this")
+            }
+        }
+        // Hover is tracked on the whole banner, not on the button: a control
+        // that is invisible until the pointer is already on it cannot be found.
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.12)) { hovering = inside }
+        }
     }
 }
 
@@ -305,7 +344,7 @@ struct ActivityHeatmap: View {
     private let labelWidth: CGFloat = 22
     @State private var availableWidth: CGFloat = 0
 
-    private var maxWords: Int { max(1, weeks.flatMap { $0 }.map(\.wordCount).max() ?? 1) }
+    private var maxRuns: Int { max(1, weeks.flatMap { $0 }.map(\.runCount).max() ?? 1) }
     private var columns: Int { max(weeks.count, 1) }
     private var cell: CGFloat {
         guard availableWidth > 0 else { return 18 }
@@ -368,8 +407,8 @@ struct ActivityHeatmap: View {
     }
 
     private func fill(for bucket: UsageStatsDayBucket) -> Color {
-        guard bucket.wordCount > 0 else { return Color.white.opacity(0.06) }
-        let intensity = min(1.0, 0.2 + 0.8 * Double(bucket.wordCount) / Double(maxWords))
+        guard bucket.runCount > 0 else { return Color.white.opacity(0.06) }
+        let intensity = min(1.0, 0.2 + 0.8 * Double(bucket.runCount) / Double(maxRuns))
         return FlowTheme.accent.opacity(intensity)
     }
 }

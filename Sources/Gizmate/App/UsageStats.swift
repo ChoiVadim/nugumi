@@ -3,15 +3,21 @@ import Combine
 import Foundation
 import SwiftUI
 
+/// Raw values are persisted — **never rename one**. Adding a case is safe:
+/// events written by an older build simply won't carry it.
 enum UsageStatsEventKind: String, Codable, CaseIterable, Equatable, Identifiable {
     case selection
     case screenArea
     case draftMessage
     case smartReply
     case replacement
+    /// One of the user's own gizmos, named by `UsageStatsEvent.gizmoName`.
+    case gizmoRun
 
     var id: String { rawValue }
 
+    /// What a run of this kind is called in the top-gizmos list. A `.gizmoRun`
+    /// event carries the user's own name and never falls back to this.
     var title: String {
         switch self {
         case .selection: return "Selected text"
@@ -19,6 +25,7 @@ enum UsageStatsEventKind: String, Codable, CaseIterable, Equatable, Identifiable
         case .draftMessage: return "My writing"
         case .smartReply: return "Replies"
         case .replacement: return "Replacements"
+        case .gizmoRun: return "Gizmo"
         }
     }
 
@@ -29,6 +36,7 @@ enum UsageStatsEventKind: String, Codable, CaseIterable, Equatable, Identifiable
         case .draftMessage: return "text.insert"
         case .smartReply: return "bubble.left.and.bubble.right"
         case .replacement: return "arrow.triangle.2.circlepath"
+        case .gizmoRun: return "wand.and.stars"
         }
     }
 
@@ -39,11 +47,21 @@ enum UsageStatsEventKind: String, Codable, CaseIterable, Equatable, Identifiable
         case .draftMessage: return Color(red: 0.52, green: 0.52, blue: 0.52)
         case .smartReply: return Color(red: 0.88, green: 0.88, blue: 0.88)
         case .replacement: return Color(red: 0.70, green: 0.70, blue: 0.70)
+        case .gizmoRun: return Color(red: 0.82, green: 0.82, blue: 0.82)
         }
     }
 
-    static var useKinds: [UsageStatsEventKind] {
+    /// The ring's own actions. They live in the same slots as the user's gizmos
+    /// and the user does not tell them apart, so they count as gizmos too — but
+    /// only these arrive through `recordUse`.
+    static var builtInKinds: [UsageStatsEventKind] {
         [.selection, .screenArea, .draftMessage, .smartReply]
+    }
+
+    /// Everything that counts as a run. `.replacement` is excluded: it is the
+    /// follow-up to a run that already counted, not a run of its own.
+    static var runKinds: [UsageStatsEventKind] {
+        builtInKinds + [.gizmoRun]
     }
 }
 
@@ -51,35 +69,36 @@ struct UsageStatsEvent: Codable, Identifiable {
     let id: UUID
     let date: Date
     let kind: UsageStatsEventKind
+    // Word, character and language counts are no longer shown anywhere. They
+    // stay on the event because they are already written into everyone's stored
+    // history, and dropping them from the schema would throw that away for no
+    // gain — the aggregation, not the recording, is what got deleted.
     let sourceWordCount: Int
     let resultWordCount: Int
     let characterCount: Int
     let targetLanguageID: String?
+    /// The gizmo's own name, for `.gizmoRun`. `var` rather than `let` so the
+    /// memberwise initializer defaults it to nil: every event written before
+    /// gizmo runs were counted decodes without this key.
+    var gizmoName: String?
+
+    /// What this run is called in the top-gizmos list.
+    var displayName: String {
+        gizmoName ?? kind.title
+    }
 }
 
-struct UsageStatsModeBreakdown: Identifiable {
-    let kind: UsageStatsEventKind
+struct UsageStatsGizmoBreakdown: Identifiable {
+    let name: String
     let count: Int
-    let wordCount: Int
     let fraction: Double
 
-    var id: UsageStatsEventKind { kind }
-}
-
-struct UsageStatsLanguageBreakdown: Identifiable {
-    let languageID: String
-    let displayName: String
-    let count: Int
-    let wordCount: Int
-    let fraction: Double
-
-    var id: String { languageID }
+    var id: String { name }
 }
 
 struct UsageStatsDayBucket: Identifiable {
     let date: Date
-    let eventCount: Int
-    let wordCount: Int
+    let runCount: Int
     let isToday: Bool
 
     var id: Date { date }
@@ -87,20 +106,15 @@ struct UsageStatsDayBucket: Identifiable {
 
 struct UsageStatsSnapshot {
     let events: [UsageStatsEvent]
-    let totalUses: Int
-    let totalSourceWords: Int
-    let totalResultWords: Int
-    let totalReplacements: Int
+    /// Every run, built-in and user gizmo alike.
+    let totalRuns: Int
+    /// How many different gizmos have ever been run.
+    let distinctGizmos: Int
+    let runsToday: Int
     let currentStreak: Int
     let longestStreak: Int
-    let currentMonthWords: Int
-    let previousMonthWords: Int
-    let monthChangePercent: Int?
-    let activeDays: Int
-    let averageWordsPerActiveDay: Int
     let busiestDay: UsageStatsDayBucket?
-    let modeBreakdown: [UsageStatsModeBreakdown]
-    let languageBreakdown: [UsageStatsLanguageBreakdown]
+    let gizmoBreakdown: [UsageStatsGizmoBreakdown]
     let heatmapWeeks: [[UsageStatsDayBucket]]
 
     static var empty: UsageStatsSnapshot {
@@ -110,93 +124,37 @@ struct UsageStatsSnapshot {
     static func make(events: [UsageStatsEvent], calendar inputCalendar: Calendar = .current) -> UsageStatsSnapshot {
         var calendar = inputCalendar
         calendar.timeZone = .current
-        let now = Date()
-        let today = calendar.startOfDay(for: now)
-        let useEvents = events.filter { UsageStatsEventKind.useKinds.contains($0.kind) }
-        let totalSourceWords = countedWords(in: useEvents)
-        let totalResultWords = useEvents.reduce(0) { $0 + $1.resultWordCount }
-        let totalReplacements = events.filter { $0.kind == .replacement }.count
+        let today = calendar.startOfDay(for: Date())
+        let runEvents = events.filter { UsageStatsEventKind.runKinds.contains($0.kind) }
 
-        let dayWords = Dictionary(grouping: useEvents) { event in
-            calendar.startOfDay(for: event.date)
-        }.mapValues { dayEvents in
-            countedWords(in: dayEvents)
+        let runsByDay = Dictionary(grouping: runEvents) { calendar.startOfDay(for: $0.date) }
+        let streaks = streakValues(activeDays: Set(runsByDay.keys), today: today, calendar: calendar)
+
+        let totalRuns = runEvents.count
+        let byName = Dictionary(grouping: runEvents, by: \.displayName)
+        var gizmoBreakdown: [UsageStatsGizmoBreakdown] = byName.map { name, named in
+            let count: Int = named.count
+            let fraction: Double = totalRuns == 0 ? 0 : Double(count) / Double(totalRuns)
+            return UsageStatsGizmoBreakdown(name: name, count: count, fraction: fraction)
         }
-        let activeDaySet = Set(dayWords.keys)
-        let streaks = streakValues(activeDays: activeDaySet, today: today, calendar: calendar)
-
-        let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? today
-        let previousMonthStart = calendar.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
-        let currentMonthWords = useEvents
-            .filter { $0.date >= monthStart }
-            .reduce(0) { $0 + max($1.sourceWordCount, $1.resultWordCount) }
-        let previousMonthWords = useEvents
-            .filter { $0.date >= previousMonthStart && $0.date < monthStart }
-            .reduce(0) { $0 + max($1.sourceWordCount, $1.resultWordCount) }
-        let monthChangePercent: Int? = previousMonthWords > 0
-            ? Int(round((Double(currentMonthWords - previousMonthWords) / Double(previousMonthWords)) * 100))
-            : nil
-
-        let modeBreakdown = UsageStatsEventKind.useKinds.map { kind in
-            let modeEvents = useEvents.filter { $0.kind == kind }
-            let words = modeEvents.reduce(0) { $0 + $1.sourceWordCount }
-            let fraction = useEvents.isEmpty ? 0 : Double(modeEvents.count) / Double(useEvents.count)
-            return UsageStatsModeBreakdown(kind: kind, count: modeEvents.count, wordCount: words, fraction: fraction)
+        gizmoBreakdown.sort { lhs, rhs in
+            lhs.count == rhs.count ? lhs.name < rhs.name : lhs.count > rhs.count
         }
 
-        let languageEvents = Dictionary(grouping: useEvents) { $0.targetLanguageID ?? "" }
-        let languageBreakdown = languageEvents.map { languageID, languageEvents in
-            let language = TranslationLanguage.language(id: languageID)
-            let words = languageEvents.reduce(0) { $0 + $1.sourceWordCount }
-            let fraction = useEvents.isEmpty ? 0 : Double(languageEvents.count) / Double(useEvents.count)
-            return UsageStatsLanguageBreakdown(
-                languageID: languageID,
-                displayName: language.displayName,
-                count: languageEvents.count,
-                wordCount: words,
-                fraction: fraction
-            )
-        }
-        .sorted { lhs, rhs in
-            if lhs.count == rhs.count {
-                return lhs.displayName < rhs.displayName
-            }
-            return lhs.count > rhs.count
-        }
-
-        let heatmapWeeks = makeHeatmapWeeks(events: useEvents, today: today, calendar: calendar)
-        let flatBuckets = heatmapWeeks.flatMap { $0 }
-        let busiestDay = flatBuckets.max { lhs, rhs in
-            if lhs.wordCount == rhs.wordCount {
-                return lhs.eventCount < rhs.eventCount
-            }
-            return lhs.wordCount < rhs.wordCount
-        }
-        let activeDays = activeDaySet.count
-        let averageWordsPerActiveDay = activeDays == 0 ? 0 : Int(round(Double(totalSourceWords) / Double(activeDays)))
+        let heatmapWeeks = makeHeatmapWeeks(events: runEvents, today: today, calendar: calendar)
+        let busiestDay = heatmapWeeks.flatMap { $0 }.max { $0.runCount < $1.runCount }
 
         return UsageStatsSnapshot(
             events: events,
-            totalUses: useEvents.count,
-            totalSourceWords: totalSourceWords,
-            totalResultWords: totalResultWords,
-            totalReplacements: totalReplacements,
+            totalRuns: totalRuns,
+            distinctGizmos: byName.count,
+            runsToday: runsByDay[today]?.count ?? 0,
             currentStreak: streaks.current,
             longestStreak: streaks.longest,
-            currentMonthWords: currentMonthWords,
-            previousMonthWords: previousMonthWords,
-            monthChangePercent: monthChangePercent,
-            activeDays: activeDays,
-            averageWordsPerActiveDay: averageWordsPerActiveDay,
             busiestDay: busiestDay,
-            modeBreakdown: modeBreakdown,
-            languageBreakdown: languageBreakdown,
+            gizmoBreakdown: gizmoBreakdown,
             heatmapWeeks: heatmapWeeks
         )
-    }
-
-    private static func countedWords(in events: [UsageStatsEvent]) -> Int {
-        events.reduce(0) { $0 + max($1.sourceWordCount, $1.resultWordCount) }
     }
 
     private static func makeHeatmapWeeks(
@@ -217,12 +175,9 @@ struct UsageStatsSnapshot {
                     return nil
                 }
                 let day = calendar.startOfDay(for: date)
-                let dayEvents = groupedEvents[day] ?? []
-                let words = dayEvents.reduce(0) { $0 + max($1.sourceWordCount, $1.resultWordCount) }
                 return UsageStatsDayBucket(
                     date: day,
-                    eventCount: dayEvents.count,
-                    wordCount: words,
+                    runCount: (groupedEvents[day] ?? []).count,
                     isToday: calendar.isDate(day, inSameDayAs: today)
                 )
             }
@@ -285,7 +240,7 @@ final class UsageStatsStore: ObservableObject {
         kind: UsageStatsEventKind,
         targetLanguage: TranslationLanguage
     ) {
-        guard UsageStatsEventKind.useKinds.contains(kind) else {
+        guard UsageStatsEventKind.builtInKinds.contains(kind) else {
             return
         }
         let event = UsageStatsEvent(
@@ -298,6 +253,22 @@ final class UsageStatsStore: ObservableObject {
             targetLanguageID: targetLanguage.id
         )
         append(event)
+    }
+
+    /// One run of one of the user's own gizmos. Recorded where every kind of
+    /// gizmo is dispatched, so prompt, native, script and agent all land here.
+    func recordGizmoRun(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        append(UsageStatsEvent(
+            id: UUID(),
+            date: Date(),
+            kind: .gizmoRun,
+            sourceWordCount: 0,
+            resultWordCount: 0,
+            characterCount: 0,
+            targetLanguageID: nil,
+            gizmoName: trimmed.isEmpty ? UsageStatsEventKind.gizmoRun.title : trimmed
+        ))
     }
 
     func recordReplacement(text: String) {
@@ -426,17 +397,10 @@ private struct UsageStatsMenuSummaryView: View {
     private let contentWidth: CGFloat = 310
 
     private var snapshot: UsageStatsSnapshot { store.snapshot }
-    private var todayWords: Int {
-        // Mirror the filter used for the lifetime total — exclude
-        // `.replacement` events so the same translation isn't counted twice
-        // (once as the originating use, once as the follow-up replacement).
-        snapshot.events
-            .filter { Calendar.current.isDateInToday($0.date) }
-            .filter { UsageStatsEventKind.useKinds.contains($0.kind) }
-            .reduce(0) { $0 + max($1.sourceWordCount, $1.resultWordCount) }
-    }
-    private var workflowItems: [UsageStatsModeBreakdown] {
-        snapshot.modeBreakdown.filter { $0.count > 0 }
+    /// Top few only: the plate is 310pt wide and a legend that wraps pushes the
+    /// menu taller than the thing it summarizes.
+    private var gizmoItems: [UsageStatsGizmoBreakdown] {
+        Array(snapshot.gizmoBreakdown.prefix(4))
     }
 
     var body: some View {
@@ -450,16 +414,16 @@ private struct UsageStatsMenuSummaryView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Label("\(snapshot.totalUses.formatted()) uses", systemImage: "chart.bar.xaxis")
+                Label("\(snapshot.distinctGizmos.formatted()) gizmos", systemImage: "chart.bar.xaxis")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.secondary)
                 expandToggle
             }
 
             HStack(spacing: 0) {
-                MenuMetricValue(title: "Words", value: snapshot.totalSourceWords.formatted())
+                MenuMetricValue(title: "Runs", value: snapshot.totalRuns.formatted())
                 MenuMetricDivider()
-                MenuMetricValue(title: "Today words", value: todayWords.formatted())
+                MenuMetricValue(title: "Today", value: snapshot.runsToday.formatted())
                 MenuMetricDivider()
                 MenuMetricValue(title: "Streak", value: "\(snapshot.currentStreak)d")
             }
@@ -481,24 +445,24 @@ private struct UsageStatsMenuSummaryView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Workflow mix")
+                        Text("Top gizmos")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(snapshot.totalReplacements.formatted()) replaced")
+                        Text("\(snapshot.longestStreak)d best")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
 
                     GeometryReader { proxy in
-                        if snapshot.totalUses == 0 {
+                        if snapshot.totalRuns == 0 {
                             RoundedRectangle(cornerRadius: 3, style: .continuous)
                                 .fill(Color.primary.opacity(0.08))
                         } else {
                             HStack(spacing: 0) {
-                                ForEach(workflowItems) { item in
+                                ForEach(Array(gizmoItems.enumerated()), id: \.element.id) { index, item in
                                     Rectangle()
-                                        .fill(item.kind.color.opacity(0.86))
+                                        .fill(Self.shade(index))
                                         .frame(width: proxy.size.width * item.fraction)
                                 }
                             }
@@ -508,11 +472,11 @@ private struct UsageStatsMenuSummaryView: View {
                     .frame(height: 10)
 
                     HStack(spacing: 7) {
-                        ForEach(workflowItems) { item in
-                            WorkflowLegendItem(kind: item.kind)
+                        ForEach(Array(gizmoItems.enumerated()), id: \.element.id) { index, item in
+                            GizmoLegendItem(name: item.name, swatch: Self.shade(index))
                         }
-                        if snapshot.modeBreakdown.allSatisfy({ $0.count == 0 }) {
-                            Text("Start using Gizmate to fill this chart")
+                        if gizmoItems.isEmpty {
+                            Text("Run a gizmo to fill this chart")
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(.secondary)
                         }
@@ -536,6 +500,13 @@ private struct UsageStatsMenuSummaryView: View {
         .onAppear { store.refresh() }
     }
 
+    /// The menu plate sits on system material, light or dark, so the ramp is
+    /// built from `Color.primary` rather than the fixed greys the ring uses.
+    private static func shade(_ index: Int) -> Color {
+        let opacities: [Double] = [0.78, 0.55, 0.36, 0.22]
+        return Color.primary.opacity(opacities[min(index, opacities.count - 1)])
+    }
+
     private var expandToggle: some View {
         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
             .font(.system(size: 9, weight: .bold))
@@ -553,17 +524,17 @@ private struct UsageStatsMenuSummaryView: View {
     }
 }
 
-private struct WorkflowLegendItem: View {
-    let kind: UsageStatsEventKind
+private struct GizmoLegendItem: View {
+    let name: String
+    let swatch: Color
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 3.5) {
-            Image(systemName: kind.symbolName)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 11, alignment: .center)
+            Circle()
+                .fill(swatch)
+                .frame(width: 6, height: 6)
 
-            Text(kind.title)
+            Text(name)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -604,8 +575,8 @@ private struct MenuMetricDivider: View {
 private struct MenuActivityMap: View {
     let snapshot: UsageStatsSnapshot
 
-    private var maxWords: Int {
-        max(1, snapshot.heatmapWeeks.flatMap { $0 }.map(\.wordCount).max() ?? 1)
+    private var maxRuns: Int {
+        max(1, snapshot.heatmapWeeks.flatMap { $0 }.map(\.runCount).max() ?? 1)
     }
 
     var body: some View {
@@ -617,7 +588,7 @@ private struct MenuActivityMap: View {
                         ForEach(snapshot.heatmapWeeks[weekIndex]) { bucket in
                             MenuHeatmapCell(
                                 bucket: bucket,
-                                maxWords: maxWords
+                                maxRuns: maxRuns
                             )
                         }
                     }
@@ -631,7 +602,7 @@ private struct MenuActivityMap: View {
 
 private struct MenuHeatmapCell: View {
     let bucket: UsageStatsDayBucket
-    let maxWords: Int
+    let maxRuns: Int
 
     var body: some View {
         RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -641,14 +612,14 @@ private struct MenuHeatmapCell: View {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .stroke(bucket.isToday ? UsageStatsEventKind.draftMessage.color : Color.clear, lineWidth: 1.4)
             )
-            .help("\(shortDate(bucket.date)): \(bucket.wordCount) words")
+            .help("\(shortDate(bucket.date)): \(bucket.runCount) runs")
     }
 
     private var fill: Color {
-        guard bucket.wordCount > 0 else {
+        guard bucket.runCount > 0 else {
             return Color.primary.opacity(0.06)
         }
-        let intensity = max(0.22, min(1.0, Double(bucket.wordCount) / Double(maxWords)))
+        let intensity = max(0.22, min(1.0, Double(bucket.runCount) / Double(maxRuns)))
         return UsageStatsEventKind.selection.color.opacity(intensity)
     }
 }

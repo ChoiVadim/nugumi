@@ -22,7 +22,6 @@ extension GizmateApp {
 
         translateButtonController?.close()
         translateButtonController = nil
-        petController?.clearReady()
 
         let mode = forcedMode ?? floatingDefaultMode
 
@@ -32,7 +31,12 @@ extension GizmateApp {
             self.selectionReader.readSelectedTextContext(allowClipboardFallback: true) { [weak self] selection in
                 guard let self else { return }
 
-                let shortcutDisplay = self.shortcut(for: .translateOrReply).displayString
+                // Name the key the user actually pressed, which now differs
+                // between Explain and Reply — telling someone who pressed ⌃⌥Y
+                // to "press ⌃⌥T" would send them to the wrong action.
+                let shortcutDisplay = self.shortcut(
+                    for: mode == .smartReply ? .replyToSelection : .explainSelection
+                ).displayString
 
                 guard let selection else {
                     self.presentSelectionTranslationError("Select text first, then press \(shortcutDisplay).")
@@ -93,7 +97,6 @@ extension GizmateApp {
                 guard let selection else {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.petController?.clearReady()
                     self.presentSelectionTranslationError("Select text first, then press \(self.shortcut(for: .translateSelection).displayString).")
                     return
                 }
@@ -102,7 +105,6 @@ extension GizmateApp {
                 guard !cleanedDraft.isEmpty else {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.petController?.clearReady()
                     self.presentSelectionTranslationError("Select text first, then press \(self.shortcut(for: .translateSelection).displayString).")
                     return
                 }
@@ -113,7 +115,6 @@ extension GizmateApp {
                     near: mouseLocation,
                     selectionRect: selection.selectionRect,
                     panelSide: self.panelSideForSelectionEnding(at: mouseLocation),
-                    keepPetReadyUntilPanelCloses: true,
                     restoresReadyOnUserDismiss: true
                 )
             }
@@ -193,12 +194,6 @@ extension GizmateApp {
     @MainActor
     func showInstantTranslationLoading(near screenPoint: NSPoint) -> FloatingTranslateButtonController? {
         switch selectionDisplayMode {
-        case .pet:
-            if petController == nil {
-                petController = PetController(initialMode: .draftMessage)
-            }
-            petController?.showThinking()
-            return nil
         case .floatingBar:
             // Reuse the bar that's already on screen so it morphs in place
             // instead of flickering — its panel stays at the same origin.
@@ -229,7 +224,6 @@ extension GizmateApp {
 
     @MainActor
     func hideInstantTranslationLoading(_ loadingBar: FloatingTranslateButtonController?) {
-        petController?.clearThinking()
         guard let loadingBar else { return }
         loadingBar.close()
         if floatingLoadingBar === loadingBar {

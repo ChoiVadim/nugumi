@@ -30,6 +30,15 @@ public typealias ToolBuildValidationHandlerV1 = @Sendable (ToolBuildValidationIn
 public typealias ToolBuildClarificationHandlerV1 = @Sendable (ToolAgentAskUserRequestV1) async throws -> ToolAgentAskUserResponseV1
 public typealias ToolBuildSleepV1 = @Sendable (UInt64) async throws -> Void
 
+/// What the user has stored **right now**, asked at the moment the model calls
+/// `read_build_context` rather than taken from the request.
+///
+/// The request's `availableSecretNames` is a snapshot from before the build
+/// started, and the one moment a user reaches for a key is halfway through the
+/// build that just told them it needs one. Answering from the snapshot makes
+/// "add it and tell me when it's there" a loop that can never terminate.
+public typealias ToolBuildSecretNamesV1 = @Sendable () async -> [String]
+
 public actor ToolBuildSupervisor {
     let store: ToolBuildStore
     let runtimeVersion: String
@@ -39,6 +48,9 @@ public actor ToolBuildSupervisor {
     let validation: ToolBuildValidationHandlerV1
     let clarification: ToolBuildClarificationHandlerV1
     let clarificationCancellation: @Sendable () async -> Void
+    /// `nil` falls back to the request's snapshot, which is what a test that
+    /// does not care about secrets wants.
+    let secretNames: ToolBuildSecretNamesV1?
     let makeCandidateID: @Sendable () -> UUID
     let sleep: ToolBuildSleepV1
 
@@ -63,6 +75,7 @@ public actor ToolBuildSupervisor {
         validation: @escaping ToolBuildValidationHandlerV1,
         clarification: @escaping ToolBuildClarificationHandlerV1 = { _ in throw ToolAgentFailureCodeV1.invalidProtocol },
         clarificationCancellation: @escaping @Sendable () async -> Void = {},
+        secretNames: ToolBuildSecretNamesV1? = nil,
         makeCandidateID: @escaping @Sendable () -> UUID = { UUID() },
         sleep: @escaping ToolBuildSleepV1 = { try await Task.sleep(nanoseconds: $0) }
     ) {
@@ -74,6 +87,7 @@ public actor ToolBuildSupervisor {
         self.validation = validation
         self.clarification = clarification
         self.clarificationCancellation = clarificationCancellation
+        self.secretNames = secretNames
         self.makeCandidateID = makeCandidateID
         self.sleep = sleep
     }

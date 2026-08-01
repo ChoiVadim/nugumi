@@ -12,7 +12,7 @@ import SwiftUI
 import UserNotifications
 import Vision
 
-/// The ring of action buttons that opens around the floating bar / pet.
+/// The ring of action buttons that opens around the floating bar.
 /// Purely presentational: owns one transparent panel, reports the picked
 /// action via `onSelect`, and calls `onDismiss` when it closed itself
 /// (outside click, Escape, empty-area click). The presenter owns the
@@ -20,11 +20,11 @@ import Vision
 @MainActor
 final class RadialActionMenuController {
     private let panel: NSPanel
-    /// Hover over the ring's center (the bar/pet under the ✕). The presenter
+    /// Hover over the ring's center (the bar under the ✕). The presenter
     /// subscribes to drive its close-button hover tint — its own tracking
     /// area is occluded by this panel while the ring is open.
     var onCenterHoverChange: ((Bool) -> Void)?
-    /// The bar/pet panel that opened the menu. Its clicks are exempt from
+    /// The bar panel that opened the menu. Its clicks are exempt from
     /// the local dismiss monitor: if a click reaches the presenter (past the
     /// menu's own backdrop), its handler must see the menu still open and
     /// toggle it — dismissing here first would make that handler reopen.
@@ -554,7 +554,7 @@ final class RadialActionMenuController {
     /// local monitor (Gizmate frontmost) and a global one (another app
     /// frontmost — observed, not consumed). Mouse clicks: the global monitor
     /// covers other apps, the local one covers Gizmate's own windows — except
-    /// the menu itself and the presenting bar/pet, whose click handler owns
+    /// the menu itself and the presenting bar, whose click handler owns
     /// the toggle.
     private func installDismissMonitors() {
         guard dismissMonitors.isEmpty else { return }

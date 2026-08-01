@@ -90,4 +90,62 @@ final class BuiltInOverridesTests: XCTestCase {
 
         XCTAssertEqual(store.displayName(for: .summarize), "Summarize")
     }
+
+    // MARK: - Ring integration
+
+    private var allHandlers: RingActionHandlers {
+        RingActionHandlers(
+            explain: {}, rewrite: {}, reply: {}, ask: {},
+            capture: {}, dictate: {}, live: {}
+        )
+    }
+
+    /// A disabled built-in leaves a gap. It must NOT shift the buttons after it
+    /// along — the ring draws slot i at position i, and a ring that reshuffles
+    /// is a ring nobody can aim at from muscle memory.
+    @MainActor
+    func testDisabledBuiltInLeavesItsSlotEmpty() {
+        let slots = RingBuilder.slots(
+            configuration: RingConfiguration(
+                layout: RingLayout(slots: [.builtIn(.explain), .builtIn(.dictate), .builtIn(.reply)]),
+                tools: [],
+                overrides: [.dictate: BuiltInOverride(isEnabled: false)]
+            ),
+            handlers: allHandlers,
+            dismiss: {}
+        )
+
+        XCTAssertEqual(slots[0]?.label, RingActionID.explain.label)
+        XCTAssertNil(slots[1])
+        XCTAssertEqual(slots[2]?.label, RingActionID.reply.label)
+    }
+
+    @MainActor
+    func testRenamedBuiltInShowsItsNewLabel() {
+        let slots = RingBuilder.slots(
+            configuration: RingConfiguration(
+                layout: RingLayout(slots: [.builtIn(.dictate)]),
+                tools: [],
+                overrides: [.dictate: BuiltInOverride(name: "Speak")]
+            ),
+            handlers: allHandlers,
+            dismiss: {}
+        )
+
+        XCTAssertEqual(slots[0]?.label, "Speak")
+    }
+
+    /// An untouched ring must build exactly as it did before overrides existed.
+    @MainActor
+    func testRingWithNoOverridesIsUnchanged() {
+        let layout = RingLayout(slots: [.builtIn(.explain), .builtIn(.dictate)])
+        let slots = RingBuilder.slots(
+            configuration: RingConfiguration(layout: layout, tools: []),
+            handlers: allHandlers,
+            dismiss: {}
+        )
+
+        XCTAssertEqual(slots[0]?.label, RingActionID.explain.label)
+        XCTAssertEqual(slots[1]?.label, RingActionID.dictate.label)
+    }
 }
