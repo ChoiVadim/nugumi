@@ -62,10 +62,8 @@ private struct RingSlotPickerPanel: View {
     @ObservedObject var toolsStore: ToolsStore
     let address: RingSlotAddress
 
-    @State private var search = ""
     @State private var group: Group = .builtIn
     @State private var pending: RingSlotContent?
-    @FocusState private var searchFocused: Bool
 
     private enum Group: String, CaseIterable {
         case builtIn = "Built-in actions"
@@ -80,30 +78,15 @@ private struct RingSlotPickerPanel: View {
         ring.slots[safe: address.index] ?? .empty
     }
 
-    /// Searched by the name the user currently sees, so a renamed built-in is
-    /// findable by its new name as well as the one it shipped with.
-    private var builtIns: [RingActionID] {
-        RingActionID.allCases.filter {
-            matches(bridge.builtInOverrides.displayName(for: $0), $0.displayName, $0.summary)
-        }
-    }
+    private var builtIns: [RingActionID] { RingActionID.allCases }
 
     private var tools: [GizmateTool] {
-        toolsStore.tools
-            .sorted { $0.createdAt < $1.createdAt }
-            .filter { matches($0.name, $0.prompt) }
-    }
-
-    private func matches(_ fields: String...) -> Bool {
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return true }
-        return fields.contains { $0.lowercased().contains(q) }
+        toolsStore.tools.sorted { $0.createdAt < $1.createdAt }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            searchField
             Divider().background(FlowTheme.hairline)
             sourceBar
             Divider().background(FlowTheme.hairline)
@@ -120,7 +103,6 @@ private struct RingSlotPickerPanel: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
         .onAppear {
-            searchFocused = true
             pending = current == .empty ? nil : current
             if case .tool = current { group = .tools }
         }
@@ -132,7 +114,9 @@ private struct RingSlotPickerPanel: View {
                 Text("Choose an action")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(FlowTheme.ink)
-                Text("Currently: \(describe(current))")
+                // The only affordance left now that the footer is gone, so it
+                // has to say so.
+                Text("Currently: \(describe(current)) · double-click to put one here")
                     .font(.system(size: 11.5))
                     .foregroundStyle(FlowTheme.inkTertiary)
             }
@@ -153,25 +137,6 @@ private struct RingSlotPickerPanel: View {
         .padding(.bottom, 12)
     }
 
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(FlowTheme.inkTertiary)
-            TextField("Filter actions and gizmos", text: $search)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .foregroundStyle(FlowTheme.ink)
-                .focused($searchFocused)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
-    }
-
     private var sourceBar: some View {
         HStack(spacing: 8) {
             sourceTab(.builtIn, count: builtIns.count)
@@ -185,12 +150,36 @@ private struct RingSlotPickerPanel: View {
                 }
                 .help("Puts a button here that opens a ring of its own.")
             }
-            newButton(symbol: "plus.circle", title: "New gizmo") {
-                bridge.ringSheet = .toolEditor(id: nil, assignTo: address)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    /// Building a gizmo is the point of this panel, not a side errand — so it
+    /// gets the full width at the bottom rather than a link in the source bar.
+    private var footer: some View {
+        Button {
+            bridge.ringSheet = .toolEditor(id: nil, assignTo: address)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("New gizmo")
+                    .font(.system(size: 13.5, weight: .semibold))
+            }
+            .foregroundStyle(Color(white: 0.08))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(FlowTheme.accentBright)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Write a gizmo of your own and drop it in this slot.")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     private func newButton(symbol: String, title: String, action: @escaping () -> Void) -> some View {
@@ -250,13 +239,13 @@ private struct RingSlotPickerPanel: View {
                                 ? "Switched off — open it to turn it back on."
                                 : id.summary,
                             // A built-in is switched off, never deleted, so it
-                            // gets the pencil gizmo rows have but no trash.
+                            // gets the gear gizmo rows have but no trash.
                             onEdit: { bridge.ringSheet = .builtInEditor(id) }
                         )
                         // Dimmed rather than hidden: a user who switched
                         // something off still needs to find it to switch it back
-                        // on. The row stays clickable so the pencil is
-                        // reachable; the footer is what refuses to assign it.
+                        // on. The row stays selectable so the gear is
+                        // reachable; `assign` is what refuses to place it.
                         .opacity(isOff ? 0.45 : 1)
                     }
                 case .tools:
@@ -300,107 +289,63 @@ private struct RingSlotPickerPanel: View {
     ) -> some View {
         let isPending = pending == content
         return HStack(spacing: 4) {
-            Button { pending = content } label: {
-                HStack(spacing: 11) {
-                    symbolImage
-                        .font(.system(size: 14, weight: .semibold))
+            HStack(spacing: 11) {
+                symbolImage
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(FlowTheme.ink)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(FlowTheme.ink)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(Color.white.opacity(0.08)))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(title)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(FlowTheme.ink)
-                        Text(detail)
-                            .font(.system(size: 11))
-                            .foregroundStyle(FlowTheme.inkTertiary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 8)
-                    if isPending {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(FlowTheme.accent)
-                    }
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.vertical, 8)
-                .padding(.leading, 14)
-                .padding(.trailing, 8)
-                .contentShape(Rectangle())
+                Spacer(minLength: 8)
             }
-            .buttonStyle(.plain)
+            .padding(.vertical, 8)
+            .padding(.leading, 14)
+            .padding(.trailing, 8)
+            .contentShape(Rectangle())
+            // Not a Button: a Button eats the click before a double can form.
+            // The count-2 gesture has to be declared first to get first refusal.
+            .onTapGesture(count: 2) { assign(content) }
+            .onTapGesture { pending = content }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(isPending ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction(named: "Assign") { assign(content) }
 
-            if let onEdit {
-                RowIconButton(symbol: "pencil", action: onEdit)
-                    .help("Edit \(title)")
-                    .accessibilityLabel("Edit \(title)")
-            }
-            if let onDelete {
-                RowIconButton(symbol: "trash", action: onDelete)
-                    .help("Delete \(title)")
-                    .accessibilityLabel("Delete \(title)")
-                    .padding(.trailing, 8)
+            // Row controls belong to the selected row only — otherwise every row
+            // carries a column of icons and the list reads as a toolbar.
+            if isPending {
+                if let onEdit {
+                    RowIconButton(symbol: "gearshape", action: onEdit)
+                        .help("Edit \(title)")
+                        .accessibilityLabel("Edit \(title)")
+                }
+                if let onDelete {
+                    RowIconButton(symbol: "trash", action: onDelete)
+                        .help("Delete \(title)")
+                        .accessibilityLabel("Delete \(title)")
+                        .padding(.trailing, 8)
+                }
             }
         }
         .background(isPending ? Color.white.opacity(0.06) : Color.clear)
     }
 
-    private var canAssign: Bool {
-        pending != nil && pending != current && !pendingIsSwitchedOff
-    }
-
     /// A switched-off built-in would render as a permanent gap in the ring,
-    /// which reads as a bug rather than as a choice — so it can be opened and
-    /// edited from here, but not assigned to a slot.
-    private var pendingIsSwitchedOff: Bool {
-        guard case .builtIn(let id) = pending else { return false }
-        return !bridge.builtInOverrides.isEnabled(id)
-    }
-
-    private var pendingIsAssignedElsewhere: Bool {
-        guard let pending, pending != current else { return false }
-        return ring.slots.contains(pending)
-    }
-
-    private var footer: some View {
-        HStack(spacing: 10) {
-            if pendingIsSwitchedOff {
-                Text("Switched off. Turn it back on with the pencil to use it.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            } else if pendingIsAssignedElsewhere {
-                Text("Already in another slot. Assigning moves it here.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            }
-            Spacer(minLength: 0)
-            SecondaryButton(title: "Cancel") { closePanel() }
-            Button {
-                guard let pending else { return }
-                bridge.ringLayout.assign(pending, to: address.index, in: address.path)
-                closePanel()
-            } label: {
-                Text(pendingIsAssignedElsewhere ? "Move here" : "Assign")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(FlowTheme.raisedStrong)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .strokeBorder(FlowTheme.edge, lineWidth: 1)
-                            )
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(!canAssign)
-            .opacity(canAssign ? 1 : 0.45)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+    /// which reads as a bug rather than as a choice — so it can be selected and
+    /// edited from here, but a double-click won't land it in the slot.
+    private func assign(_ content: RingSlotContent) {
+        pending = content
+        if case .builtIn(let id) = content, !bridge.builtInOverrides.isEnabled(id) { return }
+        bridge.ringLayout.assign(content, to: address.index, in: address.path)
+        closePanel()
     }
 
     /// Deleting a tool removes its folder and its script for good, so it asks
@@ -426,7 +371,6 @@ private struct RingSlotPickerPanel: View {
     /// Same responder handoff as the editor: a text field losing the window's
     /// first responder while being removed leaves the window ignoring clicks.
     private func closePanel() {
-        searchFocused = false
         NSApp.keyWindow?.makeFirstResponder(nil)
         bridge.ringSheet = nil
     }
