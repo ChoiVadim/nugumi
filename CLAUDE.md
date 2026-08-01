@@ -186,3 +186,28 @@ pkill -f 'Gizmate' ; swift run Gizmate   # quick debug run — this is the defau
 
 - `swift run Gizmate` is the fast dev loop for UI/behavior iteration (a debug build, Sparkle inert). Do NOT run `bash Scripts/build-app-bundle.sh` just to see a change — that full universal signed bundle is only for release, Sparkle/update testing, or when a feature needs TCC permissions correctly attributed to `com.nugumi.app` rather than the shell (the "TCC launch trap").
 - Run it in the background so it doesn't block, and re-run (kill + `swift run`) after each subsequent change.
+
+## Commit when a task is done
+
+Finishing a task means committing it. No need to ask — this file is the standing
+authorization. Push and open PRs only when asked.
+
+```sh
+git add <the files you touched> && git commit -m "Short imperative summary"
+```
+
+- **Stage by path, never `git add -A` / `git add .`.** The user edits this same
+  worktree while you work, so it routinely holds unrelated user WIP. Check
+  `git status` before staging; sweeping that WIP into your commit buries it under
+  a message that doesn't describe it.
+- Run `git diff --cached --stat` before committing. The index may already hold
+  work the user staged; unstage it (`git restore --staged <path>`), commit, then
+  re-stage it so their index comes back exactly as it was.
+- When one file mixes your edit with user WIP, stage only your hunks — pipe
+  `git diff -- <file>` through `awk '/^@@/{c++; if(c==2) exit} {print}'` (or an
+  equivalent slice) into `git apply --cached`. `git add -p` is interactive and
+  unavailable here.
+- A build broken by that user WIP is not a reason to skip the commit — commit
+  your files and say the build is red for an unrelated reason.
+- Broken build from _your_ change: fix it first. Don't commit known-broken work.
+- One task, one commit. Split only when a task really did two unrelated things.
