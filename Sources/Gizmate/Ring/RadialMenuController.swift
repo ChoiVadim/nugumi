@@ -297,7 +297,14 @@ final class RadialActionMenuController {
             let expands = sub.expandsOnHover && depth < 2
             let subButton = RadialMenuButtonView(image: sub.image) { [weak self] in
                 // An expandable sub reveals its own orbit on click; leaves fire.
-                if expands { self?.showChildOrbit(index) } else { self?.finish(with: sub) }
+                // Same `firesOnClick` exception the first ring makes — Note is
+                // usually inside the More folder, so this is the path its click
+                // actually takes.
+                if expands, !sub.firesOnClick {
+                    self?.showChildOrbit(index)
+                } else {
+                    self?.finish(with: sub)
+                }
             }
             subButton.setFrameOrigin(NSPoint(
                 x: panelCenter.x + entry.offset.x - subButton.frame.width / 2,

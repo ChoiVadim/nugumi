@@ -101,6 +101,35 @@ final class RingDefaultLayoutTests: XCTestCase {
         )
     }
 
+    /// Note ships inside the More folder, so its click is dispatched by the
+    /// orbit's sub-button path, not the first ring's. `firesOnClick` has to
+    /// survive the trip through the folder or clicking it only opens the tags.
+    @MainActor
+    func testNoteInsideTheFolderStillFilesOnClick() {
+        let (store, cleanup) = store()
+        defer { cleanup() }
+
+        var filed: [NoteTag?] = []
+        let slots = RingBuilder.slots(
+            configuration: RingConfiguration(
+                layout: store.layout,
+                tools: [],
+                folders: store.folders
+            ),
+            handlers: RingActionHandlers(
+                explain: {}, rewrite: {}, reply: {}, ask: {},
+                capture: {}, dictate: {}, live: {},
+                saveNote: RingSaveNoteOption(tags: NoteTag.defaults) { filed.append($0) }
+            ),
+            dismiss: {}
+        )
+
+        let note = slots[5]?.subItems.compactMap { $0 }.first { $0.label == "Note" }
+        XCTAssertEqual(note?.firesOnClick, true)
+        note?.handler()
+        XCTAssertEqual(filed.map { $0?.id }, [NoteTag.otherID])
+    }
+
     @MainActor
     func testResetKeepsTheFolderTheDefaultLayoutNeeds() {
         let (store, cleanup) = store()
