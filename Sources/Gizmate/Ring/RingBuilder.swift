@@ -80,6 +80,29 @@ enum RingBuilder {
                 guard let tool = configuration.tools.first(where: { $0.id == id }),
                       let run = handlers.tool
                 else { return nil }
+                guard tool.options.isEmpty else {
+                    // The choice rides inside the value: a copy with
+                    // `chosenOption` set is still the same gizmo by id, so the
+                    // script, its approval and its usage count all resolve
+                    // exactly as they did before options existed.
+                    let subItems: [RingItem?] = tool.options.map { option in
+                        RingItem(label: option, image: RingTextBadge.image(option)) {
+                            dismiss()
+                            var picked = tool
+                            picked.chosenOption = option
+                            run(picked)
+                        }
+                    }
+                    return RingItem(
+                        label: tool.name,
+                        image: RingIconKind.symbol(tool.resolvedSymbolName).image(),
+                        // Unused, as for any expandable parent — hovering opens
+                        // the orbit instead.
+                        handler: {},
+                        subItems: subItems,
+                        subLayout: .fan
+                    )
+                }
                 return RingItem.symbol(tool.resolvedSymbolName, label: tool.name) {
                     dismiss()
                     run(tool)
