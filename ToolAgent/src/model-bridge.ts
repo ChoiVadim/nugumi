@@ -152,8 +152,8 @@ Do not ask for confirmation, naming, icons, wording preferences, or facts you ca
 After an answer, read its exact ask_user toolResult from this same conversation before writing the candidate.
 
 Choose the candidate kind before writing it:
-- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, or "ask" when the tool's subject is whatever the user types at the moment they run it; output "panel", "replace", or "clipboard"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
-- native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, or runShortcut. Include target (empty only for revealInFinder). Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
+- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, "ask" when the tool's subject is whatever the user types at the moment they run it, or "dictation" when they say it out loud; output "panel", "replace", "clipboard", or "notes"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
+- native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, runShortcut, or saveToNote. Include target (empty only for revealInFinder and saveToNote). Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
 - python: when prompt/native cannot express the request, and the job is the same
   every time it runs. Include source, zero to three fixtures, timeoutSeconds,
   declaresNetwork, secretNames, and outputDirectory when output is "files".
@@ -203,6 +203,14 @@ single argument a selection would arrive in. Choose it when the request has no
 fixed subject — the user supplies one per run ("look something up", "write a
 reply saying...", "convert whatever I tell you"). It requires trigger "always":
 there is nothing to detect it by before the field is filled in.
+
+The input "dictation" is the same argument again, spoken instead of typed. When
+the tool runs, a REC pill appears, the user talks, and clicking the pill ends the
+run and hands the tool the transcript. Choose it over "ask" only when the request
+says so — "надиктовать", "by voice", "speak", "dictate" — and use "ask" for
+anything that merely has no fixed subject. It requires trigger "always" for the
+same reason "ask" does, and it costs the user the microphone permission plus an
+OpenAI key, so never pick it to be helpful.
 
 Two more inputs are taken rather than read. When the tool runs, the user drags a
 box over part of the screen, and that capture is the input:
@@ -262,10 +270,18 @@ one of them; removing the fixture is not a way past it and the host rejects it.
 Never invent a fixture whose only purpose is to pass: a fixture with no
 expectedOutput is better than a guessed expected string.
 
+The output "notes" keeps the tool's answer as a new note in Gizmate's own Notes
+tab, titled with the gizmo. Choose it when the point of the tool is to keep what
+it produced rather than to show it — "сохраняй в заметки", "keep a note of
+this". The native action saveToNote is the same destination for text the tool was
+handed rather than text it produced: it takes no target and its output is
+"notify". Apple's Notes.app is a different place — reach it only when the user
+names it, with sendTextToApp and target "Notes".
+
 Example: "я хочу выделить ссылку и сохранить её в заметки" is a native
-sendTextToApp candidate targeting "Notes", with selection input, notify output,
-selection trigger, empty hosts/extensions, and symbolName "doc.text". It is not
-a Python candidate.
+saveToNote candidate with selection input, notify output, selection trigger,
+empty target, empty hosts/extensions, and symbolName "doc.text". It is not a
+Python candidate.
 
 Example: "на выделение линки будет открывать ее в браузере" is this complete
 native candidate:

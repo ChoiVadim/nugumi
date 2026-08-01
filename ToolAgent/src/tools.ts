@@ -29,6 +29,7 @@ export function createTools(runtime: SidecarRuntime) {
     input: Type.Union([
       Type.Literal("selection"),
       Type.Literal("ask"),
+      Type.Literal("dictation"),
       Type.Literal("clipboardText"),
       Type.Literal("clipboardURL"),
       Type.Literal("files"),
@@ -42,6 +43,7 @@ export function createTools(runtime: SidecarRuntime) {
       Type.Literal("clipboard"),
       Type.Literal("files"),
       Type.Literal("notify"),
+      Type.Literal("notes"),
     ]),
     trigger: Type.Union([
       Type.Literal("always"),
@@ -59,12 +61,14 @@ export function createTools(runtime: SidecarRuntime) {
       input: Type.Union([
         Type.Literal("selection"),
         Type.Literal("ask"),
+        Type.Literal("dictation"),
         Type.Literal("screenshotText"),
       ]),
       output: Type.Union([
         Type.Literal("panel"),
         Type.Literal("replace"),
         Type.Literal("clipboard"),
+        Type.Literal("notes"),
       ]),
       trigger: Type.Union([Type.Literal("always"), Type.Literal("selection")]),
       prompt: Type.String({ maxLength: 16_384 }),
@@ -85,6 +89,7 @@ export function createTools(runtime: SidecarRuntime) {
         Type.Literal("revealInFinder"),
         Type.Literal("openURL"),
         Type.Literal("runShortcut"),
+        Type.Literal("saveToNote"),
       ]),
       target: Type.String({ maxLength: 8192 }),
     }),
@@ -117,6 +122,7 @@ export function createTools(runtime: SidecarRuntime) {
         Type.Literal("replace"),
         Type.Literal("clipboard"),
         Type.Literal("notify"),
+        Type.Literal("notes"),
       ]),
       prompt: Type.String({ maxLength: 16_384 }),
       // At most one, with no expectedOutput: an agent's answer is not

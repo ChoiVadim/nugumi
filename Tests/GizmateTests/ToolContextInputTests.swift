@@ -28,6 +28,26 @@ final class ToolContextInputTests: XCTestCase {
         XCTAssertFalse(ToolInput.ask.needsCapture)
     }
 
+    /// Spoken input lands in the same slot as typed input, for the same reason:
+    /// a script or prompt downstream is handed one argument and never learns
+    /// where it came from.
+    func testDictationReadsTheSpokenTextFromSelection() {
+        let context = ToolContext(selection: "напомни купить молоко")
+        XCTAssertEqual(context.arguments(for: .dictation), ["напомни купить молоко"])
+        XCTAssertEqual(context.arguments(for: .dictation), context.arguments(for: .selection))
+        XCTAssertNil(ToolContext(selection: "").arguments(for: .dictation))
+    }
+
+    /// `runTool` branches on exactly one of these three before dispatching, so a
+    /// dictation tool that also claimed to need the capsule or a drag would take
+    /// the wrong branch and never reach the mic.
+    func testDictationNeedsTheMicAndNothingElseDoes() {
+        XCTAssertEqual(ToolInput.allCases.filter(\.needsDictation), [.dictation])
+        XCTAssertFalse(ToolInput.dictation.needsPrompt)
+        XCTAssertFalse(ToolInput.dictation.needsCapture)
+        XCTAssertEqual(ToolInput.dictation.rawValue, "dictation")
+    }
+
     /// Ring folders and manifests round-trip inputs by raw value, and the agent
     /// protocol maps `ToolAgentCandidateInputV1` across the same strings.
     func testAskRawValueIsStable() {
@@ -44,6 +64,7 @@ final class ToolContextInputTests: XCTestCase {
         for input in [
             ToolAgentCandidateInputV1.selection,
             .ask,
+            .dictation,
             .screenshotText,
         ] {
             XCTAssertNoThrow(

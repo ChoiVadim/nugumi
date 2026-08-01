@@ -244,6 +244,58 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(report.passingFingerprint, fingerprint)
     }
 
+    /// `saveToNote` writes into Gizmate's own Notes tab, so it has no target and
+    /// no app to look for — the same shape `revealInFinder` has. Requiring one
+    /// would fail every note candidate the model is now told to write.
+    func testNativeValidationAcceptsSaveToNoteWithoutATarget() throws {
+        let candidate = try ToolAgentCandidateV1(
+            kind: .native,
+            name: "Keep This",
+            brief: "Keeps the selected text as a note.",
+            symbolName: "doc.text",
+            input: .selection,
+            output: .notify,
+            trigger: .selection,
+            nativeAction: .saveToNote
+        )
+        let fingerprint = ToolAgentFingerprintV1(String(repeating: "c", count: 64))
+
+        let report = try ToolAgentHostCandidateValidator.validate(
+            candidateID: UUID(),
+            fingerprint: fingerprint,
+            candidate: candidate,
+            applicationExists: { _ in false }
+        )
+        let generated = ToolAgentLiveBuilder.generatedTool(from: candidate)
+
+        XCTAssertEqual(report.outcome, .passed)
+        XCTAssertEqual(generated.tool.nativeAction, .saveToNote)
+        XCTAssertTrue(generated.tool.target.isEmpty)
+    }
+
+    /// A spoken prompt gizmo saved into the Notes tab: both ends of this change
+    /// have to survive the raw-value mapping, or the candidate installs as
+    /// "nothing in, toast out".
+    func testMapsSpokenPromptCandidateThatKeepsItsAnswerAsANote() throws {
+        let candidate = try ToolAgentCandidateV1(
+            kind: .prompt,
+            name: "Voice Note",
+            brief: "Tidies up what you say and keeps it.",
+            symbolName: "note.text",
+            input: .dictation,
+            output: .notes,
+            trigger: .always,
+            prompt: "Tidy this up into a short note.",
+            appliesTargetLanguage: false
+        )
+
+        let generated = ToolAgentLiveBuilder.generatedTool(from: candidate)
+
+        XCTAssertEqual(generated.tool.input, .dictation)
+        XCTAssertEqual(generated.tool.output, .notes)
+        XCTAssertTrue(generated.tool.input.needsDictation)
+    }
+
     func testMapsVerifiedPythonCandidateWithItsFullManifest() throws {
         let candidate = try ToolAgentCandidateV1(
             kind: .python,

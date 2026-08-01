@@ -14,6 +14,10 @@ extension GizmateApp {
             askForToolInput(tool)
             return
         }
+        if tool.input.needsDictation {
+            dictateForToolInput(tool)
+            return
+        }
         guard tool.input.needsCapture else {
             dispatch(tool, selection: selection, screenshot: nil)
             return
@@ -49,6 +53,15 @@ extension GizmateApp {
         Task { @MainActor [weak self] in
             guard let self, let typed = await self.promptForToolInput(tool) else { return }
             self.dispatch(tool, selection: typed, screenshot: nil)
+        }
+    }
+
+    /// Runs a `.dictation` tool on whatever the user says into the REC pill.
+    @MainActor
+    func dictateForToolInput(_ tool: GizmateTool) {
+        Task { @MainActor [weak self] in
+            guard let self, let heard = await self.dictateToolInput() else { return }
+            self.dispatch(tool, selection: heard, screenshot: nil)
         }
     }
 

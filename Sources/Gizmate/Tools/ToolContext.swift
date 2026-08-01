@@ -77,12 +77,13 @@ struct ToolContext: Equatable {
     /// a script with no arguments). `.files` yields one entry per file.
     func arguments(for input: ToolInput) -> [String]? {
         switch input {
-        // `.ask` rides on `selection` rather than carrying a field of its own:
-        // the runner resolves the typed text before it builds a context and
-        // hands it over in exactly the slot a selection would occupy, so a
-        // script or prompt downstream cannot tell the two apart. That is the
-        // whole point — one argument, whoever typed it.
-        case .selection, .ask:
+        // `.ask` and `.dictation` ride on `selection` rather than carrying a
+        // field of their own: the runner resolves the typed or spoken text
+        // before it builds a context and hands it over in exactly the slot a
+        // selection would occupy, so a script or prompt downstream cannot tell
+        // the three apart. That is the whole point — one argument, however it
+        // was produced.
+        case .selection, .ask, .dictation:
             return selection.isEmpty ? nil : [selection]
         case .clipboardText:
             guard let clipboardText, !clipboardText.isEmpty else { return nil }

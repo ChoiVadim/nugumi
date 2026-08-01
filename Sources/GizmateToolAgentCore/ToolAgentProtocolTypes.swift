@@ -158,6 +158,9 @@ public enum ToolAgentCandidateInputV1: String, Codable, Equatable, Sendable {
     /// The user types the tool's input into a capsule when it runs; the tool is
     /// handed exactly that text, in the slot a selection would occupy.
     case ask
+    /// The same slot again, spoken instead of typed: the user talks while the
+    /// tool runs and it is handed the transcript.
+    case dictation
     case clipboardText
     case clipboardURL
     case files
@@ -175,6 +178,8 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
     case clipboard
     case files
     case notify
+    /// Kept as a new note in Gizmate's own Notes tab, titled with the gizmo.
+    case notes
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {

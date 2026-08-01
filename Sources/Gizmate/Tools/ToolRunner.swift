@@ -37,6 +37,7 @@ enum ToolRunError: LocalizedError {
             switch input {
             case .selection: return "Select some text first."
             case .ask: return "Nothing was typed."
+            case .dictation: return "Nothing was heard."
             case .clipboardText: return "Copy some text first."
             case .clipboardURL: return "Copy a link first."
             case .files: return "Copy one or more files in Finder first."

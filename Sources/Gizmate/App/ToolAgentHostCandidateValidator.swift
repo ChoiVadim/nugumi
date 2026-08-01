@@ -28,7 +28,7 @@ enum ToolAgentHostCandidateValidator {
                 failureDetail = ["http", "https"].contains(scheme)
                     ? nil
                     : "The native link target must be a valid http or https URL."
-            case .revealInFinder, .runShortcut:
+            case .revealInFinder, .runShortcut, .saveToNote:
                 failureDetail = nil
             case nil:
                 failureDetail = "The native action is missing."

@@ -21,22 +21,48 @@ final class DictationController: NSObject {
     private var startedAt: Date?
     private var clipboardSnapshot: PasteboardSnapshot?
     private var lastPasteChangeCount: Int?
+    /// Set while a `.dictation` gizmo is waiting on its input: phrases are
+    /// collected instead of typed, and handed over when the run ends.
+    private var collect: ((String?) -> Void)?
+    private var heard: [String] = []
 
     func toggle(apiKey: String?) {
         if isRunning { stop() } else { start(apiKey: apiKey) }
     }
 
+    /// Records into a string rather than into whatever app holds the caret, and
+    /// returns everything heard once the user clicks the pill. This is the
+    /// `.dictation` tool input: from here down a spoken gizmo looks exactly like
+    /// an `.ask` one, and nil means the same thing a dismissed capsule does —
+    /// a cancelled tool, not an error.
+    func dictate(apiKey: String?) async -> String? {
+        guard !isRunning, collect == nil else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            heard = []
+            collect = { cont.resume(returning: $0) }
+            start(apiKey: apiKey)
+        }
+    }
+
     func start(apiKey: String?) {
-        guard let apiKey, !apiKey.isEmpty else { onMissingAPIKey?(); return }
-        guard !isRunning else { return }
+        guard let apiKey, !apiKey.isEmpty else {
+            onMissingAPIKey?()
+            finishCollecting()
+            return
+        }
+        guard !isRunning else { finishCollecting(); return }
         Task { @MainActor in
             guard await MicrophoneCapture.requestAuthorization() else {
                 onMicrophonePermissionDenied?()
+                self.finishCollecting()
                 return
             }
-            guard !self.isRunning else { return }
+            guard !self.isRunning else { self.finishCollecting(); return }
             self.isRunning = true
-            self.clipboardSnapshot = PasteboardSnapshot.capture(from: .general)
+            // Nothing is pasted while collecting, so there is nothing to put back.
+            self.clipboardSnapshot = self.collect == nil
+                ? PasteboardSnapshot.capture(from: .general)
+                : nil
             self.lastPasteChangeCount = nil
 
             let session = RealtimeTranscriptionSession(
@@ -87,12 +113,25 @@ final class DictationController: NSObject {
         }
         clipboardSnapshot = nil
         lastPasteChangeCount = nil
+        finishCollecting()
+    }
+
+    /// Hands the transcript to whoever called `dictate`. Called from every exit
+    /// `start` has as well as from `stop`, because a continuation nobody resumes
+    /// is a gizmo that never runs and a ring that never comes back.
+    private func finishCollecting() {
+        guard let collect else { return }
+        self.collect = nil
+        let text = heard.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        heard = []
+        collect(text.isEmpty ? nil : text)
     }
 
     private func insert(_ phrase: String) {
         guard isRunning else { return }
         let text = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        guard collect == nil else { heard.append(text); return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         // ponytail: naive spacing — every phrase gets one trailing space;

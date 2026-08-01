@@ -99,6 +99,10 @@ enum ToolInput: String, Codable, CaseIterable {
     /// receives exactly what was typed and nothing else — the same one argument
     /// `selection` gives it, so nothing downstream has to know the difference.
     case ask
+    /// The same one argument again, spoken instead of typed: the mic runs while
+    /// the tool waits, and the tool is handed the transcript. Nothing
+    /// downstream can tell it from a selection either.
+    case dictation
     case clipboardText
     case clipboardURL
     case files
@@ -114,6 +118,7 @@ enum ToolInput: String, Codable, CaseIterable {
         switch self {
         case .selection: return "Selected text"
         case .ask: return "Ask me"
+        case .dictation: return "Spoken text"
         case .clipboardText: return "Clipboard text"
         case .clipboardURL: return "Copied link"
         case .files: return "Copied files"
@@ -134,6 +139,12 @@ enum ToolInput: String, Codable, CaseIterable {
     /// input doesn't exist until the tool runs and the user types it.
     var needsPrompt: Bool {
         self == .ask
+    }
+
+    /// And once more with the mic: same slot, same "doesn't exist until the tool
+    /// runs", a REC pill instead of a field.
+    var needsDictation: Bool {
+        self == .dictation
     }
 }
 

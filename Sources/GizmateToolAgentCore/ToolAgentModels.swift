@@ -7,9 +7,10 @@ public enum ToolAgentNativeActionV1: String, Codable, Equatable, Sendable {
     case revealInFinder
     case openURL
     case runShortcut
+    case saveToNote
 
     fileprivate var needsTarget: Bool {
-        self != .revealInFinder
+        self != .revealInFinder && self != .saveToNote
     }
 }
 
@@ -340,13 +341,14 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // Only a Python tool reads a process environment, so a prompt or
             // native candidate that declares secrets has misunderstood what it
             // is building rather than found a way to use one.
-            // Three ways for text the user is looking at to arrive: selected,
-            // read off the screen by Vision, or typed when the tool runs. The
-            // sidecar's schema and the capability description have always
-            // offered all three; this guard used to accept only the first, so a
+            // Four ways for the text a prompt tool works on to arrive: selected,
+            // read off the screen by Vision, typed, or spoken when the tool
+            // runs. The sidecar's schema and the capability description offer
+            // all four; this guard used to accept only the first, so a
             // screenshotText prompt candidate — which the model was explicitly
             // told to write — came back as invalidCandidate.
-            guard input == .selection || input == .ask || input == .screenshotText,
+            guard input == .selection || input == .ask || input == .screenshotText
+                    || input == .dictation,
                   output != .files,
                   output != .notify,
                   !prompt.isEmpty,
@@ -646,13 +648,14 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
 
         switch kind {
         case .prompt:
-            // Three ways for text the user is looking at to arrive: selected,
-            // read off the screen by Vision, or typed when the tool runs. The
-            // sidecar's schema and the capability description have always
-            // offered all three; this guard used to accept only the first, so a
+            // Four ways for the text a prompt tool works on to arrive: selected,
+            // read off the screen by Vision, typed, or spoken when the tool
+            // runs. The sidecar's schema and the capability description offer
+            // all four; this guard used to accept only the first, so a
             // screenshotText prompt candidate — which the model was explicitly
             // told to write — came back as invalidCandidate.
-            guard input == .selection || input == .ask || input == .screenshotText,
+            guard input == .selection || input == .ask || input == .screenshotText
+                    || input == .dictation,
                   output != .files,
                   output != .notify,
                   !prompt.isEmpty,

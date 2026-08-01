@@ -73,6 +73,15 @@ extension GizmateApp {
         dictationController.toggle(apiKey: KeychainStore.apiKey(for: .openAI))
     }
 
+    /// The same mic, collected into a string instead of typed into the front
+    /// app: a `.dictation` gizmo's one input. nil when nothing was said, or when
+    /// the key or the mic permission is missing — the controller's own alerts
+    /// have already explained which.
+    @MainActor
+    func dictateToolInput() async -> String? {
+        await dictationController.dictate(apiKey: KeychainStore.apiKey(for: .openAI))
+    }
+
     @MainActor
     func presentLiveTranslationAPIKeyAlert(feature: String = "Live translation") {
         NSApp.activate(ignoringOtherApps: true)

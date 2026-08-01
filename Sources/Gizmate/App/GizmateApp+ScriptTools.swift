@@ -33,6 +33,12 @@ extension GizmateApp {
             }
             typed = answer
         }
+        if tool.input.needsDictation {
+            guard let heard = await dictateToolInput() else {
+                return .failed("Nothing was heard, so there was nothing to run on.")
+            }
+            typed = heard
+        }
 
         // A capture tool has nothing to test until the user drags out an area,
         // so the test asks for one — the same drag the real run would.

@@ -78,6 +78,7 @@ const commonCandidate = {
   input: z.enum([
     "selection",
     "ask",
+    "dictation",
     "clipboardText",
     "clipboardURL",
     "files",
@@ -85,7 +86,7 @@ const commonCandidate = {
     "screenshotText",
     "none",
   ]),
-  output: z.enum(["panel", "replace", "clipboard", "files", "notify"]),
+  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes"]),
   trigger: z.enum(["always", "selection", "link", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
@@ -100,8 +101,8 @@ const promptCandidate = z
     // A prompt tool works on text the user is looking at. "screenshotText" is
     // that same text, read off the screen instead of out of a selection, and
     // "ask" is text the user types when the tool runs.
-    input: z.enum(["selection", "ask", "screenshotText"]),
-    output: z.enum(["panel", "replace", "clipboard"]),
+    input: z.enum(["selection", "ask", "dictation", "screenshotText"]),
+    output: z.enum(["panel", "replace", "clipboard", "notes"]),
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
@@ -120,6 +121,7 @@ const nativeCandidate = z
       "revealInFinder",
       "openURL",
       "runShortcut",
+      "saveToNote",
     ]),
     target: byteString(LIMITS.targetBytes, true),
   })
@@ -163,7 +165,7 @@ const agentCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("agent"),
-    output: z.enum(["panel", "replace", "clipboard", "notify"]),
+    output: z.enum(["panel", "replace", "clipboard", "notify", "notes"]),
     prompt: byteString(LIMITS.promptBytes),
     // At most one, and never with an expectedOutput: an agent's answer is not
     // predictable, so a fixture is the input a harmless trial run should use,
@@ -211,6 +213,7 @@ export const candidateSchema = z
     if (
       candidate.kind === "native" &&
       candidate.nativeAction !== "revealInFinder" &&
+      candidate.nativeAction !== "saveToNote" &&
       candidate.target.length === 0
     ) {
       context.addIssue({
@@ -239,6 +242,7 @@ const commonInstalledTool = {
   input: z.enum([
     "selection",
     "ask",
+    "dictation",
     "clipboardText",
     "clipboardURL",
     "files",
@@ -246,7 +250,7 @@ const commonInstalledTool = {
     "screenshotText",
     "none",
   ]),
-  output: z.enum(["panel", "replace", "clipboard", "files", "notify"]),
+  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes"]),
   trigger: z.enum(["always", "selection", "link", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
@@ -261,8 +265,8 @@ const installedPromptTool = z
     // A prompt tool works on text the user is looking at. "screenshotText" is
     // that same text, read off the screen instead of out of a selection, and
     // "ask" is text the user types when the tool runs.
-    input: z.enum(["selection", "ask", "screenshotText"]),
-    output: z.enum(["panel", "replace", "clipboard"]),
+    input: z.enum(["selection", "ask", "dictation", "screenshotText"]),
+    output: z.enum(["panel", "replace", "clipboard", "notes"]),
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
@@ -281,6 +285,7 @@ const installedNativeTool = z
       "revealInFinder",
       "openURL",
       "runShortcut",
+      "saveToNote",
     ]),
     target: byteString(LIMITS.targetBytes, true),
   })
@@ -307,7 +312,7 @@ const installedAgentTool = z
   .object({
     ...commonInstalledTool,
     kind: z.literal("agent"),
-    output: z.enum(["panel", "replace", "clipboard", "notify"]),
+    output: z.enum(["panel", "replace", "clipboard", "notify", "notes"]),
     prompt: byteString(LIMITS.promptBytes),
     maxSteps: z.number().int().min(1).max(24),
     timeoutSeconds: z.number().int().min(15).max(900),
@@ -347,6 +352,7 @@ export const installedToolSchema = z
     if (
       tool.kind === "native" &&
       tool.nativeAction !== "revealInFinder" &&
+      tool.nativeAction !== "saveToNote" &&
       tool.target.length === 0
     ) {
       context.addIssue({
