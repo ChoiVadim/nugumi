@@ -394,6 +394,15 @@ struct ToolEditorPanel: View {
                 }
             }
 
+            editorSection(
+                "Options",
+                subtitle: "Variants this gizmo offers. The Ring shows them as a "
+                    + "second layer behind its button, and the first one is used "
+                    + "when you run the gizmo from a shortcut."
+            ) {
+                optionsEditor
+            }
+
             switch draft.kind {
             case .prompt:
                 editorSection(
@@ -525,6 +534,48 @@ struct ToolEditorPanel: View {
         }
     }
 
+    /// A plain list of variant labels. Rows are edited in place and sanitized
+    /// on the way into the draft, so a blank or duplicate row simply doesn't
+    /// become an option rather than becoming a broken button.
+    private var optionsEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(draft.options.enumerated()), id: \.offset) { index, option in
+                HStack(spacing: 8) {
+                    TextField("720p", text: Binding(
+                        get: { index < draft.options.count ? draft.options[index] : "" },
+                        set: { newValue in
+                            guard index < draft.options.count else { return }
+                            var edited = draft.options
+                            edited[index] = newValue
+                            draft.options = edited
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    Button {
+                        var edited = draft.options
+                        edited.remove(at: index)
+                        draft.options = edited
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Remove \(option)")
+                }
+            }
+            if draft.options.count < 5 {
+                Button {
+                    // Two at a time from nothing: one option is not a choice, so
+                    // a list that starts at one can never be saved.
+                    draft.options += draft.options.isEmpty ? ["", ""] : [""]
+                } label: {
+                    Label("Add an option", systemImage: "plus.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(FlowTheme.inkTertiary)
+            }
+        }
+    }
+
     private func editorSection<Content: View>(
         _ title: String,
         subtitle: String,
@@ -604,6 +655,7 @@ struct ToolEditorPanel: View {
         tool.name = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
         tool.prompt = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         tool.brief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
+        tool.options = GizmateTool.sanitizedOptions(tool.options)
         bridge.tools.save(tool, script: tool.kind == .python ? script : nil)
         let ran: String? = {
             if case .passed = test, let passedTestFingerprint { return passedTestFingerprint }
