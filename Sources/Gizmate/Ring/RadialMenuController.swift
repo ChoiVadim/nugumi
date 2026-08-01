@@ -131,8 +131,14 @@ final class RadialActionMenuController {
             let isExpandable = item.expandsOnHover
             let button = RadialMenuButtonView(image: item.image) { [weak self] in
                 // Expandable parents (a folder, or the messenger button) reveal
-                // their orbit instead of firing/closing — the ring stays.
-                if isExpandable { self?.showOrbit(slotIndex) } else { self?.finish(with: item) }
+                // their orbit instead of firing/closing — the ring stays. Unless
+                // the parent has a default of its own to run (`firesOnClick`),
+                // in which case hovering is what opens the orbit.
+                if isExpandable, !item.firesOnClick {
+                    self?.showOrbit(slotIndex)
+                } else {
+                    self?.finish(with: item)
+                }
             }
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,

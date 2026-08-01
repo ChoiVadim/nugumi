@@ -66,6 +66,12 @@ struct RingItem {
     /// are empty slots, kept so `.slots` can leave a gap where the user left one.
     var subItems: [RingItem?] = []
     var subLayout: RingSubLayout = .fan
+    /// A parent that still runs its own `handler` when clicked, instead of only
+    /// opening its orbit. Off for a folder or the Summarize button — neither
+    /// has anything to do on its own — and on for Note, where clicking means
+    /// "file it under the fallback tag, don't make me choose". Hover opens the
+    /// orbit either way, so the choices stay one gesture away.
+    var firesOnClick: Bool = false
 
     /// An orbit with nothing in it is not worth opening — the button behaves
     /// like any other and runs its own handler.
@@ -142,9 +148,13 @@ struct RingSaveNoteOption {
 }
 
 /// Builds the ring's Note item. With tags it is a hover-expandable parent whose
-/// orbit is one word-badge per tag; with none it is an ordinary button that
-/// saves straight away, so deleting every tag degrades to the plain behaviour
-/// rather than to a button that cannot be pressed.
+/// orbit is one icon per tag; with none it is an ordinary button that saves
+/// straight away, so deleting every tag degrades to the plain behaviour rather
+/// than to a button that cannot be pressed.
+///
+/// Clicking the parent files the note under the fallback tag rather than
+/// insisting on a choice — the orbit is for when the user wants to pick, not a
+/// toll on every save.
 @MainActor
 func saveNoteRingItem(_ opt: RingSaveNoteOption, dismiss: @escaping () -> Void) -> RingItem {
     let icon = RingActionID.saveNote.icon.image()
@@ -155,16 +165,25 @@ func saveNoteRingItem(_ opt: RingSaveNoteOption, dismiss: @escaping () -> Void) 
         }
     }
     let subItems: [RingItem?] = opt.tags.map { tag in
-        RingItem(label: tag.name, image: RingTextBadge.image(tag.name)) {
+        // The glyph alone: the hover callout already spells the tag out, and a
+        // word shrunk to fit a 44pt disc is the worse half of the pair.
+        RingItem.symbol(tag.ringSymbol, label: tag.name) {
             dismiss()
             opt.run(tag)
         }
     }
+    // Deleted like any other tag, in which case the click files it untagged —
+    // the same fallback gizmo-written notes take.
+    let fallback = opt.tags.first { $0.id == NoteTag.otherID }
     return RingItem(
         label: RingActionID.saveNote.label,
         image: icon,
-        handler: {},
-        subItems: subItems
+        handler: {
+            dismiss()
+            opt.run(fallback)
+        },
+        subItems: subItems,
+        firesOnClick: true
     )
 }
 

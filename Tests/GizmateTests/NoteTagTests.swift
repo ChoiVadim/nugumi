@@ -54,10 +54,56 @@ final class NoteTagTests: XCTestCase {
         defer { cleanup() }
 
         store.add(text: "quarterly numbers", tagID: NoteTag.workID)
-        store.renameTag(NoteTag.workID, to: "Job")
+        store.updateTag(NoteTag.workID, name: "Job", symbol: "hammer")
 
         XCTAssertEqual(store.tag(NoteTag.workID)?.name, "Job")
+        XCTAssertEqual(store.tag(NoteTag.workID)?.symbol, "hammer")
         XCTAssertEqual(store.notes(taggedWith: NoteTag.workID).map(\.text), ["quarterly numbers"])
+    }
+
+    /// The ring draws the glyph and nothing else, so a tag with no icon has to
+    /// resolve to one rather than to an empty button.
+    @MainActor
+    func testATagWithNoIconFallsBackToTheGenericGlyph() {
+        let (store, cleanup) = store()
+        defer { cleanup() }
+
+        let tag = store.addTag(named: "Ideas")
+        XCTAssertNil(tag.symbol)
+        XCTAssertEqual(tag.ringSymbol, NoteTag.fallbackSymbol)
+        XCTAssertEqual(store.tag(NoteTag.workID)?.ringSymbol, "briefcase")
+    }
+
+    /// Clicking the ring's Note button must save without asking — the orbit is
+    /// there for when the user wants to pick, not a toll on every save.
+    @MainActor
+    func testClickingTheNoteButtonFilesUnderTheFallbackTag() {
+        var filed: [NoteTag?] = []
+        let item = saveNoteRingItem(
+            RingSaveNoteOption(tags: NoteTag.defaults) { filed.append($0) },
+            dismiss: {}
+        )
+
+        XCTAssertTrue(item.firesOnClick, "otherwise the click only opens the orbit")
+        item.handler()
+        XCTAssertEqual(filed.map { $0?.id }, [NoteTag.otherID])
+    }
+
+    /// With Other deleted the click still saves — untagged, the same place a
+    /// gizmo-written note lands when nothing chose a tag for it.
+    @MainActor
+    func testClickingWithNoFallbackTagFilesUntagged() {
+        var filed: [NoteTag?] = []
+        let item = saveNoteRingItem(
+            RingSaveNoteOption(tags: NoteTag.defaults.filter { $0.id != NoteTag.otherID }) {
+                filed.append($0)
+            },
+            dismiss: {}
+        )
+
+        item.handler()
+        XCTAssertEqual(filed.count, 1)
+        XCTAssertNil(filed[0])
     }
 
     /// The one that matters: reorganising folders must never destroy text.

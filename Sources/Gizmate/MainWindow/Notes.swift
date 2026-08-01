@@ -6,11 +6,22 @@ import Foundation
 struct NoteTag: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
+    /// SF Symbol the ring's Note orbit wears for this tag. The ring draws the
+    /// glyph alone — the name is already in the hover callout, and a word
+    /// squeezed into a 44pt disc reads worse than an icon at any length.
+    /// `nil` is a tag the user never picked one for.
+    var symbol: String?
 
-    init(id: UUID = UUID(), name: String) {
+    init(id: UUID = UUID(), name: String, symbol: String? = nil) {
         self.id = id
         self.name = name
+        self.symbol = symbol
     }
+
+    /// What the ring draws for a tag with no icon of its own.
+    static let fallbackSymbol = "tag"
+
+    var ringSymbol: String { symbol ?? Self.fallbackSymbol }
 
     /// The tag gizmos file into when nothing chose one for them.
     ///
@@ -26,9 +37,9 @@ struct NoteTag: Codable, Identifiable, Equatable {
     /// What a fresh install starts with. Editable afterwards — this is a
     /// starting point, not a fixed vocabulary.
     static let defaults: [NoteTag] = [
-        NoteTag(id: personalID, name: "Personal"),
-        NoteTag(id: workID, name: "Work"),
-        NoteTag(id: otherID, name: "Other"),
+        NoteTag(id: personalID, name: "Personal", symbol: "person"),
+        NoteTag(id: workID, name: "Work", symbol: "briefcase"),
+        NoteTag(id: otherID, name: "Other", symbol: "tray"),
     ]
 }
 
@@ -189,17 +200,25 @@ final class NotesStore: ObservableObject {
     // MARK: - Tags
 
     @discardableResult
-    func addTag(named name: String) -> NoteTag {
-        let tag = NoteTag(name: name)
+    func addTag(named name: String, symbol: String? = nil) -> NoteTag {
+        let tag = NoteTag(name: name, symbol: symbol)
         tags.append(tag)
         saveTags()
         onChange?()
         return tag
     }
 
+    /// Renaming on its own keeps whatever icon the tag already had.
     func renameTag(_ id: UUID, to name: String) {
+        updateTag(id, name: name, symbol: tag(id)?.symbol)
+    }
+
+    /// Name and icon travel together: the editor row commits both at once, and
+    /// an empty symbol is "no icon of its own", not the string "".
+    func updateTag(_ id: UUID, name: String, symbol: String?) {
         guard let idx = tags.firstIndex(where: { $0.id == id }) else { return }
         tags[idx].name = name
+        tags[idx].symbol = (symbol?.isEmpty ?? true) ? nil : symbol
         saveTags()
         onChange?()
     }
