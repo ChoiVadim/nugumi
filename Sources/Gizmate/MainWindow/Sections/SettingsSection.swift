@@ -85,11 +85,15 @@ private struct GeneralTab: View {
         Group {
             SubCard {
                 VStack(spacing: 18) {
-                    SettingRow("On selection",
-                               subtitle: "What appears when you select text.") {
-                        PillPicker(options: SelectionDisplayMode.allCases,
-                                   selection: bridge.binding(\.selectionDisplayMode) { .setSelectionDisplayMode($0) },
-                                   label: { $0.menuTitle })
+                    SettingRow("Show button on selection",
+                               subtitle: "Off means the ring only opens from the shortcut.") {
+                        Toggle("", isOn: Binding(
+                            get: { bridge.settings.selectionDisplayMode == .floatingBar },
+                            set: { bridge.perform(.setSelectionDisplayMode($0 ? .floatingBar : .off)) }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(FlowTheme.accent)
                     }
                 }
             }
