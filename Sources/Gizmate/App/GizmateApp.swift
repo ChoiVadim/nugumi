@@ -354,8 +354,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
                 // Unrunnable tools (no prompt, or a script tool with no script)
                 // are filtered here so the builder never has to consult the store.
                 tools: self.toolsStore.tools.filter(self.toolsStore.isRunnable),
-                folders: self.ringLayoutStore.folders,
-                context: ToolContext.current(selection: selection)
+                folders: self.ringLayoutStore.folders
             )
         }
         setupStatusItem()

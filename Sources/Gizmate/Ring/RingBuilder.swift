@@ -66,9 +66,10 @@ enum RingBuilder {
                 return builtInItem(id, handlers: handlers, dismiss: dismiss)
             case .tool(let id):
                 guard let tool = configuration.tools.first(where: { $0.id == id }),
-                      // A tool whose trigger doesn't fit the moment leaves its slot
-                      // as a gap — the same rule the contextual Summarize follows.
-                      tool.trigger.matches(configuration.context),
+                // Every gizmo the user placed stays where they put it, whatever
+                // is on the clipboard: a slot that comes and goes is a slot
+                // nobody can aim at. A gizmo run without its input says so
+                // instead (`ToolRunError.noInput`).
                       let run = handlers.tool
                 else { return nil }
                 return RingItem.symbol(tool.resolvedSymbolName, label: tool.name) {

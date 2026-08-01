@@ -318,7 +318,7 @@ struct ToolEditorPanel: View {
 
     /// Trigger · input · result, spelled out rather than shown as three pickers.
     private var behaviourLine: String {
-        var parts = [draft.trigger.summary]
+        var parts: [String] = []
         if draft.kind != .native || draft.nativeAction.usesInput {
             parts.append("takes \(draft.input.displayName.lowercased())")
         }
@@ -357,13 +357,16 @@ struct ToolEditorPanel: View {
                     }
                 }
                 editorSection(
-                    "Availability and result",
-                    subtitle: "Choose when the tool appears and where its answer goes."
+                    "Result",
+                    subtitle: "Where the gizmo's answer goes."
                 ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        triggerPicker
-                        resultPicker
-                    }
+                    resultPicker
+                }
+                editorSection(
+                    "Your context",
+                    subtitle: "What this gizmo knows about you before it starts."
+                ) {
+                    contextToggles
                 }
             case .native:
                 editorSection(
@@ -377,15 +380,12 @@ struct ToolEditorPanel: View {
                         }
                     }
                 }
-                editorSection(
-                    "Availability and input",
-                    subtitle: "Choose when the action appears and what it receives."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        triggerPicker
-                        if draft.nativeAction.usesInput {
-                            inputPicker
-                        }
+                if draft.nativeAction.usesInput {
+                    editorSection(
+                        "Input",
+                        subtitle: "What the action receives."
+                    ) {
+                        inputPicker
                     }
                 }
             case .python:
@@ -396,11 +396,10 @@ struct ToolEditorPanel: View {
                     scriptField
                 }
                 editorSection(
-                    "Availability and result",
-                    subtitle: "Choose when the script appears, its input, and its output."
+                    "Input and result",
+                    subtitle: "What the script receives, and where its output goes."
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
-                        triggerPicker
                         inputPicker
                         resultPicker
                         if draft.output == .files {
@@ -439,12 +438,10 @@ struct ToolEditorPanel: View {
                     promptField
                 }
                 editorSection(
-                    "Availability and result",
-                    subtitle: "Choose when it appears, what it starts from, and "
-                        + "where its answer goes."
+                    "Input and result",
+                    subtitle: "What it starts from, and where its answer goes."
                 ) {
                     VStack(alignment: .leading, spacing: 18) {
-                        triggerPicker
                         inputPicker
                         resultPicker
                     }
@@ -952,37 +949,6 @@ struct ToolEditorPanel: View {
         script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var triggerPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SettingRow("Shows up", subtitle: draft.trigger.summary) {
-                PillPicker(
-                    options: TriggerChoice.allCases,
-                    selection: Binding(
-                        get: { TriggerChoice(draft.trigger) },
-                        set: { draft.trigger = $0.trigger(keeping: draft.trigger) }
-                    ),
-                    label: { $0.displayName }
-                )
-            }
-            switch draft.trigger {
-            case .clipboardURL(let hosts):
-                filterField(
-                    placeholder: "youtube.com, youtu.be — blank for any link",
-                    values: hosts,
-                    onChange: { draft.trigger = .clipboardURL(hosts: $0) }
-                )
-            case .files(let extensions):
-                filterField(
-                    placeholder: "heic, png — blank for any file",
-                    values: extensions,
-                    onChange: { draft.trigger = .files(extensions: $0) }
-                )
-            case .always, .selectionNotEmpty:
-                EmptyView()
-            }
-        }
-    }
-
     /// Eight inputs, with labels as long as "Text on screen" — far past what a
     /// pill row fits, which is what pushed the whole panel wider than itself.
     private var inputPicker: some View {
@@ -1253,31 +1219,6 @@ struct ToolEditorPanel: View {
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
     }
 
-    /// Comma-separated list bound to a `[String]`, for host and extension filters.
-    private func filterField(
-        placeholder: String,
-        values: [String],
-        onChange: @escaping ([String]) -> Void
-    ) -> some View {
-        TextField(placeholder, text: Binding(
-            get: { values.joined(separator: ", ") },
-            set: { raw in
-                onChange(
-                    raw.components(separatedBy: ",")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                        .filter { !$0.isEmpty }
-                )
-            }
-        ))
-        .textFieldStyle(.plain)
-        .font(.system(size: 12, design: .monospaced))
-        .foregroundStyle(FlowTheme.ink)
-        .padding(.vertical, 7)
-        .padding(.horizontal, 11)
-        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-    }
-
     private func fieldLabel(_ title: String, hint: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
@@ -1309,45 +1250,6 @@ struct ToolEditorPanel: View {
         for value in sys.argv[1:]:
             print(value)
         """
-}
-
-/// Flat, pill-friendly view of `ToolTrigger`, which carries lists the picker
-/// can't express. Switching keeps whatever filter the previous case held.
-private enum TriggerChoice: String, CaseIterable {
-    case always, selection, link, files
-
-    init(_ trigger: ToolTrigger) {
-        switch trigger {
-        case .always: self = .always
-        case .selectionNotEmpty: self = .selection
-        case .clipboardURL: self = .link
-        case .files: self = .files
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .always: return "Always"
-        case .selection: return "Selection"
-        case .link: return "Copied link"
-        case .files: return "Copied files"
-        }
-    }
-
-    func trigger(keeping previous: ToolTrigger) -> ToolTrigger {
-        switch self {
-        case .always:
-            return .always
-        case .selection:
-            return .selectionNotEmpty
-        case .link:
-            if case .clipboardURL = previous { return previous }
-            return .clipboardURL(hosts: [])
-        case .files:
-            if case .files = previous { return previous }
-            return .files(extensions: [])
-        }
-    }
 }
 
 /// Result of one Install & test run, as the editor shows it.

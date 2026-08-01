@@ -126,7 +126,6 @@ struct ToolEvalCaseReport: Codable {
     let kind: String?
     let input: String?
     let output: String?
-    let trigger: String?
     let declaresNetwork: Bool?
     let assurance: String?
     let source: String?
@@ -301,7 +300,6 @@ struct ToolEvalMode: Equatable {
             kind: generated?.tool.kind.rawValue,
             input: generated?.tool.input.rawValue,
             output: generated?.tool.output.rawValue,
-            trigger: generated.map { Self.triggerName($0.tool.trigger) },
             declaresNetwork: generated?.tool.declaresNetwork,
             assurance: generated?.assurance.rawValue,
             source: generated?.script.isEmpty == false ? generated?.script : nil,
@@ -343,15 +341,6 @@ struct ToolEvalMode: Equatable {
         case .unverified: return 0
         case .smoke: return 1
         case .verified: return 2
-        }
-    }
-
-    private static func triggerName(_ trigger: ToolTrigger) -> String {
-        switch trigger {
-        case .always: return "always"
-        case .selectionNotEmpty: return "selection"
-        case .clipboardURL: return "link"
-        case .files: return "files"
         }
     }
 

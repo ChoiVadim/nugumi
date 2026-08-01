@@ -105,28 +105,6 @@ enum ToolAgentLiveBuilder {
         let kind = ToolAgentCandidateKindV1(rawValue: tool.kind.rawValue) ?? .prompt
         let input = ToolAgentCandidateInputV1(rawValue: tool.input.rawValue) ?? .none
         let output = ToolAgentCandidateOutputV1(rawValue: tool.output.rawValue) ?? .notify
-        let trigger: ToolAgentCandidateTriggerV1
-        let hosts: [String]
-        let extensions: [String]
-        switch tool.trigger {
-        case .always:
-            trigger = .always
-            hosts = []
-            extensions = []
-        case .selectionNotEmpty:
-            trigger = .selection
-            hosts = []
-            extensions = []
-        case .clipboardURL(let values):
-            trigger = .link
-            hosts = values
-            extensions = []
-        case .files(let values):
-            trigger = .files
-            hosts = []
-            extensions = values
-        }
-
         return try ToolAgentInstalledToolV1(
             kind: kind,
             name: tool.name,
@@ -134,9 +112,12 @@ enum ToolAgentLiveBuilder {
             symbolName: tool.symbolName,
             input: input,
             output: output,
-            trigger: trigger,
-            hosts: hosts,
-            extensions: extensions,
+            // Gizmos are no longer gated on context — every one of them sits in
+            // the Ring at all times — but the wire protocol still carries the
+            // field, and `.always` is the value that validates against any input.
+            trigger: .always,
+            hosts: [],
+            extensions: [],
             // An agent tool's instruction lives in the same field a prompt tool's
             // prompt does, so both carry it into an edit.
             prompt: kind == .prompt || kind == .agent ? tool.prompt : "",
@@ -453,12 +434,6 @@ enum ToolAgentLiveBuilder {
         }
         let input = ToolInput(rawValue: candidate.input.rawValue) ?? .none
         let output = ToolOutput(rawValue: candidate.output.rawValue) ?? .notify
-        let trigger: ToolTrigger = switch candidate.trigger {
-        case .always: .always
-        case .selection: .selectionNotEmpty
-        case .link: .clipboardURL(hosts: candidate.hosts)
-        case .files: .files(extensions: candidate.extensions)
-        }
         let nativeAction = candidate.nativeAction
             .flatMap { NativeAction(rawValue: $0.rawValue) }
             ?? .openApp
@@ -470,7 +445,6 @@ enum ToolAgentLiveBuilder {
             kind: kind,
             input: input,
             output: output,
-            trigger: trigger,
             prompt: candidate.prompt,
             appliesTargetLanguage: candidate.appliesTargetLanguage,
             nativeAction: nativeAction,

@@ -26,7 +26,6 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
             kind: .prompt,
             input: .selection,
             output: .panel,
-            trigger: .selectionNotEmpty,
             prompt: "Explain the selected text simply.",
             appliesTargetLanguage: true,
             timeoutSeconds: 45,
@@ -40,7 +39,7 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(installed.name, tool.name)
         XCTAssertEqual(installed.input, .selection)
         XCTAssertEqual(installed.output, .panel)
-        XCTAssertEqual(installed.trigger, .selection)
+        XCTAssertEqual(installed.trigger, .always)
         XCTAssertEqual(installed.prompt, tool.prompt)
         XCTAssertTrue(installed.appliesTargetLanguage)
         XCTAssertEqual(installed.timeoutSeconds, 120)
@@ -48,14 +47,13 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(installed.source, "")
     }
 
-    func testSnapshotsExistingNativeToolAndTriggerFiltersForPiEditing() throws {
+    func testSnapshotsExistingNativeToolForPiEditing() throws {
         let tool = GizmateTool(
             name: "Open copied link",
             symbolName: "link",
             kind: .native,
             input: .clipboardURL,
             output: .notify,
-            trigger: .clipboardURL(hosts: ["example.com"]),
             nativeAction: .openURL,
             target: "{input}",
             brief: "Opens copied Example links."
@@ -64,8 +62,9 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         let installed = try ToolAgentLiveBuilder.installedTool(from: tool, script: "")
 
         XCTAssertEqual(installed.kind, .native)
-        XCTAssertEqual(installed.trigger, .link)
-        XCTAssertEqual(installed.hosts, ["example.com"])
+        // The Ring no longer gates on context, so a snapshot always says .always.
+        XCTAssertEqual(installed.trigger, .always)
+        XCTAssertEqual(installed.hosts, [])
         XCTAssertEqual(installed.extensions, [])
         XCTAssertEqual(installed.nativeAction, .openURL)
         XCTAssertEqual(installed.target, "{input}")
@@ -87,7 +86,6 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
             kind: .python,
             input: .files,
             output: .files,
-            trigger: .files(extensions: ["txt"]),
             outputDirectory: "~/Desktop",
             timeoutSeconds: 45,
             declaresNetwork: false,
@@ -98,7 +96,7 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
 
         XCTAssertEqual(installed.kind, .python)
         XCTAssertEqual(installed.source, source)
-        XCTAssertEqual(installed.extensions, ["txt"])
+        XCTAssertEqual(installed.extensions, [])
         XCTAssertEqual(installed.outputDirectory, "~/Desktop")
         XCTAssertEqual(installed.timeoutSeconds, 45)
         XCTAssertFalse(installed.declaresNetwork)
@@ -156,7 +154,6 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(generated.tool.kind, .prompt)
         XCTAssertEqual(generated.tool.input, .selection)
         XCTAssertEqual(generated.tool.output, .replace)
-        XCTAssertEqual(generated.tool.trigger, .selectionNotEmpty)
         XCTAssertEqual(generated.tool.prompt, candidate.prompt)
         XCTAssertTrue(generated.tool.appliesTargetLanguage)
         XCTAssertEqual(generated.script, "")
@@ -180,7 +177,6 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(generated.tool.kind, .native)
         XCTAssertEqual(generated.tool.input, .selection)
         XCTAssertEqual(generated.tool.output, .notify)
-        XCTAssertEqual(generated.tool.trigger, .selectionNotEmpty)
         XCTAssertEqual(generated.tool.nativeAction, .sendTextToApp)
         XCTAssertEqual(generated.tool.target, "Notes")
         XCTAssertEqual(generated.script, "")
@@ -277,7 +273,6 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(generated.tool.kind, .python)
         XCTAssertEqual(generated.tool.input, .clipboardText)
         XCTAssertEqual(generated.tool.output, .clipboard)
-        XCTAssertEqual(generated.tool.trigger, .always)
         XCTAssertEqual(generated.tool.timeoutSeconds, 45)
         XCTAssertFalse(generated.tool.declaresNetwork)
         XCTAssertEqual(generated.script, candidate.source)

@@ -141,10 +141,8 @@ struct RingConfiguration {
     var tools: [GizmateTool]
     /// Every sub-ring, flat. Slots reference these by id.
     var folders: [RingFolder] = []
-    /// What's in front of the user right now, used to test each tool's trigger.
-    var context: ToolContext
 
-    static let `default` = RingConfiguration(layout: .default, tools: [], context: .empty)
+    static let `default` = RingConfiguration(layout: .default, tools: [])
 }
 
 /// Live ring contents, published once by the app delegate at launch. Same

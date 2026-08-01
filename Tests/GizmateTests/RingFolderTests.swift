@@ -27,7 +27,7 @@ final class RingFolderTests: XCTestCase {
     }
 
     private func configuration(root: RingLayout, folders: [RingFolder]) -> RingConfiguration {
-        RingConfiguration(layout: root, tools: [], folders: folders, context: .empty)
+        RingConfiguration(layout: root, tools: [], folders: folders)
     }
 
     /// Sub-item labels with the gaps left in, which is the whole point of the

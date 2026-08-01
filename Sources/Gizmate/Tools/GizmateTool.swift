@@ -176,69 +176,6 @@ enum ToolOutput: String, Codable, CaseIterable {
     }
 }
 
-/// When the tool shows up in the ring. A tool whose trigger doesn't match the
-/// current context is skipped, leaving its slot as a gap — the same mechanism
-/// that already hides the contextual Summarize button.
-enum ToolTrigger: Codable, Equatable {
-    /// Always in the ring. Prompt tools use this: the quick menu opens its ring
-    /// before reading the selection, so anything selection-gated would vanish there.
-    case always
-    case selectionNotEmpty
-    /// A URL on the clipboard. An empty `hosts` list matches any URL; otherwise a
-    /// host matches exactly or as a subdomain ("youtube.com" covers "m.youtube.com").
-    case clipboardURL(hosts: [String])
-    /// Files on the clipboard (⌘C in Finder puts file URLs there). An empty
-    /// `extensions` list matches any file; otherwise EVERY file must match.
-    case files(extensions: [String])
-
-    func matches(_ context: ToolContext) -> Bool {
-        switch self {
-        case .always:
-            return true
-        case .selectionNotEmpty:
-            return !context.selection.isEmpty
-        case .clipboardURL(let hosts):
-            guard let url = context.clipboardURL else { return false }
-            guard !hosts.isEmpty else { return true }
-            let host = (url.host() ?? "").lowercased()
-            return hosts.contains { raw in
-                let wanted = raw.lowercased().trimmingCharacters(in: .whitespaces)
-                guard !wanted.isEmpty else { return false }
-                return host == wanted || host.hasSuffix("." + wanted)
-            }
-        case .files(let extensions):
-            guard !context.clipboardFiles.isEmpty else { return false }
-            guard !extensions.isEmpty else { return true }
-            let wanted = Set(
-                extensions.map {
-                    $0.lowercased()
-                        .trimmingCharacters(in: .whitespaces)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "."))
-                }
-            )
-            return context.clipboardFiles.allSatisfy {
-                wanted.contains($0.pathExtension.lowercased())
-            }
-        }
-    }
-
-    /// Short human phrase for the editor and the slot picker.
-    var summary: String {
-        switch self {
-        case .always: return "Always in the ring"
-        case .selectionNotEmpty: return "When text is selected"
-        case .clipboardURL(let hosts):
-            return hosts.isEmpty
-                ? "When a link is copied"
-                : "When a link from \(hosts.joined(separator: ", ")) is copied"
-        case .files(let extensions):
-            return extensions.isEmpty
-                ? "When files are copied"
-                : "When \(extensions.joined(separator: ", ")) files are copied"
-        }
-    }
-}
-
 /// A user-authored ring action.
 ///
 /// Deliberately one flat struct with a `kind` rather than an enum carrying
@@ -258,7 +195,6 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     var kind: ToolKind
     var input: ToolInput
     var output: ToolOutput
-    var trigger: ToolTrigger
 
     // MARK: .prompt
     var prompt: String
@@ -306,7 +242,6 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         kind: ToolKind = .prompt,
         input: ToolInput = .selection,
         output: ToolOutput = .panel,
-        trigger: ToolTrigger = .always,
         prompt: String = "",
         appliesTargetLanguage: Bool = true,
         nativeAction: NativeAction = .openApp,
@@ -325,7 +260,6 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         self.kind = kind
         self.input = input
         self.output = output
-        self.trigger = trigger
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
 
@@ -374,7 +308,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     // Lenient decoding, same reasoning as `Snippet`: a field added in a later
     // version must not throw away every tool the user already saved.
     private enum CodingKeys: String, CodingKey {
-        case id, name, symbolName, kind, input, output, trigger
+        case id, name, symbolName, kind, input, output
         case prompt, appliesTargetLanguage
         case nativeAction, target
         case outputDirectory, timeoutSeconds, declaresNetwork, secretNames, brief
@@ -400,7 +334,6 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         output = try c.decodeIfPresent(ToolOutput.self, forKey: .output)
             ?? legacy?.decodeIfPresent(ToolOutput.self, forKey: .result)
             ?? .panel
-        trigger = try c.decodeIfPresent(ToolTrigger.self, forKey: .trigger) ?? .always
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         appliesTargetLanguage = try c.decodeIfPresent(Bool.self, forKey: .appliesTargetLanguage) ?? true
         nativeAction = try c.decodeIfPresent(NativeAction.self, forKey: .nativeAction) ?? .openApp
