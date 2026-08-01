@@ -51,6 +51,25 @@ final class GizmoOptionsTests: XCTestCase {
         )
     }
 
+    /// The cap is a UTF-8 byte count, matching `ToolAgentInstalledToolV1`'s own
+    /// bound, not a character count — a string well under 64 characters can
+    /// still overflow it multi-byte per character. Only the offending entry is
+    /// dropped, and the boundary value itself must survive intact.
+    func testOptionsOverSixtyFourUTF8BytesAreDroppedAtTheBoundary() {
+        let atLimit = String(repeating: "é", count: 32) // 64 UTF-8 bytes, 32 characters
+        let overLimit = atLimit + "x" // 65 UTF-8 bytes, 33 characters
+        XCTAssertEqual(atLimit.utf8.count, 64)
+        XCTAssertEqual(overLimit.utf8.count, 65)
+        XCTAssertEqual(
+            GizmateTool(name: "AtLimit", options: [atLimit, "480p"]).options,
+            [atLimit, "480p"]
+        )
+        XCTAssertEqual(
+            GizmateTool(name: "OverLimit", options: [overLimit, "480p", "720p"]).options,
+            ["480p", "720p"]
+        )
+    }
+
     func testTemplateSubstitutionOnlyHappensForAGizmoWithOptions() {
         var tool = GizmateTool(name: "Download", options: ["360p", "720p"])
         tool.chosenOption = "720p"

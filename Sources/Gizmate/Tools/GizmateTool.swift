@@ -435,12 +435,17 @@ struct GizmateTool: Codable, Equatable, Identifiable {
 
     /// Trimmed, de-duplicated and capped at five — more than that stops fanning
     /// cleanly at the outer orbit. Fewer than two is dropped entirely: a
-    /// one-circle sub-orbit is a worse button than the one it replaced.
+    /// one-circle sub-orbit is a worse button than the one it replaced. The
+    /// 64-byte ceiling mirrors the builder protocol's own bound: a gizmo the
+    /// store accepts but `ToolAgentInstalledToolV1` rejects would throw on the
+    /// way into an edit session, so the user asks to rename a gizmo and gets an
+    /// error instead. Written as a literal rather than imported, because the
+    /// app's data model does not depend on the builder protocol.
     static func sanitizedOptions(_ raw: [String]) -> [String] {
         var seen = Set<String>()
         let cleaned = raw
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && seen.insert($0).inserted }
+            .filter { !$0.isEmpty && $0.utf8.count <= 64 && seen.insert($0).inserted }
             .prefix(5)
         return cleaned.count < 2 ? [] : Array(cleaned)
     }
