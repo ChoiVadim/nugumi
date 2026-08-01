@@ -18,10 +18,9 @@ final class GizmateSettingsBridge: ObservableObject {
     /// Active tab inside the AI Engine section (0 = Models, 1 = Providers).
     /// Programmatic "go set up a provider" deep links set this to 1.
     @Published var aiEngineTab: Int = 0
-    /// Active tab inside Voice (0 = Style, 1 = Languages, 2 = About you).
+    /// Active tab inside Voice (0 = Style, 1 = Languages, 2 = About you,
+    /// 3 = Dictionary, 4 = Snippets).
     @Published var voiceTab: Int = 0
-    /// Active tab inside Library (0 = Dictionary, 1 = Snippets).
-    @Published var libraryTab: Int = 0
     /// Active tab inside Settings (0 = General, 1 = Shortcuts).
     @Published var settingsTab: Int = 0
     /// Engine picked on the onboarding finale — that group's card leads the

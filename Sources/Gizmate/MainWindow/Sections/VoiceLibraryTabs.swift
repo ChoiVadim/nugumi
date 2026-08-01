@@ -1,48 +1,12 @@
 import SwiftUI
 
-// MARK: - Library (Dictionary & Snippets)
+// MARK: - Voice: Dictionary & Snippets tabs
 
 /// The words Gizmate reuses: names it must keep verbatim, and shorthand it
-/// expands. Both are the same list over a different `SnippetKind`.
-struct LibrarySection: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
-    /// Owned here, not in the list, because the "Add" button that flips it
-    /// lives in the section header alongside the tab bar.
-    @State private var isAddingNew = false
-
-    private var kind: SnippetKind { bridge.libraryTab == 0 ? .dictionaryTerm : .snippet }
-
-    var body: some View {
-        DetailContainer(
-            "Library",
-            subtitle: kind == .snippet
-                ? "Short phrases Gizmate expands before rewriting."
-                : "Words and names Gizmate keeps exactly as written.",
-            pinned: FlowTabBar(tabs: ["Dictionary", "Snippets"], selection: tabSelection),
-            accessory: AnyView(
-                SecondaryButton(title: kind == .snippet ? "Add snippet" : "Add word") {
-                    isAddingNew = true
-                }
-            )
-        ) {
-            SnippetsListContent(store: bridge.snippets, kind: kind, isAddingNew: $isAddingNew)
-                // Fresh identity per tab so a row left open for editing in one
-                // list doesn't reappear as an open editor in the other.
-                .id(kind)
-        }
-    }
-
-    /// Switching tabs abandons a half-written new entry rather than carrying
-    /// the open editor across to the other list.
-    private var tabSelection: Binding<Int> {
-        Binding(
-            get: { bridge.libraryTab },
-            set: { bridge.libraryTab = $0; isAddingNew = false }
-        )
-    }
-}
-
-private struct SnippetsListContent: View {
+/// expands. Both are the same list over a different `SnippetKind`. `isAddingNew`
+/// is owned by `VoiceSection` because the "Add" button that flips it lives in
+/// the section header alongside the tab bar.
+struct SnippetsList: View {
     @ObservedObject var store: SnippetsStore
     let kind: SnippetKind
     @Binding var isAddingNew: Bool

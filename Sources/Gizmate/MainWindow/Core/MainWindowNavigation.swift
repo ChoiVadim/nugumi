@@ -7,17 +7,17 @@ enum EngineSetupFocus: String, CaseIterable, Hashable {
 }
 
 /// Sidebar destinations. Related settings live together behind one entry with a
-/// tab bar rather than as separate rows — `voice` covers how Gizmate writes,
-/// `library` the words it reuses, `settings` behaviour plus hotkeys.
+/// tab bar rather than as separate rows — `voice` covers how Gizmate writes plus
+/// the words it reuses, `settings` behaviour plus hotkeys.
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     case home, ring, insights
-    case voice, library, aiEngine
+    case voice, aiEngine
     case settings, help
 
     var id: String { rawValue }
 
     static var primary: [MainWindowSection] {
-        [.home, .ring, .insights, .voice, .library, .aiEngine]
+        [.home, .ring, .insights, .voice, .aiEngine]
     }
     static var secondary: [MainWindowSection] { [.settings, .help] }
 
@@ -27,7 +27,6 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .insights: return "Insights"
         case .ring: return "Ring"
         case .voice: return "Voice"
-        case .library: return "Library"
         case .aiEngine: return "AI Engine"
         case .settings: return "Settings"
         case .help: return "Help"
@@ -40,7 +39,6 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .insights: return "chart.bar"
         case .ring: return "circle.hexagongrid"
         case .voice: return "textformat"
-        case .library: return "books.vertical"
         case .aiEngine: return "cpu"
         case .settings: return "gearshape"
         case .help: return "questionmark.circle"
