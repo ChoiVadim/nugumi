@@ -38,7 +38,9 @@ struct NotesSection: View {
             if let tagEditor {
                 TagEditorRow(
                     initialName: name(for: tagEditor),
-                    onSave: { save(tagEditor, named: $0) },
+                    initialSymbol: symbol(for: tagEditor),
+                    onSave: { save(tagEditor, named: $0, symbol: $1) },
+                    onDelete: deleteAction(for: tagEditor),
                     onCancel: { self.tagEditor = nil }
                 )
                 .id(tagEditor)
@@ -58,33 +60,21 @@ struct NotesSection: View {
         return "Notes filed under \(tag.name)."
     }
 
+    /// Only ever "add a note". Deleting a tag lives in that tag's own editor
+    /// row — a permanent bin in the page header sits one slip away from the
+    /// button next to it and names no target.
     private var headerButtons: some View {
-        HStack(spacing: 4) {
-            if let selectedTagID {
-                ResetDiscButton(
-                    symbol: "trash",
-                    label: "Delete tag",
-                    accessibilityTitle: "Delete tag"
-                ) {
-                    // The notes survive and fall back to untagged — see
-                    // `NotesStore.deleteTag`.
-                    bridge.notes.deleteTag(selectedTagID)
-                    self.selectedTagID = nil
-                    tagEditor = nil
-                }
-            }
-            ResetDiscButton(
-                symbol: "plus",
-                label: "Add note",
-                accessibilityTitle: "Add note"
-            ) {
-                tagEditor = nil
-                // Created straight away rather than as a pending draft: with the
-                // card being its own editor there is no half-state to model, and
-                // an untouched card is one click on its own bin to remove.
-                // ponytail: no auto-sweep of blank cards — the bin is right there.
-                focusedNoteID = bridge.notes.add(tagID: selectedTagID).id
-            }
+        ResetDiscButton(
+            symbol: "plus",
+            label: "Add note",
+            accessibilityTitle: "Add note"
+        ) {
+            tagEditor = nil
+            // Created straight away rather than as a pending draft: with the
+            // card being its own editor there is no half-state to model, and
+            // an untouched card is one click on its own bin to remove.
+            // ponytail: no auto-sweep of blank cards — the bin is right there.
+            focusedNoteID = bridge.notes.add(tagID: selectedTagID).id
         }
     }
 
@@ -143,12 +133,34 @@ struct NotesSection: View {
         }
     }
 
-    private func save(_ mode: TagEditorMode, named name: String) {
+    /// Empty means "no icon of its own" — the ring falls back to a plain tag
+    /// glyph rather than the tag's name.
+    private func symbol(for mode: TagEditorMode) -> String {
+        switch mode {
+        case .adding: return ""
+        case .renaming(let id): return bridge.notes.tag(id)?.symbol ?? ""
+        }
+    }
+
+    /// Nil while adding: there is nothing to delete yet.
+    private func deleteAction(for mode: TagEditorMode) -> (() -> Void)? {
+        guard case .renaming(let id) = mode else { return nil }
+        return {
+            // The notes survive and fall back to untagged — see
+            // `NotesStore.deleteTag`.
+            bridge.notes.deleteTag(id)
+            selectedTagID = nil
+            tagEditor = nil
+        }
+    }
+
+    private func save(_ mode: TagEditorMode, named name: String, symbol: String) {
+        let symbol: String? = symbol.isEmpty ? nil : symbol
         switch mode {
         case .adding:
-            selectedTagID = bridge.notes.addTag(named: name).id
+            selectedTagID = bridge.notes.addTag(named: name, symbol: symbol).id
         case .renaming(let id):
-            bridge.notes.renameTag(id, to: name)
+            bridge.notes.updateTag(id, name: name, symbol: symbol)
         }
         tagEditor = nil
     }
@@ -157,47 +169,109 @@ struct NotesSection: View {
 /// One text field for adding or renaming a tag. Same draft-then-commit contract
 /// as the note editor: nothing reaches the store until Save, Esc cancels.
 private struct TagEditorRow: View {
-    let onSave: (String) -> Void
+    /// Name and icon, committed together.
+    let onSave: (String, String) -> Void
+    /// Nil while adding a tag — there is nothing to delete yet.
+    let onDelete: (() -> Void)?
     let onCancel: () -> Void
 
     @State private var name: String
+    @State private var symbol: String
+    @State private var hoveringDelete = false
     @FocusState private var focused: Bool
 
-    init(initialName: String, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+    init(
+        initialName: String,
+        initialSymbol: String = "",
+        onSave: @escaping (String, String) -> Void,
+        onDelete: (() -> Void)? = nil,
+        onCancel: @escaping () -> Void
+    ) {
         self.onSave = onSave
+        self.onDelete = onDelete
         self.onCancel = onCancel
         _name = State(initialValue: initialName)
+        _symbol = State(initialValue: initialSymbol)
     }
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        SubCard {
-            HStack(spacing: 10) {
-                TextField("Tag name", text: $name)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.vertical, 7)
-                    .padding(.horizontal, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.white.opacity(0.06))
-                    )
-                    .focused($focused)
-                    .onSubmit { commit() }
-                SecondaryButton(title: "Save", action: commit)
-                    .disabled(trimmed.isEmpty)
-                    .opacity(trimmed.isEmpty ? 0.45 : 1)
-                RowIconButton(symbol: "xmark", action: onCancel)
+        SubCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Text(onDelete == nil ? "New tag" : "Rename tag")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .textCase(.uppercase)
+                        .kerning(0.6)
+                    Spacer(minLength: 8)
+                    // Up here rather than beside Save: a rare, destructive
+                    // action, kept quiet and far from the button the hand goes
+                    // to after Return. A filled red pill outshouted Save.
+                    if let onDelete {
+                        Button(action: onDelete) {
+                            Text("Delete tag")
+                                .font(.system(size: 11.5, weight: .medium))
+                                .foregroundStyle(
+                                    Color(red: 1.0, green: 0.62, blue: 0.62)
+                                        .opacity(hoveringDelete ? 1 : 0.7)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { hoveringDelete = $0 }
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    // Sized to what it holds. A tag name is a word, and a
+                    // full-width slab promises a paragraph.
+                    TextField("Tag name", text: $name)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .frame(width: 220)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .stroke(
+                                    focused ? FlowTheme.accent.opacity(0.55) : FlowTheme.hairline,
+                                    lineWidth: 1
+                                )
+                        )
+                        .focused($focused)
+                        .onSubmit { commit() }
+
+                    SecondaryButton(title: "Save", action: commit)
+                        .disabled(trimmed.isEmpty)
+                        .opacity(trimmed.isEmpty ? 0.45 : 1)
+                    RowIconButton(symbol: "xmark", action: onCancel)
+                    Spacer(minLength: 0)
+                }
+
+                // This is what the ring shows for the tag — the orbit draws the
+                // icon, never the name, so it is worth picking one.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Ring icon")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                    IconGrid(selection: $symbol, height: 108)
+                }
             }
         }
+        .animation(.easeOut(duration: 0.12), value: focused)
         .onAppear { focused = true }
         .onExitCommand { onCancel() }
     }
 
     private func commit() {
         guard !trimmed.isEmpty else { return }
-        onSave(trimmed)
+        onSave(trimmed, symbol)
     }
 }
 
