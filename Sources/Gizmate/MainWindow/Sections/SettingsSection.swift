@@ -15,7 +15,7 @@ struct SettingsSection: View {
                 : "Global hotkeys that work from any app.",
             pinned: FlowTabBar(tabs: ["General", "Shortcuts"], selection: $bridge.settingsTab),
             accessory: bridge.settingsTab == 1
-                ? AnyView(SecondaryButton(title: "Reset to defaults") { bridge.perform(.resetShortcuts) })
+                ? AnyView(ResetDiscButton(accessibilityTitle: "Reset shortcuts to defaults") { bridge.perform(.resetShortcuts) })
                 : nil
         ) {
             if bridge.settingsTab == 0 {

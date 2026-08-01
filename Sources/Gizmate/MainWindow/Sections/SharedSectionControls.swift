@@ -107,6 +107,40 @@ struct FlowTabBar: View {
     }
 }
 
+/// Reset, kept to a disc so it doesn't compete with the heading. The label is
+/// laid out at full width the whole time and only fades in on hover, so the
+/// heading beside it never re-wraps as the pointer crosses in. It is deliberately
+/// outside the button: an invisible click target that wipes state is a trap.
+struct ResetDiscButton: View {
+    var accessibilityTitle: String = "Reset to defaults"
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Reset to defaults")
+                .font(.system(size: 12))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .fixedSize()
+                .opacity(hovering ? 1 : 0)
+                .allowsHitTesting(false)
+            Button(action: action) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkSecondary)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill))
+                    .overlay(Circle().stroke(FlowTheme.hairline, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .onHover { inside in
+                withAnimation(.easeOut(duration: 0.15)) { hovering = inside }
+            }
+            .accessibilityLabel(accessibilityTitle)
+        }
+    }
+}
+
 struct RowIconButton: View {
     let symbol: String
     let action: () -> Void
