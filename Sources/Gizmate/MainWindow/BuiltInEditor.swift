@@ -100,6 +100,22 @@ struct BuiltInEditorPanel: View {
 
             shortcutRow
 
+            // Trigger, then display — the same order the gizmo editor uses, so
+            // the two editors read alike.
+            if DockCatalog.dockableBuiltIns.contains(actionID) {
+                Divider().background(FlowTheme.hairline)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Screen edge")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                    DockPlacementPicker(
+                        store: bridge.dock,
+                        itemID: ToolRef.builtIn(actionID).storageID
+                    )
+                }
+            }
+
             Divider().background(FlowTheme.hairline)
 
             VStack(alignment: .leading, spacing: 8) {

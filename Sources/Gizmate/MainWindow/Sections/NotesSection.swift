@@ -45,36 +45,12 @@ struct NotesSection: View {
                 )
                 .id(tagEditor)
             }
-            dockRow
             NotesGrid(
                 store: bridge.notes,
                 tagID: selectedTagID,
                 focusedNoteID: $focusedNoteID
             )
         }
-    }
-
-    /// Where Notes lives on screen. Here rather than in Settings because it is
-    /// a fact about Notes, and because every dockable thing — a gizmo, and in
-    /// time every built-in — carries this choice in its own page.
-    private var dockRow: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Screen edge")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(FlowTheme.ink)
-                Text("Keep notes a hover away from the edge of your screen.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-            }
-            Spacer(minLength: 12)
-            DockPlacementPicker(store: bridge.dock, itemID: DockCatalog.notesID)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(FlowTheme.card)
-        )
     }
 
     private var subtitle: String {

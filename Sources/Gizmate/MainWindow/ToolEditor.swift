@@ -790,7 +790,7 @@ struct ToolEditorPanel: View {
     private var dockPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             fieldLabel("Screen edge", hint: "Keep this gizmo a hover away from the edge of your screen.")
-            DockPlacementPicker(store: bridge.dock, itemID: DockCatalog.id(for: draft))
+            DockPlacementPicker(store: bridge.dock, itemID: ToolRef.generated(draft.id).storageID)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
