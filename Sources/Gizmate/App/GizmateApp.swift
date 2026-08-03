@@ -130,6 +130,9 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     let uvBootstrap = UVBootstrap()
     let ringLayoutStore = RingLayoutStore()
     let builtInOverridesStore = BuiltInOverridesStore()
+    let dockStore = DockStore()
+    /// One per edge, built in `startDocks()`.
+    var dockControllers: [EdgeDockController] = []
     lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(
         baseURL: ollamaBaseURL,
         models: LLMModel.ollamaModels
@@ -389,6 +392,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         applySelectionDisplayMode()
         setupGlobalHotKeys()
         syncAppClassifierOverrides()
+        startDocks()
         setupBootstrap()
         // Refresh the API-key providers' + Claude Code model catalogs and the
         // ChatGPT/Codex catalog (best-effort, cached). Codex previously only

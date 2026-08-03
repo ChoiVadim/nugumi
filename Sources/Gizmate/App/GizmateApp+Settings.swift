@@ -90,8 +90,31 @@ extension GizmateApp {
     }
 }
 
+extension GizmateApp {
+    /// Brings up one dock per edge and points the shared hover monitor at them.
+    ///
+    /// The docks are built against `self` rather than `GizmateSettingsBridge`:
+    /// the bridge belongs to `MainWindowController` and dies with the main
+    /// window, while a dock has to work when no window is open at all.
+    @MainActor
+    func startDocks() {
+        dockStore.prune(keeping: DockCatalog.knownIDs(host: self))
+        dockControllers = DockEdge.allCases.map {
+            EdgeDockController(edge: $0, store: dockStore, host: self)
+        }
+        dockStore.onChange = { [weak self] in
+            self?.dockControllers.forEach { $0.rebuild() }
+        }
+        DockHoverMonitor.shared.onMove = { [weak self] point in
+            self?.dockControllers.forEach { $0.pointerMoved(to: point) }
+        }
+        DockHoverMonitor.shared.start()
+    }
+}
+
 extension GizmateApp: SettingsHost {
     var usageStats: UsageStatsStore { usageStatsStore }
+    var dock: DockStore { dockStore }
     var snippets: SnippetsStore { snippetsStore }
     var notes: NotesStore { notesStore }
     var tools: ToolsStore { toolsStore }

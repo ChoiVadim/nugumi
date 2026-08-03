@@ -18,27 +18,36 @@ struct DockItem {
 
 /// Everything dockable today.
 ///
-/// One entry. It grows when gizmos can render their own content — see
+/// Built against `SettingsHost` rather than `GizmateSettingsBridge`: the bridge
+/// is created by `MainWindowController` and dies with the main window, while a
+/// dock outlives it. The host is `GizmateApp` itself and owns the stores, which
+/// is all a docked item has ever needed.
+///
+/// One entry today. It grows when gizmos can render their own content — see
 /// `docs/superpowers/specs/2026-08-03-edge-dock-design.md`.
 @MainActor
 enum DockCatalog {
     static let notesID = "notes"
 
-    static func all(bridge: GizmateSettingsBridge) -> [DockItem] {
+    static func all(host: any SettingsHost) -> [DockItem] {
         [
-            DockItem(id: notesID, title: "Notes", symbolName: "note.text") {
-                let host = NSHostingView(rootView: DockNotesView().environmentObject(bridge))
-                host.translatesAutoresizingMaskIntoConstraints = false
-                return host
+            DockItem(id: notesID, title: "Notes", symbolName: "note.text") { [weak host] in
+                let view = DockNotesView(
+                    notes: host?.notes ?? NotesStore(),
+                    onOpenAll: { host?.presentMainWindow(section: .notes) }
+                )
+                let hosting = NSHostingView(rootView: view)
+                hosting.translatesAutoresizingMaskIntoConstraints = false
+                return hosting
             }
         ]
     }
 
-    static func item(id: String, bridge: GizmateSettingsBridge) -> DockItem? {
-        all(bridge: bridge).first { $0.id == id }
+    static func item(id: String, host: any SettingsHost) -> DockItem? {
+        all(host: host).first { $0.id == id }
     }
 
-    static func knownIDs(bridge: GizmateSettingsBridge) -> Set<String> {
-        Set(all(bridge: bridge).map(\.id))
+    static func knownIDs(host: any SettingsHost) -> Set<String> {
+        Set(all(host: host).map(\.id))
     }
 }

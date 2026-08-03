@@ -8,7 +8,11 @@ import SwiftUI
 /// `NotesStore` — no second source of truth — with only what fits: write one,
 /// find a recent one, and a way through to the full list.
 struct DockNotesView: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
+    /// The app's one `NotesStore`, handed in rather than reached for through
+    /// `GizmateSettingsBridge`: that bridge belongs to the main window and dies
+    /// with it, and a dock outlives the main window by design.
+    @ObservedObject var notes: NotesStore
+    let onOpenAll: () -> Void
 
     /// `nil` is All. Holding the tag's id rather than an index keeps the
     /// selection pointing at the same tag when tags are added or removed —
@@ -19,10 +23,10 @@ struct DockNotesView: View {
 
     private static let recentLimit = 20
 
-    private var tags: [NoteTag] { bridge.notes.tags }
+    private var tags: [NoteTag] { notes.tags }
 
     private var visibleNotes: [Note] {
-        bridge.notes.notes
+        notes.notes
             .filter(\.isUsable)
             .filter { selectedTagID == nil || $0.tagID == selectedTagID }
             .sorted { $0.updatedAt > $1.updatedAt }
@@ -76,7 +80,7 @@ struct DockNotesView: View {
     private func saveDraft() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        bridge.notes.add(text: text, tagID: selectedTagID)
+        notes.add(text: text, tagID: selectedTagID)
         draft = ""
     }
 
@@ -136,7 +140,7 @@ struct DockNotesView: View {
         if editingNoteID == note.id {
             TextEditor(text: Binding(
                 get: { note.text },
-                set: { bridge.notes.update(note.id, text: $0) }
+                set: { notes.update(note.id, text: $0) }
             ))
             .font(.system(size: 12))
             .frame(minHeight: 70)
@@ -173,7 +177,7 @@ struct DockNotesView: View {
 
     private var footer: some View {
         Button {
-            bridge.host?.presentMainWindow(section: .notes)
+            onOpenAll()
         } label: {
             HStack(spacing: 4) {
                 Text("All notes").font(.system(size: 11, weight: .medium))
