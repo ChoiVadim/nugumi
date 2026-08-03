@@ -108,13 +108,12 @@ struct NotesSection: View {
         HStack(spacing: 20) {
             tab(title: "All", selected: selectedTagID == nil) { selectedTagID = nil }
             ForEach(tags) { tag in
-                tab(title: tag.name, selected: selectedTagID == tag.id) {
-                    selectedTagID = tag.id
-                }
-                .onTapGesture(count: 2) {
-                    selectedTagID = tag.id
-                    tagEditor = .renaming(tag.id)
-                }
+                tab(
+                    title: tag.name,
+                    selected: selectedTagID == tag.id,
+                    action: { selectedTagID = tag.id },
+                    onRename: { tagEditor = .renaming(tag.id) }
+                )
             }
             Button {
                 tagEditor = .adding
@@ -134,20 +133,32 @@ struct NotesSection: View {
         }
     }
 
-    private func tab(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? FlowTheme.ink : FlowTheme.inkSecondary)
-                Rectangle()
-                    .fill(selected ? Color.white : Color.clear)
-                    .frame(height: 2)
-            }
-            .fixedSize()
-            .contentShape(Rectangle())
+    /// Not a Button: the tag tabs also answer to a double-click, and a Button
+    /// next to a rival count-2 gesture doesn't fire until the double-click
+    /// interval has run out — a visible stall on every tag switch.
+    private func tab(
+        title: String,
+        selected: Bool,
+        action: @escaping () -> Void,
+        onRename: (() -> Void)? = nil
+    ) -> some View {
+        VStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 13.5, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? FlowTheme.ink : FlowTheme.inkSecondary)
+            Rectangle()
+                .fill(selected ? Color.white : Color.clear)
+                .frame(height: 2)
         }
-        .buttonStyle(.plain)
+        .fixedSize()
+        .contentShape(Rectangle())
+        .onClick(action, double: onRename)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityActions {
+            if let onRename { Button("Rename tag", action: onRename) }
+        }
     }
 
     private func name(for mode: TagEditorMode) -> String {

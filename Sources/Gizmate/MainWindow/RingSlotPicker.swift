@@ -301,9 +301,9 @@ private struct RingSlotPickerPanel: View {
             .padding(.trailing, 8)
             .contentShape(Rectangle())
             // Not a Button: a Button eats the click before a double can form.
-            // The count-2 gesture has to be declared first to get first refusal.
-            .onTapGesture(count: 2) { assign(content) }
-            .onTapGesture { pending = content }
+            // Selecting has to land on mouse-up of the first click — see
+            // `onClick`, which is what a rival count-2 gesture would delay.
+            .onClick({ pending = content }, double: { assign(content) })
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(isPending ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction(named: "Assign") { assign(content) }

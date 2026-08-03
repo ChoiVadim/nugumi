@@ -1,6 +1,31 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Reusable building blocks
+
+extension View {
+    /// A click that acts at once, plus a double-click that does something extra.
+    ///
+    /// Declaring a single and a `count: 2` tap on the same view costs every
+    /// single click the system's double-click interval — SwiftUI has to wait out
+    /// the window to learn whether a second click is coming, so the row lights up
+    /// a quarter-second after the finger left the button. One gesture reading the
+    /// click count off the event has nothing to disambiguate: click one runs
+    /// `single` immediately, and click two arrives as a second call that also
+    /// runs `double`.
+    // ponytail: reads NSApp.currentEvent rather than wrapping an
+    // NSClickGestureRecognizer — SwiftUI dispatches taps inside the AppKit event
+    // it came from, so the event is right there.
+    func onClick(
+        _ single: @escaping () -> Void,
+        double: (() -> Void)? = nil
+    ) -> some View {
+        onTapGesture {
+            single()
+            if let double, (NSApp.currentEvent?.clickCount ?? 1) >= 2 { double() }
+        }
+    }
+}
 
 /// The floating rounded card (dark menu material) that every section sits in.
 /// No scroll of its own — sections decide what scrolls.
