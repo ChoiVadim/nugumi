@@ -24,14 +24,14 @@ struct DockTabStrip: View {
         layout {
             ForEach(items, id: \.id) { item in
                 Button { onPick(item.id) } label: {
+                    // Tint only, no fill. The glass is already the surface being
+                    // pressed, and a plate on top of it fights the flare it sits
+                    // inside — the same call `HoverIconButton` documents for the
+                    // captions header.
                     Image(systemName: item.symbolName)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(item.id == activeID ? FlowTheme.ink : FlowTheme.inkSecondary)
                         .frame(width: DockGeometry.tabSize, height: DockGeometry.tabSize)
-                        .background(
-                            UnevenRoundedRectangle(cornerRadii: tabCornerRadii, style: .continuous)
-                                .fill(item.id == activeID ? FlowTheme.raised : FlowTheme.subtleFill)
-                        )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -39,25 +39,6 @@ struct DockTabStrip: View {
             }
         }
         .padding(padding)
-    }
-
-    /// Square on the side facing the bezel, rounded on the other three.
-    private var tabCornerRadii: RectangleCornerRadii {
-        let r = DockGeometry.tabCornerRadius
-        switch edge {
-        case .top:
-            return RectangleCornerRadii(
-                topLeading: 0, bottomLeading: r, bottomTrailing: r, topTrailing: 0
-            )
-        case .left:
-            return RectangleCornerRadii(
-                topLeading: 0, bottomLeading: 0, bottomTrailing: r, topTrailing: r
-            )
-        case .right:
-            return RectangleCornerRadii(
-                topLeading: r, bottomLeading: r, bottomTrailing: 0, topTrailing: 0
-            )
-        }
     }
 
     /// Only across the strip. Nothing on the bezel side — the tab has to touch

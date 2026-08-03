@@ -66,7 +66,11 @@ final class EdgeDockController {
         panel.isReleasedWhenClosed = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // No shadow: macOS pairs a window shadow with a thin light rim, and on a
+        // panel that hugs the bezel that rim reads as a border drawn along the
+        // screen edge. The concave flare is what separates the dock from the
+        // desktop; it does not need a second cue.
+        panel.hasShadow = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
     }
@@ -282,9 +286,6 @@ final class EdgeDockController {
             view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: insets.top),
             view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
         ])
-        // The window shadow is derived from rendered alpha, and a fresh mask
-        // does not invalidate it on its own.
-        panel.invalidateShadow()
     }
 
     // MARK: - Dismiss

@@ -15,7 +15,6 @@ enum DockGeometry {
     static let tabSize: CGFloat = 34
     static let tabSpacing: CGFloat = 6
     static let stripPadding: CGFloat = 6
-    static let tabCornerRadius: CGFloat = 9
     static let panelCornerRadius: CGFloat = 18
     /// The concave flare where a dock meets the bezel.
     static let inverseCornerRadius: CGFloat = 12
