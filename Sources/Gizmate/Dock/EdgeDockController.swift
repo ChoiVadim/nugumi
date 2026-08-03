@@ -88,6 +88,14 @@ final class EdgeDockController {
         let items = dockItems()
         guard !items.isEmpty else { return }
 
+        // A revealed side strip tracks the pointer: the closer it gets to the
+        // bezel, the further the tab comes out to meet it. Horizontal distance
+        // only — how far down the screen the pointer is says nothing about
+        // whether it is heading for this edge.
+        if state == .strip, edge != .top {
+            resizeStrip(items: items, pointerX: point.x, on: screen)
+        }
+
         if state != .hidden, panel.frame.insetBy(dx: -12, dy: -12).contains(point) {
             // Back over the dock — cancel any pending close.
             pointerLeftTimer?.invalidate()
@@ -106,6 +114,24 @@ final class EdgeDockController {
         }
 
         schedulePointerLeftClose()
+    }
+
+    /// Set directly rather than animated: the pointer's own motion is the
+    /// animation, and a 0.1s easing on top of a 30Hz stream would lag behind it.
+    private func resizeStrip(items: [DockItem], pointerX: CGFloat, on screen: NSScreen) {
+        let nearness = DockGeometry.proximity(
+            pointerX: pointerX,
+            edge: edge,
+            screenFrame: screen.frame
+        )
+        let frame = DockGeometry.stripFrame(
+            edge,
+            tabCount: items.count,
+            proximity: nearness,
+            on: screen
+        )
+        guard abs(frame.width - panel.frame.width) > 0.5 else { return }
+        panel.setFrame(frame, display: true)
     }
 
     private func schedulePointerLeftClose() {
@@ -227,24 +253,24 @@ final class EdgeDockController {
     // MARK: - Window
 
     private func present(frame: NSRect, animateFrame: Bool) {
-        if animateFrame {
-            // Growing is fine to animate: the glass fills `contentView` and
-            // follows the model frame. Only closing must not move.
-            panel.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.16
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrame(frame, display: true)
-                panel.animator().alphaValue = 1
-            }
-        } else {
-            panel.setFrame(frame, display: false)
+        if !animateFrame {
+            // Coming from nothing: start fully past the bezel so the panel
+            // slides out of the screen edge rather than fading in on top of the
+            // desktop. Only closing must not move — see `fadeOut`.
+            panel.setFrame(DockGeometry.offscreenFrame(frame, for: edge), display: false)
             panel.alphaValue = 0
-            panel.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.14
-                panel.animator().alphaValue = 1
-            }
+        }
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = animateFrame ? 0.2 : 0.26
+            // Decelerating rather than `.easeOut`: the panel arrives from
+            // off-screen at speed and settles, which reads as coming out of the
+            // bezel instead of being placed there.
+            context.timingFunction = CAMediaTimingFunction(
+                controlPoints: 0.16, 0.9, 0.24, 1
+            )
+            panel.animator().setFrame(frame, display: true)
+            panel.animator().alphaValue = 1
         }
     }
 

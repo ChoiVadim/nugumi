@@ -13,9 +13,20 @@ enum DockGeometry {
     /// How close to a side edge the pointer must come before that dock reveals.
     static let revealThickness: CGFloat = 4
     static let tabSize: CGFloat = 34
+    /// A side tab is taller than it is wide, so it reads as something to pull
+    /// out of the bezel rather than a button that happens to be there.
+    static let sideTabHeight: CGFloat = tabSize * 1.5
     static let tabSpacing: CGFloat = 6
     static let stripPadding: CGFloat = 6
     static let panelCornerRadius: CGFloat = 18
+
+    /// How far a side strip peeks out at its thinnest and its widest. It grows
+    /// as the pointer closes in, so the tab meets the pointer rather than
+    /// sitting at one size waiting to be hit.
+    static let stripMinBreadth: CGFloat = 14
+    static var stripMaxBreadth: CGFloat { tabSize + stripPadding }
+    /// Distance from the bezel at which a strip is at its thinnest.
+    static let proximityRange: CGFloat = 140
     /// The concave flare where a dock meets the bezel.
     static let inverseCornerRadius: CGFloat = 12
     /// Gap between the notch's bottom edge and a strip hanging below it.
@@ -85,13 +96,45 @@ enum DockGeometry {
                 auxRight: auxRight
             )
         case .left, .right:
-            // Middle half only. The corners belong to the menu bar, the Dock,
-            // and every window's resize handle — a dock that opened there
-            // would fire on the way to something else.
-            let height = screenFrame.height / 2
-            let y = screenFrame.midY - height / 2
+            // Full height: a side dock answers to how far along X the pointer
+            // is and nothing else, so the whole edge is live rather than a band
+            // in the middle you have to find.
             let x = edge == .left ? screenFrame.minX : screenFrame.maxX - revealThickness
-            return NSRect(x: x, y: y, width: revealThickness, height: height)
+            return NSRect(
+                x: x,
+                y: screenFrame.minY,
+                width: revealThickness,
+                height: screenFrame.height
+            )
+        }
+    }
+
+    // MARK: - Proximity
+
+    /// 1 at the bezel, 0 at `proximityRange` away. Horizontal distance only —
+    /// how far down the screen the pointer is says nothing about whether it is
+    /// heading for a side dock.
+    static func proximity(pointerX: CGFloat, edge: DockEdge, screenFrame: NSRect) -> CGFloat {
+        let bezelX = edge == .left ? screenFrame.minX : screenFrame.maxX
+        let distance = abs(pointerX - bezelX)
+        guard distance < proximityRange else { return 0 }
+        return 1 - distance / proximityRange
+    }
+
+    /// Thickness of a strip at a given closeness. Padded on one side only: the
+    /// other faces the bezel, where the tab sits flush.
+    static func stripBreadth(proximity: CGFloat) -> CGFloat {
+        let clamped = min(max(proximity, 0), 1)
+        return stripMinBreadth + (stripMaxBreadth - stripMinBreadth) * clamped
+    }
+
+    /// Where a panel starts its slide in: pushed fully past its own bezel, so it
+    /// arrives from off-screen rather than fading in on top of the desktop.
+    static func offscreenFrame(_ frame: NSRect, for edge: DockEdge) -> NSRect {
+        switch edge {
+        case .top: return frame.offsetBy(dx: 0, dy: frame.height)
+        case .left: return frame.offsetBy(dx: -frame.width, dy: 0)
+        case .right: return frame.offsetBy(dx: frame.width, dy: 0)
         }
     }
 
@@ -110,15 +153,16 @@ enum DockGeometry {
     /// Length of a strip holding `tabCount` tabs, along its long axis. The ends
     /// clear `inverseCornerRadius` rather than `stripPadding`, because that is
     /// where the flare eats into the shape.
-    static func stripLength(tabCount: Int) -> CGFloat {
+    static func stripLength(tabCount: Int, edge: DockEdge) -> CGFloat {
         let count = CGFloat(max(tabCount, 1))
-        return count * tabSize + (count - 1) * tabSpacing + inverseCornerRadius * 2
+        return count * tabExtent(for: edge)
+            + (count - 1) * tabSpacing
+            + inverseCornerRadius * 2
     }
 
-    /// Thickness of a strip, across its short axis. Padded on one side only:
-    /// the other faces the bezel, where the tab sits flush.
-    static func stripBreadth() -> CGFloat {
-        tabSize + stripPadding
+    /// How much of the long axis one tab takes. Side tabs are the tall ones.
+    static func tabExtent(for edge: DockEdge) -> CGFloat {
+        edge == .top ? tabSize : sideTabHeight
     }
 
     // MARK: - Shape
@@ -206,13 +250,14 @@ enum DockGeometry {
     static func stripFrame(
         for edge: DockEdge,
         tabCount: Int,
+        proximity: CGFloat = 1,
         screenFrame: NSRect,
         menuBarHeight: CGFloat,
         auxLeft: NSRect?,
         auxRight: NSRect?
     ) -> NSRect {
-        let length = stripLength(tabCount: tabCount)
-        let breadth = stripBreadth()
+        let length = stripLength(tabCount: tabCount, edge: edge)
+        let breadth = stripBreadth(proximity: proximity)
         switch edge {
         case .top:
             let notch = notchRect(
@@ -238,10 +283,16 @@ enum DockGeometry {
         }
     }
 
-    static func stripFrame(_ edge: DockEdge, tabCount: Int, on screen: NSScreen) -> NSRect {
+    static func stripFrame(
+        _ edge: DockEdge,
+        tabCount: Int,
+        proximity: CGFloat = 1,
+        on screen: NSScreen
+    ) -> NSRect {
         stripFrame(
             for: edge,
             tabCount: tabCount,
+            proximity: proximity,
             screenFrame: screen.frame,
             menuBarHeight: menuBarHeight(of: screen),
             auxLeft: screen.auxiliaryTopLeftArea,

@@ -31,7 +31,14 @@ struct DockTabStrip: View {
                     Image(nsImage: item.icon.image(pointSize: 15))
                         .renderingMode(.template)
                         .foregroundStyle(item.id == activeID ? FlowTheme.ink : FlowTheme.inkSecondary)
-                        .frame(width: DockGeometry.tabSize, height: DockGeometry.tabSize)
+                        // Side tabs fill whatever width the strip currently has
+                        // — the panel resizes with the pointer's closeness, and
+                        // a fixed width would leave the glass empty beside it.
+                        .frame(
+                            maxWidth: edge == .top ? DockGeometry.tabSize : .infinity,
+                            minHeight: DockGeometry.tabExtent(for: edge),
+                            maxHeight: DockGeometry.tabExtent(for: edge)
+                        )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

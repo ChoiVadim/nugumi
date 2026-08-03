@@ -91,7 +91,7 @@ final class DockGeometryTests: XCTestCase {
         ))
     }
 
-    func testSideRevealZonesHugTheEdgeAndAvoidTheCorners() {
+    func testSideRevealZonesHugTheEdgeAndRunItsFullHeight() {
         let left = DockGeometry.revealZone(
             for: .left, screenFrame: plainFrame, menuBarHeight: 24, auxLeft: nil, auxRight: nil
         )
@@ -104,11 +104,57 @@ final class DockGeometryTests: XCTestCase {
         XCTAssertEqual(right.maxX, plainFrame.maxX)
         XCTAssertEqual(right.width, DockGeometry.revealThickness)
 
-        // Middle half only: the corners belong to the menu bar, the Dock and
-        // every window's resize handle.
-        XCTAssertEqual(left.height, plainFrame.height / 2)
-        XCTAssertEqual(left.midY, plainFrame.midY)
-        XCTAssertEqual(right.midY, plainFrame.midY)
+        // Full height: reveal answers to X alone, so the whole edge is live.
+        XCTAssertEqual(left.height, plainFrame.height)
+        XCTAssertEqual(left.minY, plainFrame.minY)
+        XCTAssertEqual(right.height, plainFrame.height)
+    }
+
+    func testProximityIgnoresYAndFallsOffWithDistance() {
+        XCTAssertEqual(
+            DockGeometry.proximity(pointerX: plainFrame.maxX, edge: .right, screenFrame: plainFrame),
+            1, accuracy: 0.001
+        )
+        XCTAssertEqual(
+            DockGeometry.proximity(pointerX: plainFrame.minX, edge: .left, screenFrame: plainFrame),
+            1, accuracy: 0.001
+        )
+        let half = DockGeometry.proximity(
+            pointerX: plainFrame.maxX - DockGeometry.proximityRange / 2,
+            edge: .right,
+            screenFrame: plainFrame
+        )
+        XCTAssertEqual(half, 0.5, accuracy: 0.001)
+        XCTAssertEqual(
+            DockGeometry.proximity(pointerX: plainFrame.midX, edge: .right, screenFrame: plainFrame),
+            0, accuracy: 0.001, "past the range there is no pull at all"
+        )
+    }
+
+    func testStripBreadthGrowsWithCloseness() {
+        XCTAssertEqual(DockGeometry.stripBreadth(proximity: 0), DockGeometry.stripMinBreadth)
+        XCTAssertEqual(DockGeometry.stripBreadth(proximity: 1), DockGeometry.stripMaxBreadth)
+        // Clamped, so a pointer past the bezel does not widen it further.
+        XCTAssertEqual(DockGeometry.stripBreadth(proximity: 3), DockGeometry.stripMaxBreadth)
+    }
+
+    func testOffscreenFrameSitsFullyPastItsOwnBezel() {
+        let frame = NSRect(x: 2180, y: 400, width: 380, height: 520)
+        let right = DockGeometry.offscreenFrame(frame, for: .right)
+        XCTAssertEqual(right.minX, frame.maxX, "starts where the panel ends, i.e. off-screen")
+
+        let left = DockGeometry.offscreenFrame(NSRect(x: 0, y: 400, width: 380, height: 520), for: .left)
+        XCTAssertEqual(left.maxX, 0)
+
+        let top = DockGeometry.offscreenFrame(
+            NSRect(x: 400, y: 908, width: 620, height: 300), for: .top
+        )
+        XCTAssertEqual(top.minY, 1208)
+    }
+
+    func testSideTabsAreTallerThanTheyAreWide() {
+        XCTAssertEqual(DockGeometry.tabExtent(for: .right), DockGeometry.tabSize * 1.5)
+        XCTAssertEqual(DockGeometry.tabExtent(for: .top), DockGeometry.tabSize)
     }
 
     // MARK: - Strip
@@ -130,7 +176,7 @@ final class DockGeometryTests: XCTestCase {
         XCTAssertGreaterThan(three.height, one.height)
         XCTAssertEqual(
             three.height - one.height,
-            2 * (DockGeometry.tabSize + DockGeometry.tabSpacing),
+            2 * (DockGeometry.sideTabHeight + DockGeometry.tabSpacing),
             accuracy: 0.01
         )
     }
@@ -187,8 +233,12 @@ final class DockGeometryTests: XCTestCase {
 
     func testTabStripLengthClearsTheFlareAtBothEnds() {
         XCTAssertEqual(
-            DockGeometry.stripLength(tabCount: 1),
+            DockGeometry.stripLength(tabCount: 1, edge: .top),
             DockGeometry.tabSize + DockGeometry.inverseCornerRadius * 2
+        )
+        XCTAssertEqual(
+            DockGeometry.stripLength(tabCount: 1, edge: .right),
+            DockGeometry.sideTabHeight + DockGeometry.inverseCornerRadius * 2
         )
     }
 
