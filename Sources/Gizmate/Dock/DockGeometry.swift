@@ -15,6 +15,8 @@ enum DockGeometry {
     static let tabSize: CGFloat = 34
     static let tabSpacing: CGFloat = 6
     static let stripPadding: CGFloat = 6
+    static let tabCornerRadius: CGFloat = 9
+    static let panelCornerRadius: CGFloat = 18
     /// Gap between the notch's bottom edge and a strip hanging below it.
     static let topStripGap: CGFloat = 0
 
@@ -110,9 +112,20 @@ enum DockGeometry {
         return count * tabSize + (count - 1) * tabSpacing + stripPadding * 2
     }
 
-    /// Thickness of a strip, across its short axis.
+    /// Thickness of a strip, across its short axis. Padded on one side only:
+    /// the other faces the bezel, where the tab sits flush.
     static func stripBreadth() -> CGFloat {
-        tabSize + stripPadding * 2
+        tabSize + stripPadding
+    }
+
+    /// Which corners a dock's glass rounds — every one except the two touching
+    /// the screen bezel, where a curve would read as a gap.
+    static func maskedCorners(for edge: DockEdge) -> CACornerMask {
+        switch edge {
+        case .top: return [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        case .left: return [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        case .right: return [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        }
     }
 
     static func stripFrame(

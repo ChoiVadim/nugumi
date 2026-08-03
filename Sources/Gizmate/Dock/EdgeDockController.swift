@@ -155,7 +155,7 @@ final class EdgeDockController {
                 DockTabStrip(
                     items: items,
                     activeID: nil,
-                    axis: edge == .top ? .horizontal : .vertical
+                    edge: edge
                 ) { [weak self] id in
                     self?.transition(to: .expanded(itemID: id))
                 }
@@ -194,7 +194,7 @@ final class EdgeDockController {
             DockTabStrip(
                 items: items,
                 activeID: active.id,
-                axis: edge == .top ? .horizontal : .vertical
+                edge: edge
             ) { [weak self] id in
                 self?.transition(to: .expanded(itemID: id))
             }
@@ -261,9 +261,10 @@ final class EdgeDockController {
         glass?.removeFromSuperview()
         let host = GlassHostView(
             frame: root.bounds,
-            cornerRadius: 18,
+            cornerRadius: DockGeometry.panelCornerRadius,
             tintColor: nil,
-            style: .regular
+            style: .regular,
+            maskedCorners: DockGeometry.maskedCorners(for: edge)
         )
         host.autoresizingMask = [.width, .height]
         root.addSubview(host)

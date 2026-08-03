@@ -102,7 +102,20 @@ final class GlassHostView: NSView {
     let contentView = NSView()
     private let material = ClampedCornerEffectView()
 
-    init(frame: NSRect, cornerRadius: CGFloat, tintColor: NSColor?, style: GlassHostStyle) {
+    /// `maskedCorners` rounds only some corners. Defaults to all four, so every
+    /// caller that predates it is unchanged; the edge docks pass the two facing
+    /// away from the screen edge, because a rounded corner flush against the
+    /// bezel reads as a gap rather than a curve.
+    init(
+        frame: NSRect,
+        cornerRadius: CGFloat,
+        tintColor: NSColor?,
+        style: GlassHostStyle,
+        maskedCorners: CACornerMask = [
+            .layerMinXMinYCorner, .layerMaxXMinYCorner,
+            .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+        ]
+    ) {
         super.init(frame: frame)
         wantsLayer = true
         contentView.frame = bounds
@@ -119,6 +132,9 @@ final class GlassHostView: NSView {
         material.state = .active
         material.wantsLayer = true
         material.layer?.cornerRadius = cornerRadius
+        // Survives `setFrameSize`, which re-clamps the radius but leaves the
+        // mask alone — so this is set once and stays right through resizes.
+        material.layer?.maskedCorners = maskedCorners
         material.layer?.masksToBounds = true
         addSubview(material)
         material.addSubview(contentView)
