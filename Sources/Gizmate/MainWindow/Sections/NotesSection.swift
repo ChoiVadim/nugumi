@@ -298,6 +298,9 @@ struct NotesGrid: View {
     /// `nil` is the All tab — every note, whatever it is filed under.
     var tagID: UUID?
     @Binding var focusedNoteID: UUID?
+    /// Fixed card height for the multi-column page; `nil` where cards stack one
+    /// per row and should follow their text.
+    var cardHeight: CGFloat? = 186
 
     /// Most recently edited first, so a just-saved note is where the eye lands.
     private var items: [Note] {
@@ -322,26 +325,33 @@ struct NotesGrid: View {
         } else {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
                 ForEach(items) { note in
-                    NoteCard(
-                        note: note,
-                        tags: store.tags,
-                        isFocused: focusedNoteID == note.id,
-                        onFocusHandled: { focusedNoteID = nil },
-                        onChange: { title, text in
-                            store.update(note.id, title: title, text: text)
-                        },
-                        onTag: { store.update(note.id, tagID: .some($0)) },
-                        onToggleContext: {
-                            store.update(note.id, usedAsContext: !note.usedAsContext)
-                        },
-                        onDelete: { store.delete(note.id) }
-                    )
-                    // Keyed by id alone: re-keying on content would rebuild the
-                    // card mid-keystroke and drop the caret.
-                    .id(note.id)
+                    card(for: note)
                 }
             }
         }
+    }
+
+    /// Pulled out of the `LazyVGrid` builder: with this many arguments inline,
+    /// the type checker gives up on the whole grid expression.
+    private func card(for note: Note) -> some View {
+        NoteCard(
+            note: note,
+            tags: store.tags,
+            isFocused: focusedNoteID == note.id,
+            onFocusHandled: { focusedNoteID = nil },
+            onChange: { title, text in
+                store.update(note.id, title: title, text: text)
+            },
+            onTag: { store.update(note.id, tagID: .some($0)) },
+            onToggleContext: {
+                store.update(note.id, usedAsContext: !note.usedAsContext)
+            },
+            onDelete: { store.delete(note.id) },
+            fixedHeight: cardHeight
+        )
+        // Keyed by id alone: re-keying on content would rebuild the card
+        // mid-keystroke and drop the caret.
+        .id(note.id)
     }
 }
 
@@ -360,11 +370,41 @@ private struct NoteCard: View {
     let onTag: (UUID?) -> Void
     let onToggleContext: () -> Void
     let onDelete: () -> Void
+    /// A fixed card height keeps every card in a grid *row* the same height.
+    /// `nil` drops that and follows the text instead — right wherever the cards
+    /// are stacked one per row, like the dock, where uniform height only buys
+    /// dead space under short notes.
+    let fixedHeight: CGFloat?
 
     @State private var title: String
     @State private var text: String
     @State private var hovering = false
+    @State private var bodyHeight: CGFloat = 0
     @FocusState private var titleFocused: Bool
+
+    /// Floor so an empty note is still a card you can aim at, ceiling so one
+    /// long note cannot push every other one off the panel — past it the body
+    /// scrolls inside the card, exactly as it does at a fixed height.
+    private var contentBodyHeight: CGFloat { min(max(bodyHeight, 34), 260) }
+
+    @ViewBuilder
+    private var editor: some View {
+        let field = PlainTextEditor(text: $text, measuredHeight: $bodyHeight)
+            .onChange(of: text) { _, new in onChange(title, new) }
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("Write something…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(FlowTheme.inkTertiary.opacity(0.5))
+                        .allowsHitTesting(false)
+                }
+            }
+        if fixedHeight == nil {
+            field.frame(maxWidth: .infinity).frame(height: contentBodyHeight)
+        } else {
+            field.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
 
     init(
         note: Note,
@@ -374,7 +414,8 @@ private struct NoteCard: View {
         onChange: @escaping (String, String) -> Void,
         onTag: @escaping (UUID?) -> Void,
         onToggleContext: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        fixedHeight: CGFloat?
     ) {
         self.note = note
         self.tags = tags
@@ -384,6 +425,7 @@ private struct NoteCard: View {
         self.onTag = onTag
         self.onToggleContext = onToggleContext
         self.onDelete = onDelete
+        self.fixedHeight = fixedHeight
         _title = State(initialValue: note.title)
         _text = State(initialValue: note.text)
     }
@@ -408,20 +450,10 @@ private struct NoteCard: View {
             // and every card in a row stays the same height. Flexible rather
             // than fixed: a fixed body inside a fixed card leaves dead space
             // under the last line.
-            PlainTextEditor(text: $text)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onChange(of: text) { _, new in onChange(title, new) }
-                .overlay(alignment: .topLeading) {
-                    if text.isEmpty {
-                        Text("Write something…")
-                            .font(.system(size: 13))
-                            .foregroundStyle(FlowTheme.inkTertiary.opacity(0.5))
-                            .allowsHitTesting(false)
-                    }
-                }
+            editor
         }
         .padding(14)
-        .frame(height: 186)
+        .frame(height: fixedHeight)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill)

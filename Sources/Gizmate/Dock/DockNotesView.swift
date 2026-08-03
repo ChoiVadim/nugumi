@@ -131,8 +131,15 @@ struct DockNotesView: View {
     /// no second implementation to keep in step.
     private var noteList: some View {
         ScrollView {
-            NotesGrid(store: notes, tagID: selectedTagID, focusedNoteID: $focusedNoteID)
-                .padding(.bottom, 4)
+            // `cardHeight: nil` — one card per row here, so a fixed height only
+            // buys dead space under a two-word note.
+            NotesGrid(
+                store: notes,
+                tagID: selectedTagID,
+                focusedNoteID: $focusedNoteID,
+                cardHeight: nil
+            )
+            .padding(.bottom, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

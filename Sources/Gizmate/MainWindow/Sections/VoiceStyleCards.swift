@@ -185,6 +185,10 @@ private struct CustomInstructionEditor: View {
 /// track auto-hide when the text fits. Mirrors the app's other NSTextView editors.
 struct PlainTextEditor: NSViewRepresentable {
     @Binding var text: String
+    /// How tall the laid-out text actually is, for a caller that wants to size
+    /// itself to its content. Defaults to a sink so every existing caller — all
+    /// of which live in fixed-height cards — is unchanged.
+    var measuredHeight: Binding<CGFloat> = .constant(0)
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = NSTextView()
@@ -216,6 +220,7 @@ struct PlainTextEditor: NSViewRepresentable {
         guard let textView = scroll.documentView as? NSTextView else { return }
         if textView.string != text { textView.string = text }
         textView.textColor = .white
+        context.coordinator.report(textView)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -226,6 +231,28 @@ struct PlainTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            report(textView)
+        }
+
+        /// TextKit 2 first, TextKit 1 as the fallback. Reaching for
+        /// `layoutManager` on a TextKit 2 view silently downgrades it to
+        /// compatibility mode, so it is only touched when there is no TextKit 2
+        /// layout manager to ask.
+        func report(_ textView: NSTextView) {
+            let height: CGFloat
+            if let tlm = textView.textLayoutManager {
+                tlm.ensureLayout(for: tlm.documentRange)
+                height = tlm.usageBoundsForTextContainer.height
+            } else if let lm = textView.layoutManager, let container = textView.textContainer {
+                lm.ensureLayout(for: container)
+                height = lm.usedRect(for: container).height
+            } else {
+                return
+            }
+            guard abs(height - parent.measuredHeight.wrappedValue) > 0.5 else { return }
+            // Out of the current layout pass: writing a binding from inside one
+            // is what "Modifying state during view update" complains about.
+            DispatchQueue.main.async { [parent] in parent.measuredHeight.wrappedValue = height }
         }
     }
 }
