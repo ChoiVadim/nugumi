@@ -120,7 +120,35 @@ private struct GeneralTab: View {
                     }
                 }
             }
+
+            SubCard {
+                VStack(spacing: 18) {
+                    ForEach(dockableItems, id: \.id) { item in
+                        SettingRow(item.title,
+                                   subtitle: "Keep \(item.title) on a screen edge, a hover away.") {
+                            Picker("", selection: Binding(
+                                get: { bridge.dock.edge(of: item.id) },
+                                set: { bridge.dock.dock(item.id, to: $0) }
+                            )) {
+                                Text("Off").tag(DockEdge?.none)
+                                ForEach(DockEdge.allCases, id: \.self) { edge in
+                                    Text(edge.displayName).tag(DockEdge?.some(edge))
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .frame(width: 240)
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    /// Reads through `host` rather than the bridge: `DockCatalog` builds its
+    /// items against the app itself, which outlives this window.
+    private var dockableItems: [DockItem] {
+        bridge.host.map { DockCatalog.all(host: $0) } ?? []
     }
 }
 

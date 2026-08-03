@@ -11,6 +11,7 @@ final class GizmateSettingsBridge: ObservableObject {
     let usageStats: UsageStatsStore
     let snippets: SnippetsStore
     let notes: NotesStore
+    let dock: DockStore
     let tools: ToolsStore
     let ringLayout: RingLayoutStore
     let builtInOverrides: BuiltInOverridesStore
@@ -49,6 +50,7 @@ final class GizmateSettingsBridge: ObservableObject {
         self.usageStats = host.usageStats
         self.snippets = host.snippets
         self.notes = host.notes
+        self.dock = host.dock
         self.tools = host.tools
         self.ringLayout = host.ringLayout
         self.builtInOverrides = host.builtInOverrides

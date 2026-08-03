@@ -104,6 +104,7 @@ protocol SettingsHost: AnyObject {
     var tools: ToolsStore { get }
     var ringLayout: RingLayoutStore { get }
     var builtInOverrides: BuiltInOverridesStore { get }
+    var dock: DockStore { get }
     /// Already implemented on `GizmateApp`; exposed here so a surface outside
     /// the main window (the dock) can lead back into it.
     func presentMainWindow(section: MainWindowSection?)
