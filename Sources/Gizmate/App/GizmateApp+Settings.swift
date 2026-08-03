@@ -105,6 +105,15 @@ extension GizmateApp {
         dockStore.onChange = { [weak self] in
             self?.dockControllers.forEach { $0.rebuild() }
         }
+        // A gizmo the user deletes must leave the dock with it, not linger
+        // until the next launch. `prune` is a no-op when nothing went away, so
+        // this costs a set comparison per edit.
+        let previousToolsChange = toolsStore.onChange
+        toolsStore.onChange = { [weak self] in
+            previousToolsChange?()
+            guard let self else { return }
+            self.dockStore.prune(keeping: DockCatalog.knownIDs(host: self))
+        }
         DockHoverMonitor.shared.onMove = { [weak self] point in
             self?.dockControllers.forEach { $0.pointerMoved(to: point) }
         }

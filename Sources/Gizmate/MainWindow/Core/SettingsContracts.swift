@@ -105,6 +105,9 @@ protocol SettingsHost: AnyObject {
     var ringLayout: RingLayoutStore { get }
     var builtInOverrides: BuiltInOverridesStore { get }
     var dock: DockStore { get }
+    /// Already implemented on `GizmateApp`; exposed so a docked gizmo's run
+    /// button reaches the same path the Ring uses.
+    func runTool(_ tool: GizmateTool, selection: String)
     /// Already implemented on `GizmateApp`; exposed here so a surface outside
     /// the main window (the dock) can lead back into it.
     func presentMainWindow(section: MainWindowSection?)
