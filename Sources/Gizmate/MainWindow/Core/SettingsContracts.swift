@@ -108,6 +108,8 @@ protocol SettingsHost: AnyObject {
     /// Already implemented on `GizmateApp`; exposed so a docked gizmo's run
     /// button reaches the same path the Ring uses.
     func runTool(_ tool: GizmateTool, selection: String)
+    /// The same, for the shipped actions.
+    func performBuiltIn(_ id: RingActionID)
     /// Already implemented on `GizmateApp`; exposed here so a surface outside
     /// the main window (the dock) can lead back into it.
     func presentMainWindow(section: MainWindowSection?)
