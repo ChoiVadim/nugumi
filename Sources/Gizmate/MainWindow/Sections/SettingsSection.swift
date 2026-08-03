@@ -121,32 +121,7 @@ private struct GeneralTab: View {
                 }
             }
 
-            SubCard {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(dockableBuiltIns, id: \.id) { item in
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(item.title)
-                                .font(.system(size: 12.5, weight: .medium))
-                                .foregroundStyle(FlowTheme.ink)
-                            Text("Keep \(item.title) a hover away from the edge of your screen.")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(FlowTheme.inkSecondary)
-                            DockPlacementPicker(store: bridge.dock, itemID: item.id)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
-    }
-
-    /// Built-ins only. A gizmo picks its edge in its own editor, next to
-    /// everything else about it.
-    ///
-    /// Reads through `host` rather than the bridge: `DockCatalog` builds its
-    /// items against the app itself, which outlives this window.
-    private var dockableBuiltIns: [DockItem] {
-        bridge.host.map { DockCatalog.builtIns(host: $0) } ?? []
     }
 }
 
