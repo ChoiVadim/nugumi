@@ -104,6 +104,9 @@ protocol SettingsHost: AnyObject {
     var tools: ToolsStore { get }
     var ringLayout: RingLayoutStore { get }
     var builtInOverrides: BuiltInOverridesStore { get }
+    /// Already implemented on `GizmateApp`; exposed here so a surface outside
+    /// the main window (the dock) can lead back into it.
+    func presentMainWindow(section: MainWindowSection?)
     /// Whether the uv runtime script tools need is present.
     var uvIsReady: Bool { get }
     /// Installs uv if needed, then runs `script` once on the current context and
