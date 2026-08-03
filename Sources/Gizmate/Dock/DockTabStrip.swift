@@ -28,8 +28,8 @@ struct DockTabStrip: View {
                     // pressed, and a plate on top of it fights the flare it sits
                     // inside — the same call `HoverIconButton` documents for the
                     // captions header.
-                    Image(systemName: item.symbolName)
-                        .font(.system(size: 15, weight: .medium))
+                    Image(nsImage: item.icon.image(pointSize: 15))
+                        .renderingMode(.template)
                         .foregroundStyle(item.id == activeID ? FlowTheme.ink : FlowTheme.inkSecondary)
                         .frame(width: DockGeometry.tabSize, height: DockGeometry.tabSize)
                         .contentShape(Rectangle())
