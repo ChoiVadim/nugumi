@@ -2,11 +2,11 @@ import SwiftUI
 
 /// Notes, sized for a dock rather than a settings window.
 ///
-/// `NotesSection` cannot be reused here: it is built around `DetailContainer`
-/// with a title, subtitle, pinned tag bar and a `PageBanner`, which in a 360pt
-/// panel is a screenful of chrome before the first note. This shows the same
-/// `NotesStore` — no second source of truth — with only what fits: write one,
-/// find a recent one, and a way through to the full list.
+/// `NotesSection` as a whole cannot be reused: it is built around
+/// `DetailContainer` with a title, subtitle, pinned tag bar and a `PageBanner`,
+/// which in a 360pt panel is a screenful of chrome before the first note. The
+/// part that matters — `NotesGrid` and its cards — is reused verbatim, so a note
+/// looks and edits the same on an edge as it does on the page.
 struct DockNotesView: View {
     /// The app's one `NotesStore`, handed in rather than reached for through
     /// `GizmateSettingsBridge`: that bridge belongs to the main window and dies
@@ -19,20 +19,10 @@ struct DockNotesView: View {
     /// the same reasoning `NotesSection` uses.
     @State private var selectedTagID: UUID?
     @State private var draft: String = ""
-    @State private var editingNoteID: UUID?
-
-    private static let recentLimit = 20
+    /// Handed to `NotesGrid` so a just-saved note opens with the caret in it.
+    @State private var focusedNoteID: UUID?
 
     private var tags: [NoteTag] { notes.tags }
-
-    private var visibleNotes: [Note] {
-        notes.notes
-            .filter(\.isUsable)
-            .filter { selectedTagID == nil || $0.tagID == selectedTagID }
-            .sorted { $0.updatedAt > $1.updatedAt }
-            .prefix(Self.recentLimit)
-            .map { $0 }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -48,40 +38,57 @@ struct DockNotesView: View {
 
     // MARK: - Composer
 
+    /// Two lines tall from the start, so a note that runs on has somewhere to go
+    /// without the box jumping as the first line wraps.
+    ///
+    /// Return saves, Shift+Return breaks the line — the same pair the gizmo
+    /// builder's composer uses, and the same workaround: an `NSTextField`'s
+    /// field editor binds Shift+Return to `insertNewline:`, which *ends* editing,
+    /// so it has to be routed to the line-break command by hand.
     private var composer: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "square.and.pencil")
-                .foregroundStyle(FlowTheme.inkTertiary)
-                .font(.system(size: 12))
-                .padding(.top, 2)
-            TextField("Write a note", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .lineLimit(1...4)
-                .onSubmit(saveDraft)
-            if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button(action: saveDraft) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundStyle(FlowTheme.accentBright)
+        TextField("Write a note", text: $draft, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            // `reservesSpace` only exists on the single-Int overload, so the two
+            // empty lines are held open by `minHeight` below instead.
+            .lineLimit(2...6)
+            .onKeyPress(.return, phases: .down) { keyPress in
+                if keyPress.modifiers.contains(.shift) {
+                    guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else {
+                        return .ignored
+                    }
+                    editor.insertNewlineIgnoringFieldEditor(nil)
+                    return .handled
+                }
+                saveDraftAndFocus()
+                return .handled
+            }
+            .foregroundStyle(FlowTheme.ink)
+            .padding(.leading, 11)
+            .padding(.vertical, 9)
+            .padding(.trailing, 38)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(FlowTheme.subtleFill)
+            )
+            .overlay(alignment: .bottomTrailing) {
+                Button(action: saveDraftAndFocus) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(FlowTheme.raisedStrong))
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut(.return, modifiers: [.command])
+                .disabled(!canSave)
+                .opacity(canSave ? 1 : 0.35)
+                .padding(7)
             }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(FlowTheme.subtleFill)
-        )
     }
 
-    private func saveDraft() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        notes.add(text: text, tagID: selectedTagID)
-        draft = ""
+    private var canSave: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Tags
@@ -118,59 +125,23 @@ struct DockNotesView: View {
 
     // MARK: - List
 
+    /// The real note cards, not a stripped-down list. `NotesGrid` lays out with
+    /// `.adaptive(minimum: 235)`, so at a dock panel's width it already collapses
+    /// to a single column — the same cards as the Notes page, one per row, with
+    /// no second implementation to keep in step.
     private var noteList: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 2) {
-                if visibleNotes.isEmpty {
-                    Text("Nothing kept here yet.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .padding(.vertical, 8)
-                }
-                ForEach(visibleNotes) { note in
-                    row(for: note)
-                }
-            }
+            NotesGrid(store: notes, tagID: selectedTagID, focusedNoteID: $focusedNoteID)
+                .padding(.bottom, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    @ViewBuilder
-    private func row(for note: Note) -> some View {
-        if editingNoteID == note.id {
-            TextEditor(text: Binding(
-                get: { note.text },
-                set: { notes.update(note.id, text: $0) }
-            ))
-            .font(.system(size: 12))
-            .frame(minHeight: 70)
-            .scrollContentBackground(.hidden)
-            .padding(6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(FlowTheme.subtleFill)
-            )
-            .onExitCommand { editingNoteID = nil }
-        } else {
-            Button {
-                editingNoteID = note.id
-            } label: {
-                HStack(spacing: 8) {
-                    Text(note.displayTitle)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(note.updatedAt, format: .relative(presentation: .numeric))
-                        .font(.system(size: 10))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
+    private func saveDraftAndFocus() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        focusedNoteID = notes.add(text: text, tagID: selectedTagID).id
+        draft = ""
     }
 
     // MARK: - Footer
