@@ -259,25 +259,32 @@ final class EdgeDockController {
     private func install(view: NSView) {
         guard let root = panel.contentView else { return }
         glass?.removeFromSuperview()
+        let dockEdge = edge
         let host = GlassHostView(
             frame: root.bounds,
             cornerRadius: DockGeometry.panelCornerRadius,
             tintColor: nil,
             style: .regular,
-            maskedCorners: DockGeometry.maskedCorners(for: edge)
+            cornerPath: { DockGeometry.panelPath(for: dockEdge, in: $0) }
         )
         host.autoresizingMask = [.width, .height]
         root.addSubview(host)
         glass = host
 
+        // Keep the content off the flare — the shape pulls in by
+        // `inverseCornerRadius` on the bezel side.
+        let insets = DockGeometry.contentInsets(for: edge)
         view.translatesAutoresizingMaskIntoConstraints = false
         host.contentView.addSubview(view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor),
-            view.topAnchor.constraint(equalTo: host.contentView.topAnchor),
-            view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor),
+            view.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor, constant: insets.left),
+            view.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor, constant: -insets.right),
+            view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: insets.top),
+            view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
         ])
+        // The window shadow is derived from rendered alpha, and a fresh mask
+        // does not invalidate it on its own.
+        panel.invalidateShadow()
     }
 
     // MARK: - Dismiss

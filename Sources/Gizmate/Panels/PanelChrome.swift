@@ -89,12 +89,33 @@ enum GlassHostStyle {
 final class ClampedCornerEffectView: NSVisualEffectView {
     var desiredCornerRadius: CGFloat = 0
 
+    /// Replaces the plain corner radius with an arbitrary shape, re-derived on
+    /// every resize like the radius is. `cornerRadius` can only round corners
+    /// outward; a concave corner is a curve that lives outside the rectangle,
+    /// so shapes like the edge docks' bezel flare need a mask instead.
+    var cornerPath: ((CGRect) -> CGPath)? {
+        didSet { applyShape(size: bounds.size) }
+    }
+
+    private let shapeMask = CAShapeLayer()
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        layer?.cornerRadius = min(
-            desiredCornerRadius,
-            min(newSize.width, newSize.height) / 2
-        )
+        applyShape(size: newSize)
+    }
+
+    private func applyShape(size: NSSize) {
+        guard let cornerPath else {
+            layer?.mask = nil
+            layer?.cornerRadius = min(
+                desiredCornerRadius,
+                min(size.width, size.height) / 2
+            )
+            return
+        }
+        layer?.cornerRadius = 0
+        shapeMask.path = cornerPath(CGRect(origin: .zero, size: size))
+        layer?.mask = shapeMask
     }
 }
 
@@ -102,19 +123,15 @@ final class GlassHostView: NSView {
     let contentView = NSView()
     private let material = ClampedCornerEffectView()
 
-    /// `maskedCorners` rounds only some corners. Defaults to all four, so every
-    /// caller that predates it is unchanged; the edge docks pass the two facing
-    /// away from the screen edge, because a rounded corner flush against the
-    /// bezel reads as a gap rather than a curve.
+    /// `cornerPath` replaces the plain radius with a shape — the edge docks use
+    /// it for the concave flare where the panel meets the bezel. nil keeps the
+    /// uniform rounded rectangle every other caller expects.
     init(
         frame: NSRect,
         cornerRadius: CGFloat,
         tintColor: NSColor?,
         style: GlassHostStyle,
-        maskedCorners: CACornerMask = [
-            .layerMinXMinYCorner, .layerMaxXMinYCorner,
-            .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
-        ]
+        cornerPath: ((CGRect) -> CGPath)? = nil
     ) {
         super.init(frame: frame)
         wantsLayer = true
@@ -132,10 +149,9 @@ final class GlassHostView: NSView {
         material.state = .active
         material.wantsLayer = true
         material.layer?.cornerRadius = cornerRadius
-        // Survives `setFrameSize`, which re-clamps the radius but leaves the
-        // mask alone — so this is set once and stays right through resizes.
-        material.layer?.maskedCorners = maskedCorners
         material.layer?.masksToBounds = true
+        // After the radius, so the setter's `applyShape` wins over it.
+        material.cornerPath = cornerPath
         addSubview(material)
         material.addSubview(contentView)
     }

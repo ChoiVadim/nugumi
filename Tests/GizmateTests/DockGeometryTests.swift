@@ -150,6 +150,48 @@ final class DockGeometryTests: XCTestCase {
         XCTAssertEqual(strip.maxY, notch.minY, accuracy: 0.01, "hangs below the notch, not over it")
     }
 
+    // MARK: - Shape
+
+    /// The side paths are the top path rotated, and a wrong transform shows up
+    /// as a shape that no longer fills its bounds.
+    func testPanelPathFillsItsBoundsOnEveryEdge() {
+        let bounds = CGRect(x: 0, y: 0, width: 380, height: 520)
+        for edge in DockEdge.allCases {
+            let box = DockGeometry.panelPath(for: edge, in: bounds).boundingBoxOfPath
+            XCTAssertEqual(box.minX, bounds.minX, accuracy: 0.5, "\(edge) minX")
+            XCTAssertEqual(box.minY, bounds.minY, accuracy: 0.5, "\(edge) minY")
+            XCTAssertEqual(box.maxX, bounds.maxX, accuracy: 0.5, "\(edge) maxX")
+            XCTAssertEqual(box.maxY, bounds.maxY, accuracy: 0.5, "\(edge) maxY")
+        }
+    }
+
+    /// The flare pulls the body in, so a point just inside the bezel corner is
+    /// outside the shape while the same point further along the edge is inside.
+    func testTopFlareCarvesTheCornersAndKeepsTheBezelEdge() {
+        let bounds = CGRect(x: 0, y: 0, width: 380, height: 520)
+        let path = DockGeometry.panelPath(for: .top, in: bounds)
+
+        XCTAssertFalse(
+            path.contains(CGPoint(x: 2, y: 500)),
+            "the top-left corner is carved out by the concave arc"
+        )
+        XCTAssertTrue(
+            path.contains(CGPoint(x: 190, y: 519)),
+            "the bezel edge itself still runs the full width"
+        )
+        XCTAssertTrue(
+            path.contains(CGPoint(x: 190, y: 260)),
+            "the body is untouched"
+        )
+    }
+
+    func testTabStripLengthClearsTheFlareAtBothEnds() {
+        XCTAssertEqual(
+            DockGeometry.stripLength(tabCount: 1),
+            DockGeometry.tabSize + DockGeometry.inverseCornerRadius * 2
+        )
+    }
+
     // MARK: - Expanded
 
     func testExpandedPanelHugsItsEdge() {

@@ -60,14 +60,16 @@ struct DockTabStrip: View {
         }
     }
 
-    /// No padding on the bezel side either — the tab has to touch the edge for
-    /// the square corners to read as flush rather than clipped.
+    /// Only across the strip. Nothing on the bezel side — the tab has to touch
+    /// the edge for its square corners to read as flush rather than clipped —
+    /// and nothing along the long axis either, where the panel's own content
+    /// insets already clear the flare.
     private var padding: EdgeInsets {
         let p = DockGeometry.stripPadding
         switch edge {
-        case .top: return EdgeInsets(top: 0, leading: p, bottom: p, trailing: p)
-        case .left: return EdgeInsets(top: p, leading: 0, bottom: p, trailing: p)
-        case .right: return EdgeInsets(top: p, leading: p, bottom: p, trailing: 0)
+        case .top: return EdgeInsets(top: 0, leading: 0, bottom: p, trailing: 0)
+        case .left: return EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: p)
+        case .right: return EdgeInsets(top: 0, leading: p, bottom: 0, trailing: 0)
         }
     }
 }

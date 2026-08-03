@@ -17,6 +17,8 @@ enum DockGeometry {
     static let stripPadding: CGFloat = 6
     static let tabCornerRadius: CGFloat = 9
     static let panelCornerRadius: CGFloat = 18
+    /// The concave flare where a dock meets the bezel.
+    static let inverseCornerRadius: CGFloat = 12
     /// Gap between the notch's bottom edge and a strip hanging below it.
     static let topStripGap: CGFloat = 0
 
@@ -106,10 +108,12 @@ enum DockGeometry {
 
     // MARK: - Strip
 
-    /// Length of a strip holding `tabCount` tabs, along its long axis.
+    /// Length of a strip holding `tabCount` tabs, along its long axis. The ends
+    /// clear `inverseCornerRadius` rather than `stripPadding`, because that is
+    /// where the flare eats into the shape.
     static func stripLength(tabCount: Int) -> CGFloat {
         let count = CGFloat(max(tabCount, 1))
-        return count * tabSize + (count - 1) * tabSpacing + stripPadding * 2
+        return count * tabSize + (count - 1) * tabSpacing + inverseCornerRadius * 2
     }
 
     /// Thickness of a strip, across its short axis. Padded on one side only:
@@ -118,13 +122,85 @@ enum DockGeometry {
         tabSize + stripPadding
     }
 
-    /// Which corners a dock's glass rounds — every one except the two touching
-    /// the screen bezel, where a curve would read as a gap.
-    static func maskedCorners(for edge: DockEdge) -> CACornerMask {
+    // MARK: - Shape
+
+    /// The outline of a dock's glass: rounded outward on the three free sides,
+    /// curved *inward* where it meets the bezel, so the panel reads as growing
+    /// out of the screen edge rather than being laid on top of it.
+    ///
+    /// Built once for a top-facing dock and rotated, because getting one piece
+    /// of concave geometry right is cheaper than getting three right.
+    static func panelPath(for edge: DockEdge, in bounds: CGRect) -> CGPath {
         switch edge {
-        case .top: return [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-        case .left: return [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
-        case .right: return [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        case .top:
+            return flaredTopPath(width: bounds.width, height: bounds.height)
+        case .left:
+            // (x, y) → (width - y, x): a quarter turn that lands the flared
+            // side on the left.
+            var turn = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: bounds.width, ty: 0)
+            let path = flaredTopPath(width: bounds.height, height: bounds.width)
+            return path.copy(using: &turn) ?? path
+        case .right:
+            // (x, y) → (y, height - x): the other quarter turn.
+            var turn = CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: bounds.height)
+            let path = flaredTopPath(width: bounds.height, height: bounds.width)
+            return path.copy(using: &turn) ?? path
+        }
+    }
+
+    /// A `w`×`h` box whose top edge runs the full width, whose sides pull in by
+    /// `inverseCornerRadius` through a concave arc, and whose bottom corners are
+    /// rounded the ordinary way.
+    ///
+    /// Layer coordinates, so y grows upward and `h` is the bezel side.
+    private static func flaredTopPath(width w: CGFloat, height h: CGFloat) -> CGPath {
+        // Clamped so a small strip degrades into a plausible shape instead of
+        // an inside-out one.
+        let r = min(inverseCornerRadius, w / 3, h / 3)
+        let R = min(panelCornerRadius, (w - 2 * r) / 2, h / 2)
+
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: r, y: R))
+        path.addArc(
+            tangent1End: CGPoint(x: r, y: 0),
+            tangent2End: CGPoint(x: r + R, y: 0),
+            radius: R
+        )
+        path.addLine(to: CGPoint(x: w - r - R, y: 0))
+        path.addArc(
+            tangent1End: CGPoint(x: w - r, y: 0),
+            tangent2End: CGPoint(x: w - r, y: R),
+            radius: R
+        )
+        path.addLine(to: CGPoint(x: w - r, y: h - r))
+        // Concave: the arc's centre sits outside the body, at the corner the
+        // curve is flaring into.
+        path.addArc(
+            center: CGPoint(x: w, y: h - r),
+            radius: r,
+            startAngle: .pi,
+            endAngle: .pi / 2,
+            clockwise: true
+        )
+        path.addLine(to: CGPoint(x: 0, y: h))
+        path.addArc(
+            center: CGPoint(x: 0, y: h - r),
+            radius: r,
+            startAngle: .pi / 2,
+            endAngle: 0,
+            clockwise: true
+        )
+        path.closeSubpath()
+        return path
+    }
+
+    /// How far a dock's content must stay clear of the bezel side, so it never
+    /// lands under a flare.
+    static func contentInsets(for edge: DockEdge) -> NSEdgeInsets {
+        let r = inverseCornerRadius
+        switch edge {
+        case .top: return NSEdgeInsets(top: 0, left: r, bottom: 0, right: r)
+        case .left, .right: return NSEdgeInsets(top: r, left: 0, bottom: r, right: 0)
         }
     }
 
