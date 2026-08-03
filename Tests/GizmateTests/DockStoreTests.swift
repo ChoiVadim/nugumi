@@ -77,10 +77,11 @@ final class DockStoreTests: XCTestCase {
         let (store, defaults, cleanup) = store()
         defer { cleanup() }
 
-        store.dock("notes", to: .top)
+        let id = ToolRef.builtIn(.saveNote).storageID
+        store.dock(id, to: .top)
         let reloaded = DockStore(defaults: defaults)
 
-        XCTAssertEqual(reloaded.items(on: .top), ["notes"])
+        XCTAssertEqual(reloaded.items(on: .top), [id])
     }
 
     @MainActor
@@ -109,6 +110,63 @@ final class DockStoreTests: XCTestCase {
 
         store.prune(keeping: [])
         XCTAssertEqual(changes, 1)
+    }
+
+    // MARK: - Key migration
+
+    @MainActor
+    func testLegacyNotesKeyMigratesToTheBuiltInNoteAction() {
+        let (_, defaults, cleanup) = store()
+        defer { cleanup() }
+
+        defaults.set(["right": ["notes"]], forKey: DockStore.defaultsKey)
+        let loaded = DockStore(defaults: defaults)
+
+        XCTAssertEqual(loaded.items(on: .right), [ToolRef.builtIn(.saveNote).storageID])
+    }
+
+    @MainActor
+    func testLegacyBareUUIDMigratesToAGeneratedRef() {
+        let (_, defaults, cleanup) = store()
+        defer { cleanup() }
+
+        let id = UUID()
+        defaults.set(["left": [id.uuidString]], forKey: DockStore.defaultsKey)
+        let loaded = DockStore(defaults: defaults)
+
+        XCTAssertEqual(loaded.items(on: .left), [ToolRef.generated(id).storageID])
+    }
+
+    @MainActor
+    func testMigrationIsWrittenBackSoItRunsOnce() {
+        let (_, defaults, cleanup) = store()
+        defer { cleanup() }
+
+        defaults.set(["right": ["notes"]], forKey: DockStore.defaultsKey)
+        _ = DockStore(defaults: defaults)
+        let raw = defaults.dictionary(forKey: DockStore.defaultsKey) as? [String: [String]]
+
+        XCTAssertEqual(raw?["right"], [ToolRef.builtIn(.saveNote).storageID])
+    }
+
+    @MainActor
+    func testAlreadyMigratedKeysAreLeftAlone() {
+        let (_, defaults, cleanup) = store()
+        defer { cleanup() }
+
+        let already = ToolRef.builtIn(.ask).storageID
+        defaults.set(["top": [already]], forKey: DockStore.defaultsKey)
+        let loaded = DockStore(defaults: defaults)
+
+        XCTAssertEqual(loaded.items(on: .top), [already])
+    }
+
+    @MainActor
+    func testStorageIDRoundTrips() {
+        let id = UUID()
+        XCTAssertEqual(ToolRef(storageID: ToolRef.generated(id).storageID), .generated(id))
+        XCTAssertEqual(ToolRef(storageID: ToolRef.builtIn(.live).storageID), .builtIn(.live))
+        XCTAssertNil(ToolRef(storageID: "notes"))
     }
 
     @MainActor

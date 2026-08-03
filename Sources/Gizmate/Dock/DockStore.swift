@@ -96,11 +96,16 @@ final class DockStore: ObservableObject {
         // version doesn't know is skipped, not thrown, so one unknown key does
         // not wipe the whole dock.
         var loaded: [DockEdge: [String]] = [:]
+        var migrated = false
         for (key, ids) in raw {
             guard let edge = DockEdge(rawValue: key), !ids.isEmpty else { continue }
-            loaded[edge] = ids
+            let mapped = ids.map(ToolRef.migratedID(from:))
+            if mapped != ids { migrated = true }
+            loaded[edge] = mapped
         }
         placement = loaded
+        // Written back so the mapping runs once rather than on every launch.
+        if migrated { save() }
     }
 
     private func save() {
