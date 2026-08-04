@@ -180,6 +180,17 @@ of running the finished tool for real. Read that, not just the pass/fail line �
 Cases live in `ToolEvalSuite.all` (`App/ToolEvalMode.swift`) and are written the
 way a user would type them.
 
+Read `.attempts` before concluding anything about a failure. It names every kind
+the model tried and the diagnostic each one got back, and the finished `kind` is
+only the last of them: a case reporting `kind: python` may well have written a
+correct `native` candidate first and been refused by the host. Reading the
+verdict instead of the trail has already produced two prompt "fixes" for a
+failure the prompt never caused — the case named an app that was not installed,
+so the host refused the native candidate and the model repaired the only way
+that diagnostic allows. Name only apps macOS ships, by bundle name rather than
+localised name (`installedApplicationExists` resolves `Calendar.app`, not
+"Календарь"), or the case grades the machine instead of the builder.
+
 **The suite must never be made to pass by teaching the system prompt a specific
 answer.** A recipe in the prompt proves the prompt can hold a recipe, not that
 the agent can build tools; the next request the user invents will fail exactly

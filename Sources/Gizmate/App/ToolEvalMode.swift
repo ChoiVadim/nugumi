@@ -171,9 +171,19 @@ enum ToolEvalSuite {
             kind: .python,
             input: .files
         ),
+        // Names an app macOS ships, and that is not decoration. The first draft
+        // asked for Spotify and failed on a machine without it — the model
+        // chose `native` correctly, the host rejected the candidate with "No
+        // installed macOS application named Spotify was found", and the model
+        // repaired the only way that diagnostic allows: by writing Python. So
+        // the case graded the dev machine's app inventory rather than the
+        // builder, and it graded it as a prompt problem.
+        // Safari rather than a localised name: `installedApplicationExists`
+        // resolves a bundle file name, so "Календарь" would be refused on the
+        // very machine that has Calendar.app installed.
         ToolEvalCase(
-            name: "input-none-open-playlist",
-            request: "открывать Spotify на весь экран одной кнопкой",
+            name: "input-none-open-safari",
+            request: "открывать Safari на весь экран одной кнопкой",
             kind: .native,
             // Spelled out, because `input` is an Optional and `.none` there is
             // `Optional.none` — the case would compile, assert nothing, and read

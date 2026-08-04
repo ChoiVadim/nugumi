@@ -153,7 +153,7 @@ After an answer, read its exact ask_user toolResult from this same conversation 
 
 Choose the candidate kind before writing it:
 - prompt: meaning or writing work over what the user is looking at — text or, on a model that can see, an image. Pick input and result from the two catalogues below; every one of them is available to a prompt candidate. Include prompt and appliesTargetLanguage. Do not include Python/native fields.
-- native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, runShortcut, or saveToNote. Include target (empty only for revealInFinder and saveToNote). Its result is "replace", "clipboard", "notify", "notes" or "speak" — there is no model in a native tool to write an answer or draw one, so "panel", "files" and "annotate" are not available to it. Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
+- native: one closed macOS action from the catalogue below. Include target. Its result is "replace", "clipboard", "notify", "notes" or "speak" — there is no model in a native tool to write an answer or draw one, so "panel", "files" and "annotate" are not available to it. Do not include prompt/Python fields. Prefer native over Python whenever the catalogue can express the job.
 - python: when prompt/native cannot express the request, and the job is the same
   every time it runs. Include source, zero to three fixtures, timeoutSeconds,
   declaresNetwork, secretNames, and outputDirectory when output is "files".
@@ -162,6 +162,39 @@ Choose the candidate kind before writing it:
   runs its own Python, step by step, until it has an answer. Include prompt (the
   instruction, written to the agent, not to the user), maxSteps, timeoutSeconds,
   secretNames, and zero or one fixture.
+
+=== THE SEVEN ACTIONS ===
+
+What a native candidate's "nativeAction" may be. Each is a thing macOS already
+does, wired up and shipped — no dependency to resolve, no interpreter to start,
+no approval for the user to read, and it runs the moment the button is pressed.
+Writing Python to do one of these is strictly worse in every one of those ways,
+so when an action below describes the job, that action IS the answer.
+
+- "openApp": brings the app to the front, launching it if it isn't running.
+  target is the app name, e.g. "Spotify".
+- "openAppFullScreen": launches the app if needed, waits for its window, and
+  puts that window into full screen. target is the app name. This is the whole
+  of "open X fullscreen", "открывай на весь экран" — one field.
+- "sendTextToApp": focuses the app and pastes the tool's input into it. target is
+  the app name.
+- "revealInFinder": opens a Finder window with the input files selected. No
+  target.
+- "openURL": opens a link in the browser. target is the URL, with {input} where
+  the tool's input belongs, e.g. "https://www.google.com/search?q={input}".
+- "runShortcut": runs one of the user's own Shortcuts, handing it the input.
+  target is the Shortcut's name.
+- "saveToNote": keeps the input as a new note in Gizmate's Notes tab. No target.
+
+Every one of these already does the work you would otherwise write by hand: it
+launches the app when it is not running, waits for the window to exist, and
+fails with a message naming what was missing when it cannot. Robustness is not
+a reason to prefer Python here — the checks you would add are already in the
+action, and a Python reimplementation of one is the harder, slower, more
+fragile of two answers.
+
+Reach for Python only when no action above fits.
+
 
 Prefer python over agent whenever python can express the job. An agent costs the
 user a model call per step and its behavior is not reviewable before it runs, so
