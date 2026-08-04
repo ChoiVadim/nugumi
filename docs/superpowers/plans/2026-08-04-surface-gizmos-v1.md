@@ -624,7 +624,11 @@ const layoutNode: z.ZodType<unknown> = z.lazy(() =>
 );
 ```
 
-and `layout: layoutNode.optional()` on the python candidate. Add `layoutEmptyBytes: 120` to `LIMITS`, mirroring `ToolAgentLayoutV1.maximumEmptyBytes`. In `tools.ts:47,120`, add `Type.Literal("surface")` to the output literal unions.
+and `layout: layoutNode.optional()` on the python candidate. Add `layoutEmptyBytes: 120` to `LIMITS`, mirroring `ToolAgentLayoutV1.maximumEmptyBytes`.
+
+In `tools.ts`, add `Type.Literal("surface")` to the output union in `commonCandidate` (~line 47) **only**. The union at ~line 120 is the `agent` kind's narrowed list, and `.agent` cannot deliver a surface — adding it there would contradict both `agentDeliverable` and the narrowed zod enum.
+
+`tools.ts` does **not** get the `layout` field here. It is the schema the model sees when it calls the tool, and teaching the model about layouts is one job, done in Task 10 alongside the prose description — a half-taught model in between helps nobody and nothing tests it.
 
 Build the sidecar:
 
@@ -1365,7 +1369,13 @@ In `CandidateValidation.run`, after the `.files` check at line 128:
 
 A surface's fixtures carry no `expectedOutput` — a folder listing is never byte-stable — so it grades `.smoke`, which the existing `ranWithoutComparison` path already produces.
 
-- [ ] **Step 4: Describe the result to the model**
+- [ ] **Step 4: Teach the model the field exists**
+
+Task 3 deliberately left `tools.ts` without a `layout` field: that file is the schema the model sees when it calls the tool, and teaching the model is one job, done here.
+
+Add `layout` to the **python** candidate object in `ToolAgent/src/tools.ts`, mirroring the `layoutNode` shape Task 3 put in `protocol.ts`. `Type.Object` in TypeBox is open by default, so a model that emits `layout` today is not rejected — but it will never emit a field it cannot see, and prose in the system prompt is a weaker teacher than the schema every other field appears in. Both, or the eval case fails for a reason that has nothing to do with the model's reasoning.
+
+- [ ] **Step 5: Describe the result to the model**
 
 `git status` first — this file holds user WIP. In `ToolAgent/src/model-bridge.ts`, beside the other result descriptions near line 315:
 
@@ -1380,7 +1390,7 @@ A surface's fixtures carry no `expectedOutput` — a folder listing is never byt
 
 plus the four nodes and the modifier prefixes, one line each. Describe the vocabulary, never a specific answer: a recipe in the prompt proves the prompt can hold a recipe.
 
-- [ ] **Step 5: Run everything**
+- [ ] **Step 6: Run everything**
 
 ```sh
 swift test 2>&1 | tail -30
@@ -1394,13 +1404,13 @@ Scripts/tool-eval.sh result-surface-downloads
 
 This is the first time the eval case added in Task 1 can actually pass — the vocabulary now exists, is described to the model, and renders. Expected: pass. If it fails, read `.build/tool-eval/report.json` and its `.attempts` trail before concluding anything — the finished `kind` is only the last thing the model tried, and a case reporting `python` may have written something else first and been refused by the host. Fix the generic machinery, never the prompt's knowledge of this specific answer.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```sh
 git status --short
 git add Sources/Gizmate/Dock/Surface/SurfaceLayoutCheck.swift \
         Sources/Gizmate/Tools/CandidateValidation.swift \
-        ToolAgent/src/model-bridge.ts \
+        ToolAgent/src/model-bridge.ts ToolAgent/src/tools.ts \
         Tests/GizmateTests/SurfaceCandidateValidationTests.swift
 git commit -m "Check a layout against rows the script actually printed"
 ```
