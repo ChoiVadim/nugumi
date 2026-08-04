@@ -164,6 +164,12 @@ share of users regardless of what looks right.
   the getter so the revert cannot land. A SwiftUI `ScrollView` cannot be given a
   custom `NSScrollView` subclass, so in a panel the nesting inverts: host the
   SwiftUI content inside `OverlayScrollHost`, which owns the scroll view.
+- **A scroll view nested in a list must pass the wheel through.** An
+  `NSScrollView` swallows `scrollWheel` even with nothing to scroll, so a text
+  editor inside a card stops the list dead wherever the pointer rests. Forward to
+  `nextResponder` unless the editor is first responder — being edited is the one
+  case with a real claim on it. `PassthroughScrollView` does this and
+  `PlainTextEditor` uses it.
 - SwiftUI's `TextEditor` re-applies its own scroller config on every update, so
   nothing set on it sticks. Use `PlainTextEditor`, which owns its
   `NSScrollView` — and which also avoids the bug where dismissing a panel

@@ -183,6 +183,23 @@ private struct CustomInstructionEditor: View {
 /// SwiftUI's `TextEditor` re-applies its own scroller config on every update, so
 /// `autohidesScrollers` never sticks there — owning the `NSScrollView` makes the
 /// track auto-hide when the text fits. Mirrors the app's other NSTextView editors.
+/// Hands the scroll wheel back to whatever this editor sits in — a note card
+/// inside a list — unless it is actually being edited.
+///
+/// An `NSScrollView` swallows `scrollWheel` even with nothing to scroll, so an
+/// editor embedded in a card would stop the list dead wherever the pointer
+/// happened to rest. Editing is the one case where the editor has a claim on it,
+/// because that is when a long note needs scrolling on its own.
+final class PassthroughScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        guard window?.firstResponder === documentView else {
+            nextResponder?.scrollWheel(with: event)
+            return
+        }
+        super.scrollWheel(with: event)
+    }
+}
+
 struct PlainTextEditor: NSViewRepresentable {
     @Binding var text: String
     /// How tall the laid-out text actually is, for a caller that wants to size
@@ -207,7 +224,7 @@ struct PlainTextEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.autoresizingMask = [.width]
 
-        let scroll = NSScrollView()
+        let scroll = PassthroughScrollView()
         scroll.documentView = textView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
