@@ -111,7 +111,10 @@ final class FloatingTranslateButtonController {
         buttonView.enableHoverScaling()
     }
 
+    private var followMonitors: [Any] = []
+
     func close() {
+        stopFollowingCursor()
         radialMenu?.close()
         radialMenu = nil
         panel.close()
@@ -122,6 +125,59 @@ final class FloatingTranslateButtonController {
         radialMenu?.close()
         radialMenu = nil
         buttonView.setLoading(true)
+        startFollowingCursor()
+    }
+
+    // MARK: - Following the cursor while it works
+
+    /// Sits below and to the right of the pointer, where a drag cursor's own
+    /// badge goes — far enough not to cover what is under the tip.
+    private static let cursorGap = NSPoint(x: 12, y: 12)
+
+    /// A ring left where the selection was is a progress indicator the user has
+    /// already looked away from. Following the pointer keeps it where their
+    /// attention is, for the one state where there is nothing to click.
+    private func startFollowingCursor() {
+        guard followMonitors.isEmpty else { return }
+        moveToCursor()
+        let follow: @MainActor () -> Void = { [weak self] in self?.moveToCursor() }
+        let types: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: types, handler: { _ in
+            MainActor.assumeIsolated { follow() }
+        }) {
+            followMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: types, handler: { event in
+            MainActor.assumeIsolated { follow() }
+            return event
+        }) {
+            followMonitors.append(local)
+        }
+    }
+
+    private func stopFollowingCursor() {
+        followMonitors.forEach(NSEvent.removeMonitor)
+        followMonitors = []
+    }
+
+    /// Set straight, never animated: the pointer's own motion is the animation,
+    /// and an easing on top of it would trail behind the cursor.
+    private func moveToCursor() {
+        let pointer = NSEvent.mouseLocation
+        let size = panel.frame.size
+        var origin = NSPoint(
+            x: pointer.x + Self.cursorGap.x,
+            y: pointer.y - Self.cursorGap.y - size.height
+        )
+        // Flip to the other side rather than hang off the screen.
+        let visible = NSScreen.visibleFrame(containing: pointer)
+        if origin.x + size.width > visible.maxX {
+            origin.x = pointer.x - Self.cursorGap.x - size.width
+        }
+        if origin.y < visible.minY {
+            origin.y = pointer.y + Self.cursorGap.y
+        }
+        panel.setFrameOrigin(origin)
     }
 
     private func toggleRadialMenu() {
