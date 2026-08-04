@@ -105,6 +105,15 @@ protocol SettingsHost: AnyObject {
     var ringLayout: RingLayoutStore { get }
     var builtInOverrides: BuiltInOverridesStore { get }
     var dock: DockStore { get }
+    /// The last rows each surface gizmo's script printed. The dock draws
+    /// from this the instant the pointer reaches the edge, before a refresh
+    /// has had a chance to run.
+    var surfaceRows: SurfaceRowsCache { get }
+    /// Runs a surface gizmo's script because the pointer crossed a screen
+    /// edge — never because the user pressed anything, so this can't ask for
+    /// approval the way `runTool` can. An unapproved surface reports
+    /// `.failed` instead of running; see `SurfaceRefresh`.
+    func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome
     /// Already implemented on `GizmateApp`; exposed so a docked gizmo's run
     /// button reaches the same path the Ring uses.
     func runTool(_ tool: GizmateTool, selection: String)

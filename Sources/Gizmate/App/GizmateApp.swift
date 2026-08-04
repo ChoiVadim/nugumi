@@ -138,6 +138,10 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     let ringLayoutStore = RingLayoutStore()
     let builtInOverridesStore = BuiltInOverridesStore()
     let dockStore = DockStore()
+    /// The last rows each surface gizmo's script printed, kept across a
+    /// gizmo's whole run so a refresh only ever costs one disk read on a
+    /// cold miss. See `SurfaceRowsCache`.
+    let surfaceRowsCache = SurfaceRowsCache()
     /// One per edge, built in `startDocks()`.
     var dockControllers: [EdgeDockController] = []
     lazy var bootstrap: OllamaBootstrap = OllamaBootstrap(

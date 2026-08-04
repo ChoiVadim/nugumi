@@ -642,10 +642,9 @@ extension GizmateApp {
                 ?? .zero
             presentGizmoAnnotations(result.text, screenFrame: frame, toolName: tool.name)
         case .surface:
-            // A surface has no one-shot delivery: its rows come from the dock
-            // reading this same script on its own schedule, not from a run
-            // triggered here. The dock itself doesn't exist yet.
-            ToastHUD.shared.show(text: "\(tool.name) — shown on the screen edge, not run this way")
+            // A surface has no result to deliver; its rows are already on the
+            // edge. Toasting here would report an answer that is not one.
+            break
         }
     }
 
