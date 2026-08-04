@@ -59,6 +59,26 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         }
     }
 
+    /// The eval suite is the only thing that drives a real build end to end, so
+    /// an input or result no case asks for ships having never been generated
+    /// once. That is exactly how `drawnScreen` reached a user before it reached
+    /// a test. Cheap to keep honest: adding a case to `ToolEvalSuite` is one
+    /// literal, and this fails the moment the enum grows without one.
+    func testTheEvalSuiteAsksForEveryInputAndEveryResult() {
+        let missingInputs = Set(ToolInput.allCases)
+            .subtracting(ToolEvalSuite.all.compactMap(\.input))
+        let missingOutputs = Set(ToolOutput.allCases)
+            .subtracting(ToolEvalSuite.all.compactMap(\.output))
+        XCTAssertEqual(
+            missingInputs.map(\.rawValue).sorted(), [],
+            "no eval case asks for a gizmo with these inputs"
+        )
+        XCTAssertEqual(
+            missingOutputs.map(\.rawValue).sorted(), [],
+            "no eval case asks for a gizmo with these results"
+        )
+    }
+
     /// Every input the editor offers a prompt gizmo has to survive the builder's
     /// own validation.
     ///

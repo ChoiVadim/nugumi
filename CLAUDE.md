@@ -158,7 +158,17 @@ actually build the tool a user asked for. That is what the eval is for.
 ```sh
 Scripts/tool-eval.sh              # every case
 Scripts/tool-eval.sh download     # only cases whose name contains "download"
+Scripts/tool-eval.sh input        # the one-case-per-input coverage sweep
+Scripts/tool-eval.sh result       # the one-case-per-result coverage sweep
 ```
+
+`ToolEvalSuite.inputSweep` and `.resultSweep` hold one case for every `ToolInput`
+and every `ToolOutput`, and `ToolProtocolEnumParityTests` fails if either enum
+grows without one. That guardrail is not optional bookkeeping: twice now a new
+case reached the enum, the sidecar schema and the capability description while
+missing one hand-written allowlist in the host, and both times the first person
+to find out was a user being told "the model returned an invalid agent action".
+The sweep costs a model call per case; the alternative costs a bug report.
 
 Each case is a real request through the real agent against the model configured
 for text actions, so a full run costs tokens and minutes. The JSON report

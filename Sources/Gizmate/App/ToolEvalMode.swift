@@ -116,6 +116,132 @@ enum ToolEvalSuite {
             kind: .agent,
             input: .selection
         ),
+    ] + inputSweep + resultSweep
+
+    /// One case per input, written the way somebody would ask for a tool that
+    /// happens to need it — never by naming the input.
+    ///
+    /// The sweep exists because the same defect has now shipped twice: a new
+    /// input reaches the enum, the sidecar schema and the capability
+    /// description, and misses one hand-written allowlist deep in the host.
+    /// Nothing fails until a user asks for exactly that tool and is told "the
+    /// model returned an invalid agent action", which names neither the field
+    /// nor the value. A case here fails on the first run instead.
+    ///
+    /// `Scripts/tool-eval.sh input` runs just these.
+    static let inputSweep: [ToolEvalCase] = [
+        ToolEvalCase(
+            name: "input-dictation-note",
+            request: "хочу надиктовать мысль голосом и получить из неё аккуратно "
+                + "написанный абзац",
+            kind: .prompt,
+            input: .dictation
+        ),
+        ToolEvalCase(
+            name: "input-screenshot-text-explain",
+            request: "объясни мне текст ошибки который висит на экране — "
+                + "выделить его мышкой нельзя",
+            kind: .prompt,
+            input: .screenshotText
+        ),
+        ToolEvalCase(
+            name: "input-screenshot-look",
+            request: "хочу выделить кусок экрана и спросить что там происходит "
+                + "на картинке",
+            kind: .prompt,
+            input: .screenshot
+        ),
+        ToolEvalCase(
+            name: "input-screenshot-process",
+            request: "вырезать кусок экрана и сохранить его как чёрно-белый png",
+            kind: .python,
+            input: .screenshot,
+            output: .files
+        ),
+        ToolEvalCase(
+            name: "input-drawn-screen-explain",
+            request: "хочу обвести что-то на экране и получить объяснение "
+                + "что именно я обвёл",
+            kind: .prompt,
+            input: .drawnScreen
+        ),
+        ToolEvalCase(
+            name: "input-files-rename",
+            request: "переименовать выбранные в Finder фотографии по дате съёмки",
+            kind: .python,
+            input: .files
+        ),
+        ToolEvalCase(
+            name: "input-none-open-playlist",
+            request: "открывать Spotify на весь экран одной кнопкой",
+            kind: .native,
+            // Spelled out, because `input` is an Optional and `.none` there is
+            // `Optional.none` — the case would compile, assert nothing, and read
+            // as covered.
+            input: ToolInput.none
+        ),
+    ]
+
+    /// One case per result, same rule: the request describes where the answer
+    /// should end up, never the name of the setting.
+    ///
+    /// `Scripts/tool-eval.sh result` runs just these.
+    static let resultSweep: [ToolEvalCase] = [
+        ToolEvalCase(
+            name: "result-panel-explain",
+            request: "объясни выделенный термин простыми словами, "
+                + "чтобы я мог потом переспросить",
+            kind: .prompt,
+            input: .selection,
+            output: .panel
+        ),
+        ToolEvalCase(
+            name: "result-replace-grammar",
+            request: "исправляй грамматику прямо в тексте который я выделил, "
+                + "без всяких окон",
+            kind: .prompt,
+            input: .selection,
+            output: .replace
+        ),
+        ToolEvalCase(
+            name: "result-clipboard-headline",
+            request: "сделай из выделенного текста короткий заголовок "
+                + "и положи его в буфер обмена",
+            kind: .prompt,
+            input: .selection,
+            output: .clipboard
+        ),
+        ToolEvalCase(
+            name: "result-notify-site-up",
+            request: "проверь отвечает ли сайт по выделенной ссылке и просто "
+                + "скажи мне да или нет, окно не открывай",
+            input: .selection,
+            output: .notify,
+            declaresNetwork: true
+        ),
+        ToolEvalCase(
+            name: "result-notes-keep-summary",
+            request: "пересказывай выделенное в паре предложений и сохраняй "
+                + "это в заметки",
+            kind: .prompt,
+            input: .selection,
+            output: .notes
+        ),
+        ToolEvalCase(
+            name: "result-speak-summary",
+            request: "перескажи выделенное в двух предложениях и прочитай "
+                + "мне вслух, показывать ничего не надо",
+            kind: .prompt,
+            input: .selection,
+            output: .speak
+        ),
+        ToolEvalCase(
+            name: "result-annotate-point",
+            request: "хочу обвести область на экране и чтобы мне показали "
+                + "прямо на экране куда нажимать дальше",
+            kind: .prompt,
+            output: .annotate
+        ),
     ]
 }
 
