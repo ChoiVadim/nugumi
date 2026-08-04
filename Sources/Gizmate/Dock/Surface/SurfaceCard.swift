@@ -33,16 +33,21 @@ struct SurfaceCard: View {
             if let icon {
                 iconView(icon)
             }
+            // Both lines sit at Caption (12px, DESIGN.md §3) — there is no
+            // 11px regular level, only Micro (11px, semibold, for monospaced
+            // section labels), which a file's subtitle isn't. Hierarchy
+            // comes from weight and colour instead, per §3's own rule: "Use
+            // medium and semibold for hierarchy instead of larger sizes."
             VStack(spacing: 4) {
                 Text(resolvedTitle)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(FlowTheme.ink)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                 if let resolvedSubtitle {
                     Text(resolvedSubtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(FlowTheme.inkSecondary)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkTertiary)
                         .lineLimit(1)
                 }
             }
