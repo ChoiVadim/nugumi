@@ -617,6 +617,13 @@ extension GizmateApp {
                 return
             }
             SpeechOut.speak(text)
+        case .annotate:
+            // A script or agent never captured a screen of its own, so the
+            // shapes land on the one the user is looking at.
+            let frame = NSScreen.screens.first { $0.frame.contains(screenPoint) }?.frame
+                ?? NSScreen.main?.frame
+                ?? .zero
+            presentGizmoAnnotations(result.text, screenFrame: frame, toolName: tool.name)
         }
     }
 

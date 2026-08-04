@@ -173,6 +173,8 @@ public enum ToolAgentCandidateInputV1: String, Codable, Equatable, Sendable {
     case screenshot
     /// The same drag, read by Vision; the tool is handed the recognised text.
     case screenshotText
+    /// The whole screen with the user's own marks drawn on it.
+    case drawnScreen
     case none
 }
 
@@ -186,6 +188,8 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
     case notes
     /// Read out loud instead of shown.
     case speak
+    /// Drawn over the screen as shapes instead of shown as text.
+    case annotate
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {

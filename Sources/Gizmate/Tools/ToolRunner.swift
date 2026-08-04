@@ -41,6 +41,7 @@ enum ToolRunError: LocalizedError {
             case .files: return "Select one or more files in Finder first."
             case .screenshot: return "No screen area was captured."
             case .screenshotText: return "No text was found in that screen area."
+            case .drawnScreen: return "The screen wasn't captured."
             case .none: return nil
             }
         case .timedOut(let seconds):

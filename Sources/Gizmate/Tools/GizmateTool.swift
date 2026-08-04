@@ -116,6 +116,10 @@ enum ToolInput: String, Codable, CaseIterable {
     /// The same capture, read by Vision. The tool receives the recognised text,
     /// so it looks exactly like `selection` to the script or prompt.
     case screenshotText
+    /// The whole screen with the user's own red marks burned into it — Ask's
+    /// drawing overlay without the prompt field. Draw, press Return, and the
+    /// gizmo is handed the marked-up image.
+    case drawnScreen
     case none
 
     var displayName: String {
@@ -126,6 +130,7 @@ enum ToolInput: String, Codable, CaseIterable {
         case .files: return "Selected files"
         case .screenshot: return "Screen area"
         case .screenshotText: return "Text on screen"
+        case .drawnScreen: return "Screen you mark up"
         case .none: return "Nothing"
         }
     }
@@ -147,6 +152,21 @@ enum ToolInput: String, Codable, CaseIterable {
     /// runs", a REC pill instead of a field.
     var needsDictation: Bool {
         self == .dictation
+    }
+
+    /// Same slot again, with a canvas: the screen is captured, the user draws
+    /// on it, and Return hands the result over. Deliberately not folded into
+    /// `needsCapture` — that one drags out a region and returns immediately,
+    /// this one waits on a keystroke.
+    var needsDrawing: Bool {
+        self == .drawnScreen
+    }
+
+    /// Whether what the gizmo is handed is a picture rather than text. The
+    /// model has to be able to see, and the prompt paths have to carry the
+    /// image rather than a path to it.
+    var isImage: Bool {
+        self == .screenshot || self == .drawnScreen
     }
 
     /// Whether building this tool's context should go looking for files. Gated
@@ -182,6 +202,9 @@ enum ToolOutput: String, Codable, CaseIterable {
     case notes
     /// Reads the answer out loud. See `SpeechOut`.
     case speak
+    /// The model draws over the screen instead of writing: the same shapes Ask
+    /// renders, with no panel behind them.
+    case annotate
 
     var displayName: String {
         switch self {
@@ -192,6 +215,7 @@ enum ToolOutput: String, Codable, CaseIterable {
         case .notify: return "Notify"
         case .notes: return "Save to notes"
         case .speak: return "Read aloud"
+        case .annotate: return "Draw on screen"
         }
     }
 
@@ -211,6 +235,8 @@ enum ToolOutput: String, Codable, CaseIterable {
             return "Keeps the answer as a new note, ready to read in the Notes tab."
         case .speak:
             return "Says the answer out loud instead of showing it."
+        case .annotate:
+            return "Circles and points at things on your screen. Needs a gizmo that can see it."
         }
     }
 }

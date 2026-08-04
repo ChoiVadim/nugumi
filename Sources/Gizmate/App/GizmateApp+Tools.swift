@@ -18,6 +18,10 @@ extension GizmateApp {
             dictateForToolInput(tool)
             return
         }
+        if tool.input.needsDrawing {
+            drawForToolInput(tool)
+            return
+        }
         guard tool.input.needsCapture else {
             dispatch(tool, selection: selection, screenshot: nil)
             return
@@ -65,6 +69,30 @@ extension GizmateApp {
         }
     }
 
+    /// Runs a `.drawnScreen` tool on the screen the user just marked up. Esc
+    /// returns nil and cancels, like a walked-away capture or capsule.
+    @MainActor
+    func drawForToolInput(_ tool: GizmateTool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                guard let capture = try await self.captureDrawnScreen() else { return }
+                // Scripts and native actions have only ever taken a path; the
+                // image itself rides along for the kinds with a model in them.
+                let shot = try Self.writeDrawnScreenFile(capture)
+                self.dispatch(
+                    tool,
+                    selection: shot.imageURL.path,
+                    screenshot: shot,
+                    capture: capture
+                )
+            } catch {
+                guard !ScreenshotTranslationError.isCancellation(error) else { return }
+                self.presentScreenshotTranslationError(error)
+            }
+        }
+    }
+
     /// Borrows the Ask capsule for a `.ask` tool's one input, and returns what
     /// was typed. nil when the capsule was dismissed — an input the user walked
     /// away from is a cancelled tool, not an error worth a dialog, exactly as a
@@ -102,11 +130,15 @@ extension GizmateApp {
         }
     }
 
+    /// `capture` carries what a path cannot: the image itself, for the kinds
+    /// with a model that has to see it, and the screen rect a `.annotate`
+    /// result needs to place its shapes on.
     @MainActor
     private func dispatch(
         _ tool: GizmateTool,
         selection: String,
-        screenshot: ToolScreenshot?
+        screenshot: ToolScreenshot?,
+        capture: AskGizmateScreenCapture? = nil
     ) {
         // The one funnel every kind of gizmo passes through, whichever way it
         // was started — ring, hotkey, quick menu. Counted here rather than at
@@ -125,6 +157,20 @@ extension GizmateApp {
             return
         case .prompt:
             break
+        }
+
+        // An image gizmo's "selection" is only a path — the model is meant to
+        // look at the picture, so run it even though there is no text to work
+        // on. Without this it would fall into the no-input error below.
+        if tool.input.isImage {
+            run(
+                tool,
+                on: capture == nil ? selection : "",
+                near: NSEvent.mouseLocation,
+                selectionRect: nil,
+                capture: capture
+            )
+            return
         }
 
         let armed = TextNormalizer.cleanedSelection(selection)
@@ -178,8 +224,22 @@ extension GizmateApp {
         _ tool: GizmateTool,
         on text: String,
         near screenPoint: NSPoint,
-        selectionRect: NSRect?
+        selectionRect: NSRect?,
+        capture: AskGizmateScreenCapture? = nil
     ) {
+        // A gizmo that looks at a picture is useless on a model that cannot see
+        // one, and the failure is otherwise invisible: the image is dropped and
+        // the model answers confidently about nothing.
+        if capture != nil, !LLMModel.option(id: textModelID).supportsImages {
+            presentSelectionTranslationError(
+                "\(tool.name) looks at your screen, so it needs a model that can see images. "
+                    + "Pick one in Settings.",
+                title: tool.name
+            )
+            return
+        }
+        let images = capture.map { [$0.image] } ?? []
+
         switch tool.output {
         case .panel:
             translateButtonController?.close()
@@ -195,7 +255,8 @@ extension GizmateApp {
                 usageKind: .selection,
                 selectionRect: selectionRect,
                 panelSide: panelSideForSelectionEnding(at: screenPoint),
-                restoresReadyOnUserDismiss: true
+                restoresReadyOnUserDismiss: true,
+                images: images
             )
         case .replace:
             lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -203,25 +264,37 @@ extension GizmateApp {
                 text,
                 language: draftTargetLanguage,
                 near: screenPoint,
-                mode: .custom(tool)
+                mode: .custom(tool),
+                images: images
             )
         case .clipboard, .files, .notify:
             // `.files` and `.notify` are script-tool result modes. A prompt tool
             // only ever produces text, so the nearest honest behavior is to hand
             // that text over.
-            runPromptToolForText(tool, on: text, near: screenPoint) { answer in
+            runPromptToolForText(tool, on: text, near: screenPoint, images: images) { answer in
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(answer, forType: .string)
                 ToastHUD.shared.show(text: "\(tool.name) — copied")
             }
         case .notes:
-            runPromptToolForText(tool, on: text, near: screenPoint) { [weak self] answer in
+            runPromptToolForText(tool, on: text, near: screenPoint, images: images) { [weak self] answer in
                 guard let self else { return }
                 self.keepNote(answer, title: tool.name, tagID: self.gizmoNoteTagID)
             }
         case .speak:
-            runPromptToolForText(tool, on: text, near: screenPoint) { answer in
+            runPromptToolForText(tool, on: text, near: screenPoint, images: images) { answer in
                 SpeechOut.speak(answer)
+            }
+        case .annotate:
+            // Shapes are placed in fractions of a screen, so they need the rect
+            // they were measured against. A gizmo that never captured one is
+            // talking about the screen the user is looking at.
+            let frame = capture?.screenFrame
+                ?? NSScreen.screens.first { $0.frame.contains(screenPoint) }?.frame
+                ?? NSScreen.main?.frame
+                ?? .zero
+            runPromptToolForText(tool, on: text, near: screenPoint, images: images) { [weak self] answer in
+                self?.presentGizmoAnnotations(answer, screenFrame: frame, toolName: tool.name)
             }
         }
     }
@@ -234,6 +307,7 @@ extension GizmateApp {
         _ tool: GizmateTool,
         on text: String,
         near screenPoint: NSPoint,
+        images: [ImageInput] = [],
         deliver: @escaping @MainActor (String) -> Void
     ) {
         if let setupError = translationErrorIfBootstrapNeedsSetup() {
@@ -260,7 +334,7 @@ extension GizmateApp {
             do {
                 let answer = try await client.translate(
                     text,
-                    images: [],
+                    images: images,
                     to: language,
                     mode: mode,
                     appCategory: appCategory,

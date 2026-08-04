@@ -85,9 +85,10 @@ const commonCandidate = {
     "files",
     "screenshot",
     "screenshotText",
+    "drawnScreen",
     "none",
   ]),
-  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes", "speak"]),
+  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes", "speak", "annotate"]),
   trigger: z.enum(["always", "selection", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
@@ -112,8 +113,8 @@ const promptCandidate = z
     // A prompt tool works on text the user is looking at. "screenshotText" is
     // that same text, read off the screen instead of out of a selection, and
     // "ask" is text the user types when the tool runs.
-    input: z.enum(["selection", "ask", "dictation", "screenshotText"]),
-    output: z.enum(["panel", "replace", "clipboard", "notes", "speak"]),
+    input: z.enum(["selection", "ask", "dictation", "screenshotText", "screenshot", "drawnScreen"]),
+    output: z.enum(["panel", "replace", "clipboard", "notes", "speak", "annotate"]),
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
@@ -176,7 +177,7 @@ const agentCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("agent"),
-    output: z.enum(["panel", "replace", "clipboard", "notify", "notes", "speak"]),
+    output: z.enum(["panel", "replace", "clipboard", "notify", "notes", "speak", "annotate"]),
     prompt: byteString(LIMITS.promptBytes),
     // At most one, and never with an expectedOutput: an agent's answer is not
     // predictable, so a fixture is the input a harmless trial run should use,
@@ -251,9 +252,10 @@ const commonInstalledTool = {
     "files",
     "screenshot",
     "screenshotText",
+    "drawnScreen",
     "none",
   ]),
-  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes", "speak"]),
+  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes", "speak", "annotate"]),
   trigger: z.enum(["always", "selection", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
@@ -277,8 +279,8 @@ const installedPromptTool = z
     // A prompt tool works on text the user is looking at. "screenshotText" is
     // that same text, read off the screen instead of out of a selection, and
     // "ask" is text the user types when the tool runs.
-    input: z.enum(["selection", "ask", "dictation", "screenshotText"]),
-    output: z.enum(["panel", "replace", "clipboard", "notes", "speak"]),
+    input: z.enum(["selection", "ask", "dictation", "screenshotText", "screenshot", "drawnScreen"]),
+    output: z.enum(["panel", "replace", "clipboard", "notes", "speak", "annotate"]),
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
@@ -324,7 +326,7 @@ const installedAgentTool = z
   .object({
     ...commonInstalledTool,
     kind: z.literal("agent"),
-    output: z.enum(["panel", "replace", "clipboard", "notify", "notes", "speak"]),
+    output: z.enum(["panel", "replace", "clipboard", "notify", "notes", "speak", "annotate"]),
     prompt: byteString(LIMITS.promptBytes),
     maxSteps: z.number().int().min(1).max(24),
     timeoutSeconds: z.number().int().min(15).max(900),

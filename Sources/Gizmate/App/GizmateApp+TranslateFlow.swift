@@ -204,7 +204,8 @@ extension GizmateApp {
         panelSide: TranslationPanelController.Side = .right,
         restoresReadyOnUserDismiss: Bool = false,
         onReplace: ((String) -> Void)? = nil,
-        replaceShortcutSourcePID: pid_t? = nil
+        replaceShortcutSourcePID: pid_t? = nil,
+        images: [ImageInput] = []
     ) {
         if let setupError = translationErrorIfBootstrapNeedsSetup() {
             handleTranslationFailure(setupError)
@@ -281,7 +282,8 @@ extension GizmateApp {
             useCache: useCache,
             usageKind: usageKind,
             controller: controller,
-            requestID: requestID
+            requestID: requestID,
+            images: images
         )
     }
 
@@ -403,7 +405,8 @@ extension GizmateApp {
         usageKind: UsageStatsEventKind,
         controller: TranslationPanelController,
         requestID: UUID,
-        recordsHistory: Bool = true
+        recordsHistory: Bool = true,
+        images: [ImageInput] = []
     ) {
         if let busyError = translationErrorIfBootstrapBusy() {
             controller.showError(Self.translationPanelErrorMessage(for: busyError), requestID: requestID)
@@ -430,7 +433,7 @@ extension GizmateApp {
             do {
                 let translated = try await backend.translate(
                     text,
-                    images: [],
+                    images: images,
                     to: language,
                     mode: mode,
                     appCategory: appCategory,

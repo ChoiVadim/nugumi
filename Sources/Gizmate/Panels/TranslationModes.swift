@@ -414,12 +414,36 @@ enum TranslationMode: Equatable {
         if tool.appliesTargetLanguage {
             body += "\n\nWrite the output in \(targetLanguage.promptName)."
         }
+        if tool.output == .annotate {
+            body += Self.annotationContract
+        }
         return body + contextSections(
             for: tool,
             targetLanguage: targetLanguage,
             composition: composition
         )
     }
+
+    /// Appended to a gizmo whose result is `.annotate`. The shape vocabulary is
+    /// Ask's — same decoder, same renderer — with one difference that follows
+    /// from there being no panel: prose has nowhere to land, so the model is
+    /// told its words have to live inside `label` shapes.
+    private static let annotationContract = """
+
+
+        Answer by drawing on the screenshot, not by writing. Return ONLY a fenced block, nothing before or after it:
+
+        ```annotations
+        [{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},
+         {"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},
+         {"type":"label","x":0.55,"y":0.30,"text":"start here"}]
+        ```
+
+        - Coordinates are fractions of the screenshot, 0.0–1.0, x left-to-right and y TOP-to-bottom.
+        - "ellipse" and "rect" take the CENTER ("cx", "cy") plus width/height fractions ("w", "h"). "arrow" goes from ("fromX", "fromY") to ("toX", "toY"). "label" anchors its "text" (five words or fewer) at ("x", "y").
+        - There is no panel and no text answer — anything you need to say must be a "label" shape. A reply with no shapes shows the user nothing at all.
+        - A few precise shapes beat many: circle one element, draw one arrow per direction, box one region. Never more than 12 shapes.
+        """
 
     /// The context blocks a built-in's editor toggles bring in, for the parts
     /// its template does not already carry. Rewrite and Reply splice the Voice

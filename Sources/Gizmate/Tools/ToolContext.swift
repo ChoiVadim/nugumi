@@ -72,7 +72,9 @@ struct ToolContext: Equatable {
             return selection.isEmpty ? nil : [selection]
         case .files:
             return files.isEmpty ? nil : files.map(\.path)
-        case .screenshot:
+        // Both hand over a path: a script cannot be given an image any other
+        // way, and the marked-up one is written to disk exactly like a drag.
+        case .screenshot, .drawnScreen:
             guard let screenshot else { return nil }
             return [screenshot.imageURL.path]
         case .screenshotText:

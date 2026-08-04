@@ -152,7 +152,7 @@ Do not ask for confirmation, naming, icons, wording preferences, or facts you ca
 After an answer, read its exact ask_user toolResult from this same conversation before writing the candidate.
 
 Choose the candidate kind before writing it:
-- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, "ask" when the tool's subject is whatever the user types at the moment they run it, or "dictation" when they say it out loud; output "panel", "replace", "clipboard", "notes", or "speak"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
+- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, "ask" when the tool's subject is whatever the user types at the moment they run it, or "dictation" when they say it out loud; "drawnScreen" when the user wants to point at something on screen by drawing on it, or "screenshot" when the whole picture matters rather than its text; output "panel", "replace", "clipboard", "notes", "speak", or "annotate"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
 - native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, runShortcut, or saveToNote. Include target (empty only for revealInFinder and saveToNote). Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
 - python: when prompt/native cannot express the request, and the job is the same
   every time it runs. Include source, zero to three fixtures, timeoutSeconds,
@@ -310,6 +310,16 @@ names it, with sendTextToApp and target "Notes".
 The output "speak" reads the tool's answer out loud and shows nothing. Choose it
 only when the user asked to hear the result — "прочитай вслух", "read it to me",
 "say the answer" — never as a friendlier version of "panel".
+
+The output "annotate" draws the answer over the screen as circles, arrows and
+short labels, with no panel and no text. Choose it when the answer IS a place on
+screen — "покажи где нажать", "point at the button", "circle the mistake". It
+needs an input the model can see, so pair it with "drawnScreen" or "screenshot".
+
+The input "drawnScreen" captures the whole screen and lets the user scribble on
+it first, then hands the marked-up image over. Choose it when the request is
+about something the user has to point at — "обведи то что я отмечу", "look at
+what I circle". Plain "screenshot" is the same picture without the drawing step.
 
 Example: "я хочу выделить ссылку и сохранить её в заметки" is a native
 saveToNote candidate with selection input, notify output, selection trigger,

@@ -246,7 +246,12 @@ final class AskAnnotationOverlayController {
 @MainActor
 final class AskDrawingOverlayController {
     private final class OverlayPanel: NSPanel {
-        override var canBecomeKey: Bool { false }
+        /// Ask keeps this false so typing stays in its prompt field. A gizmo
+        /// has no field, and its Return has to be swallowed rather than land
+        /// in whatever app is behind the canvas — which only a key window can
+        /// do, since a global monitor cannot consume an event.
+        var acceptsKeys = false
+        override var canBecomeKey: Bool { acceptsKeys }
         override var canBecomeMain: Bool { false }
 
         // Blanket updates (InvisibilityState.applyToAllOpenWindows, sharing
@@ -260,6 +265,11 @@ final class AskDrawingOverlayController {
     }
 
     private final class StrokeCanvasView: NSView {
+        /// Shown centered near the top while a gizmo is waiting on the drawing.
+        /// nil for Ask, whose own pill already says what to do.
+        var hint: String? {
+            didSet { needsDisplay = true }
+        }
         var strokes: [[NSPoint]] = [] {
             didSet { needsDisplay = true }
         }
@@ -326,6 +336,33 @@ final class AskDrawingOverlayController {
                 }
                 path.stroke()
             }
+            drawHint()
+        }
+
+        /// Drawn into the canvas rather than shown as a second panel: the
+        /// canvas already covers the screen, and a pill window here would be
+        /// one more thing to place, level and tear down. It never reaches the
+        /// model either — `annotated(with:)` composites strokes, not this view.
+        private func drawHint() {
+            guard let hint else { return }
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+                .foregroundColor: NSColor.white
+            ]
+            let size = (hint as NSString).size(withAttributes: attributes)
+            let padding = NSSize(width: 16, height: 9)
+            let pill = NSRect(
+                x: (bounds.width - size.width) / 2 - padding.width,
+                y: bounds.maxY - size.height - 2 * padding.height - 28,
+                width: size.width + 2 * padding.width,
+                height: size.height + 2 * padding.height
+            )
+            NSColor.black.withAlphaComponent(0.78).setFill()
+            NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+            (hint as NSString).draw(
+                at: NSPoint(x: pill.minX + padding.width, y: pill.minY + padding.height),
+                withAttributes: attributes
+            )
         }
     }
 
@@ -333,6 +370,8 @@ final class AskDrawingOverlayController {
     private let canvas: StrokeCanvasView
     private let screenFrame: NSRect
     private var undoKeyMonitor: Any?
+    private var finishKeyMonitor: Any?
+    private let onFinish: ((Bool) -> Void)?
     private var lastTextEditAt: Date?
     private var didClose = false
 
@@ -346,9 +385,15 @@ final class AskDrawingOverlayController {
         }
     }
 
-    init(screenFrame: NSRect) {
+    /// `onFinish` turns the canvas from Ask's silent companion into something
+    /// that can end a gizmo's input on its own: `true` for Return, `false` for
+    /// Esc. Ask leaves it nil — its pill is what submits, and a Return monitor
+    /// here would take the key out of its prompt field.
+    init(screenFrame: NSRect, hint: String? = nil, onFinish: ((Bool) -> Void)? = nil) {
         self.screenFrame = screenFrame
+        self.onFinish = onFinish
         canvas = StrokeCanvasView(frame: NSRect(origin: .zero, size: screenFrame.size))
+        canvas.hint = hint
         panel = OverlayPanel(
             contentRect: screenFrame,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -371,7 +416,16 @@ final class AskDrawingOverlayController {
         // test: a fully clear window must still receive drawing drags.
         panel.ignoresMouseEvents = false
         panel.contentView = canvas
-        panel.orderFrontRegardless()
+        if onFinish != nil {
+            panel.acceptsKeys = true
+            // Same two lines every focus-taking panel here uses; the guard both
+            // activates and keeps the settings window from riding along.
+            SelfActivationGuard.activate()
+            panel.makeKeyAndOrderFront(nil)
+            installFinishKeyMonitor()
+        } else {
+            panel.orderFrontRegardless()
+        }
         installUndoKeyMonitor()
     }
 
@@ -379,11 +433,36 @@ final class AskDrawingOverlayController {
     func close() {
         guard !didClose else { return }
         didClose = true
-        if let undoKeyMonitor {
-            NSEvent.removeMonitor(undoKeyMonitor)
-            self.undoKeyMonitor = nil
+        for monitor in [undoKeyMonitor, finishKeyMonitor].compactMap({ $0 }) {
+            NSEvent.removeMonitor(monitor)
         }
+        undoKeyMonitor = nil
+        finishKeyMonitor = nil
         panel.close()
+        // The canvas held focus so it could swallow Return; a `.replace` gizmo
+        // has to type back into the app the user came from.
+        if onFinish != nil {
+            SelfActivationGuard.relinquish()
+        }
+    }
+
+    /// Return finishes, Esc cancels. Consumed (`return nil`) rather than passed
+    /// on — a Return that also reached the app behind would insert a newline
+    /// into whatever the user was just looking at.
+    private func installFinishKeyMonitor() {
+        finishKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let onFinish = self.onFinish else { return event }
+            switch Int(event.keyCode) {
+            case kVK_Return, kVK_ANSI_KeypadEnter:
+                onFinish(true)
+                return nil
+            case kVK_Escape:
+                onFinish(false)
+                return nil
+            default:
+                return event
+            }
+        }
     }
 
     enum UndoTarget: Equatable {

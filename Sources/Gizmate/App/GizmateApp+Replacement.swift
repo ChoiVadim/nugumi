@@ -126,7 +126,8 @@ extension GizmateApp {
         _ text: String,
         language: TranslationLanguage,
         near screenPoint: NSPoint,
-        mode: TranslationMode = .draftMessage
+        mode: TranslationMode = .draftMessage,
+        images: [ImageInput] = []
     ) {
         if let setupError = translationErrorIfBootstrapNeedsSetup() {
             handleTranslationFailure(setupError)
@@ -153,7 +154,7 @@ extension GizmateApp {
             do {
                 let translated = try await client.translate(
                     text,
-                    images: [],
+                    images: images,
                     to: language,
                     mode: mode,
                     appCategory: currentAppCategory,

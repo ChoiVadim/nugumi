@@ -793,17 +793,20 @@ struct ToolEditorPanel: View {
         )
     }
 
-    /// A prompt tool only ever produces text, so `files` and `notify` aren't
-    /// offered. An agent finishes with text too, but a side-effect agent that
-    /// only wants to say "done" is a real shape, so it keeps `notify`.
-    private static let promptOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notes, .speak]
-    private static let agentOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notify, .notes, .speak]
-
-    private static func outputs(for kind: ToolKind) -> [ToolOutput] {
+    /// Every kind with something to say may say it any way it likes — a prompt
+    /// gizmo that only wants a toast, or a script that reads its answer aloud,
+    /// are both real shapes, and guessing which pairings are silly on the
+    /// user's behalf was the only thing keeping them apart.
+    ///
+    /// Action is the one exception, and only for `.annotate`: drawing on the
+    /// screen means a model deciding what to draw, and a fixed macOS action has
+    /// no model in it. The pill would do nothing at all.
+    // Internal rather than private only so the parity test can assert the one
+    // exclusion below is deliberate.
+    static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {
-        case .prompt: return promptOutputs
-        case .agent: return agentOutputs
-        case .native, .python: return ToolOutput.allCases
+        case .prompt, .agent, .python: return ToolOutput.allCases
+        case .native: return ToolOutput.allCases.filter { $0 != .annotate }
         }
     }
 
