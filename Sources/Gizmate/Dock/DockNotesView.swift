@@ -130,8 +130,11 @@ struct DockNotesView: View {
     /// `.adaptive(minimum: 235)`, so at a dock panel's width it already collapses
     /// to a single column — the same cards as the Notes page, one per row, with
     /// no second implementation to keep in step.
+    /// `OverlayScrollHost` rather than a SwiftUI `ScrollView`: this is a
+    /// borderless panel, where AppKit reverts a set-by-property overlay scroller
+    /// back to the wide legacy one. See its doc comment.
     private var noteList: some View {
-        ScrollView {
+        OverlayScrollHost {
             // `cardHeight: nil` — one card per row here, so a fixed height only
             // buys dead space under a two-word note.
             NotesGrid(
@@ -140,10 +143,9 @@ struct DockNotesView: View {
                 focusedNoteID: $focusedNoteID,
                 cardHeight: nil
             )
+            // Clear of the overlay scroller, which floats over the content.
+            .padding(.trailing, 4)
             .padding(.bottom, 4)
-            // Thin, overlay, auto-hiding — the app's one scroller look, and the
-            // only way to get it when macOS is set to "always show scroll bars".
-            .background(ScrollerConfigurator())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

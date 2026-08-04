@@ -153,14 +153,17 @@ share of users regardless of what looks right.
 
 | Context                            | How                                                                                   |
 | ---------------------------------- | ------------------------------------------------------------------------------------- |
-| SwiftUI `ScrollView`               | `.background(ScrollerConfigurator())` inside the content                              |
-| An `NSScrollView` you own          | `scrollerStyle = .overlay`, `autohidesScrollers = true`, `scrollerKnobStyle = .light` |
-| Inside a borderless floating panel | subclass `OverlayScrollView`                                                          |
+| SwiftUI `ScrollView`, main window | `.background(ScrollerConfigurator())` inside the content |
+| SwiftUI content, borderless panel | `OverlayScrollHost { … }` — **not** a `ScrollView` |
+| An `NSScrollView` you own | `scrollerStyle = .overlay`, `autohidesScrollers = true`, `scrollerKnobStyle = .light` |
+| An `NSScrollView` in a borderless panel | subclass `OverlayScrollView` |
 
 - In a borderless panel, AppKit **reverts** a manually-set `.overlay` back to the
   wide legacy scroller, whose track never hides. Setting the property is not
   enough there — `OverlayScrollView` (`Live/LiveCaptionViews.swift`) overrides
-  the getter so the revert cannot land.
+  the getter so the revert cannot land. A SwiftUI `ScrollView` cannot be given a
+  custom `NSScrollView` subclass, so in a panel the nesting inverts: host the
+  SwiftUI content inside `OverlayScrollHost`, which owns the scroll view.
 - SwiftUI's `TextEditor` re-applies its own scroller config on every update, so
   nothing set on it sticks. Use `PlainTextEditor`, which owns its
   `NSScrollView` — and which also avoids the bug where dismissing a panel
