@@ -313,6 +313,11 @@ finishes.
   on screen — "покажи где нажать", "point at the button", "circle the mistake".
   It requires an input the model can see, so pair it only with "drawnScreen" or
   "screenshot", and never with a request whose answer is prose.
+  Do NOT describe the shape format in the candidate's prompt. Gizmate appends the
+  exact coordinate contract itself at run time, every time such a tool runs, and
+  a second hand-written spec only contradicts it. Write the prompt as the task —
+  "circle the button the user is asking about and label it" — and let the host
+  say how to encode that.
 
 Input and result are chosen independently: any input may be paired with any
 result, and the only hard constraints are the ones stated above — the trigger a
