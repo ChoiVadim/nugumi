@@ -39,8 +39,9 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
     /// counter through `Decoder.userInfo` means every node only ever asks
     /// "is my own subtree small enough", and a subtree's depth can never
     /// exceed the whole tree's, so no inner node can reject a tree that
-    /// actually fits.
-    public var depth: Int {
+    /// actually fits. Purely a `Codable` implementation detail, so it stays
+    /// internal — nothing outside this file needs to ask a layout its depth.
+    var depth: Int {
         switch self {
         case let .grid(cell, _, _): return 1 + cell.depth
         case let .list(row, _): return 1 + row.depth
