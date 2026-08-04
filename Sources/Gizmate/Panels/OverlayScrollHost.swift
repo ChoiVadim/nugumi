@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+/// Flipped so content stacks from the top. An `NSScrollView`'s document view is
+/// bottom-origin unless it says otherwise, which parks the content below the
+/// viewport and shows an empty panel with a live scroller — the same reason
+/// `Snippets.swift` has its own `FlippedDocumentView`.
+private final class FlippedScrollDocument: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// SwiftUI content inside an `NSScrollView` we own, for use in borderless
 /// floating panels.
 ///
@@ -9,10 +17,8 @@ import SwiftUI
 /// back to the system's wide legacy scroller, whose track never hides. The fix
 /// is `OverlayScrollView`, which overrides the getter so there is nothing to
 /// revert — and a SwiftUI `ScrollView` cannot be told to use a custom
-/// `NSScrollView` subclass, so the content has to be hosted the other way round.
-///
-/// Only the width is pinned to the clip view. Height stays intrinsic, which is
-/// what gives the document something to scroll.
+/// `NSScrollView` subclass, so the nesting has to invert: AppKit owns the
+/// scrolling, SwiftUI rides inside it.
 struct OverlayScrollHost<Content: View>: NSViewRepresentable {
     @ViewBuilder var content: () -> Content
 
@@ -25,19 +31,43 @@ struct OverlayScrollHost<Content: View>: NSViewRepresentable {
         scroll.scrollerKnobStyle = .light
         scroll.contentView.drawsBackground = false
 
+        let document = FlippedScrollDocument()
+        document.translatesAutoresizingMaskIntoConstraints = false
         let host = NSHostingView(rootView: AnyView(content()))
         host.translatesAutoresizingMaskIntoConstraints = false
-        scroll.documentView = host
+        document.addSubview(host)
+        scroll.documentView = document
+
         NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
-            host.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            // The document's height comes from the hosting view, which is what
+            // gives the scroll view something to scroll.
+            host.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            host.topAnchor.constraint(equalTo: document.topAnchor),
+            host.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            // Width tracks the viewport; height deliberately does not.
+            document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
         ])
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let host = scroll.documentView as? NSHostingView<AnyView> else { return }
+        guard let host = scroll.documentView?.subviews.first as? NSHostingView<AnyView> else {
+            return
+        }
         host.rootView = AnyView(content())
+    }
+
+    /// An `NSScrollView` has no intrinsic size, so without this SwiftUI has
+    /// nothing to go on and the surrounding stack can grow past the panel.
+    /// Taking exactly what is offered keeps it inside its container.
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: NSScrollView,
+        context: Context
+    ) -> CGSize? {
+        CGSize(width: proposal.width ?? 320, height: proposal.height ?? 320)
     }
 }

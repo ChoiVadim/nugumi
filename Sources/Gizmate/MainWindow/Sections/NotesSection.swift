@@ -323,9 +323,23 @@ struct NotesGrid: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-                ForEach(items) { note in
-                    card(for: note)
+            // Non-lazy in the single-column case, which is the dock: a lazy
+            // container needs a bounded viewport to decide what to build, and
+            // inside an `NSScrollView`'s document view the height is unbounded
+            // — it renders nothing at all. A few dozen cards cost nothing to
+            // build eagerly; the multi-column page keeps the lazy grid.
+            if cardHeight == nil {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(items) { note in
+                        card(for: note)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                    ForEach(items) { note in
+                        card(for: note)
+                    }
                 }
             }
         }
