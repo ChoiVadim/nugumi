@@ -127,19 +127,75 @@ enum NativeToolRunner {
 
     // MARK: - Apps
 
-    /// Launches or focuses the app and returns its display name. `open -a` does
-    /// the name resolution (fuzzy matching, `.app` suffixes, bundle ids) that no
-    /// single NSWorkspace call covers, and costs a few tens of milliseconds.
+    /// Where the app a gizmo names actually lives, or nil when nothing by that
+    /// name is installed.
+    ///
+    /// Three ways a user names an app, in ascending cost: its bundle
+    /// identifier, the name of its bundle on disk, and the name macOS
+    /// *displays* for it. The third is not an edge case and not only about
+    /// localisation — `/System/Applications/FindMy.app` is "Find My" in the
+    /// Dock, in Finder and in Spotlight, so it is the only name most people
+    /// have ever seen, and neither `open -a "Find My"` nor a file check finds
+    /// it. On a Russian Mac the same is true of every bundled app at once.
+    ///
+    /// Shared with `ToolAgentHostCandidateValidator`: the builder must accept
+    /// exactly the names a run can resolve, or refusing one moves the failure
+    /// from build time to run time, which is strictly worse.
+    @MainActor
+    static func applicationURL(for nameOrBundleID: String) -> URL? {
+        let trimmed = nameOrBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("."),
+           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: trimmed) {
+            return url
+        }
+        let manager = FileManager.default
+        let fileName = trimmed.hasSuffix(".app") ? trimmed : "\(trimmed).app"
+        let roots = [
+            "/Applications",
+            "/System/Applications",
+            "/System/Applications/Utilities",
+            (NSHomeDirectory() as NSString).appendingPathComponent("Applications"),
+        ]
+        for root in roots {
+            let path = (root as NSString).appendingPathComponent(fileName)
+            if manager.fileExists(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+        // Only now the directory listings, so the common case stays four
+        // `stat` calls rather than four `readdir`s.
+        for root in roots {
+            guard let entries = try? manager.contentsOfDirectory(atPath: root) else { continue }
+            for entry in entries where entry.hasSuffix(".app") {
+                let path = (root as NSString).appendingPathComponent(entry)
+                if manager.displayName(atPath: path)
+                    .localizedCaseInsensitiveCompare(trimmed) == .orderedSame {
+                    return URL(fileURLWithPath: path)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Launches or focuses the app and returns the name macOS knows it by.
+    ///
+    /// The returned name is the *display* name, never what the user typed:
+    /// `enterFullScreen` looks the app up again through `localizedName`, and
+    /// "FindMy" never equals "Find My" — so a gizmo naming the bundle would
+    /// launch the app and then spend five seconds failing to full-screen it.
     @discardableResult
     private static func activate(_ nameOrBundleID: String) async throws -> String {
-        if nameOrBundleID.contains("."),
-           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: nameOrBundleID) {
+        if let url = applicationURL(for: nameOrBundleID) {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.activates = true
             _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-            return url.deletingPathExtension().lastPathComponent
+            return FileManager.default.displayName(atPath: url.path)
         }
 
+        // Nothing on disk under that name. `open -a` still does fuzzy matching
+        // the lookup above does not, and reaches apps outside the four standard
+        // directories, so it stays as the last attempt rather than the first.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-a", nameOrBundleID]

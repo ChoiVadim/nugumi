@@ -129,3 +129,29 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         }
     }
 }
+
+/// The builder refuses a native candidate whose app it cannot find, so what it
+/// can find has to be exactly what a run can open. When the two disagreed, the
+/// model wrote a correct native candidate, was refused, and repaired into
+/// Python — a worse tool for a request that was right the first time.
+@MainActor
+final class InstalledApplicationResolutionTests: XCTestCase {
+    /// The name macOS shows and the name on disk are not the same string, and
+    /// this is not only about localisation: FindMy.app is "Find My" everywhere
+    /// a user can see it, in English.
+    func testBothTheDisplayNameAndTheBundleNameResolveToOneApp() throws {
+        let onDisk = "/System/Applications/FindMy.app"
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: onDisk),
+            "FindMy.app is not on this Mac"
+        )
+        XCTAssertEqual(NativeToolRunner.applicationURL(for: "FindMy")?.path, onDisk)
+        XCTAssertEqual(NativeToolRunner.applicationURL(for: "Find My")?.path, onDisk)
+        XCTAssertTrue(ToolAgentHostCandidateValidator.installedApplicationExists("Find My"))
+    }
+
+    func testAnAppThatIsNotInstalledStillResolvesToNothing() {
+        XCTAssertNil(NativeToolRunner.applicationURL(for: "Definitely Not An App \(UUID())"))
+        XCTAssertFalse(ToolAgentHostCandidateValidator.installedApplicationExists(""))
+    }
+}

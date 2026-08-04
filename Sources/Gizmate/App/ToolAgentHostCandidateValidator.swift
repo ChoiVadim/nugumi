@@ -16,9 +16,19 @@ enum ToolAgentHostCandidateValidator {
         case .native:
             switch candidate.nativeAction {
             case .openApp, .openAppFullScreen, .sendTextToApp:
+                // Says what to do about it, because the obvious repair is the
+                // wrong one. Handed only the fact, the model rewrites the tool
+                // in Python — which cannot open a missing app either, and now
+                // it is an unread script the user has to approve. A misspelling
+                // is worth another try; an app that is genuinely not installed
+                // is not a tool this Mac can build today.
                 failureDetail = applicationExists(candidate.target)
                     ? nil
-                    : "No installed macOS application named \(candidate.target) was found."
+                    : "No installed macOS application named \(candidate.target) was found. "
+                        + "Check the spelling and the name macOS shows for it, and try the "
+                        + "native action once more. If the app really is not installed, say "
+                        + "so with UNSUPPORTED — do not rewrite this as a Python tool, "
+                        + "because Python cannot open an app that is not there either."
             case .openURL:
                 let testValue = candidate.target.replacingOccurrences(
                     of: "{input}",
@@ -56,30 +66,21 @@ enum ToolAgentHostCandidateValidator {
         )
     }
 
+    /// Whether a native candidate's app target names something this Mac can
+    /// actually open.
+    ///
+    /// Delegates to the resolver the run itself uses. Keeping a second copy of
+    /// the rules here is how the builder came to refuse names a run could have
+    /// opened — and would just as easily accept ones it could not.
     @MainActor
     static func installedApplicationExists(_ target: String) -> Bool {
         let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        if trimmed.contains("."),
-           NSWorkspace.shared.urlForApplication(withBundleIdentifier: trimmed) != nil {
-            return true
-        }
-        if NSWorkspace.shared.runningApplications.contains(where: {
+        if NativeToolRunner.applicationURL(for: trimmed) != nil { return true }
+        // An app running from somewhere nobody scans is still installed.
+        return NSWorkspace.shared.runningApplications.contains {
             $0.localizedName?.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
-        }) {
-            return true
-        }
-        let appName = trimmed.hasSuffix(".app") ? trimmed : "\(trimmed).app"
-        let roots = [
-            "/Applications",
-            "/System/Applications",
-            "/System/Applications/Utilities",
-            (NSHomeDirectory() as NSString).appendingPathComponent("Applications"),
-        ]
-        return roots.contains {
-            FileManager.default.fileExists(
-                atPath: ($0 as NSString).appendingPathComponent(appName)
-            )
+                || $0.bundleIdentifier?.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
         }
     }
 }
