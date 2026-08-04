@@ -66,14 +66,25 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         XCTAssertTrue(offered.contains(.annotate))
     }
 
-    /// Script is unrestricted. Prompt is not, any more: a surface renders rows a
-    /// script printed, and a prompt gizmo has no script — it has a model, which
-    /// cannot run on every pointer hover over a screen edge.
-    func testOnlyScriptGizmosAreOfferedEveryResult() {
-        XCTAssertEqual(ToolEditorPanel.outputs(for: .python), ToolOutput.allCases)
+    /// Script used to be the unrestricted kind. It no longer is: `.surface`
+    /// needs a layout tree, and this editor has no control that writes one —
+    /// that's composed by the build-time agent alone (Task 10), so a hand-
+    /// built gizmo can never carry one. `.python` and `.prompt` end up
+    /// excluding `.surface` for two unrelated reasons that happen to agree —
+    /// `.python` because the editor can't author the layout it would need,
+    /// `.prompt` because a model can't run on every pointer hover over a
+    /// screen edge even if it had one — so no kind reaches this editor able
+    /// to offer `.surface`, not even the one kind whose script could
+    /// actually serve one at runtime.
+    func testNoKindCanBeGivenSurfaceByHandInTheEditor() {
+        XCTAssertFalse(ToolEditorPanel.outputs(for: .python).contains(.surface))
         XCTAssertFalse(ToolEditorPanel.outputs(for: .prompt).contains(.surface))
         XCTAssertFalse(ToolEditorPanel.outputs(for: .agent).contains(.surface))
         XCTAssertFalse(ToolEditorPanel.outputs(for: .native).contains(.surface))
+        XCTAssertEqual(
+            ToolEditorPanel.outputs(for: .python),
+            ToolOutput.allCases.filter { $0 != .surface }
+        )
         XCTAssertEqual(
             ToolEditorPanel.outputs(for: .prompt),
             ToolOutput.allCases.filter { $0 != .surface }

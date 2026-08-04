@@ -838,8 +838,14 @@ struct ToolEditorPanel: View {
     /// together.
     static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {
+        // A surface needs a layout tree, and nothing in this editor writes
+        // one — that's composed by the build-time agent alone (Task 10),
+        // never typed in by hand. Offering the pill here would let someone
+        // save a `.surface` gizmo with `layout == nil`, which `isUsable`
+        // then makes permanently dead: no ring slot, no dock tab, nothing
+        // said about why it went nowhere.
         case .python:
-            return ToolOutput.allCases
+            return ToolOutput.allCases.filter { $0 != .surface }
         // A surface renders rows a script printed. A prompt gizmo has a model
         // where the script would be, and a dock reveal cannot wait for one.
         case .prompt:
