@@ -180,6 +180,8 @@ enum ToolOutput: String, Codable, CaseIterable {
     case notify
     /// Keeps the answer as a new note, titled with the gizmo's name.
     case notes
+    /// Reads the answer out loud. See `SpeechOut`.
+    case speak
 
     var displayName: String {
         switch self {
@@ -189,6 +191,7 @@ enum ToolOutput: String, Codable, CaseIterable {
         case .files: return "Save files"
         case .notify: return "Notify"
         case .notes: return "Save to notes"
+        case .speak: return "Read aloud"
         }
     }
 
@@ -206,6 +209,8 @@ enum ToolOutput: String, Codable, CaseIterable {
             return "Shows a short confirmation and nothing else."
         case .notes:
             return "Keeps the answer as a new note, ready to read in the Notes tab."
+        case .speak:
+            return "Says the answer out loud instead of showing it."
         }
     }
 }

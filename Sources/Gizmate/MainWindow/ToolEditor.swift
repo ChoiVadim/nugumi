@@ -779,21 +779,25 @@ struct ToolEditorPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Same story as `inputPicker`: a row of pills wide enough for "Save to
+    /// notes" leaves `SettingRow`'s label column about one word wide, so the
+    /// explanation next to it wraps into a ransom note. A grid takes the full
+    /// width and puts the explanation above it, where it has room.
     private var resultPicker: some View {
-        SettingRow("Result", subtitle: draft.output.explanation) {
-            PillPicker(
-                options: Self.outputs(for: draft.kind),
-                selection: $draft.output,
-                label: { $0.displayName }
-            )
-        }
+        wrappingPicker(
+            "Result",
+            hint: draft.output.explanation,
+            options: Self.outputs(for: draft.kind),
+            selection: $draft.output,
+            label: { $0.displayName }
+        )
     }
 
     /// A prompt tool only ever produces text, so `files` and `notify` aren't
     /// offered. An agent finishes with text too, but a side-effect agent that
     /// only wants to say "done" is a real shape, so it keeps `notify`.
-    private static let promptOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notes]
-    private static let agentOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notify, .notes]
+    private static let promptOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notes, .speak]
+    private static let agentOutputs: [ToolOutput] = [.panel, .replace, .clipboard, .notify, .notes, .speak]
 
     private static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {

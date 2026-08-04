@@ -248,6 +248,8 @@ extension GizmateApp {
                     self.replaceCurrentSelection(with: result.text ?? "")
                 case .notes where result.text != nil:
                     self.keepNote(result.text ?? "", title: tool.name, tagID: self.gizmoNoteTagID)
+                case .speak where result.text != nil:
+                    SpeechOut.speak(result.text ?? "")
                 default:
                     ToastHUD.shared.show(text: result.message)
                 }
@@ -608,6 +610,13 @@ extension GizmateApp {
             // Titled with the gizmo rather than the answer's first line: a list
             // of notes all called "Summary" is unreadable, "Summarize page" is not.
             keepNote(text, title: tool.name, tagID: gizmoNoteTagID)
+        case .speak:
+            let text = result.text
+            guard !text.isEmpty else {
+                ToastHUD.shared.show(text: "\(tool.name) — no output")
+                return
+            }
+            SpeechOut.speak(text)
         }
     }
 

@@ -184,6 +184,8 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
     case notify
     /// Kept as a new note in Gizmate's own Notes tab, titled with the gizmo.
     case notes
+    /// Read out loud instead of shown.
+    case speak
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {

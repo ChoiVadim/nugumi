@@ -219,6 +219,10 @@ extension GizmateApp {
                 guard let self else { return }
                 self.keepNote(answer, title: tool.name, tagID: self.gizmoNoteTagID)
             }
+        case .speak:
+            runPromptToolForText(tool, on: text, near: screenPoint) { answer in
+                SpeechOut.speak(answer)
+            }
         }
     }
 

@@ -42,6 +42,7 @@ export function createTools(runtime: SidecarRuntime) {
       Type.Literal("files"),
       Type.Literal("notify"),
       Type.Literal("notes"),
+      Type.Literal("speak"),
     ]),
     trigger: Type.Union([
       Type.Literal("always"),
@@ -66,6 +67,7 @@ export function createTools(runtime: SidecarRuntime) {
         Type.Literal("replace"),
         Type.Literal("clipboard"),
         Type.Literal("notes"),
+        Type.Literal("speak"),
       ]),
       trigger: Type.Union([Type.Literal("always"), Type.Literal("selection")]),
       prompt: Type.String({ maxLength: 16_384 }),
@@ -120,6 +122,7 @@ export function createTools(runtime: SidecarRuntime) {
         Type.Literal("clipboard"),
         Type.Literal("notify"),
         Type.Literal("notes"),
+        Type.Literal("speak"),
       ]),
       prompt: Type.String({ maxLength: 16_384 }),
       // At most one, with no expectedOutput: an agent's answer is not

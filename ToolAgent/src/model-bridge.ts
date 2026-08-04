@@ -152,7 +152,7 @@ Do not ask for confirmation, naming, icons, wording preferences, or facts you ca
 After an answer, read its exact ask_user toolResult from this same conversation before writing the candidate.
 
 Choose the candidate kind before writing it:
-- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, "ask" when the tool's subject is whatever the user types at the moment they run it, or "dictation" when they say it out loud; output "panel", "replace", "clipboard", or "notes"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
+- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, "ask" when the tool's subject is whatever the user types at the moment they run it, or "dictation" when they say it out loud; output "panel", "replace", "clipboard", "notes", or "speak"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
 - native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, runShortcut, or saveToNote. Include target (empty only for revealInFinder and saveToNote). Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
 - python: when prompt/native cannot express the request, and the job is the same
   every time it runs. Include source, zero to three fixtures, timeoutSeconds,
@@ -306,6 +306,10 @@ this". The native action saveToNote is the same destination for text the tool wa
 handed rather than text it produced: it takes no target and its output is
 "notify". Apple's Notes.app is a different place — reach it only when the user
 names it, with sendTextToApp and target "Notes".
+
+The output "speak" reads the tool's answer out loud and shows nothing. Choose it
+only when the user asked to hear the result — "прочитай вслух", "read it to me",
+"say the answer" — never as a friendlier version of "panel".
 
 Example: "я хочу выделить ссылку и сохранить её в заметки" is a native
 saveToNote candidate with selection input, notify output, selection trigger,
