@@ -147,6 +147,10 @@ final class TranslationPanelController {
             anchorY: anchorY,
             showsSource: showsSource,
             showsFollowUp: showsFollowUp,
+            // On an edge the dock supplies the glass, the corners and the
+            // width, so the content must not bring its own — see DESIGN.md,
+            // "No glass inside glass".
+            chromeless: dockHost != nil,
             onTargetLanguageSelected: onTargetLanguageSelected,
             onReplace: onReplace
         )

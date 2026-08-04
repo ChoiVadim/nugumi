@@ -187,6 +187,7 @@ final class EdgeDockController {
 
     private func presentResult(_ view: NSView) {
         guard let screen else { return }
+        view.autoresizingMask = [.width, .height]
         let wasVisible = state != .hidden
         transientResult = view
         pointerLeftTimer?.invalidate()

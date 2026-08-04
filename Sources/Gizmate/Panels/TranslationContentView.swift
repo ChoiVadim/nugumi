@@ -138,6 +138,17 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     private let resultScrollView = NSScrollView()
     private let sourceDivider = HairlineSeparatorView()
     private var panelGlass: GlassHostView?
+    /// Drawn without its own glass, corners or fixed width — for a host that
+    /// already provides all three. Glass inside glass is the thing this avoids:
+    /// a panel pasted into a dock instead of content laid out on one.
+    private let chromeless: Bool
+
+    /// The width to lay out against. Fixed when this view *is* the panel; the
+    /// host's width when it is only the contents of one.
+    private var layoutWidth: CGFloat { chromeless ? bounds.width : Self.bodyWidth }
+    private var layoutContentWidth: CGFloat {
+        chromeless ? max(bounds.width - Self.panelPaddingX * 2, 1) : Self.contentWidth
+    }
     private var chromeOverlay: GlassChromeOverlayView?
     private var closeButton: NSButton?
     private var copyButton: NSButton?
@@ -160,9 +171,11 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         anchorY: CGFloat,
         showsSource: Bool = true,
         showsFollowUp: Bool = false,
+        chromeless: Bool = false,
         onTargetLanguageSelected: ((TranslationLanguage) -> Void)? = nil,
         onReplace: ((String) -> Void)? = nil
     ) {
+        self.chromeless = chromeless
         self.sourceText = sourceText
         self.targetLanguage = targetLanguage
         self.resultLabel = resultLabel
@@ -695,16 +708,25 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     }
 
     private func buildUI() {
-        let panelGlass = GlassHostView(
-            frame: NSRect(x: 0, y: 0, width: Self.bodyWidth, height: bounds.height),
-            cornerRadius: 22,
-            tintColor: NSColor(calibratedRed: 0.10, green: 0.095, blue: 0.045, alpha: 0.72),
-            style: .regular
-        )
-        panelGlass.autoresizingMask = [.height]
-        addSubview(panelGlass)
-        let content = panelGlass.contentView
-        self.panelGlass = panelGlass
+        let content: NSView
+        if chromeless {
+            // The dock's own glass is the surface; this just lays out on it.
+            let plain = NSView(frame: bounds)
+            plain.autoresizingMask = [.width, .height]
+            addSubview(plain)
+            content = plain
+        } else {
+            let panelGlass = GlassHostView(
+                frame: NSRect(x: 0, y: 0, width: Self.bodyWidth, height: bounds.height),
+                cornerRadius: 22,
+                tintColor: NSColor(calibratedRed: 0.10, green: 0.095, blue: 0.045, alpha: 0.72),
+                style: .regular
+            )
+            panelGlass.autoresizingMask = [.height]
+            addSubview(panelGlass)
+            self.panelGlass = panelGlass
+            content = panelGlass.contentView
+        }
 
         closeButton = makeIconButton(
             symbolName: "xmark",
@@ -930,10 +952,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         panelGlass?.frame = NSRect(
             x: 0,
             y: 0,
-            width: Self.bodyWidth,
+            width: layoutWidth,
             height: bodyHeight
         )
-        chromeOverlay?.frame = NSRect(x: 0, y: 0, width: Self.bodyWidth, height: bodyHeight)
+        chromeOverlay?.frame = NSRect(x: 0, y: 0, width: layoutWidth, height: bodyHeight)
 
         let resolvedResultBoxHeight: CGFloat
         var y: CGFloat
@@ -960,11 +982,11 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             sourceTitleLabel.frame = NSRect(
                 x: Self.panelPaddingX,
                 y: y,
-                width: Self.contentWidth - Self.buttonSize - 8,
+                width: layoutContentWidth - Self.buttonSize - 8,
                 height: Self.labelHeight
             )
             closeButton?.frame = NSRect(
-                x: Self.bodyWidth - Self.panelPaddingX - Self.buttonSize,
+                x: layoutWidth - Self.panelPaddingX - Self.buttonSize,
                 y: y + (Self.labelHeight - Self.buttonSize) / 2,
                 width: Self.buttonSize,
                 height: Self.buttonSize
@@ -974,14 +996,14 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             let sourceScrollFrame = NSRect(
                 x: Self.panelPaddingX,
                 y: y,
-                width: Self.contentWidth,
+                width: layoutContentWidth,
                 height: resolvedSourceBoxHeight
             )
             let collapsedSourceText = Self.collapsedSourceText(sourceText)
             let sourceCanExpand = Self.singleLineWidth(
                 for: collapsedSourceText,
                 font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold)
-            ) > Self.contentWidth
+            ) > layoutContentWidth
                 || collapsedSourceText != sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
 
             sourcePreviewView.frame = sourceScrollFrame
@@ -1012,7 +1034,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             sourceDivider.frame = NSRect(
                 x: Self.panelPaddingX,
                 y: y,
-                width: Self.contentWidth,
+                width: layoutContentWidth,
                 height: Self.dividerHeight
             )
 
@@ -1120,7 +1142,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         )
 
         let buttonY = y + (Self.labelHeight - Self.buttonSize) / 2
-        var rightX = Self.bodyWidth - Self.panelPaddingX - Self.buttonSize
+        var rightX = layoutWidth - Self.panelPaddingX - Self.buttonSize
         if includeClose {
             closeButton?.frame = NSRect(x: rightX, y: buttonY, width: Self.buttonSize, height: Self.buttonSize)
             rightX -= Self.buttonSize + 8
