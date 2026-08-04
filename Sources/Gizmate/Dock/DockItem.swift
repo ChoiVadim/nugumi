@@ -26,12 +26,19 @@ struct DockItem {
 /// has to work when no window is open at all.
 @MainActor
 enum DockCatalog {
-    /// Everything that ships, minus Summarize: its ring button is built from the
-    /// frontmost app — an app icon plus a time-range orbit — so there is nothing
-    /// meaningful to park on an edge waiting. `performBuiltIn` ignores it for
-    /// the same reason.
-    static let dockableBuiltIns: [RingActionID] =
-        RingActionID.allCases.filter { $0 != .summarize }
+    /// Built-ins whose surface can already be placed on an edge.
+    ///
+    /// A screen edge is an alternative *panel*, not a second Ring: the choice
+    /// only means something for a tool that shows something. Today that is Note
+    /// alone, because the notes list is the one surface that already exists as a
+    /// view — Ask, Live and the result panel still create their own windows, so
+    /// there is nothing to hand a dock.
+    ///
+    /// Explain, Reply, Ask, Capture, Summarize and Live all join this list the
+    /// moment their panels become views. Rewrite and Dictate never will: they
+    /// write into the app you were in and show no panel at all.
+    /// See `docs/superpowers/specs/2026-08-03-one-tool-model-design.md`, phase 3.
+    static let dockableBuiltIns: [RingActionID] = [.saveNote]
 
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
@@ -46,31 +53,11 @@ enum DockCatalog {
         }
     }
 
-    static func gizmos(host: any SettingsHost) -> [DockItem] {
-        host.tools.usableTools().map { tool in
-            DockItem(
-                id: ToolRef.generated(tool.id).storageID,
-                title: tool.name,
-                icon: .symbol(tool.resolvedSymbolName)
-            ) { [weak host] in
-                hosted(
-                    AnyView(
-                        DockRunCard(
-                            title: tool.name,
-                            icon: .symbol(tool.resolvedSymbolName),
-                            subtitle: tool.output.displayName,
-                            footnote: tool.input.displayName,
-                            options: tool.options
-                        ) { option in
-                            var chosen = tool
-                            chosen.chosenOption = option
-                            host?.runTool(chosen, selection: "")
-                        }
-                    )
-                )
-            }
-        }
-    }
+    /// None yet. A gizmo with `output == .panel` earns a placement choice as
+    /// soon as the result panel is a view rather than a window; until then the
+    /// only honest answer is that it has none. A run button on an edge is a
+    /// second launcher, which is what this replaced.
+    static func gizmos(host: any SettingsHost) -> [DockItem] { [] }
 
     static func all(host: any SettingsHost) -> [DockItem] {
         builtIns(host: host) + gizmos(host: host)
@@ -86,25 +73,11 @@ enum DockCatalog {
 
     // MARK: - Surfaces
 
-    /// Note already has a view — the notes list, which is what "keep this" is
-    /// *for*. Every other built-in still owns its own window, so it docks as a
-    /// run card until those become views.
+    /// Note's surface is the notes list — which is what "keep this" is *for*.
+    /// Nothing else is in `dockableBuiltIns` yet, so nothing else reaches here.
     private static func surface(for action: RingActionID, host: (any SettingsHost)?) -> AnyView {
-        let overrides = host?.builtInOverrides
-        if action == .saveNote, let host {
-            return AnyView(DockNotesView(notes: host.notes))
-        }
-        return AnyView(
-            DockRunCard(
-                title: overrides?.displayName(for: action) ?? action.displayName,
-                icon: overrides?.icon(for: action) ?? action.icon,
-                subtitle: action.summary,
-                footnote: "",
-                options: []
-            ) { _ in
-                host?.performBuiltIn(action)
-            }
-        )
+        guard action == .saveNote, let host else { return AnyView(EmptyView()) }
+        return AnyView(DockNotesView(notes: host.notes))
     }
 
     private static func hosted(_ view: AnyView) -> NSView {

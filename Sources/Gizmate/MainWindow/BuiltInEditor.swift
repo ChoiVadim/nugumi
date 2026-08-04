@@ -100,13 +100,13 @@ struct BuiltInEditorPanel: View {
 
             shortcutRow
 
-            // Trigger, then display — the same order the gizmo editor uses, so
-            // the two editors read alike.
+            // Trigger, then where what it shows turns up. A screen edge replaces
+            // this action's panel — it is not a second Ring.
             if DockCatalog.dockableBuiltIns.contains(actionID) {
                 Divider().background(FlowTheme.hairline)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Screen edge")
+                    Text("Panel")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(FlowTheme.inkSecondary)
                     DockPlacementPicker(

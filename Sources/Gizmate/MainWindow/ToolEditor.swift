@@ -389,12 +389,11 @@ struct ToolEditorPanel: View {
 
             editorSection(
                 "General",
-                subtitle: "How this gizmo appears, and where you can reach it."
+                subtitle: "How this gizmo appears in your Ring."
             ) {
                 VStack(alignment: .leading, spacing: 18) {
                     nameAndIcon
                     kindPicker
-                    dockPicker
                 }
             }
 
@@ -776,21 +775,6 @@ struct ToolEditorPanel: View {
                 selection: $draft.kind,
                 label: { $0.displayName }
             )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Which screen edge this gizmo hangs off, if any. Lives here rather than in
-    /// Settings because it belongs to the gizmo, and because every gizmo the
-    /// user builds later gets the choice for free by being edited here at all.
-    ///
-    /// Keyed on `draft.id`, which exists before the first save. A placement set
-    /// on a gizmo that is then abandoned resolves to nothing — `dockItems()`
-    /// compacts it away, and `DockStore.prune` clears it at the next launch.
-    private var dockPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel("Screen edge", hint: "Keep this gizmo a hover away from the edge of your screen.")
-            DockPlacementPicker(store: bridge.dock, itemID: ToolRef.generated(draft.id).storageID)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

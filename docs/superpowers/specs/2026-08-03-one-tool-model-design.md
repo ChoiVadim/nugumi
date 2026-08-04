@@ -72,6 +72,41 @@ final class AskFloatingHost { … puts it in a panel, as today … }
 No behaviour changes in that step. `swift build` stays green after each move,
 and the floating path stays the default and stays byte-identical in behaviour.
 
+## Correction, 2026-08-04 — a screen edge is a panel, not a launcher
+
+The first cut of this shipped the edge choice as "put this tool on that edge",
+which made it a second Ring: a button you press to run something. That is wrong,
+and it is wrong in a way that matters, because it puts two launchers in the
+product and answers a question nobody asked.
+
+**A screen edge replaces the panel, never the trigger.** The Ring says *when* a
+tool runs; `Result` says *what happens to what it produces*; and when that result
+is a panel, the edge choice says *where that panel opens* — floating, as it
+always has, or flush to an edge.
+
+```
+Tool
+├─ trigger:  Ring slot, global shortcut          ← unchanged by this
+├─ input:    selection, ask, files, screenshot…
+└─ result:   replace / clipboard / notes / notify / files
+             └─ panel → opens: Floating | Top | Left | Right
+```
+
+Consequences, all of them deliberate:
+
+- A tool whose result is not a panel has **no** placement option. Rewrite writes
+  into the app you were in; there is no panel, so there is nothing to place.
+- Notes and Ask use the same control with the same meaning. Their "panel" is
+  their surface — the notes list, the chat — and it opens floating or on an edge
+  like any other.
+- The run card is deleted. It existed only to give a launcher something to show.
+
+**This makes phase 3 the whole feature, not a phase of it.** Until a result panel
+is a view rather than a window, the only tool that can honour the choice is Note,
+whose list already exists as one. `DockCatalog.dockableBuiltIns` is `[.saveNote]`
+and `DockCatalog.gizmos` is empty — honestly, rather than offering a control that
+does nothing.
+
 ## Non-goals
 
 - **Merging the two editors into one screen.** `BuiltInEditorPanel` and

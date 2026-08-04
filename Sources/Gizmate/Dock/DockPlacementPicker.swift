@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Off / Top / Left / Right for one dockable thing.
+/// Where a tool's panel opens: floating, or flush to a screen edge.
 ///
-/// Shared by the gizmo editor and Settings so the mapping from "no edge" to Off
-/// exists once. Deliberately not wrapped in a `SettingRow`: four pills are
+/// Not a launcher. A screen edge replaces the *panel*, never the Ring — the Ring
+/// is how a tool is triggered, this is where what it shows turns up. "Floating"
+/// is the default every tool has always had. Deliberately not wrapped in a `SettingRow`: four pills are
 /// `.fixedSize` at `minWidth: 78`, so they demand ~320pt and clip the panel when
 /// they share a row with a label — the same trap `kindPicker` documents.
 struct DockPlacementPicker: View {
@@ -19,7 +20,7 @@ struct DockPlacementPicker: View {
                 get: { store.edge(of: itemID) },
                 set: { store.dock(itemID, to: $0) }
             ),
-            label: { $0?.displayName ?? "Off" }
+            label: { $0?.displayName ?? "Floating" }
         )
     }
 }
