@@ -109,6 +109,13 @@ enum SurfaceRows {
     /// in — silently picking a representation would be worse than saying
     /// no. `NSNull` means the script had nothing to say for this key, which
     /// reads the same as not printing the key at all.
+    ///
+    /// `JSONSerialization` hands a JSON boolean back as an `NSNumber` —
+    /// there is no separate `Bool` case to switch on — so a boolean has to
+    /// be told apart from a real number by its `CFTypeID` before the
+    /// generic `NSNumber` branch runs, or `true` renders as `"1"`. The host
+    /// must show exactly what the script printed; `"1"` is a different
+    /// value from `true`, not a rendering of it.
     private static func string(from value: Any, key: String) throws -> String? {
         let described: String
         switch value {
@@ -116,6 +123,8 @@ enum SurfaceRows {
             return nil
         case let string as String:
             described = string
+        case let number as NSNumber where CFGetTypeID(number) == CFBooleanGetTypeID():
+            described = number.boolValue ? "true" : "false"
         case let number as NSNumber:
             described = String(describing: number)
         case is [Any]:

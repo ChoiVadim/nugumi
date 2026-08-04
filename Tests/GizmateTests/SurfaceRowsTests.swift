@@ -13,11 +13,17 @@ final class SurfaceRowsTests: XCTestCase {
 
     /// A script that printed a log line before its JSON is doing something
     /// reasonable, and failing it would send the model repairing a tool that
-    /// works. The last line that parses wins.
+    /// works. The last line that parses wins. Trailing lines after the JSON
+    /// (a "done" message, a stray newline) are what actually exercise the
+    /// backward walk's skip — with the JSON as the true last line, the scan
+    /// would match on its first try and never look at anything else.
     func testChatterBeforeTheJSONIsIgnored() throws {
         let rows = try SurfaceRows.decode(stdout: """
         scanning ~/Downloads
+        still scanning...
         {"rows":[{"id":"1","name":"a.txt"}]}
+        cleanup complete
+        goodbye
         """)
         XCTAssertEqual(rows.count, 1)
     }
@@ -80,10 +86,25 @@ final class SurfaceRowsTests: XCTestCase {
         )
     }
 
+    /// The padding lives in leading chatter, not inside a row's value — put
+    /// it in a `"note"` field instead and `maximumValueBytes` (1024) would
+    /// throw `.valueTooLong` first, at 256x under this test's padding size,
+    /// and the test would pass even with the stdout cap deleted. Pinning
+    /// `.notJSON` is what proves the cap fired rather than some other guard.
     func testStdoutOverTheByteCapFails() {
-        let padding = String(repeating: "x", count: 262_144)
-        XCTAssertThrowsError(
-            try SurfaceRows.decode(stdout: #"{"rows":[{"id":"1","note":"\#(padding)"}]}"#)
-        )
+        let chatter = String(repeating: "x", count: SurfaceRows.maximumStdoutBytes)
+        let stdout = chatter + "\n" + #"{"rows":[{"id":"1","name":"a"}]}"#
+        XCTAssertThrowsError(try SurfaceRows.decode(stdout: stdout)) { error in
+            guard case SurfaceRowsError.notJSON = error else {
+                XCTFail("expected .notJSON, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testBooleansBecomeTrueOrFalse() throws {
+        let rows = try SurfaceRows.decode(stdout: #"{"rows":[{"id":"1","active":true,"archived":false}]}"#)
+        XCTAssertEqual(rows[0]["active"], "true")
+        XCTAssertEqual(rows[0]["archived"], "false")
     }
 }
