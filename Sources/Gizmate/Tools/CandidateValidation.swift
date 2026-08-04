@@ -137,6 +137,38 @@ enum CandidateValidation {
             ))
         }
 
+        if candidate.output == .surface {
+            // `layout` is non-nil for a surface by `ToolAgentCandidateV1.validate`,
+            // so this is the belt to that braces rather than a real branch.
+            guard let layout = candidate.layout else {
+                return .failed(try report(
+                    input, fixtureIndex: fixtureIndex,
+                    failure: .invalidCandidate, started: started
+                ))
+            }
+            let rows: [SurfaceRow]
+            do {
+                rows = try SurfaceRows.decode(stdout: result.stdout)
+            } catch {
+                return .failed(try report(
+                    input, fixtureIndex: fixtureIndex, failure: .invalidOutput,
+                    stderrDetail: "A surface gizmo has to print "
+                        + #"{"rows":[{"id":"…","name":"…"}]} and nothing else. "#
+                        + error.localizedDescription,
+                    exitCode: result.exitCode, started: started
+                ))
+            }
+            if let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows) {
+                return .failed(try report(
+                    input, fixtureIndex: fixtureIndex, failure: .invalidOutput,
+                    stderrDetail: diagnostic, exitCode: result.exitCode, started: started
+                ))
+            }
+        }
+
+        // A surface's fixtures carry no `expectedOutput` — a folder listing is
+        // never byte-stable — so it grades `.smoke` via the same
+        // `ranWithoutComparison` path any other side-effecting output takes.
         guard let expected = fixture.expectedOutput else {
             return .ranWithoutComparison
         }

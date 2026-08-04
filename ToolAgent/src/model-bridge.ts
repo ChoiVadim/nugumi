@@ -319,7 +319,7 @@ When the request is about words the user can see but cannot select, prefer
 "screenshotText" over all of them — Vision reads them on any model, and it is
 cheaper than sending a picture on every turn.
 
-=== THE EIGHT RESULTS ===
+=== THE NINE RESULTS ===
 
 Every candidate declares exactly one result: where the answer goes when the run
 finishes.
@@ -355,12 +355,31 @@ finishes.
   a second hand-written spec only contradicts it. Write the prompt as the task —
   "circle the button the user is asking about and label it" — and let the host
   say how to encode that.
+- "surface": sits on a screen edge and shows a list the script prints, instead
+  of finishing with an answer. Script gizmos only, input "none", trigger
+  "always". The script prints {"rows":[{"id":"…","name":"…","path":"…"}]} and
+  nothing else, and "layout" says how a row is drawn. Reach for it when the
+  user asks to *see* something rather than to *do* something — "show me", "keep
+  it on the side", "so I can drag them out".
+  A layout is a tree of four nodes, each keyed off "$name" (a row's value) or
+  plain text unless noted otherwise. "grid" repeats one cell per row of data in
+  a wrapping grid — minimumWidth 48-400, plus empty copy for when there are no
+  rows yet. "list" stacks one instance per row of data, top to bottom — same
+  empty copy. "card" is a title with an optional subtitle, icon, drag and tap.
+  "text" is one bare line, no card chrome. A surface's own root has to repeat —
+  a grid or a list — since a bare card or text would draw only one row and
+  never the rest. icon, drag and tap each read their key through a prefix
+  instead of the plain "$name" binding: icon takes "file:$name" (that row's
+  file) or "symbol:name"; drag takes "file:$name" or "text:$name", for what the
+  user's drag actually carries out; tap takes "open:$name" or "reveal:$name",
+  for what a click does with that row.
 
 Input and result are chosen independently: any input may be paired with any
 result, and the only hard constraints are the ones stated above — the trigger a
-taken input forces, "files" belonging to Python, and "annotate" needing an image
-the model can see. Choose each from what the request actually asks for rather
-than from which pairs you have seen before.
+taken input forces, "files" and "surface" belonging to Python, "surface" itself
+forcing input "none" and trigger "always", and "annotate" needing an image the
+model can see. Choose each from what the request actually asks for rather than
+from which pairs you have seen before.
 
 Use a real SF Symbol from this safe shortlist: sparkles, text.alignleft,
 text.quote, textformat, character.book.closed, lightbulb, brain,
@@ -385,6 +404,13 @@ For Python candidates:
   relative paths and set outputDirectory to where they belong, for example
   "~/Downloads". Gizmate moves them there after a real run. Printing success
   without writing a file fails validation.
+- When output is "surface", print the rows as JSON on stdout — other lines
+  around them are fine, only the rows line itself is read. Every key a layout
+  binds has to be a key some row actually has, and every key read through
+  "file:" has to hold an absolute path, or validation fails and names the key.
+  A surface holds at most 500 rows and 256 KB of that JSON — a real folder can
+  hold far more than that, so sort by what actually matters (usually most
+  recent first) and print only that slice, never everything there is.
 
 Fixtures decide how the candidate is validated, so choose deliberately:
 - One fixture with expectedOutput, when the same input always produces the same

@@ -20,6 +20,44 @@ function requestPayload(
   return params;
 }
 
+// Mirrors the recursive `layoutNode` in protocol.ts: four node kinds behind a
+// `node` discriminator, with a grid or list's `cell`/`row` recursing into the
+// same union. `Type.Cyclic`/`Type.This` are TypeBox's way to express that
+// self-reference as JSON Schema (`$defs`/`$ref`) rather than the type-level
+// `z.lazy` zod uses. This is what the model actually sees when it calls the
+// tool, so it is the field's only teacher — the depth limit and the "no
+// repeater inside a repeater" rule are enforced downstream, same as in
+// protocol.ts, not by this shape.
+const layoutNode = Type.Cyclic(
+  {
+    layoutNode: Type.Union([
+      Type.Object({
+        node: Type.Literal("grid"),
+        cell: Type.This(),
+        minimumWidth: Type.Integer({ minimum: 48, maximum: 400 }),
+        empty: Type.String({ minLength: 1, maxLength: 120 }),
+      }),
+      Type.Object({
+        node: Type.Literal("list"),
+        row: Type.This(),
+        empty: Type.String({ minLength: 1, maxLength: 120 }),
+      }),
+      Type.Object({
+        node: Type.Literal("card"),
+        title: Type.String(),
+        subtitle: Type.Optional(Type.String()),
+        icon: Type.Optional(
+          Type.String({ pattern: "^(file:\\$.+|symbol:.*)$" }),
+        ),
+        drag: Type.Optional(Type.String({ pattern: "^(file|text):\\$.+$" })),
+        tap: Type.Optional(Type.String({ pattern: "^(open|reveal):\\$.+$" })),
+      }),
+      Type.Object({ node: Type.Literal("text"), value: Type.String() }),
+    ]),
+  },
+  "layoutNode",
+);
+
 export function createTools(runtime: SidecarRuntime) {
   const commonCandidate = {
     schemaVersion: Type.Literal(1),
@@ -91,6 +129,9 @@ export function createTools(runtime: SidecarRuntime) {
       ...commonCandidate,
       kind: Type.Literal("python"),
       source: Type.String({ maxLength: 65_536 }),
+      // Present exactly when output is "surface" — mirrors
+      // ToolAgentCandidateV1.layout and protocol.ts's pythonCandidate.layout.
+      layout: Type.Optional(layoutNode),
       fixtures: Type.Array(
         Type.Object({
           input: Type.String({ maxLength: 8192 }),

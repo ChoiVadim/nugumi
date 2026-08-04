@@ -255,12 +255,16 @@ const pythonCandidate = z
     // Zero fixtures means "running this would do something to the user's data".
     // A fixture without expectedOutput means "run it, but its output is not a
     // fixed string". Both are how a tool that does real work gets validated at
-    // all.
+    // all. `input` allows empty here — the candidate-level superRefine below
+    // is what actually requires it non-empty, and only when the candidate's
+    // own input isn't "none": a "none"-input tool (a surface among them) has
+    // nothing to give a fixture, so an empty string is the honest value, not
+    // a missing one.
     fixtures: z
       .array(
         z
           .object({
-            input: byteString(LIMITS.fixtureInputBytes),
+            input: byteString(LIMITS.fixtureInputBytes, true),
             expectedOutput: byteString(
               LIMITS.fixtureOutputBytes,
               true,
@@ -298,9 +302,14 @@ const agentCandidate = z
     // At most one, and never with an expectedOutput: an agent's answer is not
     // predictable, so a fixture is the input a harmless trial run should use,
     // and none at all means running it for real would do something to the
-    // user's data or to the outside world.
+    // user's data or to the outside world. `input` allows empty for the same
+    // "none" reason pythonCandidate's does.
     fixtures: z
-      .array(z.object({ input: byteString(LIMITS.fixtureInputBytes) }).strict())
+      .array(
+        z
+          .object({ input: byteString(LIMITS.fixtureInputBytes, true) })
+          .strict(),
+      )
       .max(1)
       .default([]),
     maxSteps: z.number().int().min(1).max(24),
@@ -351,6 +360,21 @@ export const candidateSchema = z
       context.addIssue({
         code: "custom",
         message: "files output needs outputDirectory",
+      });
+    }
+    // Mirrors ToolAgentCandidateV1.validate's fixture rule: "none" is the one
+    // input a fixture cannot supply a real value for, so an empty string is
+    // the honest fixture there, not a missing one. Every other input keeps
+    // requiring a real value — an empty fixture proves nothing for a tool
+    // that actually reads its argument.
+    if (
+      (candidate.kind === "python" || candidate.kind === "agent") &&
+      candidate.input !== "none" &&
+      candidate.fixtures.some((fixture) => fixture.input.length === 0)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "a fixture needs a real input unless the candidate takes none",
       });
     }
     // Mirrors ToolAgentCandidateV1.validate's surface rule: a surface is

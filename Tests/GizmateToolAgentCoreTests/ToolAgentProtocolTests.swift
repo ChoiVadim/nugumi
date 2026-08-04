@@ -689,6 +689,27 @@ final class ToolAgentProtocolTests: XCTestCase {
         ))
     }
 
+    /// "none" is the one input a fixture cannot supply a real value for — the
+    /// script reads nothing, so an empty string is the fixture that actually
+    /// runs it. Without this, a surface (or any "none"-input tool) could never
+    /// carry a fixture, `CandidateValidation` would only ever compile it, and
+    /// `SurfaceLayoutCheck` would never see a row a script really printed.
+    func testANoneInputFixtureMaySendAnEmptyInput() throws {
+        XCTAssertNoThrow(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .none, output: .surface, trigger: .always,
+            source: "print('{\"rows\":[]}')",
+            fixtures: [.init(input: "")],
+            layout: .list(row: .text(.key("name")), empty: "Nothing in Downloads")
+        ))
+    }
+
+    /// The relaxation above is scoped to "none" — a tool that actually reads
+    /// its argument still has to be proven against a real one.
+    func testAFixtureForAToolThatTakesRealInputStillNeedsOne() {
+        XCTAssertThrowsError(try makeCandidate(fixtures: [.init(input: "", expectedOutput: "HELLO")]))
+    }
+
     /// nil must not survive as an empty key, or the byte-for-byte re-encode in
     /// `ToolAgentModelActionValidator` rejects every candidate that has no layout.
     func testACandidateWithoutALayoutEncodesNoLayoutKey() throws {

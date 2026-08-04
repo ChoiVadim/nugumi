@@ -345,7 +345,14 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                       && $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFilterValueBytes
               }),
               fixtures.allSatisfy({
-                  !$0.input.isEmpty
+                  // "none" is the one input a fixture cannot supply a real
+                  // value for — the script reads nothing, so an empty string
+                  // is the honest fixture, not a missing one. Refusing it
+                  // would make a "none"-input candidate — a surface among
+                  // them — impossible to ever run-validate: it would be
+                  // stuck choosing between a fixture the guard rejects and no
+                  // fixture at all, which skips running the script entirely.
+                  (input == .none || !$0.input.isEmpty)
                       && $0.input.utf8.count <= ToolAgentProtocolLimitsV1.maximumFixtureInputBytes
                       && $0.expectedOutput.map({
                           $0.utf8.count <= ToolAgentProtocolLimitsV1.maximumFixtureOutputBytes

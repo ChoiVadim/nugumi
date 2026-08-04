@@ -90,13 +90,16 @@ final class SurfaceRowsTests: XCTestCase {
     /// it in a `"note"` field instead and `maximumValueBytes` (1024) would
     /// throw `.valueTooLong` first, at 256x under this test's padding size,
     /// and the test would pass even with the stdout cap deleted. Pinning
-    /// `.notJSON` is what proves the cap fired rather than some other guard.
+    /// `.tooMany` is what proves the cap fired rather than some other guard —
+    /// and it is the case that actually tells a repairing model what to do:
+    /// this stdout is genuinely valid JSON, just too much of it, so `.notJSON`
+    /// would send it hunting for a syntax bug that was never there.
     func testStdoutOverTheByteCapFails() {
         let chatter = String(repeating: "x", count: SurfaceRows.maximumStdoutBytes)
         let stdout = chatter + "\n" + #"{"rows":[{"id":"1","name":"a"}]}"#
         XCTAssertThrowsError(try SurfaceRows.decode(stdout: stdout)) { error in
-            guard case SurfaceRowsError.notJSON = error else {
-                XCTFail("expected .notJSON, got \(error)")
+            guard case SurfaceRowsError.tooMany = error else {
+                XCTFail("expected .tooMany, got \(error)")
                 return
             }
         }

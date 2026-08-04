@@ -36,7 +36,8 @@ enum SurfaceRowsError: LocalizedError {
         case .missingRows:
             return "The script's JSON had no \"rows\" array."
         case .tooMany:
-            return "The script printed more rows, or more fields on one row, than a surface can hold."
+            return "The script printed more than a surface can hold — too many rows, too many "
+                + "fields on one row, or just too many bytes. Print fewer rows."
         case .valueTooLong:
             return "A row's value was too long to show."
         case .valueNotAString(let key, let kind):
@@ -62,8 +63,13 @@ enum SurfaceRows {
     static func decode(stdout: String) throws -> [SurfaceRow] {
         // A runaway print loop is a script bug, not a payload to search line
         // by line — reject it up front rather than scanning megabytes of it.
+        // `.tooMany`, not `.notJSON`: this fires on a script that printed
+        // perfectly valid, huge JSON — a real folder with thousands of
+        // entries, discovered the first time a surface got validated against
+        // a script that actually runs against one. `.notJSON` sends a
+        // repairing model hunting for a syntax bug that was never there.
         guard stdout.utf8.count <= maximumStdoutBytes else {
-            throw SurfaceRowsError.notJSON
+            throw SurfaceRowsError.tooMany
         }
 
         var sawJSON = false

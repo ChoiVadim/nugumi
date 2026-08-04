@@ -304,6 +304,26 @@ test("model action contract accepts every runnable candidate shape and rejects i
       ),
     /invalid tool arguments/,
   );
+  // A tool that actually reads its argument still has to be proven against a
+  // real one — the empty-input relaxation is scoped to "none" alone.
+  assert.throws(
+    () => parseModelAction(action({ ...python, fixtures: [{ input: "" }] })),
+    /invalid tool arguments/,
+  );
+  // "none" is the one input with nothing to give a fixture, so an empty
+  // string there is the honest value, not a missing one — this is what a
+  // "none"-input side-effect script (not only a surface) needs to be
+  // run-validated at all rather than only compiled.
+  assert.doesNotThrow(() =>
+    parseModelAction(
+      action({
+        ...python,
+        input: "none",
+        trigger: "always",
+        fixtures: [{ input: "" }],
+      }),
+    ),
+  );
   assert.doesNotThrow(() => parseModelAction(action(downloader)));
   assert.doesNotThrow(() => parseModelAction(action(selectedLinkDownloader)));
   assert.doesNotThrow(() => parseModelAction(action(selectedOpenURL)));
@@ -403,6 +423,14 @@ test("a surface candidate's layout is validated by the sidecar schema, matching 
   };
 
   assert.doesNotThrow(() => parseModelAction(action(surface)));
+
+  // "none" is the one input a fixture cannot supply a real value for — the
+  // script reads nothing, so an empty string is the fixture that actually
+  // proves the layout against rows the script really printed, rather than
+  // leaving the candidate uncheckable and falling back to a compile-only pass.
+  assert.doesNotThrow(() =>
+    parseModelAction(action({ ...surface, fixtures: [{ input: "" }] })),
+  );
 
   // The rule this task exists to add: a surface with no layout at all is
   // rejected by the sidecar, not just discovered later by the host.
