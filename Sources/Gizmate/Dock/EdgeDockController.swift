@@ -40,6 +40,9 @@ final class EdgeDockController {
     private var state: DockState = .hidden
     private var pointerLeftTimer: Timer?
     private var dismissMonitors: [Any] = []
+    /// Where the pointer and the panel were when a drag on the handle started.
+    private var dragStartX: CGFloat?
+    private var dragStartFrame: NSRect = .zero
 
     /// How long the pointer must be away before the dock closes. Long enough to
     /// cross the gap between a strip and the panel it opens, short enough not
@@ -73,6 +76,16 @@ final class EdgeDockController {
         panel.hasShadow = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+    }
+
+    /// An open side dock is a window the user asked for, so it stays until they
+    /// say otherwise — dragged shut by the handle, or Escape. Only the tab strip
+    /// still comes and goes with the pointer, and the notch keeps its old
+    /// hover-in, hover-out behaviour: it is a peek, not a window.
+    private var staysOpen: Bool {
+        guard edge != .top else { return false }
+        if case .expanded = state { return true }
+        return false
     }
 
     /// Placement changed. An edge with nothing left on it must not reveal.
@@ -113,6 +126,7 @@ final class EdgeDockController {
             return
         }
 
+        guard !staysOpen else { return }
         schedulePointerLeftClose()
     }
 
@@ -152,6 +166,55 @@ final class EdgeDockController {
         pointerLeftTimer = nil
         if panel.isKeyWindow, panel.firstResponder is NSTextView { return }
         transition(to: .hidden)
+    }
+
+    // MARK: - Drag to close
+
+    /// How far toward the bezel the panel must be pulled before letting go
+    /// closes it. Short of that it springs back, so a nudge is not a dismissal.
+    private static let dragCloseThreshold: CGFloat = 64
+
+    func dragBegan() {
+        dragStartX = NSEvent.mouseLocation.x
+        dragStartFrame = panel.frame
+    }
+
+    /// Measured from the absolute pointer position, not the gesture's own
+    /// translation: this moves the window the gesture lives in, and a
+    /// translation read inside a moving window compounds with itself.
+    func dragChanged() {
+        guard let dragStartX else { return }
+        panel.setFrame(
+            dragStartFrame.offsetBy(dx: bezelwardOffset(from: dragStartX), dy: 0),
+            display: true
+        )
+    }
+
+    func dragEnded() {
+        guard let start = dragStartX else { return }
+        let offset = abs(bezelwardOffset(from: start))
+        dragStartX = nil
+        guard offset < Self.dragCloseThreshold else {
+            transition(to: .hidden)
+            return
+        }
+        // Not far enough — put it back rather than leaving it half off-screen.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().setFrame(dragStartFrame, display: true)
+        }
+    }
+
+    /// Drag only counts toward the bezel. Pulling a right-hand dock further left
+    /// would tear it off its edge, which is not a thing this dock does.
+    private func bezelwardOffset(from startX: CGFloat) -> CGFloat {
+        let delta = NSEvent.mouseLocation.x - startX
+        switch edge {
+        case .right: return max(delta, 0)
+        case .left: return min(delta, 0)
+        case .top: return 0
+        }
     }
 
     // MARK: - States
@@ -199,7 +262,10 @@ final class EdgeDockController {
 
         case .expanded(let itemID):
             guard let item = items.first(where: { $0.id == itemID }) ?? items.first else { return }
-            install(view: expandedView(items: items, active: item))
+            install(
+                view: expandedView(items: items, active: item),
+                showsDragHandle: edge != .top
+            )
             let size = NSSize(
                 width: edge == .top ? 620 : 380,
                 height: edge == .top ? 300 : 520
@@ -286,7 +352,7 @@ final class EdgeDockController {
         }
     }
 
-    private func install(view: NSView) {
+    private func install(view: NSView, showsDragHandle: Bool = false) {
         guard let root = panel.contentView else { return }
         glass?.removeFromSuperview()
         let dockEdge = edge
@@ -312,6 +378,24 @@ final class EdgeDockController {
             view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: insets.top),
             view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
         ])
+
+        guard showsDragHandle else { return }
+        let handle = NSHostingView(rootView: DockDragHandle(
+            onDragChanged: { [weak self] in self?.dragChanged() },
+            onDragBegan: { [weak self] in self?.dragBegan() },
+            onDragEnded: { [weak self] in self?.dragEnded() }
+        ))
+        handle.translatesAutoresizingMaskIntoConstraints = false
+        host.contentView.addSubview(handle)
+        // On the inner edge — the side away from the bezel, which is the only
+        // direction there is anywhere to drag to.
+        let innerAnchor = edge == .left
+            ? handle.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor)
+            : handle.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor)
+        NSLayoutConstraint.activate([
+            innerAnchor,
+            handle.centerYAnchor.constraint(equalTo: host.contentView.centerYAnchor),
+        ])
     }
 
     // MARK: - Dismiss
@@ -320,13 +404,17 @@ final class EdgeDockController {
     /// Global monitors never see our own events, so a click inside the dock is
     /// not a click outside it.
     private func installDismissMonitors() {
-        guard dismissMonitors.isEmpty else { return }
+        removeDismissMonitors()
         var monitors: [Any?] = []
-        monitors.append(NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in self?.transition(to: .hidden) }
-        })
+        // A click elsewhere dismisses a peek, but not a dock the user opened —
+        // clicking into another app is how you *use* what is on that edge.
+        if !staysOpen {
+            monitors.append(NSEvent.addGlobalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown]
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.transition(to: .hidden) }
+            })
+        }
         monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 else { return }  // Escape
             Task { @MainActor [weak self] in self?.transition(to: .hidden) }

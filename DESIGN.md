@@ -8,18 +8,18 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 
 ### Palette
 
-| Role | Token | Light | Dark | Usage |
-|------|-------|-------|------|-------|
-| Surface/glass | `FlowTheme.glass` | transparent | transparent | Visual-effect-backed window background |
-| Surface/card | `FlowTheme.card` | rgba(255,255,255,0.06) | rgba(255,255,255,0.06) | Settings panels and setup cards |
-| Surface/subtle | `FlowTheme.subtleFill` | rgba(255,255,255,0.08) | rgba(255,255,255,0.08) | Secondary fills and inactive controls |
-| Text/primary | `FlowTheme.ink` | #FFFFFF | #FFFFFF | Headings, body, active controls |
-| Text/secondary | `FlowTheme.inkSecondary` | #BDBDBD | #BDBDBD | Supporting copy and secondary labels |
-| Text/tertiary | `FlowTheme.inkTertiary` | #8C8C8C | #8C8C8C | Disabled, metadata, inactive icons |
-| Border/hairline | `FlowTheme.hairline` | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines |
-| Accent/primary | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9 | #C9C9C9 | Success, selected state, primary setup progress |
-| Accent/soft | `FlowTheme.accentSoft` | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds |
-| Status/error | inline status error | #FF8C8C | #FF8C8C | Failed setup status only |
+| Role            | Token                                        | Light                  | Dark                   | Usage                                           |
+| --------------- | -------------------------------------------- | ---------------------- | ---------------------- | ----------------------------------------------- |
+| Surface/glass   | `FlowTheme.glass`                            | transparent            | transparent            | Visual-effect-backed window background          |
+| Surface/card    | `FlowTheme.card`                             | rgba(255,255,255,0.06) | rgba(255,255,255,0.06) | Settings panels and setup cards                 |
+| Surface/subtle  | `FlowTheme.subtleFill`                       | rgba(255,255,255,0.08) | rgba(255,255,255,0.08) | Secondary fills and inactive controls           |
+| Text/primary    | `FlowTheme.ink`                              | #FFFFFF                | #FFFFFF                | Headings, body, active controls                 |
+| Text/secondary  | `FlowTheme.inkSecondary`                     | #BDBDBD                | #BDBDBD                | Supporting copy and secondary labels            |
+| Text/tertiary   | `FlowTheme.inkTertiary`                      | #8C8C8C                | #8C8C8C                | Disabled, metadata, inactive icons              |
+| Border/hairline | `FlowTheme.hairline`                         | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines                     |
+| Accent/primary  | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9                | #C9C9C9                | Success, selected state, primary setup progress |
+| Accent/soft     | `FlowTheme.accentSoft`                       | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds                       |
+| Status/error    | inline status error                          | #FF8C8C                | #FF8C8C                | Failed setup status only                        |
 
 ### Rules
 
@@ -31,15 +31,15 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 
 ### Scale
 
-| Level | Size | Weight | Line Height | Tracking | Usage |
-|-------|------|--------|-------------|----------|-------|
-| Display | 30px | regular | system | 0 | Main section headings via `FlowTheme.serif(30)` |
-| H2 | 29px | regular | system | 0 | Onboarding panel headings |
-| Card title | 15px | semibold | system | 0 | Settings cards and provider groups |
-| Row title | 14px | medium | system | 0 | Setup rows and model rows |
-| Body | 13px | regular/medium | system | 0 | Controls, compact explanatory text |
-| Caption | 12px | regular | system | 0 | Secondary copy and status detail |
-| Micro | 11px | semibold | system | 0 | Monospaced section labels and progress markers |
+| Level      | Size | Weight         | Line Height | Tracking | Usage                                           |
+| ---------- | ---- | -------------- | ----------- | -------- | ----------------------------------------------- |
+| Display    | 30px | regular        | system      | 0        | Main section headings via `FlowTheme.serif(30)` |
+| H2         | 29px | regular        | system      | 0        | Onboarding panel headings                       |
+| Card title | 15px | semibold       | system      | 0        | Settings cards and provider groups              |
+| Row title  | 14px | medium         | system      | 0        | Setup rows and model rows                       |
+| Body       | 13px | regular/medium | system      | 0        | Controls, compact explanatory text              |
+| Caption    | 12px | regular        | system      | 0        | Secondary copy and status detail                |
+| Micro      | 11px | semibold       | system      | 0        | Monospaced section labels and progress markers  |
 
 ### Font Stack
 
@@ -59,15 +59,15 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 
 All spacing maps to the 4px grid.
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `space-1` | 4px | Tight label stacks |
-| `space-2` | 8px | Icon-to-label, row gaps |
-| `space-3` | 12px | Standard row spacing |
-| `space-4` | 16px | Setup card internal stacks |
-| `space-5` | 20px | Card padding variant |
-| `space-6` | 24px | Provider group spacing |
-| `space-8` | 32px | Major panel separation |
+| Token     | Value | Usage                      |
+| --------- | ----- | -------------------------- |
+| `space-1` | 4px   | Tight label stacks         |
+| `space-2` | 8px   | Icon-to-label, row gaps    |
+| `space-3` | 12px  | Standard row spacing       |
+| `space-4` | 16px  | Setup card internal stacks |
+| `space-5` | 20px  | Card padding variant       |
+| `space-6` | 24px  | Provider group spacing     |
+| `space-8` | 32px  | Major panel separation     |
 
 ### Grid
 
@@ -114,11 +114,11 @@ All spacing maps to the 4px grid.
 
 ### Timing
 
-| Type | Duration | Easing | Usage |
-|------|----------|--------|-------|
-| Platform | system | system | Native buttons, menus, focus |
-| Micro | 100-150ms | ease-out | Hover treatments already present in onboarding cards |
-| Standard | 200-300ms | ease-in-out | Tab and panel transitions if added later |
+| Type     | Duration  | Easing      | Usage                                                |
+| -------- | --------- | ----------- | ---------------------------------------------------- |
+| Platform | system    | system      | Native buttons, menus, focus                         |
+| Micro    | 100-150ms | ease-out    | Hover treatments already present in onboarding cards |
+| Standard | 200-300ms | ease-in-out | Tab and panel transitions if added later             |
 
 ### Rules
 
@@ -132,14 +132,94 @@ All spacing maps to the 4px grid.
 
 Mixed, but constrained: real `NSVisualEffectView` glass at the window layer, translucent tonal card fills inside it, and one-pixel hairlines for structure.
 
-| Level | Value | Usage |
-|-------|-------|-------|
-| Window glass | `NSVisualEffectView.Material.hudWindow` | Main shell/background |
-| Card tonal fill | white opacity 0.06 | Settings panels |
-| Hairline | white opacity 0.10 | Separators and outlines |
+| Level           | Value                                   | Usage                   |
+| --------------- | --------------------------------------- | ----------------------- |
+| Window glass    | `NSVisualEffectView.Material.hudWindow` | Main shell/background   |
+| Card tonal fill | white opacity 0.06                      | Settings panels         |
+| Hairline        | white opacity 0.10                      | Separators and outlines |
 
 ### Rules
 
 - Do not introduce generic drop shadows.
 - Use tonal fills and hairlines for hierarchy.
 - Keep card radius aligned with existing component radius unless changing a whole component family.
+
+## 8. Scrollers
+
+**Thin, overlay, auto-hiding, light knob. Everywhere, no exceptions.** A scroller
+that holds a track open while nothing is scrolling is the loudest thing in a
+small panel, and macOS's "Show scroll bars: Always" turns that on for a large
+share of users regardless of what looks right.
+
+| Context                            | How                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------- |
+| SwiftUI `ScrollView`               | `.background(ScrollerConfigurator())` inside the content                              |
+| An `NSScrollView` you own          | `scrollerStyle = .overlay`, `autohidesScrollers = true`, `scrollerKnobStyle = .light` |
+| Inside a borderless floating panel | subclass `OverlayScrollView`                                                          |
+
+- In a borderless panel, AppKit **reverts** a manually-set `.overlay` back to the
+  wide legacy scroller, whose track never hides. Setting the property is not
+  enough there — `OverlayScrollView` (`Live/LiveCaptionViews.swift`) overrides
+  the getter so the revert cannot land.
+- SwiftUI's `TextEditor` re-applies its own scroller config on every update, so
+  nothing set on it sticks. Use `PlainTextEditor`, which owns its
+  `NSScrollView` — and which also avoids the bug where dismissing a panel
+  containing a SwiftUI `TextEditor` leaves the main window swallowing clicks.
+
+## 9. Glass surfaces
+
+- **Never animate a glass view's frame on close.** Glass takes its shape from the
+  model frame and teleports on frame one of a closing animation, popping a disc
+  at the panel's centre. Opening may animate a frame; closing fades in place and
+  orders out. This cost the ring a rewrite.
+- **No glass inside glass.** A panel is one glass surface; controls on it are
+  drawn with tint, not with their own material.
+- **Buttons on glass are tint-only — no plate.** A filled rounded rect on glass
+  fights the shape it sits in and has to be clipped against the panel's corners.
+  Show state with the icon's tint (`ink` active, `inkSecondary` resting), as
+  `HoverIconButton` does.
+
+## 10. Panels that touch the bezel
+
+- **Square the corners that meet the screen edge, and flare them inward.** A
+  rounded corner flush against the bezel reads as a gap.
+  `DockGeometry.panelPath` builds the concave shape and
+  `GlassHostView(cornerPath:)` takes it as a mask — `CALayer.cornerRadius` can
+  only round outward, so a concave corner needs a path.
+- **No window shadow.** macOS pairs a shadow with a thin light rim, and on a
+  panel hugging the bezel that rim reads as a border along the screen edge.
+- **Slide in from the bezel, fade out in place.** Arriving from off-screen is
+  what makes a panel read as coming out of the edge rather than being placed on
+  top of it.
+
+## 11. Dock behaviour
+
+- **A peek closes itself; a window the user opened does not.** The notch and the
+  side tab strips come and go with the pointer. An expanded side dock stays until
+  dismissed on purpose — dragged shut by its handle, or Escape. Clicking into
+  another app is how you _use_ what is on the edge, so it must not dismiss it.
+- **Every way out has a visible affordance.** A dock that stays open carries
+  `DockDragHandle` on its inner edge. An exit nobody can see is not an exit.
+- **Never auto-close over a text field.** While the panel holds key focus in an
+  `NSTextView`, the pointer is parked elsewhere by definition, and closing throws
+  away what was typed.
+- **Horizontal distance decides a side dock, never vertical.** How far down the
+  screen the pointer is says nothing about whether it is heading for an edge.
+- **Draw thin, but hit big.** `DockDragHandle` is 4pt of ink inside a 16pt
+  target. A 4pt target is a miss waiting to happen.
+
+## 12. Reuse before variants
+
+Before writing a second version of a component, check whether the first already
+adapts. `NotesGrid` lays out with `.adaptive(minimum: 235)` and collapses to one
+column on its own, so the dock reuses it rather than shipping a second note list
+that would drift out of step with the first.
+
+Where a real difference exists, make it a parameter and attach the reason —
+`NoteCard(fixedHeight:)` is fixed in a grid row so cards line up, and
+content-sized in a single column where uniform height only buys dead space.
+
+## 13. Copy
+
+Never write "translate", "translation" or "translator" in anything the user
+reads. Prefer results, replies, output. Code identifiers are exempt.

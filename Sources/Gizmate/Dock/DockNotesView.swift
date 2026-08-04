@@ -7,12 +7,14 @@ import SwiftUI
 /// which in a 360pt panel is a screenful of chrome before the first note. The
 /// part that matters — `NotesGrid` and its cards — is reused verbatim, so a note
 /// looks and edits the same on an edge as it does on the page.
+///
+/// No "all notes" link: the dock holds the whole list already, and a button that
+/// only swaps which window you read it in is a row of chrome per panel.
 struct DockNotesView: View {
     /// The app's one `NotesStore`, handed in rather than reached for through
     /// `GizmateSettingsBridge`: that bridge belongs to the main window and dies
     /// with it, and a dock outlives the main window by design.
     @ObservedObject var notes: NotesStore
-    let onOpenAll: () -> Void
 
     /// `nil` is All. Holding the tag's id rather than an index keeps the
     /// selection pointing at the same tag when tags are added or removed —
@@ -30,7 +32,6 @@ struct DockNotesView: View {
             if !tags.isEmpty { tagChips }
             Divider().background(FlowTheme.hairline)
             noteList
-            footer
         }
         .padding(14)
         .foregroundStyle(FlowTheme.ink)
@@ -140,6 +141,9 @@ struct DockNotesView: View {
                 cardHeight: nil
             )
             .padding(.bottom, 4)
+            // Thin, overlay, auto-hiding — the app's one scroller look, and the
+            // only way to get it when macOS is set to "always show scroll bars".
+            .background(ScrollerConfigurator())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -151,18 +155,4 @@ struct DockNotesView: View {
         draft = ""
     }
 
-    // MARK: - Footer
-
-    private var footer: some View {
-        Button {
-            onOpenAll()
-        } label: {
-            HStack(spacing: 4) {
-                Text("All notes").font(.system(size: 11, weight: .medium))
-                Image(systemName: "arrow.up.right").font(.system(size: 9))
-            }
-            .foregroundStyle(FlowTheme.inkSecondary)
-        }
-        .buttonStyle(.plain)
-    }
 }

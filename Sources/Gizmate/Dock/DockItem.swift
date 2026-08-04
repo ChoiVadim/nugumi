@@ -92,12 +92,7 @@ enum DockCatalog {
     private static func surface(for action: RingActionID, host: (any SettingsHost)?) -> AnyView {
         let overrides = host?.builtInOverrides
         if action == .saveNote, let host {
-            return AnyView(
-                DockNotesView(
-                    notes: host.notes,
-                    onOpenAll: { [weak host] in host?.presentMainWindow(section: .notes) }
-                )
-            )
+            return AnyView(DockNotesView(notes: host.notes))
         }
         return AnyView(
             DockRunCard(
