@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Flat because a binding in a layout tree renders exactly one string per
 /// cell — there is no shape in the render path for a nested value to land in.
-struct SurfaceRow: Equatable {
+struct SurfaceRow: Equatable, Codable {
     /// The script's own `id`, or the row's position when it printed none.
     /// Either way this is what a refresh diffs on, so rows do not reshuffle
     /// under the pointer just because a script re-sorted its output.
