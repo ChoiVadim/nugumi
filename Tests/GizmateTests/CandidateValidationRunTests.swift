@@ -47,21 +47,25 @@ final class CandidateValidationRunTests: XCTestCase {
         fixtures: [ToolAgentFixtureV1],
         output: ToolAgentCandidateOutputV1 = .clipboard,
         outputDirectory: String? = nil,
-        declaresNetwork: Bool = false
+        declaresNetwork: Bool = false,
+        input: ToolAgentCandidateInputV1 = .selection,
+        trigger: ToolAgentCandidateTriggerV1 = .always,
+        layout: ToolAgentLayoutV1? = nil
     ) throws -> ToolAgentCandidateV1 {
         try ToolAgentCandidateV1(
             kind: .python,
             name: "Test Tool",
             brief: "Exercises the real validation path.",
             symbolName: "curlybraces",
-            input: .selection,
+            input: input,
             output: output,
-            trigger: .always,
+            trigger: trigger,
             source: source,
             fixtures: fixtures,
             outputDirectory: outputDirectory,
             timeoutSeconds: 60,
-            declaresNetwork: declaresNetwork
+            declaresNetwork: declaresNetwork,
+            layout: layout
         )
     }
 
@@ -171,6 +175,47 @@ final class CandidateValidationRunTests: XCTestCase {
                 atPath: (NSHomeDirectory() as NSString)
                     .appendingPathComponent("Downloads/note.txt")
             )
+        )
+    }
+
+    /// Proves the wiring in `CandidateValidation.run`, not just the pure
+    /// `SurfaceLayoutCheck` function it calls: a script that really executes
+    /// and really prints rows missing a key the layout binds has to fail with
+    /// a diagnostic naming that key. This is the assertion an accidental swap
+    /// of `result.stdout` for a fixture value (or any other stand-in) would
+    /// break — the pure-function unit tests never enter this path, so nothing
+    /// today would notice.
+    func testSurfaceOutputMissingABoundKeyFailsWithTheKeyNamed() async throws {
+        // Given
+        // "filename", not "name": the generic not-JSON diagnostic below
+        // already contains the example key "name" in its own boilerplate
+        // ({"id":"…","name":"…"}), so asserting on "name" would pass even if
+        // that wrong branch fired instead of `SurfaceLayoutCheck`'s real one
+        // — exactly the false-positive this test exists to rule out.
+        let candidate = try candidate(
+            source: #"print('{"rows":[{"id":"1","other":"x"}]}')"#,
+            fixtures: [.init(input: "")],
+            output: .surface,
+            input: .none,
+            trigger: .always,
+            layout: .list(
+                row: .card(title: .key("filename"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+                empty: "Nothing here"
+            )
+        )
+
+        // When
+        let report = try await CandidateValidation.validate(
+            try input(candidate),
+            uv: try uv()
+        )
+
+        // Then
+        XCTAssertEqual(report.outcome, .failed)
+        XCTAssertEqual(report.failure, .invalidOutput)
+        XCTAssertTrue(
+            report.stderrDetail?.contains("filename") ?? false,
+            report.stderrDetail ?? "<no detail>"
         )
     }
 
