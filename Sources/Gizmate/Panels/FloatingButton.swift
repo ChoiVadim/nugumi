@@ -112,6 +112,8 @@ final class FloatingTranslateButtonController {
     }
 
     private var followMonitors: [Any] = []
+    private var followTicker: Timer?
+    private var followTarget: NSPoint?
 
     func close() {
         stopFollowingCursor()
@@ -139,7 +141,11 @@ final class FloatingTranslateButtonController {
     /// attention is, for the one state where there is nothing to click.
     private func startFollowingCursor() {
         guard followMonitors.isEmpty else { return }
+        // Snap for the first frame — easing in from wherever the button happened
+        // to be would read as it flying across the screen.
         moveToCursor()
+        if let followTarget { panel.setFrameOrigin(followTarget) }
+        stopFollowTicker()
         let follow: @MainActor () -> Void = { [weak self] in self?.moveToCursor() }
         let types: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
         if let global = NSEvent.addGlobalMonitorForEvents(matching: types, handler: { _ in
@@ -158,10 +164,22 @@ final class FloatingTranslateButtonController {
     private func stopFollowingCursor() {
         followMonitors.forEach(NSEvent.removeMonitor)
         followMonitors = []
+        stopFollowTicker()
+        followTarget = nil
     }
 
-    /// Set straight, never animated: the pointer's own motion is the animation,
-    /// and an easing on top of it would trail behind the cursor.
+    /// Takes the pointer's position as a destination rather than a command, and
+    /// closes a fraction of the remaining distance each frame. The lag is the
+    /// point: the ring reads as being *carried along* instead of welded to the
+    /// cursor, and a flick of the mouse no longer teleports it.
+    ///
+    /// Per-frame easing, not a duration: the destination changes faster than any
+    /// animation could finish, so an `NSAnimationContext` would restart from
+    /// scratch on every move and never actually arrive.
+    private static let followEasing: CGFloat = 0.16
+    /// Below this the remainder is invisible — stop rather than tick forever.
+    private static let followSettleDistance: CGFloat = 0.5
+
     private func moveToCursor() {
         let pointer = NSEvent.mouseLocation
         let size = panel.frame.size
@@ -177,7 +195,43 @@ final class FloatingTranslateButtonController {
         if origin.y < visible.minY {
             origin.y = pointer.y + Self.cursorGap.y
         }
-        panel.setFrameOrigin(origin)
+        followTarget = origin
+        startFollowTicker()
+    }
+
+    private func startFollowTicker() {
+        guard followTicker == nil else { return }
+        let ticker = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stepTowardTarget() }
+        }
+        // `.common`, so a scroll or menu tracking loop doesn't freeze it
+        // mid-flight and strand the ring halfway.
+        RunLoop.main.add(ticker, forMode: .common)
+        followTicker = ticker
+    }
+
+    private func stepTowardTarget() {
+        guard let followTarget else {
+            stopFollowTicker()
+            return
+        }
+        let current = panel.frame.origin
+        let dx = followTarget.x - current.x
+        let dy = followTarget.y - current.y
+        guard abs(dx) + abs(dy) > Self.followSettleDistance else {
+            panel.setFrameOrigin(followTarget)
+            stopFollowTicker()
+            return
+        }
+        panel.setFrameOrigin(NSPoint(
+            x: current.x + dx * Self.followEasing,
+            y: current.y + dy * Self.followEasing
+        ))
+    }
+
+    private func stopFollowTicker() {
+        followTicker?.invalidate()
+        followTicker = nil
     }
 
     private func toggleRadialMenu() {
