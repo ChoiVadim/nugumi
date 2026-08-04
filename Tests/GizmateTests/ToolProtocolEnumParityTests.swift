@@ -58,4 +58,39 @@ final class ToolProtocolEnumParityTests: XCTestCase {
             XCTAssertEqual(ToolEditorPanel.outputs(for: kind), ToolOutput.allCases)
         }
     }
+
+    /// Every input the editor offers a prompt gizmo has to survive the builder's
+    /// own validation.
+    ///
+    /// This has now failed twice for the same reason: a case was added to the
+    /// enum, to the sidecar schema and to the capability description, while the
+    /// allowlist inside `ToolAgentCandidateV1.validate` stayed where it was.
+    /// Both times the model wrote exactly the candidate it had been told to
+    /// write and the user saw "The model returned an invalid agent action",
+    /// which names neither the field nor the value that was refused.
+    func testEveryPromptPairingTheEditorOffersPassesCandidateValidation() throws {
+        for input in ToolInput.allCases {
+            for output in ToolEditorPanel.outputs(for: .prompt) {
+                guard let wireInput = ToolAgentCandidateInputV1(rawValue: input.rawValue),
+                      let wireOutput = ToolAgentCandidateOutputV1(rawValue: output.rawValue)
+                else {
+                    return XCTFail("\(input.rawValue)/\(output.rawValue) has no protocol case")
+                }
+                XCTAssertNoThrow(
+                    try ToolAgentCandidateV1(
+                        kind: .prompt,
+                        name: "Explain",
+                        brief: "Explains the thing.",
+                        symbolName: "sparkles",
+                        input: wireInput,
+                        output: wireOutput,
+                        trigger: .always,
+                        prompt: "Explain what this is."
+                    ),
+                    "a prompt gizmo the editor offers as \(input.rawValue) → "
+                        + "\(output.rawValue) is rejected by the builder"
+                )
+            }
+        }
+    }
 }

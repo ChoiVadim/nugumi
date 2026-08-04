@@ -110,11 +110,9 @@ const promptCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("prompt"),
-    // A prompt tool works on text the user is looking at. "screenshotText" is
-    // that same text, read off the screen instead of out of a selection, and
-    // "ask" is text the user types when the tool runs.
-    input: z.enum(["selection", "ask", "dictation", "screenshotText", "screenshot", "drawnScreen"]),
-    output: z.enum(["panel", "replace", "clipboard", "notes", "speak", "annotate"]),
+    // No narrowing: a prompt tool takes whatever it is handed and its answer
+    // goes wherever the user asked. A second list here is a second thing to
+    // forget, and forgetting it rejects a candidate the prompt asked for.
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
@@ -276,11 +274,9 @@ const installedPromptTool = z
   .object({
     ...commonInstalledTool,
     kind: z.literal("prompt"),
-    // A prompt tool works on text the user is looking at. "screenshotText" is
-    // that same text, read off the screen instead of out of a selection, and
-    // "ask" is text the user types when the tool runs.
-    input: z.enum(["selection", "ask", "dictation", "screenshotText", "screenshot", "drawnScreen"]),
-    output: z.enum(["panel", "replace", "clipboard", "notes", "speak", "annotate"]),
+    // No narrowing: a prompt tool takes whatever it is handed and its answer
+    // goes wherever the user asked. A second list here is a second thing to
+    // forget, and forgetting it rejects a candidate the prompt asked for.
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),

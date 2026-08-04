@@ -58,22 +58,9 @@ export function createTools(runtime: SidecarRuntime) {
     Type.Object({
       ...commonCandidate,
       kind: Type.Literal("prompt"),
-      input: Type.Union([
-        Type.Literal("selection"),
-        Type.Literal("ask"),
-        Type.Literal("dictation"),
-        Type.Literal("screenshotText"),
-        Type.Literal("screenshot"),
-        Type.Literal("drawnScreen"),
-      ]),
-      output: Type.Union([
-        Type.Literal("panel"),
-        Type.Literal("replace"),
-        Type.Literal("clipboard"),
-        Type.Literal("notes"),
-        Type.Literal("speak"),
-        Type.Literal("annotate"),
-      ]),
+      // Inherits commonCandidate's input and output on purpose. A narrower copy
+      // here is a second list to keep in step, and the one time it fell behind
+      // it rejected exactly the candidate the prompt had asked for.
       trigger: Type.Union([Type.Literal("always"), Type.Literal("selection")]),
       prompt: Type.String({ maxLength: 16_384 }),
       appliesTargetLanguage: Type.Boolean(),

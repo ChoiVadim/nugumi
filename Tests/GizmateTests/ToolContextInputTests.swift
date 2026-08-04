@@ -55,17 +55,25 @@ final class ToolContextInputTests: XCTestCase {
         XCTAssertEqual(ToolInput(rawValue: "ask"), .ask)
     }
 
-    /// A prompt tool works on text the user is looking at, and there are three
-    /// ways for that to arrive. The sidecar's own schema and the capability
-    /// description have always offered all three, so the host has to accept all
-    /// three — a candidate the model was told to write must not come back as
-    /// invalid.
+    /// A prompt tool takes whatever it is handed, and the host has to accept
+    /// every one of them — a candidate the model was told to write must not come
+    /// back as invalid.
+    ///
+    /// The list used to stop at `screenshotText`, on the reasoning that a prompt
+    /// tool "only ever sees text". That stopped being true when prompt runs
+    /// started carrying the image itself rather than its path, so
+    /// `ToolProtocolEnumParityTests` now sweeps the whole grid and this case
+    /// covers the inputs specifically.
     func testPromptCandidateAcceptsEveryInputTheModelIsOffered() throws {
         for input in [
             ToolAgentCandidateInputV1.selection,
             .ask,
             .dictation,
             .screenshotText,
+            .screenshot,
+            .drawnScreen,
+            .files,
+            .none,
         ] {
             XCTAssertNoThrow(
                 try ToolAgentCandidateV1(
@@ -84,27 +92,4 @@ final class ToolContextInputTests: XCTestCase {
         }
     }
 
-    /// The inputs a prompt tool cannot work on: it only ever sees text, so a
-    /// file list or a PNG path is not something it can be handed.
-    func testPromptCandidateStillRejectsNonTextInputs() {
-        for input in [
-            ToolAgentCandidateInputV1.files,
-            .screenshot,
-        ] {
-            XCTAssertThrowsError(
-                try ToolAgentCandidateV1(
-                    kind: .prompt,
-                    name: "Explain",
-                    brief: "Explains the text.",
-                    symbolName: "sparkles",
-                    input: input,
-                    output: .panel,
-                    trigger: .always,
-                    prompt: "Explain this.",
-                    appliesTargetLanguage: true
-                ),
-                "prompt candidate should reject \(input.rawValue) input"
-            )
-        }
-    }
 }

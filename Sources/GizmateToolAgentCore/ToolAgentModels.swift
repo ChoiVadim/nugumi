@@ -368,16 +368,17 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // Only a Python tool reads a process environment, so a prompt or
             // native candidate that declares secrets has misunderstood what it
             // is building rather than found a way to use one.
-            // Four ways for the text a prompt tool works on to arrive: selected,
-            // read off the screen by Vision, typed, or spoken when the tool
-            // runs. The sidecar's schema and the capability description offer
-            // all four; this guard used to accept only the first, so a
-            // screenshotText prompt candidate — which the model was explicitly
-            // told to write — came back as invalidCandidate.
-            guard input == .selection || input == .ask || input == .screenshotText
-                    || input == .dictation,
-                  output != .files,
-                  output != .notify,
+            // Deliberately no input or output allowlist. This guard has now
+            // twice been the thing that rejected a candidate the model was
+            // explicitly told to write — first screenshotText, then
+            // drawnScreen — because a new case was added to the enum, the
+            // sidecar schema and the capability description while this list
+            // stayed where it was. A prompt tool works on whatever it is
+            // handed and its answer goes wherever the user said; the pairing
+            // rules are guidance in the prompt, not a wall here, so a wrong
+            // pairing produces a tool that disappoints rather than a build
+            // that fails with nothing to point at.
+            guard
                   !prompt.isEmpty,
                   prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
                   nativeAction == nil,
@@ -701,16 +702,17 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
 
         switch kind {
         case .prompt:
-            // Four ways for the text a prompt tool works on to arrive: selected,
-            // read off the screen by Vision, typed, or spoken when the tool
-            // runs. The sidecar's schema and the capability description offer
-            // all four; this guard used to accept only the first, so a
-            // screenshotText prompt candidate — which the model was explicitly
-            // told to write — came back as invalidCandidate.
-            guard input == .selection || input == .ask || input == .screenshotText
-                    || input == .dictation,
-                  output != .files,
-                  output != .notify,
+            // Deliberately no input or output allowlist. This guard has now
+            // twice been the thing that rejected a candidate the model was
+            // explicitly told to write — first screenshotText, then
+            // drawnScreen — because a new case was added to the enum, the
+            // sidecar schema and the capability description while this list
+            // stayed where it was. A prompt tool works on whatever it is
+            // handed and its answer goes wherever the user said; the pairing
+            // rules are guidance in the prompt, not a wall here, so a wrong
+            // pairing produces a tool that disappoints rather than a build
+            // that fails with nothing to point at.
+            guard
                   !prompt.isEmpty,
                   prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
                   nativeAction == nil,
