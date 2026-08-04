@@ -36,7 +36,7 @@
 **Interfaces:**
 
 - Consumes: nothing.
-- Produces: `ToolAgentCandidateOutputV1.surface`, `ToolOutput.surface`, `ToolAgentCandidateOutputV1.surfaceDeliverable: Set<ToolAgentCandidateOutputV1>`, `ToolEditorPanel.outputs(for:)` narrowed for `.prompt` and `.agent`.
+- Produces: `ToolAgentCandidateOutputV1.surface`, `ToolOutput.surface`, `ToolEditorPanel.outputs(for:)` narrowed for `.prompt` and `.agent`.
 
 Only a `.python` gizmo can be a surface: `.native` has no script to print rows, and `.prompt` / `.agent` would put a model call behind every dock reveal.
 
@@ -79,16 +79,9 @@ In `ToolAgentProtocolTypes.swift`, inside `ToolAgentCandidateOutputV1`:
     case surface
 ```
 
-Then, beside `nativeDeliverable` / `agentDeliverable`:
+There is deliberately **no** `surfaceDeliverable` constant. `nativeDeliverable` and `agentDeliverable` earn their existence by being read — `ToolEditorPanel.deliverable(_:)` builds the editor's pill list out of them. "Only `.python` may be a surface" is the inverse shape and has two real homes already: the editor filter below, and `ToolAgentCandidateV1.validate` in Task 3. A third copy that nothing reads is a rule with no enforcement pretending to be one.
 
-```swift
-    /// A surface needs a script to print rows and no model in the render path,
-    /// which is `.python` and nothing else. Written as its own set rather than
-    /// a subtraction so the reason lives next to the rule.
-    public static let surfaceDeliverable: Set<ToolAgentCandidateOutputV1> = [.surface]
-```
-
-Remove `.surface` from `agentDeliverable` by narrowing its subtraction:
+Remove `.surface` from `agentDeliverable` by narrowing its subtraction, and fix its doc comment, which currently says "everything except files":
 
 ```swift
     public static let agentDeliverable: Set<ToolAgentCandidateOutputV1> =
