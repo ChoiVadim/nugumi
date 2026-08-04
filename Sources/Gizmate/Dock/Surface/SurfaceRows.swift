@@ -22,6 +22,12 @@ enum SurfaceRowsError: LocalizedError {
     case missingRows
     case tooMany
     case valueTooLong
+    /// Distinct from `valueTooLong` on purpose: this is fed back to the
+    /// model as a repair diagnostic (`CandidateValidation`), and "too long"
+    /// sends it shortening a string that was never long — the rerun fails
+    /// the same way and burns repair budget on a defect that isn't there.
+    /// Naming the key and the shape it actually is repairs itself.
+    case valueNotAString(key: String, kind: String)
 
     var errorDescription: String? {
         switch self {
@@ -32,7 +38,9 @@ enum SurfaceRowsError: LocalizedError {
         case .tooMany:
             return "The script printed more rows, or more fields on one row, than a surface can hold."
         case .valueTooLong:
-            return "A row's value was too long, or wasn't plain text, to show."
+            return "A row's value was too long to show."
+        case .valueNotAString(let key, let kind):
+            return "A row's values have to be strings, numbers or booleans; \"\(key)\" is \(kind)."
         }
     }
 }
@@ -85,7 +93,7 @@ enum SurfaceRows {
 
             var values: [String: String] = [:]
             for (key, value) in object {
-                values[key] = try string(from: value)
+                values[key] = try string(from: value, key: key)
             }
 
             // A fallback id is synthetic — it never gets written into
@@ -101,7 +109,7 @@ enum SurfaceRows {
     /// in — silently picking a representation would be worse than saying
     /// no. `NSNull` means the script had nothing to say for this key, which
     /// reads the same as not printing the key at all.
-    private static func string(from value: Any) throws -> String? {
+    private static func string(from value: Any, key: String) throws -> String? {
         let described: String
         switch value {
         case is NSNull:
@@ -110,8 +118,12 @@ enum SurfaceRows {
             described = string
         case let number as NSNumber:
             described = String(describing: number)
+        case is [Any]:
+            throw SurfaceRowsError.valueNotAString(key: key, kind: "an array")
+        case is [String: Any]:
+            throw SurfaceRowsError.valueNotAString(key: key, kind: "an object")
         default:
-            throw SurfaceRowsError.valueTooLong
+            throw SurfaceRowsError.valueNotAString(key: key, kind: "not plain text")
         }
         guard described.utf8.count <= maximumValueBytes else { throw SurfaceRowsError.valueTooLong }
         return described

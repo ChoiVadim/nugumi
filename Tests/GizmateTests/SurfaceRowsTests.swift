@@ -27,10 +27,21 @@ final class SurfaceRowsTests: XCTestCase {
         XCTAssertEqual(rows[0]["size"], "4096")
     }
 
+    /// Pinned to the specific case, not just "it throws": an array has to
+    /// report `.valueNotAString`, not `.valueTooLong` — the two send a
+    /// repairing model down completely different, and for this case wrong,
+    /// paths. See `SurfaceRowsError.valueNotAString`.
     func testNestedValuesAreRejected() {
         XCTAssertThrowsError(
             try SurfaceRows.decode(stdout: #"{"rows":[{"id":"1","tags":["a"]}]}"#)
-        )
+        ) { error in
+            guard case SurfaceRowsError.valueNotAString(let key, let kind) = error else {
+                XCTFail("expected .valueNotAString, got \(error)")
+                return
+            }
+            XCTAssertEqual(key, "tags")
+            XCTAssertEqual(kind, "an array")
+        }
     }
 
     /// No id means nothing survives a refresh — rows would reshuffle under the
