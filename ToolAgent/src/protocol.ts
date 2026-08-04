@@ -24,6 +24,8 @@ export const LIMITS = {
   // Mirrors ToolAgentProtocolLimitsV1.maximumOption*.
   optionBytes: 64,
   optionCount: 5,
+  // Mirrors ToolAgentLayoutV1.maximumEmptyBytes.
+  layoutEmptyBytes: 120,
   // An agent tool's own input, and the answer it finishes with. The answer is
   // roomier than a build session's finalText because it *is* the tool's output:
   // it lands in the result panel or on the clipboard.
@@ -88,7 +90,17 @@ const commonCandidate = {
     "drawnScreen",
     "none",
   ]),
-  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes", "speak", "annotate"]),
+  output: z.enum([
+    "panel",
+    "replace",
+    "clipboard",
+    "files",
+    "notify",
+    "notes",
+    "speak",
+    "annotate",
+    "surface",
+  ]),
   trigger: z.enum(["always", "selection", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
@@ -137,11 +149,59 @@ const nativeCandidate = z
   })
   .strict();
 
+// Mirrors ToolAgentLayoutV1: four node shapes, discriminated on `node`, each
+// `.strict()` so an extra key is rejected here rather than left for the host's
+// stricter Swift decode to catch. Only a `.python` candidate carries one — a
+// surface is a script's stdout rendered as rows, and nothing else builds rows.
+const layoutNode: z.ZodType<unknown> = z.lazy(() =>
+  z.discriminatedUnion("node", [
+    z
+      .object({
+        node: z.literal("grid"),
+        cell: layoutNode,
+        minimumWidth: z.number().int().min(48).max(400),
+        empty: byteString(LIMITS.layoutEmptyBytes),
+      })
+      .strict(),
+    z
+      .object({
+        node: z.literal("list"),
+        row: layoutNode,
+        empty: byteString(LIMITS.layoutEmptyBytes),
+      })
+      .strict(),
+    z
+      .object({
+        node: z.literal("card"),
+        title: z.string(),
+        subtitle: z.string().optional(),
+        icon: z
+          .string()
+          .regex(/^(file:\$|symbol:)/)
+          .optional(),
+        drag: z
+          .string()
+          .regex(/^(file|text):\$/)
+          .optional(),
+        tap: z
+          .string()
+          .regex(/^(open|reveal):\$/)
+          .optional(),
+      })
+      .strict(),
+    z.object({ node: z.literal("text"), value: z.string() }).strict(),
+  ]),
+);
+
 const pythonCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("python"),
     source: byteString(LIMITS.sourceBytes),
+    // Present exactly when output is "surface" — enforced by the candidate's
+    // own superRefine below, the same way outputDirectory is enforced for
+    // "files". What a surface draws, mirroring ToolAgentCandidateV1.layout.
+    layout: layoutNode.optional(),
     // Zero fixtures means "running this would do something to the user's data".
     // A fixture without expectedOutput means "run it, but its output is not a
     // fixed string". Both are how a tool that does real work gets validated at
@@ -175,7 +235,15 @@ const agentCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("agent"),
-    output: z.enum(["panel", "replace", "clipboard", "notify", "notes", "speak", "annotate"]),
+    output: z.enum([
+      "panel",
+      "replace",
+      "clipboard",
+      "notify",
+      "notes",
+      "speak",
+      "annotate",
+    ]),
     prompt: byteString(LIMITS.promptBytes),
     // At most one, and never with an expectedOutput: an agent's answer is not
     // predictable, so a fixture is the input a harmless trial run should use,
@@ -253,7 +321,17 @@ const commonInstalledTool = {
     "drawnScreen",
     "none",
   ]),
-  output: z.enum(["panel", "replace", "clipboard", "files", "notify", "notes", "speak", "annotate"]),
+  output: z.enum([
+    "panel",
+    "replace",
+    "clipboard",
+    "files",
+    "notify",
+    "notes",
+    "speak",
+    "annotate",
+    "surface",
+  ]),
   trigger: z.enum(["always", "selection", "files"]),
   hosts: z.array(byteString(LIMITS.filterValueBytes)).max(LIMITS.filterCount),
   extensions: z
@@ -322,7 +400,15 @@ const installedAgentTool = z
   .object({
     ...commonInstalledTool,
     kind: z.literal("agent"),
-    output: z.enum(["panel", "replace", "clipboard", "notify", "notes", "speak", "annotate"]),
+    output: z.enum([
+      "panel",
+      "replace",
+      "clipboard",
+      "notify",
+      "notes",
+      "speak",
+      "annotate",
+    ]),
     prompt: byteString(LIMITS.promptBytes),
     maxSteps: z.number().int().min(1).max(24),
     timeoutSeconds: z.number().int().min(15).max(900),

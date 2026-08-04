@@ -54,6 +54,12 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     public let secretNames: [String]?
     /// `.agent` only: how many scripts the agent may run before it must answer.
     public let maxSteps: Int
+    /// What a surface gizmo draws. Present exactly when `output == .surface`.
+    ///
+    /// Optional for the same reason `options` and `secretNames` are: the
+    /// validator re-encodes a candidate and compares byte for byte, and an
+    /// absent key must stay absent on the way back.
+    public let layout: ToolAgentLayoutV1?
 
     public init(
         kind: ToolAgentCandidateKindV1,
@@ -76,7 +82,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         timeoutSeconds: Int = 120,
         declaresNetwork: Bool = false,
         secretNames: [String]? = nil,
-        maxSteps: Int = 8
+        maxSteps: Int = 8,
+        layout: ToolAgentLayoutV1? = nil
     ) throws {
         try Self.validate(
             kind: kind,
@@ -97,7 +104,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             outputDirectory: outputDirectory,
             timeoutSeconds: timeoutSeconds,
             secretNames: secretNames,
-            maxSteps: maxSteps
+            maxSteps: maxSteps,
+            layout: layout
         )
         self.schemaVersion = 1
         self.kind = kind
@@ -121,6 +129,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.declaresNetwork = declaresNetwork
         self.secretNames = secretNames
         self.maxSteps = maxSteps
+        self.layout = layout
     }
 
     /// Keeps persisted phase-zero Python runs and existing protocol fixtures
@@ -203,6 +212,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             forKey: .secretNames
         )
         let maxSteps = try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
+        let layout = try container.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
         guard schemaVersion == 1 else {
             throw ToolAgentFailureCodeV1.invalidCandidate
         }
@@ -225,7 +235,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             outputDirectory: outputDirectory,
             timeoutSeconds: timeoutSeconds,
             secretNames: secretNames,
-            maxSteps: maxSteps
+            maxSteps: maxSteps,
+            layout: layout
         )
         self.schemaVersion = schemaVersion
         self.kind = kind
@@ -249,6 +260,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.declaresNetwork = declaresNetwork
         self.secretNames = secretNames
         self.maxSteps = maxSteps
+        self.layout = layout
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -283,6 +295,9 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // write must not appear on the way back — and a tool with no secrets
             // keeps the exact fingerprint it had before secrets existed.
             try container.encodeIfPresent(secretNames, forKey: .secretNames)
+            // Present only on a surface — `validate` rejects a layout on any
+            // other output, so a non-surface Python tool never had one to omit.
+            try container.encodeIfPresent(layout, forKey: .layout)
         case .agent:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(fixtures, forKey: .fixtures)
@@ -311,7 +326,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         outputDirectory: String?,
         timeoutSeconds: Int,
         secretNames: [String]?,
-        maxSteps: Int
+        maxSteps: Int,
+        layout: ToolAgentLayoutV1?
     ) throws {
         // nil and [] both mean "no secrets". Only the wire format tells them
         // apart, and that distinction is the encoder's business, not this one's.
@@ -448,6 +464,22 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
         }
+
+        // A surface is drawn by a script's stdout, never runs on demand, and
+        // is handed nothing to act on — it sits on a screen edge showing
+        // whatever it shows. Any other output must not carry a layout: the
+        // field exists only to answer "what does the surface draw".
+        if output == .surface {
+            guard kind == .python else { throw ToolAgentFailureCodeV1.invalidCandidate }
+            guard input == .none, trigger == .always else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+            guard let layout, layout.isRepeater else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        } else if layout != nil {
+            throw ToolAgentFailureCodeV1.invalidCandidate
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -473,6 +505,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         case declaresNetwork
         case secretNames
         case maxSteps
+        case layout
     }
 }
 

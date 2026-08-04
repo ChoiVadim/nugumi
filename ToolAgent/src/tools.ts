@@ -45,6 +45,7 @@ export function createTools(runtime: SidecarRuntime) {
       Type.Literal("notes"),
       Type.Literal("speak"),
       Type.Literal("annotate"),
+      Type.Literal("surface"),
     ]),
     trigger: Type.Union([
       Type.Literal("always"),

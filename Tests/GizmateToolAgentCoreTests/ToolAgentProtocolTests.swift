@@ -603,6 +603,88 @@ final class ToolAgentProtocolTests: XCTestCase {
         XCTAssertThrowsError(try candidate(["a", String(repeating: "x", count: 65)]))
     }
 
+    func testASurfaceCandidateMustCarryALayout() {
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .none, output: .surface, trigger: .always,
+            source: "print('{\"rows\":[]}')"
+        ))
+    }
+
+    func testALayoutOnANonSurfaceCandidateIsRejected() {
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Slug", brief: "Slugifies.", symbolName: "link",
+            input: .selection, output: .clipboard, trigger: .selection,
+            source: "print('x')", layout: .text(.literal("x"))
+        ))
+    }
+
+    func testOnlyAScriptCanBeASurface() {
+        for kind in [ToolAgentCandidateKindV1.prompt, .native, .agent] {
+            XCTAssertThrowsError(try ToolAgentCandidateV1(
+                kind: kind, name: "Downloads", brief: "Shows my downloads.",
+                symbolName: "tray", input: .none, output: .surface,
+                trigger: .always, prompt: "list files",
+                layout: .text(.literal("x"))
+            ), "\(kind.rawValue) has no script to print rows")
+        }
+    }
+
+    /// A surface is never handed anything and is never conditional — it is on an
+    /// edge, showing what it shows.
+    func testASurfaceTakesNoInputAndAlwaysApplies() {
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .selection, output: .surface,
+            trigger: .always, source: "print('{}')",
+            layout: .text(.literal("x"))
+        ))
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .none, output: .surface,
+            trigger: .files, source: "print('{}')",
+            layout: .text(.literal("x"))
+        ))
+    }
+
+    /// The root has to repeat, or there is nowhere for rows to go.
+    func testASurfaceLayoutRootMustBeARepeater() {
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .none, output: .surface, trigger: .always,
+            source: "print('{}')", layout: .text(.key("name"))
+        ))
+    }
+
+    func testTheFolderHubCandidateIsAccepted() throws {
+        XCTAssertNoThrow(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .none, output: .surface, trigger: .always,
+            source: "print('{\"rows\":[]}')",
+            layout: .grid(
+                cell: .card(title: .key("name"), subtitle: .key("size"),
+                            icon: .file(key: "path"), drag: .file(key: "path"),
+                            tap: .reveal(key: "path")),
+                minimumWidth: 96,
+                empty: "Nothing in Downloads"
+            )
+        ))
+    }
+
+    /// nil must not survive as an empty key, or the byte-for-byte re-encode in
+    /// `ToolAgentModelActionValidator` rejects every candidate that has no layout.
+    func testACandidateWithoutALayoutEncodesNoLayoutKey() throws {
+        let candidate = try ToolAgentCandidateV1(
+            kind: .python, name: "Slug", brief: "Slugifies.", symbolName: "link",
+            input: .selection, output: .clipboard, trigger: .selection,
+            source: "print('x')"
+        )
+        let json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(candidate)
+        ) as? [String: Any]
+        XCTAssertNil(json?["layout"])
+    }
+
     private func makeCandidate(
         name: String = "Uppercase",
         brief: String = "Uppercases clipboard text.",
