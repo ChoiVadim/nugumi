@@ -50,21 +50,27 @@ final class ToolAgentLayoutTests: XCTestCase {
         let json = #"{"node":"text","value":"x","colour":"red"}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
-        )
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
     }
 
     func testAnUnknownNodeIsRejected() {
         let json = #"{"node":"webview","url":"https://example.com"}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
-        )
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
     }
 
     func testAnUnknownModifierPrefixIsRejected() {
         let json = #"{"node":"card","title":"$n","drag":"folder:$path"}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
-        )
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
     }
 
     /// A modifier that acts on a file needs a key to read the path out of, so a
@@ -73,7 +79,9 @@ final class ToolAgentLayoutTests: XCTestCase {
         let json = #"{"node":"card","title":"$n","drag":"file:Downloads"}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
-        )
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
     }
 
     func testNestingDeeperThanThreeIsRejected() {
@@ -82,6 +90,30 @@ final class ToolAgentLayoutTests: XCTestCase {
             + #"{"node":"list","empty":"","row":{"node":"text","value":"x"}}}}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(deep.utf8))
-        )
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
+    }
+
+    /// `minimumWidth` outside `48...400` is a stated limit; without a test for
+    /// it, the bound could quietly disappear during a later refactor.
+    func testMinimumWidthOutsideBoundsIsRejected() {
+        let json = #"{"node":"grid","minimumWidth":16,"empty":"","cell":{"node":"text","value":"x"}}"#
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
+    }
+
+    /// Same reasoning for the 120-byte cap on `empty` copy.
+    func testEmptyOverTheByteLimitIsRejected() {
+        let tooLong = String(repeating: "x", count: ToolAgentLayoutV1.maximumEmptyBytes + 1)
+        let json = #"{"node":"list","empty":""# + tooLong + #"","row":{"node":"text","value":"x"}}"#
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
     }
 }
