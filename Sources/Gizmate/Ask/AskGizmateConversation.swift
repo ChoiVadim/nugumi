@@ -55,7 +55,7 @@ When a screenshot is attached AND drawing on top of it explains better than word
 
 ```annotations
 [{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},
- {"type":"rect","cx":0.60,"cy":0.20,"w":0.20,"h":0.10},
+ {"type":"rect","cx":0.60,"cy":0.20,"w":0.20,"h":0.10,"color":"red"},
  {"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},
  {"type":"label","x":0.42,"y":0.50,"text":"click here"}]
 ```
@@ -64,6 +64,7 @@ Annotation rules:
 - The block contains ONLY a JSON array — double quotes, no comments, nothing after the closing fence. It is machine-read and never shown to the user; the answer text must stand on its own without it.
 - Coordinates are normalized 0.0–1.0 over the screenshot: x left-to-right, y top-to-bottom.
 - "ellipse" and "rect" take the CENTER ("cx", "cy") plus width/height fractions ("w", "h"). "arrow" goes from ("fromX", "fromY") to ("toX", "toY"). "label" anchors its "text" (five words or fewer) at ("x", "y").
+- Any shape may carry "color": one of "green", "red", "blue", "yellow", "orange", "purple", "pink", "cyan". Leave it out and the shape is green. Use it only when the colors mean different things — red for the thing that is wrong and green for the fix, one color per step of an order. A different color per shape for decoration makes the answer harder to read, not easier.
 - A few precise shapes beat many: circle one element, draw one arrow per direction or relationship, box one region. Never more than 12 shapes.
 - If uncertain about a location, skip the shape and describe it in words instead.
 - Your previous annotations are erased with every new answer. To keep pointing at something across a follow-up, include its shapes again.

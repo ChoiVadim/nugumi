@@ -36,6 +36,15 @@ struct AskGizmateAnnotation: Codable, Equatable {
     let x: Double?
     let y: Double?
     let text: String?
+    /// What to draw this shape in, as one of `AskAnnotationPalette`'s names.
+    /// `nil` is the palette's default.
+    ///
+    /// A loose `String` rather than an enum on purpose: an unknown name has to
+    /// cost the shape its colour, not its existence. As an enum, `"cyan"` from a
+    /// model that never read the list would fail the whole shape's decode and
+    /// `FailableDecodable` would drop it — the user would lose the circle, not
+    /// just the tint. `isValid` deliberately ignores it for the same reason.
+    let color: String?
 
     var isValid: Bool {
         switch type {

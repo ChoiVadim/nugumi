@@ -435,12 +435,13 @@ enum TranslationMode: Equatable {
 
         ```annotations
         [{"type":"ellipse","cx":0.42,"cy":0.31,"w":0.10,"h":0.05},
-         {"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32},
+         {"type":"arrow","fromX":0.42,"fromY":0.45,"toX":0.55,"toY":0.32,"color":"red"},
          {"type":"label","x":0.55,"y":0.30,"text":"start here"}]
         ```
 
         - Coordinates are fractions of the screenshot, 0.0–1.0, x left-to-right and y TOP-to-bottom.
         - "ellipse" and "rect" take the CENTER ("cx", "cy") plus width/height fractions ("w", "h"). "arrow" goes from ("fromX", "fromY") to ("toX", "toY"). "label" anchors its "text" (five words or fewer) at ("x", "y").
+        - Any shape may carry "color": one of "green", "red", "blue", "yellow", "orange", "purple", "pink", "cyan". Leave it out and the shape is green. Use it only when the colors mean different things — red for what is wrong and green for what to do, one color per step of an order — never as decoration.
         - There is no panel and no text answer — anything you need to say must be a "label" shape. A reply with no shapes shows the user nothing at all.
         - A few precise shapes beat many: circle one element, draw one arrow per direction, box one region. Never more than 12 shapes.
         """

@@ -89,13 +89,39 @@ final class AskGizmateAnnotationTests: XCTestCase {
                     type: .arrow,
                     cx: nil, cy: nil, w: nil, h: nil,
                     fromX: 0.1, fromY: 0.2, toX: 0.8, toY: 0.9,
-                    x: nil, y: nil, text: nil
+                    x: nil, y: nil, text: nil, color: "red"
                 )
             ]
         )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AskGizmateResponse.self, from: data)
         XCTAssertEqual(decoded, original)
+    }
+
+    // MARK: - Colour
+
+    /// The point of a loose `String` field: a colour nobody has heard of costs
+    /// the shape its tint, never the shape itself.
+    func testUnknownColorKeepsTheShapeAndFallsBackToDefault() {
+        let response = parse("""
+        [{"type":"ellipse","cx":0.4,"cy":0.3,"w":0.1,"h":0.1,"color":"chartreuse"}]
+        """)
+        XCTAssertEqual(response.annotations.count, 1)
+        XCTAssertEqual(
+            AskAnnotationPalette.color(named: response.annotations[0].color),
+            AskAnnotationPalette.default
+        )
+    }
+
+    func testNamedColorsResolveCaseAndSpaceInsensitively() {
+        XCTAssertEqual(AskAnnotationPalette.color(named: " Red "), .systemRed)
+        XCTAssertEqual(AskAnnotationPalette.color(named: nil), AskAnnotationPalette.default)
+    }
+
+    /// White text on a yellow pill is what this exists to prevent.
+    func testLabelInkFlipsOnLightFills() {
+        XCTAssertEqual(AskAnnotationPalette.ink(on: .systemYellow), .black)
+        XCTAssertEqual(AskAnnotationPalette.ink(on: .systemBlue), .white)
     }
 
     // MARK: - Protocol v2: markdown body + trailing ```annotations fence

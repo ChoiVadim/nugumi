@@ -12,6 +12,44 @@ import SwiftUI
 import UserNotifications
 import Vision
 
+/// What a drawn-on-screen shape can be coloured.
+///
+/// Named colours rather than free-form hex: these shapes land on whatever the
+/// user happens to have open, and a model given a hex field will sooner or later
+/// pick one that vanishes into the background it is drawn over. Every entry here
+/// is a system colour that reads in both appearances, and an unrecognised name
+/// falls back to the default rather than rendering something invisible.
+enum AskAnnotationPalette {
+    /// Bright and unambiguous. The former default was the app's own accent —
+    /// `NSColor(white: 0.788)` — which is a light grey over a screenshot, i.e.
+    /// exactly the shade a marker must not be.
+    static let `default` = NSColor.systemGreen
+
+    private static let named: [String: NSColor] = [
+        "green": .systemGreen,
+        "red": .systemRed,
+        "blue": .systemBlue,
+        "yellow": .systemYellow,
+        "orange": .systemOrange,
+        "purple": .systemPurple,
+        "pink": .systemPink,
+        "cyan": .systemTeal,
+    ]
+
+    static func color(named name: String?) -> NSColor {
+        guard let name else { return `default` }
+        return named[name.trimmingCharacters(in: .whitespaces).lowercased()] ?? `default`
+    }
+
+    /// Text drawn *on* a filled shape — the label pill. White on systemYellow is
+    /// unreadable, so the ink follows the fill rather than being fixed.
+    static func ink(on fill: NSColor) -> NSColor {
+        guard let rgb = fill.usingColorSpace(.sRGB) else { return .white }
+        let luma = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+        return luma > 0.6 ? .black : .white
+    }
+}
+
 /// Click-through overlay that renders the model's explanation shapes
 /// (`annotations` in the Ask response) over the captured screen. Purely
 /// visual: it never takes mouse or keyboard input, so the user keeps
@@ -49,19 +87,20 @@ final class AskAnnotationOverlayController {
             )
             context.beginTransparencyLayer(auxiliaryInfo: nil)
             for annotation in annotations {
+                let tint = AskAnnotationPalette.color(named: annotation.color)
                 switch annotation.type {
                 case .ellipse:
                     if let rect = localRect(for: annotation) {
-                        strokeWithHalo(NSBezierPath(ovalIn: rect))
+                        strokeWithHalo(NSBezierPath(ovalIn: rect), tint)
                     }
                 case .rect:
                     if let rect = localRect(for: annotation) {
-                        strokeWithHalo(NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6))
+                        strokeWithHalo(NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6), tint)
                     }
                 case .arrow:
-                    drawArrow(annotation)
+                    drawArrow(annotation, tint)
                 case .label:
-                    drawLabel(annotation)
+                    drawLabel(annotation, tint)
                 }
             }
             context.endTransparencyLayer()
@@ -90,18 +129,18 @@ final class AskAnnotationOverlayController {
             )
         }
 
-        private func strokeWithHalo(_ path: NSBezierPath) {
+        private func strokeWithHalo(_ path: NSBezierPath, _ tint: NSColor) {
             path.lineWidth = Self.haloWidth
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             Self.haloColor.setStroke()
             path.stroke()
             path.lineWidth = Self.strokeWidth
-            NSColor.gizmateAccent.setStroke()
+            tint.setStroke()
             path.stroke()
         }
 
-        private func drawArrow(_ annotation: AskGizmateAnnotation) {
+        private func drawArrow(_ annotation: AskGizmateAnnotation, _ tint: NSColor) {
             guard let fromX = annotation.fromX, let fromY = annotation.fromY,
                   let toX = annotation.toX, let toY = annotation.toY
             else { return }
@@ -123,7 +162,7 @@ final class AskAnnotationOverlayController {
             let shaft = NSBezierPath()
             shaft.move(to: from)
             shaft.line(to: shaftEnd)
-            strokeWithHalo(shaft)
+            strokeWithHalo(shaft, tint)
 
             let perpendicular = CGPoint(x: -sin(angle), y: cos(angle))
             let head = NSBezierPath()
@@ -140,11 +179,11 @@ final class AskAnnotationOverlayController {
             head.lineWidth = 2.5
             Self.haloColor.setStroke()
             head.stroke()
-            NSColor.gizmateAccent.setFill()
+            tint.setFill()
             head.fill()
         }
 
-        private func drawLabel(_ annotation: AskGizmateAnnotation) {
+        private func drawLabel(_ annotation: AskGizmateAnnotation, _ tint: NSColor) {
             guard let x = annotation.x, let y = annotation.y,
                   let text = annotation.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !text.isEmpty
@@ -155,7 +194,7 @@ final class AskAnnotationOverlayController {
 
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-                .foregroundColor: NSColor.white
+                .foregroundColor: AskAnnotationPalette.ink(on: tint)
             ]
             let string = NSAttributedString(string: text, attributes: attributes)
             let textSize = string.size()
@@ -179,7 +218,7 @@ final class AskAnnotationOverlayController {
             background.lineWidth = 2
             Self.haloColor.setStroke()
             background.stroke()
-            NSColor.gizmateAccent.setFill()
+            tint.setFill()
             background.fill()
             string.draw(at: CGPoint(
                 x: pill.midX - textSize.width / 2,
