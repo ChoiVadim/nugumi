@@ -208,16 +208,13 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable, Ca
     ]
 
     /// What a `.agent` tool can deliver: everything a model can write, which is
-    /// everything except files. An agent finishes with text — it writes files
-    /// only inside its own steps, into a directory that is thrown away — so
-    /// `.files` would deliver "nothing produced" every single run.
+    /// everything except files and surfaces. An agent finishes with text — it
+    /// writes files only inside its own steps, into a directory that is thrown
+    /// away — so `.files` would deliver "nothing produced" every single run.
+    /// A surface needs a script printing rows on its own schedule, which an
+    /// agent has no equivalent of.
     public static let agentDeliverable: Set<ToolAgentCandidateOutputV1> =
         Set(ToolAgentCandidateOutputV1.allCases).subtracting([.files, .surface])
-
-    /// A surface needs a script to print rows and no model in the render path,
-    /// which is `.python` and nothing else. Written as its own set rather than
-    /// a subtraction so the reason lives next to the rule.
-    public static let surfaceDeliverable: Set<ToolAgentCandidateOutputV1> = [.surface]
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {
