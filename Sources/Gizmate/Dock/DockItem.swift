@@ -42,7 +42,10 @@ enum DockCatalog {
 
     /// Only surfaces that can sit on an edge *waiting*. A result panel is not
     /// one: it exists after a run, and until then there is nothing to show, so
-    /// it must not put a tab there implying otherwise.
+    /// it must not put a tab there implying otherwise. `gizmos(host:)` below
+    /// applies the same rule to user-built tools — a `.surface` gizmo is
+    /// resident for the same reason Note is: both have something to draw
+    /// before any run starts.
     static let residentBuiltIns: [RingActionID] = [.saveNote]
 
     static func builtIns(host: any SettingsHost) -> [DockItem] {
@@ -58,11 +61,31 @@ enum DockCatalog {
         }
     }
 
-    /// None yet. A gizmo with `output == .panel` earns a placement choice as
-    /// soon as the result panel is a view rather than a window; until then the
-    /// only honest answer is that it has none. A run button on an edge is a
-    /// second launcher, which is what this replaced.
-    static func gizmos(host: any SettingsHost) -> [DockItem] { [] }
+    /// Every usable `.surface` gizmo. A surface is the one result that exists
+    /// while nothing is running — its script already printed rows the last
+    /// time it ran, and the dock can draw those before it ever calls the
+    /// script again (`SurfaceHostView`). Every other result — `.panel`,
+    /// `.clipboard`, `.notes`, and the rest — is still something you summon:
+    /// there is nothing to show until a run finishes, so a tab for one of
+    /// those on an edge would either sit empty or imply a run that never
+    /// happened. A run button on an edge is a second launcher, which is what
+    /// this replaced.
+    static func gizmos(host: any SettingsHost) -> [DockItem] {
+        host.tools.usableTools()
+            .filter { $0.output == .surface }
+            .map { tool in
+                DockItem(
+                    id: ToolRef.generated(tool.id).storageID,
+                    title: tool.name,
+                    // User tools draw from SF Symbols, never the bundled
+                    // Phosphor set built-ins use — see `resolvedSymbolName`.
+                    icon: .symbol(tool.resolvedSymbolName)
+                ) { [weak host] in
+                    guard let host else { return NSView() }
+                    return hosted(AnyView(SurfaceHostView(tool: tool, host: host)))
+                }
+            }
+    }
 
     static func all(host: any SettingsHost) -> [DockItem] {
         builtIns(host: host) + gizmos(host: host)
