@@ -114,7 +114,11 @@ extension ToolAgentLayoutV1: Codable {
                 throw ToolAgentFailureCodeV1.invalidProtocol
             }
             let empty = try container.decode(String.self, forKey: .required("empty"))
-            guard empty.utf8.count <= Self.maximumEmptyBytes else {
+            // A repeater whose empty copy is "" puts a blank panel on the
+            // user's screen edge with nothing explaining why, which reads as
+            // broken — so this is the one string in the tree that must not
+            // be blank even though it is short enough to allow it.
+            guard !empty.isEmpty, empty.utf8.count <= Self.maximumEmptyBytes else {
                 throw ToolAgentFailureCodeV1.invalidProtocol
             }
             let cell = try container.decode(ToolAgentLayoutV1.self, forKey: .required("cell"))
@@ -125,7 +129,7 @@ extension ToolAgentLayoutV1: Codable {
                 throw ToolAgentFailureCodeV1.invalidProtocol
             }
             let empty = try container.decode(String.self, forKey: .required("empty"))
-            guard empty.utf8.count <= Self.maximumEmptyBytes else {
+            guard !empty.isEmpty, empty.utf8.count <= Self.maximumEmptyBytes else {
                 throw ToolAgentFailureCodeV1.invalidProtocol
             }
             let row = try container.decode(ToolAgentLayoutV1.self, forKey: .required("row"))

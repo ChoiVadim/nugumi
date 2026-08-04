@@ -24,8 +24,9 @@ export const LIMITS = {
   // Mirrors ToolAgentProtocolLimitsV1.maximumOption*.
   optionBytes: 64,
   optionCount: 5,
-  // Mirrors ToolAgentLayoutV1.maximumEmptyBytes.
+  // Mirrors ToolAgentLayoutV1.maximumEmptyBytes and .maximumDepth.
   layoutEmptyBytes: 120,
+  layoutMaxDepth: 3,
   // An agent tool's own input, and the answer it finishes with. The answer is
   // roomier than a build session's finalText because it *is* the tool's output:
   // it lands in the result panel or on the clipboard.
@@ -153,6 +154,13 @@ const nativeCandidate = z
 // `.strict()` so an extra key is rejected here rather than left for the host's
 // stricter Swift decode to catch. Only a `.python` candidate carries one — a
 // surface is a script's stdout rendered as rows, and nothing else builds rows.
+//
+// A modifier's regex is anchored at both ends and demands at least one
+// character after its `$` — `file:$` alone is not a key, the same way
+// `ToolAgentLayoutIconV1`'s `strippingKeyed` throws on it. `z.lazy` has no
+// notion of its own nesting depth, so `ToolAgentLayoutV1.maximumDepth` is
+// enforced separately below, by walking the parsed tree in `candidateSchema`'s
+// `superRefine`.
 const layoutNode: z.ZodType<unknown> = z.lazy(() =>
   z.discriminatedUnion("node", [
     z
@@ -177,21 +185,45 @@ const layoutNode: z.ZodType<unknown> = z.lazy(() =>
         subtitle: z.string().optional(),
         icon: z
           .string()
-          .regex(/^(file:\$|symbol:)/)
+          .regex(/^(file:\$.+|symbol:.*)$/)
           .optional(),
         drag: z
           .string()
-          .regex(/^(file|text):\$/)
+          .regex(/^(file|text):\$.+$/)
           .optional(),
         tap: z
           .string()
-          .regex(/^(open|reveal):\$/)
+          .regex(/^(open|reveal):\$.+$/)
           .optional(),
       })
       .strict(),
     z.object({ node: z.literal("text"), value: z.string() }).strict(),
   ]),
 );
+
+// Walks an already-parsed layout node the same way
+// `ToolAgentLayoutV1.depth`/`.isRepeater` walk the decoded Swift enum. `value`
+// is `unknown` rather than the lazy schema's inferred type because
+// `z.ZodType<unknown>` cannot express the discriminated union recursively;
+// the shape is guaranteed by `layoutNode` having already parsed it.
+function layoutNodeKind(value: unknown): unknown {
+  return typeof value === "object" && value !== null
+    ? (value as { node?: unknown }).node
+    : undefined;
+}
+
+function layoutDepth(value: unknown): number {
+  const kind = layoutNodeKind(value);
+  if (kind === "grid")
+    return 1 + layoutDepth((value as { cell: unknown }).cell);
+  if (kind === "list") return 1 + layoutDepth((value as { row: unknown }).row);
+  return 1;
+}
+
+function layoutIsRepeater(value: unknown): boolean {
+  const kind = layoutNodeKind(value);
+  return kind === "grid" || kind === "list";
+}
 
 const pythonCandidate = z
   .object({
@@ -301,6 +333,38 @@ export const candidateSchema = z
       context.addIssue({
         code: "custom",
         message: "files output needs outputDirectory",
+      });
+    }
+    // Mirrors ToolAgentCandidateV1.validate's surface rule: a surface is
+    // drawn by a script's stdout, never runs on demand, and is handed nothing
+    // to act on. Any other output must carry no layout at all — the field
+    // exists only to answer "what does the surface draw".
+    if (candidate.output === "surface") {
+      if (candidate.kind !== "python") {
+        context.addIssue({
+          code: "custom",
+          message: "only a python candidate can be a surface",
+        });
+      } else if (
+        candidate.layout === undefined ||
+        !layoutIsRepeater(candidate.layout) ||
+        layoutDepth(candidate.layout) > LIMITS.layoutMaxDepth
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "a surface needs a layout whose root repeats",
+        });
+      }
+      if (candidate.input !== "none" || candidate.trigger !== "always") {
+        context.addIssue({
+          code: "custom",
+          message: "a surface takes no input and always applies",
+        });
+      }
+    } else if (candidate.kind === "python" && candidate.layout !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "layout is only for a surface",
       });
     }
   });

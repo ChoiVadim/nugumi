@@ -85,9 +85,11 @@ final class ToolAgentLayoutTests: XCTestCase {
     }
 
     func testNestingDeeperThanThreeIsRejected() {
-        let deep = #"{"node":"grid","minimumWidth":96,"empty":"","cell":"#
-            + #"{"node":"list","empty":"","row":"#
-            + #"{"node":"list","empty":"","row":{"node":"text","value":"x"}}}}"#
+        // Non-blank `empty` copy throughout, so this fails for nesting depth
+        // and not for the unrelated blank-string rule below.
+        let deep = #"{"node":"grid","minimumWidth":96,"empty":"x","cell":"#
+            + #"{"node":"list","empty":"x","row":"#
+            + #"{"node":"list","empty":"x","row":{"node":"text","value":"x"}}}}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(deep.utf8))
         ) {
@@ -112,6 +114,24 @@ final class ToolAgentLayoutTests: XCTestCase {
         let json = #"{"node":"list","empty":""# + tooLong + #"","row":{"node":"text","value":"x"}}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
+    }
+
+    /// A blank `empty` copy puts a bare panel on the user's screen edge with
+    /// nothing explaining why it's there, so it is rejected even though it
+    /// is well inside the byte limit. Both repeaters share the same guard.
+    func testBlankEmptyStringIsRejected() {
+        let list = #"{"node":"list","empty":"","row":{"node":"text","value":"x"}}"#
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(list.utf8))
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
+        let grid = #"{"node":"grid","minimumWidth":96,"empty":"","cell":{"node":"text","value":"x"}}"#
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(grid.utf8))
         ) {
             XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
         }
