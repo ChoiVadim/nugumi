@@ -30,6 +30,7 @@
 - Modify: `Sources/GizmateToolAgentCore/ToolAgentProtocolTypes.swift:181-212`
 - Modify: `Sources/Gizmate/Tools/GizmateTool.swift:190-245`
 - Modify: `Sources/Gizmate/MainWindow/ToolEditor.swift:839-848`
+- Modify: `Sources/Gizmate/App/ToolEvalMode.swift:199-255` (`resultSweep`)
 - Test: `Tests/GizmateTests/ToolProtocolEnumParityTests.swift:71-75`
 
 **Interfaces:**
@@ -141,24 +142,42 @@ In `ToolEditor.swift:839`:
 
 `testEveryPromptPairingTheEditorOffersPassesCandidateValidation` loops `ToolEditorPanel.outputs(for: .prompt)`, which no longer contains `.surface` — it needs no edit. Confirm by running.
 
-- [ ] **Step 7: Run the tests**
+- [ ] **Step 7: Add the eval case the new result now owes**
+
+`testTheEvalSuiteAsksForEveryInputAndEveryResult` fails the moment an output exists with no eval case asking for it. That guardrail is the point, so the case lands with the enum rather than eight tasks later. It is one literal and needs nothing else in this plan to compile.
+
+Add to `ToolEvalSuite.resultSweep` in `Sources/Gizmate/App/ToolEvalMode.swift`, written the way a user would type it:
+
+```swift
+        ToolEvalCase(
+            name: "result-surface-downloads",
+            request: "хочу видеть свои загрузки сбоку экрана, "
+                + "чтобы перетаскивать файлы оттуда в другие приложения",
+            kind: .python,
+            input: .none,
+            output: .surface
+        ),
+```
+
+Do **not** run `Scripts/tool-eval.sh` yet — the agent has not been told the vocabulary and nothing renders a surface until Task 9. Task 10 runs it.
+
+- [ ] **Step 8: Run the tests**
 
 ```sh
 swift test --filter ToolProtocolEnumParityTests 2>&1 | tail -20
 ```
 
-Expected: `testTheEvalSuiteAsksForEveryInputAndEveryResult` now FAILS with "no eval case asks for a gizmo with these results: surface". Every other test passes. That failure is correct and Task 10 closes it — leave it red and say so in the commit.
+Expected: all pass, including `testTheEvalSuiteAsksForEveryInputAndEveryResult`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```sh
 git add Sources/GizmateToolAgentCore/ToolAgentProtocolTypes.swift \
         Sources/Gizmate/Tools/GizmateTool.swift \
         Sources/Gizmate/MainWindow/ToolEditor.swift \
+        Sources/Gizmate/App/ToolEvalMode.swift \
         Tests/GizmateTests/ToolProtocolEnumParityTests.swift
-git commit -m "Let a result mean the screen edge
-
-The eval-parity test is red on purpose until the surface case lands."
+git commit -m "Let a result mean the screen edge"
 ```
 
 ---
@@ -1253,14 +1272,13 @@ git commit -m "Let a surface gizmo take a place on the edge"
 **Files:**
 
 - Modify: `Sources/Gizmate/Tools/CandidateValidation.swift:112-157`
-- Modify: `Sources/Gizmate/App/ToolEvalMode.swift:199-255` (`resultSweep`)
 - Modify: `ToolAgent/src/model-bridge.ts` (the result descriptions around line 315)
 - Test: `Tests/GizmateTests/SurfaceCandidateValidationTests.swift`
 
 **Interfaces:**
 
-- Consumes: `SurfaceRows` (Task 5), `ToolAgentLayoutV1.referencedKeys` / `.fileKeys` (Task 2).
-- Produces: a `.invalidOutput` failure with a diagnostic naming the missing key, and the eval case that closes Task 1's deliberate red test.
+- Consumes: `SurfaceRows` (Task 5), `ToolAgentLayoutV1.referencedKeys` / `.fileKeys` (Task 2), and the `result-surface-downloads` eval case added in Task 1.
+- Produces: a `.invalidOutput` failure with a diagnostic naming the missing key, and the first run of that eval case that can actually pass.
 
 This is the check that makes the whole thing hold together: the layout is validated against rows produced by **really running the script**, not against a declared fixture. A binding that names nothing, or a `drag: file` pointing at a key that is not a path, is refused before the user ever docks it — and the diagnostic names the key, so the model can repair rather than guess.
 
@@ -1354,22 +1372,7 @@ In `CandidateValidation.run`, after the `.files` check at line 128:
 
 A surface's fixtures carry no `expectedOutput` — a folder listing is never byte-stable — so it grades `.smoke`, which the existing `ranWithoutComparison` path already produces.
 
-- [ ] **Step 4: Add the eval case**
-
-To `ToolEvalSuite.resultSweep`, written the way a user would type it:
-
-```swift
-        ToolEvalCase(
-            name: "result-surface-downloads",
-            request: "хочу видеть свои загрузки сбоку экрана, "
-                + "чтобы перетаскивать файлы оттуда в другие приложения",
-            kind: .python,
-            input: .none,
-            output: .surface
-        ),
-```
-
-- [ ] **Step 5: Describe the result to the model**
+- [ ] **Step 4: Describe the result to the model**
 
 `git status` first — this file holds user WIP. In `ToolAgent/src/model-bridge.ts`, beside the other result descriptions near line 315:
 
@@ -1384,27 +1387,26 @@ To `ToolEvalSuite.resultSweep`, written the way a user would type it:
 
 plus the four nodes and the modifier prefixes, one line each. Describe the vocabulary, never a specific answer: a recipe in the prompt proves the prompt can hold a recipe.
 
-- [ ] **Step 6: Run everything**
+- [ ] **Step 5: Run everything**
 
 ```sh
 swift test 2>&1 | tail -30
 ```
 
-Expected: green, including `testTheEvalSuiteAsksForEveryInputAndEveryResult` which Task 1 left red.
+Expected: green.
 
 ```sh
 Scripts/tool-eval.sh result-surface-downloads
 ```
 
-Expected: pass. If it fails, read `.build/tool-eval/report.json` and its `.attempts` trail before concluding anything — the finished `kind` is only the last thing the model tried.
+This is the first time the eval case added in Task 1 can actually pass — the vocabulary now exists, is described to the model, and renders. Expected: pass. If it fails, read `.build/tool-eval/report.json` and its `.attempts` trail before concluding anything — the finished `kind` is only the last thing the model tried, and a case reporting `python` may have written something else first and been refused by the host. Fix the generic machinery, never the prompt's knowledge of this specific answer.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```sh
 git status --short
 git add Sources/Gizmate/Dock/Surface/SurfaceLayoutCheck.swift \
         Sources/Gizmate/Tools/CandidateValidation.swift \
-        Sources/Gizmate/App/ToolEvalMode.swift \
         ToolAgent/src/model-bridge.ts \
         Tests/GizmateTests/SurfaceCandidateValidationTests.swift
 git commit -m "Check a layout against rows the script actually printed"
