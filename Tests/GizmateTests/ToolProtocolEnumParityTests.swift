@@ -66,12 +66,18 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         XCTAssertTrue(offered.contains(.annotate))
     }
 
-    /// Prompt and Script are unrestricted: one has a model behind it and the
-    /// other can genuinely write files.
-    func testPromptAndScriptAreOfferedEveryResult() {
-        for kind in [ToolKind.prompt, .python] {
-            XCTAssertEqual(ToolEditorPanel.outputs(for: kind), ToolOutput.allCases)
-        }
+    /// Script is unrestricted. Prompt is not, any more: a surface renders rows a
+    /// script printed, and a prompt gizmo has no script — it has a model, which
+    /// cannot run on every pointer hover over a screen edge.
+    func testOnlyScriptGizmosAreOfferedEveryResult() {
+        XCTAssertEqual(ToolEditorPanel.outputs(for: .python), ToolOutput.allCases)
+        XCTAssertFalse(ToolEditorPanel.outputs(for: .prompt).contains(.surface))
+        XCTAssertFalse(ToolEditorPanel.outputs(for: .agent).contains(.surface))
+        XCTAssertFalse(ToolEditorPanel.outputs(for: .native).contains(.surface))
+        XCTAssertEqual(
+            ToolEditorPanel.outputs(for: .prompt),
+            ToolOutput.allCases.filter { $0 != .surface }
+        )
     }
 
     /// The eval suite is the only thing that drives a real build end to end, so

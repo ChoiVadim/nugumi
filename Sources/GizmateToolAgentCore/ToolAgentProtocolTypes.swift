@@ -190,6 +190,10 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable, Ca
     case speak
     /// Drawn over the screen as shapes instead of shown as text.
     case annotate
+    /// Not a result at all: the gizmo renders rows its script prints into an
+    /// edge dock, and keeps doing so with no run to speak of. The only output
+    /// whose tool is never "finished".
+    case surface
 
     /// What a `.native` tool can actually deliver — exactly the cases its runner
     /// switches on, plus the toast every other case already falls through to.
@@ -208,7 +212,12 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable, Ca
     /// only inside its own steps, into a directory that is thrown away — so
     /// `.files` would deliver "nothing produced" every single run.
     public static let agentDeliverable: Set<ToolAgentCandidateOutputV1> =
-        Set(ToolAgentCandidateOutputV1.allCases).subtracting([.files])
+        Set(ToolAgentCandidateOutputV1.allCases).subtracting([.files, .surface])
+
+    /// A surface needs a script to print rows and no model in the render path,
+    /// which is `.python` and nothing else. Written as its own set rather than
+    /// a subtraction so the reason lives next to the rule.
+    public static let surfaceDeliverable: Set<ToolAgentCandidateOutputV1> = [.surface]
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {

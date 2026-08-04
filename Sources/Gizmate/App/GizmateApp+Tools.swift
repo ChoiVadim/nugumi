@@ -273,10 +273,10 @@ extension GizmateApp {
                 mode: .custom(tool),
                 images: images
             )
-        case .clipboard, .files, .notify:
-            // `.files` and `.notify` are script-tool result modes. A prompt tool
-            // only ever produces text, so the nearest honest behavior is to hand
-            // that text over.
+        case .clipboard, .files, .notify, .surface:
+            // `.files`, `.notify` and `.surface` are script-tool result modes. A
+            // prompt tool only ever produces text, so the nearest honest
+            // behavior is to hand that text over.
             runPromptToolForText(tool, on: text, near: screenPoint, images: images) { answer in
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(answer, forType: .string)

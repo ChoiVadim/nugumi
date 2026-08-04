@@ -838,8 +838,12 @@ struct ToolEditorPanel: View {
     /// together.
     static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {
-        case .prompt, .python:
+        case .python:
             return ToolOutput.allCases
+        // A surface renders rows a script printed. A prompt gizmo has a model
+        // where the script would be, and a dock reveal cannot wait for one.
+        case .prompt:
+            return ToolOutput.allCases.filter { $0 != .surface }
         case .native:
             return deliverable(ToolAgentCandidateOutputV1.nativeDeliverable)
         case .agent:

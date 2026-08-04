@@ -252,6 +252,17 @@ enum ToolEvalSuite {
             kind: .prompt,
             output: .annotate
         ),
+        ToolEvalCase(
+            name: "result-surface-downloads",
+            request: "хочу видеть свои загрузки сбоку экрана, "
+                + "чтобы перетаскивать файлы оттуда в другие приложения",
+            kind: .python,
+            // Qualified: bare `.none` resolves to `Optional<ToolInput>.none`
+            // (unset) here, not the `ToolInput.none` case — same trap as the
+            // download-tool case above.
+            input: ToolInput.none,
+            output: .surface
+        ),
     ]
 }
 

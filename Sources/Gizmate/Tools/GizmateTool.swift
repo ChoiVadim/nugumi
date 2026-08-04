@@ -205,6 +205,9 @@ enum ToolOutput: String, Codable, CaseIterable {
     /// The model draws over the screen instead of writing: the same shapes Ask
     /// renders, with no panel behind them.
     case annotate
+    /// Not a result at all: the gizmo renders rows its script prints into an
+    /// edge dock, and keeps doing so with no run to speak of.
+    case surface
 
     var displayName: String {
         switch self {
@@ -216,6 +219,7 @@ enum ToolOutput: String, Codable, CaseIterable {
         case .notes: return "Save to notes"
         case .speak: return "Read aloud"
         case .annotate: return "Draw on screen"
+        case .surface: return "Screen edge"
         }
     }
 
@@ -237,6 +241,9 @@ enum ToolOutput: String, Codable, CaseIterable {
             return "Says the answer out loud instead of showing it."
         case .annotate:
             return "Circles and points at things on your screen. Needs a gizmo that can see it."
+        case .surface:
+            return "Sits on a screen edge showing whatever the script lists, "
+                + "with files you can drag straight into another app."
         }
     }
 }
