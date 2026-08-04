@@ -190,6 +190,18 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
     case speak
     /// Drawn over the screen as shapes instead of shown as text.
     case annotate
+
+    /// What a `.native` tool can actually deliver — exactly the cases its runner
+    /// switches on, plus the toast every other case already falls through to.
+    ///
+    /// The editor offers a native gizmo the same set, so a tool the user saved
+    /// by hand round-trips through an edit session instead of throwing
+    /// `invalidCandidate` on the way in. Left out: `.panel` and `.annotate`,
+    /// which need a model to produce something a fixed macOS action has no way
+    /// to produce, and `.files`, which needs a script that wrote some.
+    public static let nativeDeliverable: Set<ToolAgentCandidateOutputV1> = [
+        .replace, .clipboard, .notify, .notes, .speak
+    ]
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {

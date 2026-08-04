@@ -85,6 +85,8 @@ export function createTools(runtime: SidecarRuntime) {
         Type.Literal("replace"),
         Type.Literal("clipboard"),
         Type.Literal("notify"),
+        Type.Literal("notes"),
+        Type.Literal("speak"),
       ]),
       nativeAction: Type.Union([
         Type.Literal("openApp"),

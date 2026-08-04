@@ -784,13 +784,41 @@ struct ToolEditorPanel: View {
     /// explanation next to it wraps into a ransom note. A grid takes the full
     /// width and puts the explanation above it, where it has room.
     private var resultPicker: some View {
-        wrappingPicker(
-            "Result",
-            hint: draft.output.explanation,
-            options: Self.outputs(for: draft.kind),
-            selection: $draft.output,
-            label: { $0.displayName }
-        )
+        VStack(alignment: .leading, spacing: 16) {
+            wrappingPicker(
+                "Result",
+                hint: draft.output.explanation,
+                options: resultOptions,
+                selection: $draft.output,
+                label: { $0.displayName }
+            )
+            // Folded in here rather than added to each of the three sections
+            // that show a result picker: it is a detail of one result, and it
+            // has to disappear with it.
+            if draft.output == .panel {
+                panelPlacement
+            }
+        }
+    }
+
+    /// Where this gizmo's result panel opens.
+    ///
+    /// Kept on the dock rather than on the gizmo, exactly as the built-ins keep
+    /// theirs: a placement is an arrangement of the user's screen, not part of
+    /// what the tool does. `DockCatalog.placeableIDs` has always counted every
+    /// usable gizmo, and `TranslateFlow` already routes a custom mode's panel
+    /// through `resultHost(for:)` — this control was the only missing piece.
+    private var panelPlacement: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            fieldLabel(
+                "Panel",
+                hint: "Where the answer opens: floating at the cursor, or flush to a screen edge."
+            )
+            DockPlacementPicker(
+                store: bridge.dock,
+                itemID: ToolRef.generated(draft.id).storageID
+            )
+        }
     }
 
     /// Every kind with something to say may say it any way it likes — a prompt
@@ -798,16 +826,31 @@ struct ToolEditorPanel: View {
     /// are both real shapes, and guessing which pairings are silly on the
     /// user's behalf was the only thing keeping them apart.
     ///
-    /// Action is the one exception, and only for `.annotate`: drawing on the
-    /// screen means a model deciding what to draw, and a fixed macOS action has
-    /// no model in it. The pill would do nothing at all.
-    // Internal rather than private only so the parity test can assert the one
-    // exclusion below is deliberate.
+    /// Action is the exception, and its list is not a taste call: it is exactly
+    /// what `runNativeTool` delivers, which is also what the builder protocol
+    /// accepts. Offering more than that gave the user a pill that silently did
+    /// nothing and a gizmo the chat builder then refused to open.
+    ///
+    /// Internal rather than private so the parity test can hold the two sides
+    /// together.
     static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {
-        case .prompt, .agent, .python: return ToolOutput.allCases
-        case .native: return ToolOutput.allCases.filter { $0 != .annotate }
+        case .prompt, .agent, .python:
+            return ToolOutput.allCases
+        case .native:
+            return ToolOutput.allCases.filter { output in
+                ToolAgentCandidateOutputV1(rawValue: output.rawValue)
+                    .map(ToolAgentCandidateOutputV1.nativeDeliverable.contains) ?? false
+            }
         }
+    }
+
+    /// What the picker shows: the deliverable set, plus whatever this gizmo is
+    /// already set to. A native tool saved while the list was wider would
+    /// otherwise render with no pill lit, which reads as data loss.
+    private var resultOptions: [ToolOutput] {
+        let offered = Self.outputs(for: draft.kind)
+        return offered.contains(draft.output) ? offered : offered + [draft.output]
     }
 
     // MARK: - Wrapping picker

@@ -125,7 +125,7 @@ const nativeCandidate = z
   .object({
     ...commonCandidate,
     kind: z.literal("native"),
-    output: z.enum(["replace", "clipboard", "notify"]),
+    output: z.enum(["replace", "clipboard", "notify", "notes", "speak"]),
     nativeAction: z.enum([
       "openApp",
       "openAppFullScreen",
@@ -291,7 +291,7 @@ const installedNativeTool = z
   .object({
     ...commonInstalledTool,
     kind: z.literal("native"),
-    output: z.enum(["replace", "clipboard", "notify"]),
+    output: z.enum(["replace", "clipboard", "notify", "notes", "speak"]),
     nativeAction: z.enum([
       "openApp",
       "openAppFullScreen",

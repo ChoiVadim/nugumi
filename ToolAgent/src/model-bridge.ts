@@ -152,8 +152,8 @@ Do not ask for confirmation, naming, icons, wording preferences, or facts you ca
 After an answer, read its exact ask_user toolResult from this same conversation before writing the candidate.
 
 Choose the candidate kind before writing it:
-- prompt: meaning or writing work over text the user is looking at. Use input "selection", "screenshotText" when the request is about what is on screen rather than what is selected, "ask" when the tool's subject is whatever the user types at the moment they run it, or "dictation" when they say it out loud; "drawnScreen" when the user wants to point at something on screen by drawing on it, or "screenshot" when the whole picture matters rather than its text; output "panel", "replace", "clipboard", "notes", "speak", or "annotate"; trigger "always" or "selection". Include prompt and appliesTargetLanguage. Do not include Python/native fields.
-- native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, runShortcut, or saveToNote. Include target (empty only for revealInFinder and saveToNote). Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
+- prompt: meaning or writing work over what the user is looking at — text or, on a model that can see, an image. Pick input and result from the two catalogues below; every one of them is available to a prompt candidate. Include prompt and appliesTargetLanguage. Do not include Python/native fields.
+- native: one closed macOS action. nativeAction is one of openApp, openAppFullScreen, sendTextToApp, revealInFinder, openURL, runShortcut, or saveToNote. Include target (empty only for revealInFinder and saveToNote). Its result is "replace", "clipboard", "notify", "notes" or "speak" — there is no model in a native tool to write an answer or draw one, so "panel", "files" and "annotate" are not available to it. Do not include prompt/Python fields. Prefer native over Python whenever the catalog can express the job.
 - python: when prompt/native cannot express the request, and the job is the same
   every time it runs. Include source, zero to three fixtures, timeoutSeconds,
   declaresNetwork, secretNames, and outputDirectory when output is "files".
@@ -220,42 +220,95 @@ writes {option} wherever the value belongs in its text or target, and the host
 substitutes it. Validation runs with the first option, so order them so the
 first is the sensible default.
 
-The input "ask" is typed rather than read. When the tool runs, a text field opens
-at the cursor and the tool is handed exactly what the user types, in the same
-single argument a selection would arrive in. Choose it when the request has no
-fixed subject — the user supplies one per run ("look something up", "write a
-reply saying...", "convert whatever I tell you"). It requires trigger "always":
-there is nothing to detect it by before the field is filled in.
+=== THE EIGHT INPUTS ===
 
-The input "dictation" is the same argument again, spoken instead of typed. When
-the tool runs, a REC pill appears, the user talks, and clicking the pill ends the
-run and hands the tool the transcript. Choose it over "ask" only when the request
-says so — "надиктовать", "by voice", "speak", "dictate" — and use "ask" for
-anything that merely has no fixed subject. It requires trigger "always" for the
-same reason "ask" does, and it costs the user the microphone permission plus an
-OpenAI key, so never pick it to be helpful.
+Every candidate declares exactly one input: what the gizmo is handed the moment
+it runs. Four are already sitting in the system when the Ring opens; four have
+to be taken from the user, and those all require trigger "always", because there
+is nothing to detect them by before they exist.
 
-The input "files" is what the user has selected in Finder — Gizmate asks Finder
-directly, and falls back to files copied with Command-C. The tool is handed one
-path per file in sys.argv[1:]. It requires trigger "always" or "files". There is
-no clipboard-text and no clipboard-link input: text the user is looking at is
-"selection", and anything else they supply per run is "ask".
+- "selection": the text the user has highlighted. The default, and right
+  whenever the request is about something the user is looking at and can select.
+- "ask": typed per run. A text field opens at the cursor and the tool is handed
+  exactly what was typed, in the same single argument a selection would arrive
+  in. Choose it when the request has no fixed subject — the user supplies one
+  each time ("look something up", "write a reply saying...", "convert whatever I
+  tell you"). Trigger "always".
+- "dictation": the same argument again, spoken. A REC pill appears, the user
+  talks, clicking it ends the run and hands over the transcript. Choose it over
+  "ask" only when the request says so — "надиктовать", "by voice", "speak",
+  "dictate". It costs the user the microphone permission plus an OpenAI key, so
+  never pick it to be helpful. Trigger "always".
+- "files": what Finder has selected, falling back to files copied with
+  Command-C. One path per file in sys.argv[1:]. Trigger "always" or "files".
+- "screenshot": the user drags a box over part of the screen; the tool is handed
+  the filesystem path of the captured PNG. Choose it when the tool needs the
+  picture itself — to crop it, convert it, upload it, read a barcode out of it,
+  or (for a prompt or agent candidate) to look at it. Trigger "always".
+- "screenshotText": the same drag, read by Vision; the tool is handed the words.
+  Choose it when the request is about text the user can see but cannot select —
+  a video, a game, an image, a PDF viewer, another app's UI. A tool that only
+  wants the words wants this, not "screenshot". Trigger "always".
+- "drawnScreen": the whole screen, captured, with the user's own marks drawn on
+  top. A crosshair appears, the user scribbles in red, Return hands the
+  marked-up image over. Choose it when the request is about something the user
+  has to point at — "обведи то что я отмечу", "look at what I circle", "this
+  button here". Plain "screenshot" is the same picture without the drawing step;
+  prefer it when the request needs no pointing. Trigger "always".
+- "none": nothing at all. For a tool whose whole job is its side effect.
 
-Two more inputs are taken rather than read. When the tool runs, the user drags a
-box over part of the screen, and that capture is the input:
-- "screenshotText": the tool is handed the text Vision read out of the capture.
-  Choose it when the request is about words the user can see but cannot select —
-  a video, a game, an image, a PDF viewer, another app's UI.
-- "screenshot": the tool is handed the filesystem path of the captured PNG.
-  Choose it only when the tool needs the picture itself, for example to crop it,
-  convert it, upload it, or read a barcode out of it. A tool that only wants the
-  words wants "screenshotText".
-Both require trigger "always" — there is nothing in the user's selection to
-detect them by. A Python candidate reads either one from sys.argv[1]
-exactly like any other input; the path is a real file that exists for the length
-of the run and is deleted afterwards, so copy it if the tool needs to keep it.
-Fixtures for a "screenshot" tool cannot be written, because no PNG exists until
-the user drags one: give such a candidate no fixtures.
+There is no clipboard-text and no clipboard-link input: text the user is looking
+at is "selection", and anything else they supply per run is "ask".
+
+A Python candidate reads any of these from sys.argv exactly like any other
+input. For the three image inputs the argument is a real file that exists for
+the length of the run and is deleted afterwards, so copy it if the tool needs to
+keep it. Fixtures cannot be written for "screenshot" or "drawnScreen", because
+no image exists until the user makes one: give such a candidate no fixtures.
+
+A prompt or agent candidate taking "screenshot" or "drawnScreen" sends the image
+to the model, so it only works on a model that can see. Do not pair either with
+a request the model could answer from text alone — "screenshotText" is cheaper
+and works everywhere.
+
+=== THE EIGHT RESULTS ===
+
+Every candidate declares exactly one result: where the answer goes when the run
+finishes.
+
+- "panel": the result panel, where the user can read the answer, ask a follow-up
+  or copy it. The right default whenever the point of the tool is to be told
+  something. The panel floats at the cursor unless the user has moved it to a
+  screen edge in the gizmo's own detail page — that placement is theirs to set,
+  not something a candidate declares.
+- "replace": types the answer straight over the user's selection, no panel. For
+  rewriting in place. Pairs with "selection" input.
+- "clipboard": copies the answer and says so in a toast.
+- "files": whatever the script wrote is moved into the tool's output directory.
+  Python only — set outputDirectory alongside it.
+- "notify": a toast and nothing else, for a tool whose point is the side effect.
+- "notes": keeps the answer as a new note in Gizmate's own Notes tab, titled
+  with the gizmo. Choose it when the point is to keep what the tool produced
+  rather than to show it — "сохраняй в заметки", "keep a note of this". The
+  native action saveToNote is the same destination for text the tool was *handed*
+  rather than text it produced: it takes no target and its result is "notify".
+  Apple's Notes.app is a different place — reach it only when the user names it,
+  with sendTextToApp and target "Notes".
+- "speak": reads the answer out loud and shows nothing. Choose it only when the
+  user asked to hear the result — "прочитай вслух", "read it to me", "say the
+  answer" — never as a friendlier version of "panel".
+- "annotate": draws the answer over the screen as circles, arrows and short
+  labels, with no panel and no text at all. Choose it when the answer IS a place
+  on screen — "покажи где нажать", "point at the button", "circle the mistake".
+  It requires an input the model can see, so pair it only with "drawnScreen" or
+  "screenshot", and never with a request whose answer is prose.
+
+Input and result are chosen independently: any input may be paired with any
+result, and the only hard constraints are the ones stated above — the trigger a
+taken input forces, "files" belonging to Python, and "annotate" needing an image
+the model can see. Choose each from what the request actually asks for rather
+than from which pairs you have seen before.
+
 Use a real SF Symbol from this safe shortlist: sparkles, text.alignleft,
 text.quote, textformat, character.book.closed, lightbulb, brain,
 magnifyingglass, curlybraces, list.bullet, tablecells, scissors, pencil,
@@ -298,28 +351,6 @@ validation went. A failed check means the tool is wrong or the input was, so fix
 one of them; removing the fixture is not a way past it and the host rejects it.
 Never invent a fixture whose only purpose is to pass: a fixture with no
 expectedOutput is better than a guessed expected string.
-
-The output "notes" keeps the tool's answer as a new note in Gizmate's own Notes
-tab, titled with the gizmo. Choose it when the point of the tool is to keep what
-it produced rather than to show it — "сохраняй в заметки", "keep a note of
-this". The native action saveToNote is the same destination for text the tool was
-handed rather than text it produced: it takes no target and its output is
-"notify". Apple's Notes.app is a different place — reach it only when the user
-names it, with sendTextToApp and target "Notes".
-
-The output "speak" reads the tool's answer out loud and shows nothing. Choose it
-only when the user asked to hear the result — "прочитай вслух", "read it to me",
-"say the answer" — never as a friendlier version of "panel".
-
-The output "annotate" draws the answer over the screen as circles, arrows and
-short labels, with no panel and no text. Choose it when the answer IS a place on
-screen — "покажи где нажать", "point at the button", "circle the mistake". It
-needs an input the model can see, so pair it with "drawnScreen" or "screenshot".
-
-The input "drawnScreen" captures the whole screen and lets the user scribble on
-it first, then hands the marked-up image over. Choose it when the request is
-about something the user has to point at — "обведи то что я отмечу", "look at
-what I circle". Plain "screenshot" is the same picture without the drawing step.
 
 Example: "я хочу выделить ссылку и сохранить её в заметки" is a native
 saveToNote candidate with selection input, notify output, selection trigger,

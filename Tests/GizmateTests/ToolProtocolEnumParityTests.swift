@@ -37,11 +37,23 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         }
     }
 
-    /// The editor is what the user picks from, so anything it offers has to be
-    /// a case the delivery switches actually handle — `outputs(for:)` narrowing
-    /// Action away from `.annotate` is the one deliberate exclusion.
-    func testActionGizmosAreNotOfferedAResultWithNoModelBehindIt() {
-        XCTAssertFalse(ToolEditorPanel.outputs(for: .native).contains(.annotate))
+    /// The editor is what the user picks from, and the protocol is what the chat
+    /// builder validates against. When the editor offers more than the protocol
+    /// accepts, saving works and opening that gizmo in the builder throws
+    /// `invalidCandidate` — a gizmo the user can create but not edit.
+    func testTheEditorOffersActionGizmosExactlyWhatTheProtocolAccepts() {
+        let offered = Set(
+            ToolEditorPanel.outputs(for: .native).compactMap {
+                ToolAgentCandidateOutputV1(rawValue: $0.rawValue)
+            }
+        )
+        XCTAssertEqual(offered, ToolAgentCandidateOutputV1.nativeDeliverable)
+        XCTAssertFalse(offered.contains(.panel), "an Action has no model to write a panel's answer")
+        XCTAssertFalse(offered.contains(.annotate), "an Action has no model to decide what to draw")
+    }
+
+    /// The other three kinds carry a model or a script, so nothing is withheld.
+    func testEveryOtherKindIsOfferedEveryResult() {
         for kind in [ToolKind.prompt, .agent, .python] {
             XCTAssertEqual(ToolEditorPanel.outputs(for: kind), ToolOutput.allCases)
         }

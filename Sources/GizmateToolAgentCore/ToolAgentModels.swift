@@ -390,7 +390,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             }
         case .native:
             guard let nativeAction,
-                  output == .replace || output == .clipboard || output == .notify,
+                  ToolAgentCandidateOutputV1.nativeDeliverable.contains(output),
                   prompt.isEmpty,
                   source.isEmpty,
                   fixtures.isEmpty,
@@ -724,7 +724,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             }
         case .native:
             guard let nativeAction,
-                  output == .replace || output == .clipboard || output == .notify,
+                  ToolAgentCandidateOutputV1.nativeDeliverable.contains(output),
                   prompt.isEmpty,
                   !appliesTargetLanguage,
                   source.isEmpty,
