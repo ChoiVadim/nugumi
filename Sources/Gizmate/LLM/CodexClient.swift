@@ -157,13 +157,20 @@ struct OpenAICodexClient: LLMBackend {
     func complete(
         systemPrompt: String,
         userPrompt: String,
+        images: [ImageInput] = [],
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> String {
+        for image in images where image.data.count > Self.maxImageBytes {
+            throw TranslationError.cloudError(.openAICodex, "Image too large (limit 5 MB)")
+        }
         let body = CodexResponsesRequest(
             model: apiModelID,
             instructions: systemPrompt,
-            input: [CodexInputItem(role: "user", content: [.text(userPrompt, role: "user")])],
+            input: [CodexInputItem(
+                role: "user",
+                content: [.text(userPrompt, role: "user")] + images.map { .image($0.openAIDataURI) }
+            )],
             stream: true,
             store: false,
             reasoning: CodexReasoningConfig(effort: thinkingLevel.cloudReasoningEffort)

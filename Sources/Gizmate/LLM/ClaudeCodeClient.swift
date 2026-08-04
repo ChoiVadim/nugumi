@@ -109,12 +109,18 @@ struct ClaudeCodeClient: LLMBackend {
     func complete(
         systemPrompt: String,
         userPrompt: String,
+        images: [ImageInput] = [],
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> String {
         try await stream(
             systemPrompt: systemPrompt,
-            messages: [["role": "user", "content": userPrompt]],
+            messages: [[
+                "role": "user",
+                "content": images.isEmpty
+                    ? userPrompt
+                    : Self.contentBlocks(text: userPrompt, images: images)
+            ]],
             thinkingLevel: thinkingLevel,
             onPartial: onPartial
         )

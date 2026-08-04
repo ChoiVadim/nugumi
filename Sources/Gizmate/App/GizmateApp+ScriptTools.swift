@@ -378,6 +378,22 @@ extension GizmateApp {
         // A "files" input hands over several paths; the agent gets them one per
         // line, which is what a Python script it writes will split on anyway.
         let input = arguments.joined(separator: "\n")
+        // An agent asked to look at a screen used to get only the path to it and
+        // a Python interpreter, so it could crop the picture but never see it.
+        // The path still goes over in `input` — a script it writes needs one —
+        // and now the picture goes to its model too.
+        let images = tool.input.isImage
+            ? screenshot.flatMap(Self.imageInput(for:)).map { [$0] } ?? []
+            : []
+        if !images.isEmpty, !LLMModel.option(id: askGizmateModelID).supportsImages {
+            presentSelectionTranslationError(
+                "\(tool.name) looks at your screen, so it needs a model that can see images. "
+                    + "Pick one in Settings.",
+                title: tool.name
+            )
+            temporaryFiles.forEach { try? FileManager.default.removeItem(at: $0) }
+            return
+        }
         let screenPoint = NSEvent.mouseLocation
         let loadingBar = showInstantTranslationLoading(near: screenPoint)
         let backend = askBackend
@@ -392,6 +408,7 @@ extension GizmateApp {
                 let answer = try await AgentToolRunner.run(
                     tool: contextualized,
                     input: input,
+                    images: images,
                     backend: backend,
                     thinkingLevel: thinkingLevel,
                     uv: uv

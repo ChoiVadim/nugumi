@@ -52,9 +52,24 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         XCTAssertFalse(offered.contains(.annotate), "an Action has no model to decide what to draw")
     }
 
-    /// The other three kinds carry a model or a script, so nothing is withheld.
-    func testEveryOtherKindIsOfferedEveryResult() {
-        for kind in [ToolKind.prompt, .agent, .python] {
+    /// An Agent finishes with text, so files are the one thing it cannot hand
+    /// over — `runAgentTool` always delivers `producedFiles: []`, and the pill
+    /// would report "nothing produced" every run.
+    func testAgentGizmosAreOfferedEveryResultButFiles() {
+        let offered = Set(
+            ToolEditorPanel.outputs(for: .agent).compactMap {
+                ToolAgentCandidateOutputV1(rawValue: $0.rawValue)
+            }
+        )
+        XCTAssertEqual(offered, ToolAgentCandidateOutputV1.agentDeliverable)
+        XCTAssertFalse(offered.contains(.files))
+        XCTAssertTrue(offered.contains(.annotate))
+    }
+
+    /// Prompt and Script are unrestricted: one has a model behind it and the
+    /// other can genuinely write files.
+    func testPromptAndScriptAreOfferedEveryResult() {
+        for kind in [ToolKind.prompt, .python] {
             XCTAssertEqual(ToolEditorPanel.outputs(for: kind), ToolOutput.allCases)
         }
     }

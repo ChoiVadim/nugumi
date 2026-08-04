@@ -436,7 +436,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // on wording.
             guard !prompt.isEmpty,
                   prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
-                  output != .files,
+                  ToolAgentCandidateOutputV1.agentDeliverable.contains(output),
                   nativeAction == nil,
                   target.isEmpty,
                   source.isEmpty,
@@ -756,7 +756,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case .agent:
             guard !prompt.isEmpty,
                   prompt.utf8.count <= ToolAgentProtocolLimitsV1.maximumPromptBytes,
-                  output != .files,
+                  ToolAgentCandidateOutputV1.agentDeliverable.contains(output),
                   !appliesTargetLanguage,
                   nativeAction == nil,
                   target.isEmpty,

@@ -826,22 +826,33 @@ struct ToolEditorPanel: View {
     /// are both real shapes, and guessing which pairings are silly on the
     /// user's behalf was the only thing keeping them apart.
     ///
-    /// Action is the exception, and its list is not a taste call: it is exactly
-    /// what `runNativeTool` delivers, which is also what the builder protocol
-    /// accepts. Offering more than that gave the user a pill that silently did
-    /// nothing and a gizmo the chat builder then refused to open.
+    /// Action and Agent are the exceptions, and neither list is a taste call:
+    /// each is exactly what that kind's runner can deliver, read from the same
+    /// constant the builder protocol validates against. Offering more gave the
+    /// user a pill that silently did nothing and a gizmo the chat builder then
+    /// refused to open; offering less rejected a tool they could legitimately
+    /// build. Both have now happened, which is why there is one list rather
+    /// than one per file.
     ///
-    /// Internal rather than private so the parity test can hold the two sides
+    /// Internal rather than private so the parity test can hold the sides
     /// together.
     static func outputs(for kind: ToolKind) -> [ToolOutput] {
         switch kind {
-        case .prompt, .agent, .python:
+        case .prompt, .python:
             return ToolOutput.allCases
         case .native:
-            return ToolOutput.allCases.filter { output in
-                ToolAgentCandidateOutputV1(rawValue: output.rawValue)
-                    .map(ToolAgentCandidateOutputV1.nativeDeliverable.contains) ?? false
-            }
+            return deliverable(ToolAgentCandidateOutputV1.nativeDeliverable)
+        case .agent:
+            return deliverable(ToolAgentCandidateOutputV1.agentDeliverable)
+        }
+    }
+
+    private static func deliverable(
+        _ allowed: Set<ToolAgentCandidateOutputV1>
+    ) -> [ToolOutput] {
+        ToolOutput.allCases.filter { output in
+            ToolAgentCandidateOutputV1(rawValue: output.rawValue)
+                .map(allowed.contains) ?? false
         }
     }
 

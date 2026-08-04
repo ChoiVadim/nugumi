@@ -64,16 +64,29 @@ extension GizmateApp {
     /// The frame is the screen the drag happened on, not the region: it is only
     /// used to place `.annotate` shapes, and those belong on the screen rather
     /// than inside somebody's crop.
+    /// The file a capture left on disk, as something a model can be shown.
+    ///
+    /// Media type comes off the extension rather than being assumed: a dragged
+    /// region is written as PNG by `screencapture`, and a marked-up screen is
+    /// re-encoded as JPEG when the strokes are burned in.
+    static func imageInput(for shot: ToolScreenshot) -> ImageInput? {
+        guard let data = try? Data(contentsOf: shot.imageURL) else { return nil }
+        let type = shot.imageURL.pathExtension.lowercased() == "png"
+            ? "image/png"
+            : "image/jpeg"
+        return ImageInput(data: data, mediaType: type)
+    }
+
     @MainActor
     static func captureForModel(_ shot: ToolScreenshot) -> AskGizmateScreenCapture? {
-        guard let data = try? Data(contentsOf: shot.imageURL),
-              let rep = NSBitmapImageRep(data: data)
+        guard let image = imageInput(for: shot),
+              let rep = NSBitmapImageRep(data: image.data)
         else { return nil }
         let frame = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }?.frame
             ?? NSScreen.main?.frame
             ?? .zero
         return AskGizmateScreenCapture(
-            image: ImageInput(data: data, mediaType: "image/png"),
+            image: image,
             imagePixelSize: CGSize(width: rep.pixelsWide, height: rep.pixelsHigh),
             screenFrame: frame,
             visibleFrame: frame

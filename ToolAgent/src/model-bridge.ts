@@ -266,21 +266,25 @@ the length of the run and is deleted afterwards, so copy it if the tool needs to
 keep it. Fixtures cannot be written for "screenshot" or "drawnScreen", because
 no image exists until the user makes one: give such a candidate no fixtures.
 
-Only a prompt candidate can LOOK at an image. "screenshot" and "drawnScreen" send
-the picture itself to a prompt candidate's model, which is what makes "describe
-what is on my screen", "what does this error mean", "what am I circling" work —
-and they require a model that can see.
+"screenshot" and "drawnScreen" send the picture itself to the model of a prompt
+OR an agent candidate, which is what makes "describe what is on my screen", "what
+does this error mean" and "what am I circling" work. Both require a model that
+can see; the host refuses the run with a clear message when the user's model
+cannot, so never avoid an image input out of caution.
 
-An agent or Python candidate is handed the file path and nothing else. No model
-in it ever sees the picture. That is right for a tool that PROCESSES an image —
-crop it, convert it, upload it, read a barcode with a library — and completely
-wrong for a tool that has to UNDERSTAND one. A request to recognise, explain,
-describe or read what is in a picture is a prompt candidate. Choosing agent for
-it produces a tool that cannot possibly work: the model is handed a filename and
-asked what it looks like.
+An agent additionally receives the file path in its input, so it can both look at
+the picture and process it with Python in the same run — read the error on screen
+AND search for it, or see what a chart shows AND redraw it.
+
+A Python candidate is handed the path and nothing else: no model in it ever sees
+the picture. That is right for a tool that only PROCESSES an image — crop,
+convert, upload, read a barcode with a library — and wrong for one that has to
+UNDERSTAND it. A request to recognise, explain or describe what is in a picture
+is a prompt candidate, or an agent when understanding it is only the first step.
 
 When the request is about words the user can see but cannot select, prefer
-"screenshotText" over both — Vision reads them on any model, and it is cheaper.
+"screenshotText" over all of them — Vision reads them on any model, and it is
+cheaper than sending a picture on every turn.
 
 === THE EIGHT RESULTS ===
 

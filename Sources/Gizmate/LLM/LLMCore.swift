@@ -242,9 +242,17 @@ protocol LLMBackend {
     /// returning the model's text verbatim. `ask` can't serve this: it injects
     /// `AskGizmatePromptBuilder.systemPrompt` and post-processes through
     /// `AskGizmateResponse.parse`, both of which would mangle a tool manifest.
+    /// One plain turn, used by the tool builder and by every model call an agent
+    /// tool makes while it runs.
+    ///
+    /// `images` is what lets an agent look at the screen it was handed rather
+    /// than read out the path to it. No default here — a protocol requirement
+    /// cannot carry one — so the concrete backends supply it and the two
+    /// text-only call sites pass an empty array.
     func complete(
         systemPrompt: String,
         userPrompt: String,
+        images: [ImageInput],
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> String

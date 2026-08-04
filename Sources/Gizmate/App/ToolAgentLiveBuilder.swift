@@ -428,6 +428,7 @@ enum ToolAgentLiveBuilder {
         let first = try await backend.complete(
             systemPrompt: request.system,
             userPrompt: request.user,
+            images: [],
             thinkingLevel: thinkingLevel,
             onPartial: { _ in }
         )
@@ -458,6 +459,7 @@ enum ToolAgentLiveBuilder {
                 tool schema. Output one JSON object only.
                 """,
             userPrompt: repairPayload,
+            images: [],
             thinkingLevel: thinkingLevel,
             onPartial: { _ in }
         )

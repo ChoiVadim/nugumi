@@ -139,14 +139,26 @@ struct OpenAIChatClient: LLMBackend {
     func complete(
         systemPrompt: String,
         userPrompt: String,
+        images: [ImageInput] = [],
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> String {
         guard !apiKey.isEmpty else { throw TranslationError.invalidAPIKey(provider) }
+        guard images.isEmpty || LLMModel.option(id: model).supportsImages else {
+            throw TranslationError.cloudError(provider, "This model can't see images.")
+        }
+        for image in images where image.data.count > Self.maxImageBytes {
+            throw TranslationError.cloudError(provider, "Image too large (limit 5 MB)")
+        }
         return try await stream(
             messages: [
                 OpenAIMessage(role: "system", content: .string(systemPrompt)),
-                OpenAIMessage(role: "user", content: .string(userPrompt))
+                OpenAIMessage(
+                    role: "user",
+                    content: images.isEmpty
+                        ? .string(userPrompt)
+                        : .parts([.text(userPrompt)] + images.map { .imageURL($0.openAIDataURI) })
+                )
             ],
             thinkingLevel: thinkingLevel,
             onPartial: onPartial

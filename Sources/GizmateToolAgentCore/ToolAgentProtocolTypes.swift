@@ -178,7 +178,7 @@ public enum ToolAgentCandidateInputV1: String, Codable, Equatable, Sendable {
     case none
 }
 
-public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
+public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable, CaseIterable {
     case panel
     case replace
     case clipboard
@@ -202,6 +202,13 @@ public enum ToolAgentCandidateOutputV1: String, Codable, Equatable, Sendable {
     public static let nativeDeliverable: Set<ToolAgentCandidateOutputV1> = [
         .replace, .clipboard, .notify, .notes, .speak
     ]
+
+    /// What a `.agent` tool can deliver: everything a model can write, which is
+    /// everything except files. An agent finishes with text — it writes files
+    /// only inside its own steps, into a directory that is thrown away — so
+    /// `.files` would deliver "nothing produced" every single run.
+    public static let agentDeliverable: Set<ToolAgentCandidateOutputV1> =
+        Set(ToolAgentCandidateOutputV1.allCases).subtracting([.files])
 }
 
 public enum ToolAgentCandidateTriggerV1: String, Codable, Equatable, Sendable {

@@ -56,12 +56,19 @@ enum AgentToolRunner {
 
     /// - Parameters:
     ///   - input: what the ring handed the tool, already resolved.
+    ///   - images: the picture the tool was handed, for an agent whose input is
+    ///     a screen. Sent on every turn rather than only the first: the sidecar
+    ///     re-serialises the whole conversation as text each time it asks for a
+    ///     model call, so an image attached once would be gone by the step that
+    ///     needed it. Costs one image per turn — see `budgets(for:)` for how
+    ///     many that can be.
     ///   - onProgress: called as each `run_python` step starts, for the HUD.
     /// - Returns: the text the agent finished with.
     @MainActor
     static func run(
         tool: GizmateTool,
         input: String,
+        images: [ImageInput] = [],
         backend: any LLMBackend,
         thinkingLevel: ThinkingLevel,
         uv: URL,
@@ -115,6 +122,7 @@ enum AgentToolRunner {
             case .modelRequest(let request):
                 let result = await answerModel(
                     request,
+                    images: images,
                     backend: backend,
                     thinkingLevel: thinkingLevel
                 )
@@ -214,6 +222,7 @@ enum AgentToolRunner {
     @MainActor
     private static func answerModel(
         _ request: ToolAgentModelRequestV1,
+        images: [ImageInput],
         backend: any LLMBackend,
         thinkingLevel: ThinkingLevel
     ) async -> ToolAgentModelResponseResultV1 {
@@ -221,6 +230,7 @@ enum AgentToolRunner {
             let text = try await backend.complete(
                 systemPrompt: request.system,
                 userPrompt: request.user,
+                images: images,
                 thinkingLevel: thinkingLevel,
                 onPartial: { _ in }
             )

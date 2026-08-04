@@ -116,13 +116,21 @@ struct OllamaClient: LLMBackend {
     func complete(
         systemPrompt: String,
         userPrompt: String,
+        images: [ImageInput] = [],
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
     ) async throws -> String {
-        try await stream(
+        if !images.isEmpty, !LLMModel.option(id: model).supportsImages {
+            throw TranslationError.ollama("Selected Ollama model doesn't support images.")
+        }
+        return try await stream(
             messages: [
                 ChatMessage(role: "system", content: systemPrompt),
-                ChatMessage(role: "user", content: userPrompt)
+                ChatMessage(
+                    role: "user",
+                    content: userPrompt,
+                    images: images.isEmpty ? nil : images.map(\.base64String)
+                )
             ],
             thinkingLevel: thinkingLevel,
             onPartial: onPartial
