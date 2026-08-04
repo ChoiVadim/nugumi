@@ -161,7 +161,8 @@ enum ToolAgentLiveBuilder {
             timeoutSeconds: kind == .python || kind == .agent ? tool.timeoutSeconds : 120,
             declaresNetwork: kind == .python && tool.declaresNetwork,
             secretNames: kind == .python || kind == .agent ? tool.secretNames : [],
-            maxSteps: tool.maxSteps
+            maxSteps: tool.maxSteps,
+            layout: output == .surface ? tool.layout : nil
         )
     }
 

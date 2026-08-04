@@ -334,8 +334,52 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(generated.summary, candidate.brief)
     }
 
-    /// The one field `installedTool` cannot carry back: `ToolAgentInstalledToolV1`
-    /// has no `layout` of its own, so only this direction is checked here.
+    /// The trip the revise flow actually makes: a saved surface gizmo becomes
+    /// the snapshot Pi is shown, and — standing in for Pi echoing it back
+    /// unchanged, the one thing no Swift code does — a candidate built from
+    /// that snapshot's own `layout` (not a fresh literal) becomes the tool
+    /// that gets saved. If either host-owned conversion dropped `layout`,
+    /// this would come back nil rather than equal to the original.
+    func testASurfaceGizmosLayoutSurvivesToolInstalledToolCandidateRoundTrip() throws {
+        let layout = ToolAgentLayoutV1.grid(
+            cell: .text(.key("name")), minimumWidth: 120, empty: "No downloads"
+        )
+        let tool = GizmateTool(
+            name: "Downloads",
+            symbolName: "tray",
+            kind: .python,
+            input: .none,
+            output: .surface,
+            layout: layout,
+            brief: "Lists recently downloaded files."
+        )
+
+        let installed = try ToolAgentLiveBuilder.installedTool(
+            from: tool, script: "print('{}')"
+        )
+        XCTAssertEqual(installed.layout, layout)
+
+        let candidate = try ToolAgentCandidateV1(
+            kind: installed.kind,
+            name: installed.name,
+            brief: installed.brief,
+            symbolName: installed.symbolName,
+            input: installed.input,
+            output: installed.output,
+            trigger: installed.trigger,
+            source: installed.source,
+            layout: installed.layout
+        )
+        let generated = ToolAgentLiveBuilder.generatedTool(from: candidate)
+
+        XCTAssertEqual(generated.tool.output, .surface)
+        XCTAssertEqual(generated.tool.layout, layout)
+    }
+
+    /// The candidate→tool half of the carry in isolation, independent of
+    /// whatever the installed-tool snapshot the candidate might have started
+    /// from — this is what happens on a `create`, where there was no
+    /// installed tool to begin with.
     func testMapsVerifiedSurfaceCandidateWithItsLayout() throws {
         let layout = ToolAgentLayoutV1.list(
             row: .text(.key("name")), empty: "Nothing here"

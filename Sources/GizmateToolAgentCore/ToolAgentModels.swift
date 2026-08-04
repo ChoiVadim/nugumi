@@ -542,6 +542,11 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
     public let secretNames: [String]
     /// `.agent` only, and preserved across an edit for the same reason.
     public let maxSteps: Int
+    /// What an existing surface gizmo draws, carried into an edit session for
+    /// the same reason `secretNames` is: without it, revising a surface gives
+    /// the model no way to see its current layout, and it would have to
+    /// invent a new one from scratch on every edit.
+    public let layout: ToolAgentLayoutV1?
 
     public init(
         kind: ToolAgentCandidateKindV1,
@@ -563,7 +568,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         timeoutSeconds: Int = 120,
         declaresNetwork: Bool = false,
         secretNames: [String] = [],
-        maxSteps: Int = 8
+        maxSteps: Int = 8,
+        layout: ToolAgentLayoutV1? = nil
     ) throws {
         try Self.validate(
             kind: kind,
@@ -607,6 +613,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         self.declaresNetwork = declaresNetwork
         self.secretNames = secretNames
         self.maxSteps = maxSteps
+        self.layout = layout
     }
 
     public init(from decoder: Decoder) throws {
@@ -632,7 +639,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
                 ?? (try container.decode(ToolAgentCandidateKindV1.self, forKey: .kind) == .python ? 30 : 120),
             declaresNetwork: try container.decodeIfPresent(Bool.self, forKey: .declaresNetwork) ?? false,
             secretNames: try container.decodeIfPresent([String].self, forKey: .secretNames) ?? [],
-            maxSteps: try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
+            maxSteps: try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8,
+            layout: try container.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
         )
     }
 
@@ -665,6 +673,10 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             if !secretNames.isEmpty {
                 try container.encode(secretNames, forKey: .secretNames)
             }
+            // Present only on a surface, same as the candidate: any other
+            // Python tool never had one to write, and this type enforces
+            // nothing about the pairing itself — that stays on the candidate.
+            try container.encodeIfPresent(layout, forKey: .layout)
         case .agent:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(maxSteps, forKey: .maxSteps)
@@ -823,5 +835,6 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case declaresNetwork
         case secretNames
         case maxSteps
+        case layout
     }
 }

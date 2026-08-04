@@ -384,6 +384,10 @@ const installedPythonTool = z
     ...commonInstalledTool,
     kind: z.literal("python"),
     source: byteString(LIMITS.sourceBytes),
+    // Present exactly when output is "surface", same as on the candidate —
+    // what an existing surface gizmo already draws, carried into an edit so
+    // Pi can see it rather than invent a new one from scratch.
+    layout: layoutNode.optional(),
     outputDirectory: byteString(LIMITS.targetBytes).optional(),
     timeoutSeconds: z.number().int().min(5).max(1800),
     declaresNetwork: z.boolean(),
