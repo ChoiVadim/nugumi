@@ -1,3 +1,4 @@
+import GizmateToolAgentCore
 import XCTest
 @testable import Gizmate
 
@@ -78,5 +79,48 @@ final class ToolsStoreTests: XCTestCase {
 
         XCTAssertNil(store.script(for: tool.id))
         XCTAssertNil(store.scriptHash(for: tool.id))
+    }
+
+    func testASurfaceGizmoKeepsItsLayoutAcrossASaveAndLoad() throws {
+        let layout = ToolAgentLayoutV1.grid(
+            cell: .card(title: .key("name"), subtitle: nil, icon: .file(key: "path"),
+                        drag: .file(key: "path"), tap: .reveal(key: "path")),
+            minimumWidth: 96, empty: "Nothing here"
+        )
+        var tool = GizmateTool()
+        tool.name = "Downloads"
+        tool.kind = .python
+        tool.input = .none
+        tool.output = .surface
+        tool.layout = layout
+
+        let reloaded = try JSONDecoder().decode(
+            GizmateTool.self, from: JSONEncoder().encode(tool)
+        )
+        XCTAssertEqual(reloaded.layout, layout)
+        XCTAssertEqual(reloaded.output, .surface)
+    }
+
+    /// Lenient, like every other field here: a layout this version cannot read
+    /// must not take the gizmo's name, script and secrets down with it.
+    func testAnUnreadableLayoutLeavesTheRestOfTheGizmoIntact() throws {
+        let json = #"{"id":"\#(UUID().uuidString)","name":"Downloads","kind":"python","#
+            + #""input":"none","output":"surface","layout":{"node":"webview"},"#
+            + #""prompt":"","target":"","brief":"","symbolName":"tray","#
+            + #""timeoutSeconds":120,"createdAt":0}"#
+        let tool = try JSONDecoder().decode(GizmateTool.self, from: Data(json.utf8))
+        XCTAssertEqual(tool.name, "Downloads")
+        XCTAssertNil(tool.layout)
+    }
+
+    /// A surface with no layout cannot draw. `isUsable` is what keeps it out of
+    /// the dock catalog rather than a crash at render time.
+    func testASurfaceWithoutALayoutIsNotUsable() {
+        var tool = GizmateTool()
+        tool.name = "Downloads"
+        tool.kind = .python
+        tool.output = .surface
+        tool.layout = nil
+        XCTAssertFalse(tool.isUsable)
     }
 }

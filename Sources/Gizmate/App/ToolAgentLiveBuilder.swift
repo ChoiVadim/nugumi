@@ -504,6 +504,7 @@ enum ToolAgentLiveBuilder {
             secretNames: kind == .python || kind == .agent
                 ? (candidate.secretNames ?? []).filter(stored.contains)
                 : [],
+            layout: output == .surface ? candidate.layout : nil,
             maxSteps: candidate.maxSteps,
             brief: candidate.brief
         )

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import GizmateToolAgentCore
 
 /// How a tool does its work.
 enum ToolKind: String, Codable, CaseIterable {
@@ -303,6 +304,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     /// `OPENAI_API_KEY` never sees it, so one leaky script is not every key.
     /// Part of the approval hash — see `ToolsStore.scriptHash(for:)`.
     var secretNames: [String]
+    /// What a `.surface` gizmo draws. nil for every other result.
+    var layout: ToolAgentLayoutV1?
 
     // MARK: .agent
     /// How many scripts a `.agent` tool may run before it has to answer. The
@@ -345,6 +348,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         timeoutSeconds: Int = 120,
         declaresNetwork: Bool = false,
         secretNames: [String] = [],
+        layout: ToolAgentLayoutV1? = nil,
         maxSteps: Int = 8,
         brief: String = "",
         usesVoice: Bool = false,
@@ -368,6 +372,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         self.timeoutSeconds = timeoutSeconds
         self.declaresNetwork = declaresNetwork
         self.secretNames = secretNames
+        self.layout = layout
         self.maxSteps = maxSteps
 
         self.brief = brief
@@ -380,6 +385,9 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     /// store checks that separately via `isRunnable(script:)`.
     var isUsable: Bool {
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        // A surface with nothing to draw is worse than one the dock never
+        // offers: it would dock cleanly and then sit empty forever.
+        if output == .surface, layout == nil { return false }
         switch kind {
         // An agent tool is its instruction: there is nothing else to run.
         case .prompt, .agent:
@@ -412,6 +420,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         case prompt, appliesTargetLanguage
         case nativeAction, target
         case outputDirectory, timeoutSeconds, declaresNetwork, secretNames, brief
+        case layout
         case maxSteps
         case usesVoice, usesNotes
         case createdAt
@@ -449,6 +458,10 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         // on disk and `ToolSecrets` resolves these straight into a path.
         secretNames = (try c.decodeIfPresent([String].self, forKey: .secretNames) ?? [])
             .filter(ToolSecrets.isValidName)
+        // Lenient for the same reason the rest of this initialiser is: a
+        // layout written by a newer build must cost the user this gizmo's
+        // surface, not the gizmo.
+        layout = try? c.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
         maxSteps = max(1, min(24, try c.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8))
         brief = try c.decodeIfPresent(String.self, forKey: .brief) ?? ""
         // Absent in every gizmo saved before this existed, and false is what

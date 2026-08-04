@@ -334,6 +334,30 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertEqual(generated.summary, candidate.brief)
     }
 
+    /// The one field `installedTool` cannot carry back: `ToolAgentInstalledToolV1`
+    /// has no `layout` of its own, so only this direction is checked here.
+    func testMapsVerifiedSurfaceCandidateWithItsLayout() throws {
+        let layout = ToolAgentLayoutV1.list(
+            row: .text(.key("name")), empty: "Nothing here"
+        )
+        let candidate = try ToolAgentCandidateV1(
+            kind: .python,
+            name: "Downloads",
+            brief: "Lists recently downloaded files.",
+            symbolName: "tray",
+            input: .none,
+            output: .surface,
+            trigger: .always,
+            source: "print('{}')",
+            layout: layout
+        )
+
+        let generated = ToolAgentLiveBuilder.generatedTool(from: candidate)
+
+        XCTAssertEqual(generated.tool.output, .surface)
+        XCTAssertEqual(generated.tool.layout, layout)
+    }
+
     func testModelActionValidatorMatchesStrictSidecarCandidateShape() {
         let valid = #"""
             {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"native","name":"Save To Notes","brief":"Sends selected text to Notes.","symbolName":"doc.text","input":"selection","output":"notify","trigger":"selection","hosts":[],"extensions":[],"nativeAction":"sendTextToApp","target":"Notes"}}}
