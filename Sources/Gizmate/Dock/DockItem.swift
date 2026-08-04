@@ -34,15 +34,20 @@ enum DockCatalog {
     /// view — Ask, Live and the result panel still create their own windows, so
     /// there is nothing to hand a dock.
     ///
-    /// Explain, Reply, Ask, Capture, Summarize and Live all join this list the
-    /// moment their panels become views. Rewrite and Dictate never will: they
+    /// Ask and Live are still missing: they build their own windows, so there
+    /// is nothing to hand a dock yet. Rewrite and Dictate never join — they
     /// write into the app you were in and show no panel at all.
     /// See `docs/superpowers/specs/2026-08-03-one-tool-model-design.md`, phase 3.
-    static let dockableBuiltIns: [RingActionID] = [.saveNote]
+    static let dockableBuiltIns: [RingActionID] = [.saveNote, .explain, .reply, .summarize]
+
+    /// Only surfaces that can sit on an edge *waiting*. A result panel is not
+    /// one: it exists after a run, and until then there is nothing to show, so
+    /// it must not put a tab there implying otherwise.
+    static let residentBuiltIns: [RingActionID] = [.saveNote]
 
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
-        return dockableBuiltIns.map { action in
+        return residentBuiltIns.map { action in
             DockItem(
                 id: ToolRef.builtIn(action).storageID,
                 title: overrides.displayName(for: action),
@@ -69,6 +74,16 @@ enum DockCatalog {
 
     static func knownIDs(host: any SettingsHost) -> Set<String> {
         Set(all(host: host).map(\.id))
+    }
+
+    /// Everything a placement may name — resident surfaces *and* the tools whose
+    /// result panel can open on an edge. `prune` keys off this, not `knownIDs`:
+    /// a docked Explain has no waiting tab, and dropping its placement for that
+    /// reason would silently undo the user's choice.
+    static func placeableIDs(host: any SettingsHost) -> Set<String> {
+        knownIDs(host: host)
+            .union(dockableBuiltIns.map { ToolRef.builtIn($0).storageID })
+            .union(host.tools.usableTools().map { ToolRef.generated($0.id).storageID })
     }
 
     // MARK: - Surfaces

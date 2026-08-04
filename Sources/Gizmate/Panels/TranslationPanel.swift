@@ -41,6 +41,18 @@ private final class TranslationResultPanel: NSPanel {
     }
 }
 
+/// Somewhere other than a floating window for a result to appear.
+///
+/// A struct of closures rather than a protocol, for the same reason `DockItem`
+/// is one: there is exactly one thing on the other end (a dock), and `NSView` is
+/// all it needs. This is the seam that makes "where does the panel open" a
+/// choice instead of a fact.
+@MainActor
+struct ResultSurfaceHost {
+    let present: (NSView) -> Void
+    let dismiss: () -> Void
+}
+
 final class TranslationPanelController {
     enum Side { case left, right }
 
@@ -78,6 +90,11 @@ final class TranslationPanelController {
     /// button or Esc. The Ask Gizmate answer uses this so reading it isn't a
     /// one-misclick-away-from-gone affair.
     private let dismissesOnOutsideClick: Bool
+    /// Non-nil when this result was routed to a dock. The panel is still built —
+    /// it owns the content view, the interceptors and the request bookkeeping —
+    /// but it is never ordered in, and the content lives on an edge instead.
+    private let dockHost: ResultSurfaceHost?
+    private var isDocked: Bool { dockHost != nil }
 
     var panelFrame: NSRect { panel.frame }
     var isVisible: Bool { panel.isVisible }
@@ -100,8 +117,10 @@ final class TranslationPanelController {
         onFollowUp: ((String) -> Void)? = nil,
         replaceShortcutSourcePID: pid_t? = nil,
         dismissesOnOutsideClick: Bool = true,
+        dockHost: ResultSurfaceHost? = nil,
         onClose: (() -> Void)? = nil
     ) {
+        self.dockHost = dockHost
         self.loadingPlaceholder = loadingPlaceholder
         self.anchor = anchor
         self.onClose = onClose
@@ -180,9 +199,17 @@ final class TranslationPanelController {
             contentView.setTargetLanguage(targetLanguage)
         }
         contentView.startLoadingAnimation(baseText: placeholder ?? loadingPlaceholder)
-        resizeToFitContent(animated: false)
-        panel.orderFrontRegardless()
-        installOutsideClickMonitors()
+        if let dockHost {
+            // The dock sizes and dismisses its own panel, so neither the
+            // fit-to-content pass nor the outside-click monitors apply: an edge
+            // that vanished on the first click elsewhere would be unusable.
+            contentView.removeFromSuperview()
+            dockHost.present(contentView)
+        } else {
+            resizeToFitContent(animated: false)
+            panel.orderFrontRegardless()
+            installOutsideClickMonitors()
+        }
         installCommandCopyInterceptor()
         installReturnKeyInterceptor()
         return activeRequestID
@@ -216,7 +243,11 @@ final class TranslationPanelController {
         removeOutsideClickMonitors()
         removeCommandCopyInterceptor()
         removeReturnKeyInterceptor()
-        panel.close()
+        if let dockHost {
+            dockHost.dismiss()
+        } else {
+            panel.close()
+        }
         onClose?()
         if wasDismissedByUser {
             onUserDismiss?()
@@ -346,6 +377,9 @@ final class TranslationPanelController {
     }
 
     private func resizeToFitContent(animated: Bool) {
+        // A docked result is sized by the dock; resizing the hidden panel would
+        // fight it and move nothing the user can see.
+        guard !isDocked else { return }
         let currentFrame = panel.frame
         if TranslationContentView.streamDebug {
             print(String(format: "[stream] resize curH=%.1f curY=%.1f", currentFrame.height, currentFrame.minY))

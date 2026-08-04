@@ -98,7 +98,7 @@ extension GizmateApp {
     /// window, while a dock has to work when no window is open at all.
     @MainActor
     func startDocks() {
-        dockStore.prune(keeping: DockCatalog.knownIDs(host: self))
+        dockStore.prune(keeping: DockCatalog.placeableIDs(host: self))
         dockControllers = DockEdge.allCases.map {
             EdgeDockController(edge: $0, store: dockStore, host: self)
         }
@@ -112,12 +112,23 @@ extension GizmateApp {
         toolsStore.onChange = { [weak self] in
             previousToolsChange?()
             guard let self else { return }
-            self.dockStore.prune(keeping: DockCatalog.knownIDs(host: self))
+            self.dockStore.prune(keeping: DockCatalog.placeableIDs(host: self))
         }
         DockHoverMonitor.shared.onMove = { [weak self] point in
             self?.dockControllers.forEach { $0.pointerMoved(to: point) }
         }
         DockHoverMonitor.shared.start()
+    }
+
+    /// Where this tool's result panel should open, if the user moved it to an
+    /// edge. `nil` is the floating panel — the default every tool has always
+    /// had, and what every call site gets by passing this straight through.
+    @MainActor
+    func resultHost(for ref: ToolRef) -> ResultSurfaceHost? {
+        guard let edge = dockStore.edge(of: ref.storageID),
+              let controller = dockControllers.first(where: { $0.edge == edge })
+        else { return nil }
+        return controller.resultHost()
     }
 }
 

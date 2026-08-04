@@ -31,6 +31,22 @@ enum ToolRef: Hashable {
         }
     }
 
+    /// Which tool's placement applies to a run in this mode.
+    ///
+    /// A revise is a follow-up inside a panel that is already open, so it
+    /// inherits rather than choosing again — and the two summarize modes are the
+    /// one built-in, whichever surface asked for it.
+    @MainActor
+    static func forMode(_ mode: TranslationMode) -> ToolRef? {
+        switch mode {
+        case .selection: return .builtIn(.explain)
+        case .draftMessage, .smartReply: return .builtIn(.reply)
+        case .summarizeChat, .summarizePage: return .builtIn(.summarize)
+        case .custom(let tool): return .generated(tool.id)
+        case .revise, .reviseMessage: return nil
+        }
+    }
+
     /// Maps a key written before this type existed.
     ///
     /// The dock shipped with `"notes"` for the notes list and bare UUID strings

@@ -98,6 +98,8 @@ final class EdgeDockController {
 
     func pointerMoved(to point: NSPoint) {
         guard let screen else { return }
+        // A result is showing: it owns the edge until it closes itself.
+        guard transientResult == nil else { return }
         let items = dockItems()
         guard !items.isEmpty else { return }
 
@@ -168,6 +170,50 @@ final class EdgeDockController {
         transition(to: .hidden)
     }
 
+    // MARK: - Hosting a result
+
+    /// A result panel routed here instead of floating. It takes the edge over
+    /// while it is up, and the edge's own surface comes back when it closes.
+    private var transientResult: NSView?
+
+    /// The seam `TranslationPanelController` uses. Weak on the way in, so a dock
+    /// that goes away cannot keep a result alive.
+    func resultHost() -> ResultSurfaceHost {
+        ResultSurfaceHost(
+            present: { [weak self] view in self?.presentResult(view) },
+            dismiss: { [weak self] in self?.dismissResult() }
+        )
+    }
+
+    private func presentResult(_ view: NSView) {
+        guard let screen else { return }
+        let wasVisible = state != .hidden
+        transientResult = view
+        pointerLeftTimer?.invalidate()
+        pointerLeftTimer = nil
+        install(view: view, showsDragHandle: edge != .top)
+        let size = NSSize(
+            width: edge == .top ? 620 : 380,
+            height: edge == .top ? 300 : 520
+        )
+        present(
+            frame: DockGeometry.expandedFrame(edge, contentSize: size, on: screen),
+            animateFrame: wasVisible
+        )
+        state = .expanded(itemID: Self.transientID)
+        installDismissMonitors()
+    }
+
+    private func dismissResult() {
+        guard transientResult != nil else { return }
+        transientResult = nil
+        transition(to: .hidden)
+    }
+
+    /// Not a real item id — nothing in `DockCatalog` answers to it, which is
+    /// what keeps a hosted result out of the tab strip.
+    private static let transientID = "\u{0}result"
+
     // MARK: - Drag to close
 
     /// How far toward the bezel the panel must be pulled before letting go
@@ -227,7 +273,7 @@ final class EdgeDockController {
     private func transition(to next: DockState) {
         guard next != state, let screen else { return }
         let items = dockItems()
-        guard !items.isEmpty else {
+        guard !items.isEmpty, next != .hidden else {
             if state != .hidden { fadeOut() }
             state = .hidden
             removeDismissMonitors()

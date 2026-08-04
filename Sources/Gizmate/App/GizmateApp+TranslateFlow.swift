@@ -247,6 +247,9 @@ extension GizmateApp {
                 )
             },
             replaceShortcutSourcePID: replaceShortcutSourcePID,
+            // nil unless the user moved this tool's panel to an edge, in which
+            // case the result opens there instead of floating.
+            dockHost: ToolRef.forMode(mode).flatMap { resultHost(for: $0) },
             onClose: { [weak self] in
                 self?.translationPanelController = nil
             }
