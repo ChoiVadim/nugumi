@@ -656,6 +656,24 @@ final class ToolAgentProtocolTests: XCTestCase {
         ))
     }
 
+    /// `grid(cell: list(row: card))` is legal by depth (3) and its root
+    /// repeats, but `SurfaceRow` is flat — the inner `list` has no second
+    /// collection to iterate. Everything this vocabulary can express has to
+    /// mean something; a nested repeater is the one shape that doesn't.
+    func testASurfaceLayoutRejectsARepeaterNestedInsideAnotherRepeater() {
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Downloads", brief: "Shows my downloads.",
+            symbolName: "tray", input: .none, output: .surface, trigger: .always,
+            source: "print('{\"rows\":[]}')",
+            layout: .grid(
+                cell: .list(row: .card(title: .key("name"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+                            empty: "Nothing here"),
+                minimumWidth: 96,
+                empty: "Nothing in Downloads"
+            )
+        ))
+    }
+
     func testTheFolderHubCandidateIsAccepted() throws {
         XCTAssertNoThrow(try ToolAgentCandidateV1(
             kind: .python, name: "Downloads", brief: "Shows my downloads.",

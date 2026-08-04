@@ -474,7 +474,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             guard input == .none, trigger == .always else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
-            guard let layout, layout.isRepeater else {
+            guard let layout, layout.isRepeater, !layout.containsNestedRepeater else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
         } else if layout != nil {

@@ -225,6 +225,24 @@ function layoutIsRepeater(value: unknown): boolean {
   return kind === "grid" || kind === "list";
 }
 
+// Mirrors ToolAgentLayoutV1.containsNestedRepeater. A repeater's own cell has
+// no second collection to iterate — the rows a script prints are flat — so a
+// grid or list nested inside another repeater's cell is legal by depth and
+// meaningless anyway. Rejecting it here keeps the two sides agreeing on
+// exactly the same candidates, the same way layoutDepth/layoutIsRepeater do.
+function layoutContainsNestedRepeater(value: unknown): boolean {
+  const kind = layoutNodeKind(value);
+  if (kind === "grid") {
+    const cell = (value as { cell: unknown }).cell;
+    return layoutIsRepeater(cell) || layoutContainsNestedRepeater(cell);
+  }
+  if (kind === "list") {
+    const row = (value as { row: unknown }).row;
+    return layoutIsRepeater(row) || layoutContainsNestedRepeater(row);
+  }
+  return false;
+}
+
 const pythonCandidate = z
   .object({
     ...commonCandidate,
@@ -353,6 +371,11 @@ export const candidateSchema = z
         context.addIssue({
           code: "custom",
           message: "a surface needs a layout whose root repeats",
+        });
+      } else if (layoutContainsNestedRepeater(candidate.layout)) {
+        context.addIssue({
+          code: "custom",
+          message: "a surface's layout may not repeat below its root",
         });
       }
       if (candidate.input !== "none" || candidate.trigger !== "always") {

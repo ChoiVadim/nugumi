@@ -462,6 +462,29 @@ test("a surface candidate's layout is validated by the sidecar schema, matching 
       ),
     /invalid tool arguments/,
   );
+  // Legal by depth (3) and its root repeats, but the inner `list` has no
+  // second collection to iterate — `SurfaceRow` is flat. Everything this
+  // vocabulary can express has to mean something; a nested repeater is the
+  // one shape that doesn't.
+  assert.throws(
+    () =>
+      parseModelAction(
+        action({
+          ...surface,
+          layout: {
+            node: "grid",
+            minimumWidth: 96,
+            empty: "x",
+            cell: {
+              node: "list",
+              empty: "x",
+              row: { node: "card", title: "$name" },
+            },
+          },
+        }),
+      ),
+    /invalid tool arguments/,
+  );
   // A modifier with nothing after its `$` is not a binding.
   assert.throws(
     () =>

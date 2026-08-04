@@ -99,13 +99,13 @@ private struct SurfaceTreeView: View {
 }
 
 /// One node rendered against one row — what a repeater's `cell`/`row`
-/// reduces to, and what a nested repeater reduces to as well.
+/// reduces to: always a template, never another repeater.
 ///
-/// `SurfaceRow` is flat, so a repeater nested inside another repeater's cell
-/// has no second collection to iterate — there is no "child rows of this
-/// row." It repeats over just the row it was handed, collapsing to a single
-/// iteration. `maximumDepth = 3` allows the model to write this shape, but
-/// no script's actual output motivates it.
+/// `ToolAgentCandidateV1.validate` refuses a layout with a repeater anywhere
+/// below its root, because `SurfaceRow` is flat — an inner repeater would
+/// have no second collection to iterate. That makes the `.grid`/`.list`
+/// branch below unreachable by construction, not a shape this view has to
+/// make sense of.
 private struct SurfaceLeafView: View {
     let node: ToolAgentLayoutV1
     let row: SurfaceRow
@@ -121,7 +121,7 @@ private struct SurfaceLeafView: View {
                 .foregroundStyle(FlowTheme.ink)
 
         case .grid, .list:
-            SurfaceTreeView(node: node, rows: [row])
+            EmptyView()
         }
     }
 }

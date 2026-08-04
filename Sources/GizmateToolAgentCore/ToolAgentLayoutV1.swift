@@ -89,6 +89,21 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         case .card, .text: return false
         }
     }
+
+    /// Whether a repeater appears anywhere below this node — a grid or list
+    /// nested inside another repeater's own cell. `SurfaceRow` is flat, so an
+    /// inner repeater would have no second collection to iterate; every shape
+    /// this vocabulary can express is supposed to mean something, and a
+    /// nested repeater is the one that doesn't. `validate` uses this to
+    /// refuse the candidate outright rather than let the renderer collapse it
+    /// to a single iteration at render time.
+    public var containsNestedRepeater: Bool {
+        switch self {
+        case let .grid(cell, _, _): return cell.isRepeater || cell.containsNestedRepeater
+        case let .list(row, _): return row.isRepeater || row.containsNestedRepeater
+        case .card, .text: return false
+        }
+    }
 }
 
 extension ToolAgentLayoutV1: Codable {
