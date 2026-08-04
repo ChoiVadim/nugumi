@@ -31,7 +31,6 @@ extension GizmateApp {
         let outcome = await SurfaceRefresh.outcome(
             for: tool,
             isApproved: ToolApprovals.isApproved(tool.id, hash: hash),
-            script: script,
             previous: surfaceRows.rows(for: tool.id)
         ) { tool in
             // A surface candidate's input is always `.none` — enforced when
@@ -39,7 +38,14 @@ extension GizmateApp {
             // no selection or file context to resolve into argv here.
             let result = try await ToolRunner.run(tool: tool, script: script, arguments: [], uv: uv)
             guard result.isSuccess else {
-                throw ToolRunError.launchFailed(
+                // Not `ToolRunError.launchFailed` — that error's text is
+                // "Couldn't start the tool," which is false here. The script
+                // did start; it ran to completion and exited badly. Once
+                // this reaches the dock's stale caption, "exited with code 1"
+                // sends the user to their own script, where the problem
+                // actually is — "couldn't start" would send them chasing a
+                // missing uv install instead.
+                throw SurfaceScriptExitFailure(
                     result.stderr.isEmpty ? "Exited with code \(result.exitCode)." : result.stderr
                 )
             }
@@ -50,5 +56,16 @@ extension GizmateApp {
             surfaceRows.store(rows, for: tool.id)
         }
         return outcome
+    }
+}
+
+/// A surface's script ran and exited non-zero. Its own type, not a reuse of
+/// `ToolRunError.launchFailed` — see the throw site above for why that one's
+/// text would misreport what happened.
+private struct SurfaceScriptExitFailure: LocalizedError {
+    let errorDescription: String?
+
+    init(_ detail: String) {
+        self.errorDescription = detail
     }
 }

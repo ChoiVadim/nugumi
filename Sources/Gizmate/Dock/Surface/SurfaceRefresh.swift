@@ -35,7 +35,6 @@ enum SurfaceRefresh {
     static func outcome(
         for tool: GizmateTool,
         isApproved: Bool,
-        script: String,
         previous: [SurfaceRow] = [],
         run: (GizmateTool) async throws -> String
     ) async -> SurfaceRefreshOutcome {

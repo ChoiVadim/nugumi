@@ -11,7 +11,7 @@ final class SurfaceRefreshTests: XCTestCase {
         tool.output = .surface
         tool.layout = .list(row: .text(.key("name")), empty: "Nothing")
         let outcome = await SurfaceRefresh.outcome(
-            for: tool, isApproved: false, script: "print('{\"rows\":[]}')"
+            for: tool, isApproved: false
         ) { _ in XCTFail("an unapproved surface must not run"); return "" }
         guard case .failed = outcome else { return XCTFail("expected .failed") }
     }
@@ -27,9 +27,9 @@ final class SurfaceRefreshTests: XCTestCase {
         // `SurfaceRows.rows(from:)`) — so a row decoded from this JSON
         // carries `id` in `values` too, not just as `SurfaceRow.id`.
         let decoded = SurfaceRow(id: "1", values: ["id": "1", "name": "a.txt"])
-        _ = await SurfaceRefresh.outcome(for: tool, isApproved: true, script: "x") { _ in json }
+        _ = await SurfaceRefresh.outcome(for: tool, isApproved: true) { _ in json }
         let again = await SurfaceRefresh.outcome(
-            for: tool, isApproved: true, script: "x", previous: [decoded]
+            for: tool, isApproved: true, previous: [decoded]
         ) { _ in json }
         XCTAssertEqual(again, .unchanged)
     }
@@ -45,7 +45,7 @@ final class SurfaceRefreshTests: XCTestCase {
         let previous = SurfaceRow(id: "1", values: ["id": "1", "name": "a.txt"])
         let json = #"{"rows":[{"id":"1","name":"b.txt"}]}"#
         let outcome = await SurfaceRefresh.outcome(
-            for: tool, isApproved: true, script: "x", previous: [previous]
+            for: tool, isApproved: true, previous: [previous]
         ) { _ in json }
         XCTAssertEqual(outcome, .refreshed([SurfaceRow(id: "1", values: ["id": "1", "name": "b.txt"])]))
     }
@@ -58,7 +58,7 @@ final class SurfaceRefreshTests: XCTestCase {
         tool.output = .surface
         tool.layout = .list(row: .text(.key("name")), empty: "Nothing")
         let outcome = await SurfaceRefresh.outcome(
-            for: tool, isApproved: true, script: "x"
+            for: tool, isApproved: true
         ) { _ in throw ToolRunError.launchFailed("boom") }
         guard case .failed = outcome else { return XCTFail("expected .failed") }
     }
