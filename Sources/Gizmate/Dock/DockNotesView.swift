@@ -20,16 +20,14 @@ struct DockNotesView: View {
     /// selection pointing at the same tag when tags are added or removed —
     /// the same reasoning `NotesSection` uses.
     @State private var selectedTagID: UUID?
-    @State private var draft: String = ""
-    /// Handed to `NotesGrid` so a just-saved note opens with the caret in it.
+    /// Handed to `NotesGrid` so a just-added note opens with the caret in it.
     @State private var focusedNoteID: UUID?
 
     private var tags: [NoteTag] { notes.tags }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            composer
-            if !tags.isEmpty { tagChips }
+            header
             Divider().background(FlowTheme.hairline)
             noteList
         }
@@ -37,62 +35,23 @@ struct DockNotesView: View {
         .foregroundStyle(FlowTheme.ink)
     }
 
-    // MARK: - Composer
-
-    /// Two lines tall from the start, so a note that runs on has somewhere to go
-    /// without the box jumping as the first line wraps.
-    ///
-    /// Return saves, Shift+Return breaks the line — the same pair the gizmo
-    /// builder's composer uses, and the same workaround: an `NSTextField`'s
-    /// field editor binds Shift+Return to `insertNewline:`, which *ends* editing,
-    /// so it has to be routed to the line-break command by hand.
-    private var composer: some View {
-        TextField("Write a note", text: $draft, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.system(size: 12))
-            // `reservesSpace` only exists on the single-Int overload, so the two
-            // empty lines are held open by `minHeight` below instead.
-            .lineLimit(2...6)
-            .onKeyPress(.return, phases: .down) { keyPress in
-                if keyPress.modifiers.contains(.shift) {
-                    guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else {
-                        return .ignored
-                    }
-                    editor.insertNewlineIgnoringFieldEditor(nil)
-                    return .handled
-                }
-                saveDraftAndFocus()
-                return .handled
-            }
-            .foregroundStyle(FlowTheme.ink)
-            .padding(.leading, 11)
-            .padding(.vertical, 9)
-            .padding(.trailing, 38)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(FlowTheme.subtleFill)
-            )
-            .overlay(alignment: .bottomTrailing) {
-                Button(action: saveDraftAndFocus) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(FlowTheme.raisedStrong))
-                }
-                .buttonStyle(.plain)
-                .disabled(!canSave)
-                .opacity(canSave ? 1 : 0.35)
-                .padding(7)
-            }
-    }
-
-    private var canSave: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     // MARK: - Tags
+
+    /// Tag chips, then the + that adds a note — the same button the Notes page
+    /// header carries, doing the same thing. No composer: the card is already an
+    /// editor, so a separate box to type into before the card exists is a second
+    /// way to write the same note, one of them without the tag picker or tick.
+    private var header: some View {
+        HStack(spacing: 8) {
+            if !tags.isEmpty { tagChips }
+            Spacer(minLength: 0)
+            // No hover label: it is drawn beside the disc and would land on the
+            // chips. The panel is 360pt wide, not a page header with room.
+            ResetDiscButton(symbol: "plus", label: "", accessibilityTitle: "Add note") {
+                focusedNoteID = notes.add(tagID: selectedTagID).id
+            }
+        }
+    }
 
     private var tagChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -149,12 +108,4 @@ struct DockNotesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
-
-    private func saveDraftAndFocus() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        focusedNoteID = notes.add(text: text, tagID: selectedTagID).id
-        draft = ""
-    }
-
 }
