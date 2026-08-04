@@ -266,10 +266,21 @@ the length of the run and is deleted afterwards, so copy it if the tool needs to
 keep it. Fixtures cannot be written for "screenshot" or "drawnScreen", because
 no image exists until the user makes one: give such a candidate no fixtures.
 
-A prompt or agent candidate taking "screenshot" or "drawnScreen" sends the image
-to the model, so it only works on a model that can see. Do not pair either with
-a request the model could answer from text alone — "screenshotText" is cheaper
-and works everywhere.
+Only a prompt candidate can LOOK at an image. "screenshot" and "drawnScreen" send
+the picture itself to a prompt candidate's model, which is what makes "describe
+what is on my screen", "what does this error mean", "what am I circling" work —
+and they require a model that can see.
+
+An agent or Python candidate is handed the file path and nothing else. No model
+in it ever sees the picture. That is right for a tool that PROCESSES an image —
+crop it, convert it, upload it, read a barcode with a library — and completely
+wrong for a tool that has to UNDERSTAND one. A request to recognise, explain,
+describe or read what is in a picture is a prompt candidate. Choosing agent for
+it produces a tool that cannot possibly work: the model is handed a filename and
+asked what it looks like.
+
+When the request is about words the user can see but cannot select, prefer
+"screenshotText" over both — Vision reads them on any model, and it is cheaper.
 
 === THE EIGHT RESULTS ===
 

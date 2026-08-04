@@ -56,9 +56,33 @@ extension GizmateApp {
         }.value
     }
 
+    /// A dragged region, as something a model can look at rather than a path it
+    /// can only read aloud. `.screenshot` has always handed prompt gizmos the
+    /// filename and called it an image input; this is what makes the picture
+    /// actually arrive.
+    ///
+    /// The frame is the screen the drag happened on, not the region: it is only
+    /// used to place `.annotate` shapes, and those belong on the screen rather
+    /// than inside somebody's crop.
+    @MainActor
+    static func captureForModel(_ shot: ToolScreenshot) -> AskGizmateScreenCapture? {
+        guard let data = try? Data(contentsOf: shot.imageURL),
+              let rep = NSBitmapImageRep(data: data)
+        else { return nil }
+        let frame = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }?.frame
+            ?? NSScreen.main?.frame
+            ?? .zero
+        return AskGizmateScreenCapture(
+            image: ImageInput(data: data, mediaType: "image/png"),
+            imagePixelSize: CGSize(width: rep.pixelsWide, height: rep.pixelsHigh),
+            screenFrame: frame,
+            visibleFrame: frame
+        )
+    }
+
     /// Writes the capture where a script or a native action can reach it. Only
-    /// prompt and agent gizmos take the image itself; everything else has always
-    /// been handed a path.
+    /// prompt gizmos take the image itself; everything else has always been
+    /// handed a path, and an agent's model never sees one at all.
     static func writeDrawnScreenFile(_ capture: AskGizmateScreenCapture) throws -> ToolScreenshot {
         let url = FileManager.default.temporaryDirectory
             .appending(path: "gizmate-drawn-\(UUID().uuidString).jpg", directoryHint: .notDirectory)

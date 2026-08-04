@@ -42,7 +42,13 @@ extension GizmateApp {
                     selection: tool.input == .screenshotText
                         ? shot.text
                         : shot.imageURL.path,
-                    screenshot: shot
+                    screenshot: shot,
+                    // `.screenshotText` asked for the words and gets only those.
+                    // `.screenshot` asked for the picture, so the picture has to
+                    // travel — a path is not an image input, it is a filename.
+                    capture: tool.input == .screenshot
+                        ? Self.captureForModel(shot)
+                        : nil
                 )
             } catch {
                 guard !ScreenshotTranslationError.isCancellation(error) else { return }

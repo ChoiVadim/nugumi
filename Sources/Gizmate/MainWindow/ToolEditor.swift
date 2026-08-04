@@ -1174,16 +1174,32 @@ struct ToolEditorPanel: View {
         script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Seven inputs, with labels as long as "Text on screen" — far past what a
-    /// pill row fits, which is what pushed the whole panel wider than itself.
+    /// Eight inputs, with labels as long as "Screen you mark up" — far past what
+    /// a pill row fits, which is what pushed the whole panel wider than itself.
     private var inputPicker: some View {
         wrappingPicker(
             "Input",
-            hint: "What the gizmo is handed when it runs.",
+            hint: inputHint,
             options: ToolInput.allCases,
             selection: $draft.input,
             label: { $0.displayName }
         )
+    }
+
+    /// Only a Prompt hands its model the picture. Everything else gets the file
+    /// path, which is not a smaller version of the same thing — an Agent asked
+    /// to describe what it sees is being asked to read a filename, and it fails
+    /// somewhere far from here with nothing to explain why.
+    private var inputHint: String {
+        let base = "What the gizmo is handed when it runs."
+        guard draft.input.isImage else { return base }
+        switch draft.kind {
+        case .prompt:
+            return base + " The picture goes to the model, so pick a model that can see."
+        case .agent, .python, .native:
+            return base + " A \(draft.kind.displayName) receives the file path, not the "
+                + "picture — nothing looks at it for you. Use Prompt for that."
+        }
     }
 
     private var outputDirectoryField: some View {
