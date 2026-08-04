@@ -277,6 +277,13 @@ struct ToolEvalCaseReport: Codable {
     let declaresNetwork: Bool?
     let assurance: String?
     let source: String?
+    /// What a `.prompt` or `.agent` gizmo was actually built to say.
+    ///
+    /// `source` covers the two kinds whose behavior is a script. Without this
+    /// the other two report only their shape, so "the case passed" and "the
+    /// gizmo says something sensible" could not be told apart by reading the
+    /// report — which is the one thing the report is for.
+    let prompt: String?
     let statuses: [String]
     let attempts: [ToolEvalAttemptSummary]
     let liveRun: ToolEvalLiveRunSummary?
@@ -451,6 +458,7 @@ struct ToolEvalMode: Equatable {
             declaresNetwork: generated?.tool.declaresNetwork,
             assurance: generated?.assurance.rawValue,
             source: generated?.script.isEmpty == false ? generated?.script : nil,
+            prompt: generated?.tool.prompt.isEmpty == false ? generated?.tool.prompt : nil,
             statuses: statuses.values,
             attempts: await Self.attempts(runID: runID),
             liveRun: liveRun
