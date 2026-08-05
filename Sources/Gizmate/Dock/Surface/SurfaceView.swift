@@ -28,14 +28,18 @@ enum SurfaceBinding {
 struct SurfaceView: View {
     let layout: ToolAgentLayoutV1
     let rows: [SurfaceRow]
-    let isStale: Bool
+    /// The caption to show below the layout, or `nil` to show none —
+    /// `SurfaceRefresh.caption(for:rowsAreEmpty:)` decides which, so this
+    /// view only ever draws whatever string it's handed rather than
+    /// deciding "stale" for itself and losing the real reason underneath.
+    let stale: String?
 
     var body: some View {
         OverlayScrollHost {
             VStack(alignment: .leading, spacing: 8) {
                 SurfaceTreeView(node: layout, rows: rows)
-                if isStale {
-                    Text("Couldn't refresh — showing what was here last.")
+                if let stale {
+                    Text(stale)
                         .font(.system(size: 12))
                         .foregroundStyle(FlowTheme.inkTertiary)
                         .frame(maxWidth: .infinity, alignment: .center)

@@ -18,7 +18,7 @@ struct SurfaceHostView: View {
     /// draws must already show something, rather than sitting empty through
     /// the ~300 ms `uv` + Python cold start a fresh run costs.
     @State private var rows: [SurfaceRow]
-    @State private var isStale = false
+    @State private var stale: String?
 
     init(tool: GizmateTool, host: any SettingsHost) {
         self.tool = tool
@@ -34,23 +34,21 @@ struct SurfaceHostView: View {
             // that this is a real gizmo. Drawing nothing makes the bug
             // visible instead of crashing the whole dock over it.
             if let layout = tool.layout {
-                SurfaceView(layout: layout, rows: rows, isStale: isStale)
+                SurfaceView(layout: layout, rows: rows, stale: stale)
             }
         }
         .task { await refresh() }
     }
 
     private func refresh() async {
-        switch await host.refreshSurface(tool) {
-        case .refreshed(let fresh):
+        let outcome = await host.refreshSurface(tool)
+        // Leave `rows` exactly as cached on `.failed` —
+        // `SurfaceRefreshOutcome.failed` promises "the dock keeps showing
+        // its cached rows either way" — so `rows.isEmpty` here is exactly
+        // "is there a 'what was here last' to fall back to".
+        if case .refreshed(let fresh) = outcome {
             rows = fresh
-            isStale = false
-        case .unchanged:
-            isStale = false
-        case .failed:
-            // Leave `rows` exactly as cached — `SurfaceRefreshOutcome.failed`
-            // promises "the dock keeps showing its cached rows either way".
-            isStale = true
         }
+        stale = SurfaceRefresh.caption(for: outcome, rowsAreEmpty: rows.isEmpty)
     }
 }

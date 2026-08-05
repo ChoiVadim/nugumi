@@ -37,6 +37,20 @@ final class ToolAgentLayoutTests: XCTestCase {
         XCTAssertEqual(layout.fileKeys, ["path"])
     }
 
+    /// A `file:` icon contributes nothing here — only a `symbol:` name is a
+    /// glyph the OS has to actually resolve, which is what `iconSymbols`
+    /// exists to let `SurfaceLayoutCheck` verify at build time.
+    func testAFileIconContributesNoIconSymbol() throws {
+        let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(folderHub.utf8))
+        XCTAssertEqual(layout.iconSymbols, [])
+    }
+
+    func testIconSymbolsTheLayoutNames() throws {
+        let json = #"{"node":"list","empty":"x","row":{"node":"card","title":"$n","icon":"symbol:folder"}}"#
+        let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        XCTAssertEqual(layout.iconSymbols, ["folder"])
+    }
+
     func testALiteralTitleIsNotAKey() throws {
         let json = #"{"node":"text","value":"Downloads"}"#
         let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
@@ -112,6 +126,19 @@ final class ToolAgentLayoutTests: XCTestCase {
     func testEmptyOverTheByteLimitIsRejected() {
         let tooLong = String(repeating: "x", count: ToolAgentLayoutV1.maximumEmptyBytes + 1)
         let json = #"{"node":"list","empty":""# + tooLong + #"","row":{"node":"text","value":"x"}}"#
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
+    }
+
+    /// The other half of M14: `"$"` alone binds nothing, on either side of
+    /// the host/sidecar boundary. `protocol.ts` gained the matching
+    /// refinement in the same pass — this pins the Swift half so the two
+    /// can't drift back apart.
+    func testABareDollarTitleIsRejected() {
+        let json = #"{"node":"card","title":"$"}"#
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
         ) {

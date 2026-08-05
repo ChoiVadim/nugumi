@@ -6,9 +6,10 @@ import Foundation
 /// Flat because a binding in a layout tree renders exactly one string per
 /// cell — there is no shape in the render path for a nested value to land in.
 struct SurfaceRow: Equatable, Codable {
-    /// The script's own `id`, or the row's position when it printed none.
-    /// Either way this is what a refresh diffs on, so rows do not reshuffle
-    /// under the pointer just because a script re-sorted its output.
+    /// The script's own `id`, or the row's position when it printed none, or
+    /// duplicated one that another row already claimed. Either way this is
+    /// what a refresh diffs on, so rows do not reshuffle under the pointer
+    /// just because a script re-sorted its output.
     let id: String
     let values: [String: String]
 
@@ -20,8 +21,21 @@ struct SurfaceRow: Equatable, Codable {
 enum SurfaceRowsError: LocalizedError {
     case notJSON
     case missingRows
-    case tooMany
-    case valueTooLong
+    /// The document parsed as JSON and had a `"rows"` array — this element
+    /// of it just wasn't an object. Distinct from `.notJSON` on purpose:
+    /// `{"rows":["a.txt"]}` is valid JSON that a model could plausibly write
+    /// by mistake, and "your output wasn't JSON" would send it hunting for a
+    /// syntax error that was never there.
+    case rowNotAnObject(index: Int, kind: String)
+    /// Each of these used to be one shared `.tooMany` case naming neither the
+    /// key nor the count, which covered three unrelated causes with a single
+    /// remedy ("print fewer rows") that misdirected the other two. Splitting
+    /// them is the same fix `valueNotAString` already made for a value's
+    /// shape: name what actually overflowed.
+    case tooMuchOutput(bytes: Int)
+    case tooManyRows(count: Int)
+    case tooManyKeys(rowIndex: Int, count: Int)
+    case valueTooLong(key: String, bytes: Int)
     /// Distinct from `valueTooLong` on purpose: this is fed back to the
     /// model as a repair diagnostic (`CandidateValidation`), and "too long"
     /// sends it shortening a string that was never long — the rerun fails
@@ -35,11 +49,20 @@ enum SurfaceRowsError: LocalizedError {
             return "The script's output wasn't JSON."
         case .missingRows:
             return "The script's JSON had no \"rows\" array."
-        case .tooMany:
-            return "The script printed more than a surface can hold — too many rows, too many "
-                + "fields on one row, or just too many bytes. Print fewer rows."
-        case .valueTooLong:
-            return "A row's value was too long to show."
+        case .rowNotAnObject(let index, let kind):
+            return "Row \(index) of \"rows\" has to be an object like {\"id\":\"…\"}; it's \(kind)."
+        case .tooMuchOutput(let bytes):
+            return "The script printed \(bytes) bytes of output; a surface can hold at most "
+                + "\(SurfaceRows.maximumStdoutBytes). Print less of it."
+        case .tooManyRows(let count):
+            return "The script printed \(count) rows; a surface can hold at most "
+                + "\(SurfaceRows.maximumRows). Print fewer rows."
+        case .tooManyKeys(let rowIndex, let count):
+            return "Row \(rowIndex) has \(count) fields; one row can hold at most "
+                + "\(SurfaceRows.maximumKeysPerRow). Print fewer fields on that row."
+        case .valueTooLong(let key, let bytes):
+            return "\"\(key)\" is \(bytes) bytes; a row's value can hold at most "
+                + "\(SurfaceRows.maximumValueBytes). Shorten it."
         case .valueNotAString(let key, let kind):
             return "A row's values have to be strings, numbers or booleans; \"\(key)\" is \(kind)."
         }
@@ -63,13 +86,13 @@ enum SurfaceRows {
     static func decode(stdout: String) throws -> [SurfaceRow] {
         // A runaway print loop is a script bug, not a payload to search line
         // by line — reject it up front rather than scanning megabytes of it.
-        // `.tooMany`, not `.notJSON`: this fires on a script that printed
-        // perfectly valid, huge JSON — a real folder with thousands of
-        // entries, discovered the first time a surface got validated against
-        // a script that actually runs against one. `.notJSON` sends a
+        // Not `.notJSON`: this fires on a script that printed perfectly
+        // valid, huge JSON — a real folder with thousands of entries,
+        // discovered the first time a surface got validated against a
+        // script that actually runs against one. `.notJSON` sends a
         // repairing model hunting for a syntax bug that was never there.
         guard stdout.utf8.count <= maximumStdoutBytes else {
-            throw SurfaceRowsError.tooMany
+            throw SurfaceRowsError.tooMuchOutput(bytes: stdout.utf8.count)
         }
 
         var sawJSON = false
@@ -91,22 +114,49 @@ enum SurfaceRows {
     }
 
     private static func rows(from rawRows: [Any]) throws -> [SurfaceRow] {
-        guard rawRows.count <= maximumRows else { throw SurfaceRowsError.tooMany }
+        guard rawRows.count <= maximumRows else { throw SurfaceRowsError.tooManyRows(count: rawRows.count) }
 
-        return try rawRows.enumerated().map { index, raw in
-            guard let object = raw as? [String: Any] else { throw SurfaceRowsError.notJSON }
-            guard object.count <= maximumKeysPerRow else { throw SurfaceRowsError.tooMany }
+        let decoded: [(id: String?, values: [String: String])] = try rawRows.enumerated().map { index, raw in
+            guard let object = raw as? [String: Any] else {
+                throw SurfaceRowsError.rowNotAnObject(index: index, kind: kind(of: raw))
+            }
+            guard object.count <= maximumKeysPerRow else {
+                throw SurfaceRowsError.tooManyKeys(rowIndex: index, count: object.count)
+            }
 
             var values: [String: String] = [:]
             for (key, value) in object {
                 values[key] = try string(from: value, key: key)
             }
+            return (id: values["id"], values: values)
+        }
 
-            // A fallback id is synthetic — it never gets written into
-            // `values`, or a script that genuinely omitted `id` would end up
-            // with a rendered `id` field it never asked for.
-            let id = values["id"] ?? String(index)
-            return SurfaceRow(id: id, values: values)
+        // `SurfaceRow.id`'s only consumer is `ForEach(rows, id: \.id)`, which
+        // requires every id in the batch to be unique — a script printing
+        // the same id twice, or `""` for every row, or `id` on some rows and
+        // not others, all reach here. Falling back to position for the
+        // *whole* batch rather than patching just the collisions keeps `id`
+        // meaning one thing: either every row's own identity, or none of
+        // them — never a mix where one row's synthetic "0" happens to equal
+        // another row's real one.
+        let explicitIDs = decoded.compactMap(\.id)
+        let idsAreUsable = explicitIDs.count == decoded.count && Set(explicitIDs).count == explicitIDs.count
+        return decoded.enumerated().map { index, entry in
+            SurfaceRow(id: idsAreUsable ? entry.id! : String(index), values: entry.values)
+        }
+    }
+
+    /// What `raw` actually is, for a diagnostic that names the shape instead
+    /// of just saying "wrong" — `valueNotAString` set this pattern for one
+    /// of a row's values; this is the same reasoning applied to a row itself.
+    private static func kind(of raw: Any) -> String {
+        switch raw {
+        case is NSNull: return "null"
+        case is String: return "a string"
+        case let number as NSNumber where CFGetTypeID(number) == CFBooleanGetTypeID(): return "a boolean"
+        case is NSNumber: return "a number"
+        case is [Any]: return "an array"
+        default: return "not an object"
         }
     }
 
@@ -140,7 +190,9 @@ enum SurfaceRows {
         default:
             throw SurfaceRowsError.valueNotAString(key: key, kind: "not plain text")
         }
-        guard described.utf8.count <= maximumValueBytes else { throw SurfaceRowsError.valueTooLong }
+        guard described.utf8.count <= maximumValueBytes else {
+            throw SurfaceRowsError.valueTooLong(key: key, bytes: described.utf8.count)
+        }
         return described
     }
 }

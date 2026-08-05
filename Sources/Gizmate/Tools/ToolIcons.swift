@@ -65,6 +65,19 @@ enum ToolIcons {
         return curated + all.filter { !shelf.contains($0) }
     }()
 
+    /// Whether this OS has a real SF Symbol by this name — the same check
+    /// `resolved(_:)` and `GizmateTool.resolvedSymbolName` use to fall back
+    /// to a known-good glyph rather than draw nothing.
+    static func resolves(_ name: String) -> Bool {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+    }
+
+    /// `name` if it resolves on this OS, or `fallback` if a name a model
+    /// invented — or one an older macOS retired — no longer does.
+    static func resolved(_ name: String) -> String {
+        resolves(name) ? name : fallback
+    }
+
     /// A symbol name as something to read rather than something to type.
     ///
     /// SF Symbol names are dotted lowercase identifiers — `arrow.down.circle`,

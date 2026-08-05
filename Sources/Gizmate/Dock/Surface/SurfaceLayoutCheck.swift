@@ -12,6 +12,14 @@ import GizmateToolAgentCore
 /// that path is still reachable is the renderer's problem, not the build's.
 enum SurfaceLayoutCheck {
     static func diagnostic(for layout: ToolAgentLayoutV1, against rows: [SurfaceRow]) -> String? {
+        // Checked before the rows guard below, on purpose: a `symbol:` name
+        // is either a real SF Symbol on this OS or it isn't, regardless of
+        // what today's run printed, so a script with nothing to show yet
+        // must not let a bad icon name through uncaught.
+        for name in layout.iconSymbols.sorted() where !ToolIcons.resolves(name) {
+            return "The layout uses icon \"symbol:\(name)\", but \"\(name)\" isn't a real SF Symbol name."
+        }
+
         // A script that legitimately has nothing to show today — an empty
         // Downloads folder — cannot be checked against its own keys. Failing
         // the build over that would refuse a gizmo that works the moment it

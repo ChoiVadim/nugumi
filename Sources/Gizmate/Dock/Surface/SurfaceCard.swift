@@ -30,7 +30,12 @@ struct SurfaceCard: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if let icon {
+            // Gated on whether the icon will actually draw something, not
+            // just on whether one was declared: an `if` with no `else`
+            // still occupies a slot in this VStack even when it renders
+            // nothing, so a `.file` icon whose key is missing left an 8pt
+            // gap above the title with no icon in it.
+            if let icon, hasVisibleIcon(icon) {
                 iconView(icon)
             }
             // Both lines sit at Caption (12px, DESIGN.md §3) — there is no
@@ -63,6 +68,19 @@ struct SurfaceCard: View {
         .modifier(SurfaceCardTapModifier(tap: tap, row: row))
     }
 
+    /// Whether `iconView` will draw anything for this icon against this row
+    /// — the question `body` needs answered before it decides whether to
+    /// give the icon a slot at all. A `.symbol` always draws something:
+    /// `CandidateValidation` rejects a name that doesn't resolve before the
+    /// gizmo is ever saved, and `iconView` falls back to a known-good glyph
+    /// regardless. A `.file` icon draws only when its row actually has one.
+    private func hasVisibleIcon(_ icon: ToolAgentLayoutIconV1) -> Bool {
+        switch icon {
+        case let .file(key): return SurfaceCard.path(for: key, in: row) != nil
+        case .symbol: return true
+        }
+    }
+
     @ViewBuilder
     private func iconView(_ icon: ToolAgentLayoutIconV1) -> some View {
         switch icon {
@@ -71,21 +89,38 @@ struct SurfaceCard: View {
             // included — a script only ever prints a path, never art, so
             // this is the one place a surface can draw something richer
             // than a glyph.
-            let path = row[key] ?? ""
-            if !path.isEmpty {
+            if let path = SurfaceCard.path(for: key, in: row) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: path))
                     .resizable()
                     .frame(width: 24, height: 24)
             }
         case let .symbol(name):
-            // Routed through the ring's own icon catalog rather than SF
-            // Symbols directly, so a surface cannot name art the ring
-            // doesn't already have.
-            Image(nsImage: RingIconKind.phosphor(name).image(pointSize: 20))
+            // SF Symbols — the same catalog `GizmateTool.resolvedSymbolName`
+            // draws a gizmo's own icon from, not the ring's bundled
+            // Phosphor set: none of those five glyphs is a plausible row
+            // icon, and the model is never told their names. Resolved
+            // through `ToolIcons` rather than trusting `name` outright:
+            // `CandidateValidation` already refuses an unresolvable name at
+            // build time, but a layout loaded back off disk after an OS
+            // change could still name one that stopped resolving, and this
+            // is the difference between a fallback glyph and a blank one.
+            Image(nsImage: RingIconKind.symbol(ToolIcons.resolved(name)).image(pointSize: 20))
                 .resizable()
                 .foregroundStyle(FlowTheme.ink)
                 .frame(width: 20, height: 20)
         }
+    }
+
+    /// A row's value for `key`, or `nil` when the key is missing or empty —
+    /// the one place "there is no path here" is decided, so the icon, the
+    /// drag and the tap all treat a stale or absent row the same way.
+    /// Getting this wrong is not cosmetic: `URL(fileURLWithPath: "")`
+    /// resolves to the process's working directory, so treating `""` as a
+    /// real path the way `row[key] ?? ""` used to hands a drag the volume
+    /// root instead of doing nothing.
+    static func path(for key: String, in row: SurfaceRow) -> String? {
+        guard let value = row[key], !value.isEmpty else { return nil }
+        return value
     }
 }
 
@@ -106,12 +141,15 @@ private struct SurfaceCardDragModifier: ViewModifier {
     private func provider(for drag: ToolAgentLayoutDragV1) -> NSItemProvider {
         switch drag {
         case let .file(key):
-            let path = row[key] ?? ""
             // A real file URL, so the drop lands as a file in Finder, Slack
             // or anything else — this is the whole point of a surface, and
             // it is native-only: no web view can hand a real file to another
-            // app. `?? NSItemProvider()` covers the stale-row case where the
-            // key no longer resolves to anything on disk.
+            // app. A missing or empty key returns a bare, inert provider
+            // rather than reach `URL(fileURLWithPath:)` at all — that
+            // initialiser turns "" into the process's working directory,
+            // which `NSItemProvider(contentsOf:)` happily hands to whatever
+            // the card was dropped on.
+            guard let path = SurfaceCard.path(for: key, in: row) else { return NSItemProvider() }
             return NSItemProvider(contentsOf: URL(fileURLWithPath: path)) ?? NSItemProvider()
         case let .text(key):
             let text = row[key] ?? ""
@@ -134,8 +172,7 @@ private struct SurfaceCardTapModifier: ViewModifier {
     }
 
     private func perform(_ tap: ToolAgentLayoutTapV1) {
-        let path = row[tap.key] ?? ""
-        guard !path.isEmpty else { return }
+        guard let path = SurfaceCard.path(for: tap.key, in: row) else { return }
         let url = URL(fileURLWithPath: path)
         switch tap {
         case .open: NSWorkspace.shared.open(url)

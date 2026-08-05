@@ -150,6 +150,19 @@ const nativeCandidate = z
   })
   .strict();
 
+// Mirrors ToolAgentLayoutBindingV1(wire:): "$name" binds a key, and the bare
+// character "$" is neither a binding nor literal text — the host throws
+// `invalidProtocol` on it. Without this refinement a candidate whose title,
+// subtitle or text value is exactly "$" passes here and fails the host's
+// stricter decode with no repair diagnostic — the last known place these two
+// validators disagreed.
+const layoutBindingString = z
+  .string()
+  .refine(
+    (value) => value !== "$",
+    'must not be the bare character "$" — that binds nothing',
+  );
+
 // Mirrors ToolAgentLayoutV1: four node shapes, discriminated on `node`, each
 // `.strict()` so an extra key is rejected here rather than left for the host's
 // stricter Swift decode to catch. Only a `.python` candidate carries one — a
@@ -181,8 +194,8 @@ const layoutNode: z.ZodType<unknown> = z.lazy(() =>
     z
       .object({
         node: z.literal("card"),
-        title: z.string(),
-        subtitle: z.string().optional(),
+        title: layoutBindingString,
+        subtitle: layoutBindingString.optional(),
         icon: z
           .string()
           .regex(/^(file:\$.+|symbol:.*)$/)
@@ -197,7 +210,7 @@ const layoutNode: z.ZodType<unknown> = z.lazy(() =>
           .optional(),
       })
       .strict(),
-    z.object({ node: z.literal("text"), value: z.string() }).strict(),
+    z.object({ node: z.literal("text"), value: layoutBindingString }).strict(),
   ]),
 );
 

@@ -41,4 +41,39 @@ final class SurfaceCandidateValidationTests: XCTestCase {
         let layout = ToolAgentLayoutV1.list(row: .text(.key("name")), empty: "Nothing")
         XCTAssertNil(SurfaceLayoutCheck.diagnostic(for: layout, against: []))
     }
+
+    func testAResolvableIconSymbolPasses() {
+        let layout = ToolAgentLayoutV1.list(
+            row: .card(title: .key("name"), subtitle: nil, icon: .symbol("folder"), drag: nil, tap: nil),
+            empty: "Nothing"
+        )
+        XCTAssertNil(SurfaceLayoutCheck.diagnostic(for: layout, against: rows))
+    }
+
+    /// The model has an SF Symbol shortlist in the very same prompt and can
+    /// still invent a name that doesn't exist — "symbol:not-a-real-glyph"
+    /// used to pass every layer and draw a silent blank icon (I3). This is
+    /// the layer that now catches it, naming the bad glyph the way any other
+    /// diagnostic here names its bad key.
+    func testAnUnresolvableIconSymbolIsRefused() {
+        let layout = ToolAgentLayoutV1.list(
+            row: .card(title: .key("name"), subtitle: nil, icon: .symbol("not-a-real-glyph"), drag: nil, tap: nil),
+            empty: "Nothing"
+        )
+        let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
+        XCTAssertNotNil(diagnostic)
+        XCTAssertTrue(diagnostic!.contains("not-a-real-glyph"))
+    }
+
+    /// Unlike a key check, an icon symbol's validity has nothing to do with
+    /// what the script printed — it either resolves on this OS or it
+    /// doesn't — so it has to be caught even when a script has nothing to
+    /// show yet, not just the day its folder stops being empty.
+    func testAnUnresolvableIconSymbolIsRefusedEvenWithNoRows() {
+        let layout = ToolAgentLayoutV1.list(
+            row: .card(title: .key("name"), subtitle: nil, icon: .symbol("not-a-real-glyph"), drag: nil, tap: nil),
+            empty: "Nothing"
+        )
+        XCTAssertNotNil(SurfaceLayoutCheck.diagnostic(for: layout, against: []))
+    }
 }

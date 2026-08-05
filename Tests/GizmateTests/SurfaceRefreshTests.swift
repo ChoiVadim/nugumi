@@ -63,3 +63,36 @@ final class SurfaceRefreshTests: XCTestCase {
         guard case .failed = outcome else { return XCTFail("expected .failed") }
     }
 }
+
+/// `SurfaceRefresh.caption(for:rowsAreEmpty:)` is what `SurfaceHostView` used
+/// to decide by itself with a bare `isStale` flag — swallowing the real
+/// failure message and showing "Nothing in Downloads" stacked on a generic
+/// staleness caption for every failure, approval included. Pulling the
+/// decision out here is what makes it testable without a view at all (I5).
+final class SurfaceRefreshCaptionTests: XCTestCase {
+    func testARefreshedOutcomeHasNoCaption() {
+        XCTAssertNil(SurfaceRefresh.caption(for: .refreshed([]), rowsAreEmpty: true))
+    }
+
+    func testAnUnchangedOutcomeHasNoCaption() {
+        XCTAssertNil(SurfaceRefresh.caption(for: .unchanged, rowsAreEmpty: false))
+    }
+
+    /// With nothing cached, there is no "what was here last" to point to —
+    /// the real reason has to be the whole caption, not discarded in favor
+    /// of a generic one stacked over the layout's own empty-state copy.
+    func testAFailureWithNoCachedRowsShowsTheRealMessage() {
+        let caption = SurfaceRefresh.caption(
+            for: .failed("Not approved yet — run “Downloads” once from the ring or Home first."),
+            rowsAreEmpty: true
+        )
+        XCTAssertEqual(caption, "Not approved yet — run “Downloads” once from the ring or Home first.")
+    }
+
+    /// Only when there is something cached behind it does "showing what was
+    /// here last" become a true sentence.
+    func testAFailureWithCachedRowsShowsTheStaleCaptionInstead() {
+        let caption = SurfaceRefresh.caption(for: .failed("uv is not installed."), rowsAreEmpty: false)
+        XCTAssertEqual(caption, "Couldn't refresh — showing what was here last.")
+    }
+}

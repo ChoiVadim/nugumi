@@ -46,7 +46,10 @@ struct FolderHubView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             Divider().background(FlowTheme.hairline)
-            SurfaceView(layout: Self.layout, rows: rows, isStale: false)
+            // A folder listing never fails to refresh — it's a synchronous
+            // `FileManager` read, not a script that can be unapproved, throw,
+            // or exit non-zero — so there is no failure caption to show.
+            SurfaceView(layout: Self.layout, rows: rows, stale: nil)
         }
         .padding(14)
         .foregroundStyle(FlowTheme.ink)

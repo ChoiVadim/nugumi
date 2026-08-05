@@ -49,4 +49,20 @@ enum SurfaceRefresh {
             return .failed(error.localizedDescription)
         }
     }
+
+    /// What the dock should say below the layout, if anything — a pure
+    /// function of the outcome and whether there is anything cached to fall
+    /// back to, so this can be tested without a view.
+    ///
+    /// `.refreshed`/`.unchanged` say nothing: either just drew the truth or
+    /// is already showing it. `.failed` is the only outcome that has
+    /// anything to explain, and what it says depends on `rowsAreEmpty`: with
+    /// no cached rows there is no "what was here last" to point to, so the
+    /// real reason — not approved yet, uv missing, a Python traceback — is
+    /// all there is to show. Only when there genuinely are cached rows
+    /// behind it does the generic staleness caption become honest.
+    static func caption(for outcome: SurfaceRefreshOutcome, rowsAreEmpty: Bool) -> String? {
+        guard case .failed(let message) = outcome else { return nil }
+        return rowsAreEmpty ? message : "Couldn't refresh — showing what was here last."
+    }
 }

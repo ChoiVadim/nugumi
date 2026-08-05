@@ -647,6 +647,13 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             declaresNetwork: try container.decodeIfPresent(Bool.self, forKey: .declaresNetwork) ?? false,
             secretNames: try container.decodeIfPresent([String].self, forKey: .secretNames) ?? [],
             maxSteps: try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8,
+            // Not `try?`, unlike `GizmateTool.layout`'s decode. This crosses
+            // the trusted host↔sidecar boundary — the host wrote this JSON
+            // itself, in the same build, to hand the model back its own
+            // layout for an edit — while `GizmateTool.layout` is read off a
+            // user's disk, where a newer build may have written a shape this
+            // one predates. One side can trust its own recent output; the
+            // other has to survive its own past.
             layout: try container.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
         )
     }

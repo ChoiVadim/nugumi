@@ -527,6 +527,24 @@ test("a surface candidate's layout is validated by the sidecar schema, matching 
       ),
     /invalid tool arguments/,
   );
+  // title/subtitle/text.value bind through the same "$name" grammar a card's
+  // title uses — ToolAgentLayoutBindingV1(wire:) throws on a bare "$", so the
+  // sidecar has to reject it too, or a candidate passes here and fails the
+  // host's stricter decode with no repair diagnostic (the last known
+  // disagreement between the two validators).
+  assert.throws(
+    () =>
+      parseModelAction(
+        action({
+          ...surface,
+          layout: {
+            ...validLayout,
+            cell: { ...validLayout.cell, title: "$" },
+          },
+        }),
+      ),
+    /invalid tool arguments/,
+  );
 });
 
 test("an edit session's current tool carries its options, bounded the same way a candidate's are", () => {

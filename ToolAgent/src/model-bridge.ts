@@ -370,9 +370,12 @@ finishes.
   a grid or a list — since a bare card or text would draw only one row and
   never the rest. icon, drag and tap each read their key through a prefix
   instead of the plain "$name" binding: icon takes "file:$name" (that row's
-  file) or "symbol:name"; drag takes "file:$name" or "text:$name", for what the
-  user's drag actually carries out; tap takes "open:$name" or "reveal:$name",
-  for what a click does with that row.
+  file, drawn as the Finder icon for that path) or "symbol:name" — a real SF
+  Symbol name from the same safe shortlist below, never a name you are
+  guessing at, since one that doesn't resolve fails validation and names the
+  bad glyph; drag takes "file:$name" or "text:$name", for what the user's
+  drag actually carries out; tap takes "open:$name" or "reveal:$name", for
+  what a click does with that row.
 
 Input and result are chosen independently: any input may be paired with any
 result, and the only hard constraints are the ones stated above — the trigger a
@@ -381,11 +384,12 @@ forcing input "none" and trigger "always", and "annotate" needing an image the
 model can see. Choose each from what the request actually asks for rather than
 from which pairs you have seen before.
 
-Use a real SF Symbol from this safe shortlist: sparkles, text.alignleft,
-text.quote, textformat, character.book.closed, lightbulb, brain,
-magnifyingglass, curlybraces, list.bullet, tablecells, scissors, pencil,
-envelope, paperplane, arrow.down.circle, folder, doc.on.doc, doc.richtext,
-photo, film, music.note, camera, link, globe, doc.text, bookmark.
+Use a real SF Symbol from this safe shortlist for symbolName and for any
+"symbol:name" layout icon: sparkles, text.alignleft, text.quote, textformat,
+character.book.closed, lightbulb, brain, magnifyingglass, curlybraces,
+list.bullet, tablecells, scissors, pencil, envelope, paperplane,
+arrow.down.circle, folder, doc.on.doc, doc.richtext, photo, film, music.note,
+camera, link, globe, doc.text, bookmark.
 
 For Python candidates:
 - Python 3.12, run by uv straight from the script's PEP 723 header.

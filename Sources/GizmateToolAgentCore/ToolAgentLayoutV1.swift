@@ -83,6 +83,23 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         }
     }
 
+    /// The `symbol:` names an icon binds. Unlike `fileKeys`, this never
+    /// depends on the rows a script prints — a symbol name is either a real
+    /// SF Symbol on this OS or it isn't, checkable from the layout alone.
+    /// `SurfaceLayoutCheck` uses this to catch a name the model invented
+    /// before the user ever docks the gizmo, rather than let it draw a
+    /// silent blank icon.
+    public var iconSymbols: Set<String> {
+        switch self {
+        case let .grid(cell, _, _): return cell.iconSymbols
+        case let .list(row, _): return row.iconSymbols
+        case let .card(_, _, icon, _, _):
+            if case let .symbol(name) = icon { return [name] }
+            return []
+        case .text: return []
+        }
+    }
+
     public var isRepeater: Bool {
         switch self {
         case .grid, .list: return true
