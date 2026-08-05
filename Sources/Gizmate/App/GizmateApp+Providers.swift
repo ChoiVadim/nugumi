@@ -146,7 +146,6 @@ extension GizmateApp {
                 images: [],
                 to: targetLanguage,
                 mode: .selection,
-                appCategory: .other,
                 composition: nil,
                 thinkingLevel: textThinkingLevel,
                 onPartial: { _ in }

@@ -224,7 +224,6 @@ protocol LLMBackend {
         images: [ImageInput],
         to targetLanguage: TranslationLanguage,
         mode: TranslationMode,
-        appCategory: AppCategory,
         composition: CompositionSettings?,
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void

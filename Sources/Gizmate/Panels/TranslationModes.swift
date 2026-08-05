@@ -170,8 +170,6 @@ enum TranslationMode: Equatable {
 
         Keep every fact, name, date, number, quotation, URL, proper noun, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your output differs from a literal translation only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms.
 
-        Context — the source text is from {app}
-
         Return only the {language} output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
         """
 
@@ -181,8 +179,6 @@ enum TranslationMode: Equatable {
         The selected Writing style is authoritative. The source draft tells you meaning, intent, emotion, and how direct the user wants to be, but it must not override the selected Writing style. When goals conflict, follow this priority: (1) meaning, (2) selected Writing style, (3) intended directness and emotional signal within that style, (4) cultural naturalness — idioms, honorifics, word order, (5) surface details to preserve verbatim — emojis, URLs, usernames, product names, numbers, line breaks, (6) literal wording (always lowest). If the draft is blunt, keep the result concise and direct, but still use the selected Writing style. Do not pad a curt one-liner into a long paragraph unless the meaning requires it. If the draft is awkward or phrased like a direct translation, smooth it while keeping the same intent. If the draft is a fragment, return a natural sendable fragment without inventing extra context.
 
         Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
-
-        Context — the user is composing this message in {app}
 
         Writing style — {writingStyle}{voice}{cleanup}{glossary}
 
@@ -197,8 +193,6 @@ enum TranslationMode: Equatable {
         If it is a multiple-choice question: identify the correct option and respond with the option letter or number followed by the option text, then a brief one-sentence justification. Example: "B. Mitochondria — they generate most of the cell's ATP."
 
         If it is an open question: give a clear, direct answer. Keep it short unless the question demands depth.
-
-        Context — the user is replying inside {app}
 
         Writing style — {writingStyle}{voice}
 
@@ -219,7 +213,7 @@ enum TranslationMode: Equatable {
 
         {genZ}
 
-        Context — the user is writing this in {app}{glossary}
+        {glossary}
 
         Return only the rewritten {language} text. No commentary, no labels, no quotes, no alternatives.
         """
@@ -313,12 +307,10 @@ enum TranslationMode: Equatable {
     /// the maps separate is what makes both byte-identical to what shipped.
     private func promptTokens(
         targetLanguage: TranslationLanguage,
-        appCategory: AppCategory,
         composition: CompositionSettings?
     ) -> [String: String] {
         var tokens: [String: String] = [
             "language": targetLanguage.promptName,
-            "app": appCategory.promptHint,
         ]
         switch self {
         case .genZ:
@@ -353,19 +345,21 @@ enum TranslationMode: Equatable {
     }
 
 
+    /// The app the user is writing in reaches this only through the writing
+    /// style it selected (`compositionSettings(for:appCategory:)`). It used to
+    /// arrive a second time as an `{app}` prose hint too, which for three of the
+    /// five categories said no more than "defer to the writing style".
     func systemPrompt(
         targetLanguage: TranslationLanguage,
-        appCategory: AppCategory,
         composition: CompositionSettings?
     ) -> String {
-        // The three editable built-ins render from a template so a user's
-        // override keeps the language, app-context and writing-style layers.
+        // The four editable built-ins render from a template so a user's
+        // override keeps the language and writing-style layers.
         if let template = promptTemplate {
             let rendered = TranslationMode.renderPrompt(
                 template,
                 tokens: promptTokens(
                     targetLanguage: targetLanguage,
-                    appCategory: appCategory,
                     composition: composition
                 )
             )
@@ -609,20 +603,6 @@ enum AppCategory: String, CaseIterable, Codable {
         }
     }
 
-    var promptHint: String {
-        switch self {
-        case .personalMessages:
-            return "a personal messaging app — chats with friends, family, partner, or close contacts. Short fragments are common, but the writing style setting decides the register."
-        case .workMessages:
-            return "a workplace messaging app — Slack, Teams, LinkedIn. Colleagues and clients. Conversational but professional; complete thoughts but not stiff."
-        case .email:
-            return "an email client. Longer-form medium where greetings, full sentences, and sign-offs are normal."
-        case .other:
-            return "an unspecified app. No strong medium expectation — defer to the user's chosen style."
-        case .custom:
-            return "an app you've assigned a custom writing style to. The custom writing style below is authoritative — follow it exactly."
-        }
-    }
 }
 
 enum WritingStyle: String, CaseIterable, Codable {

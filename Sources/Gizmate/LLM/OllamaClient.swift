@@ -60,7 +60,6 @@ struct OllamaClient: LLMBackend {
         images: [ImageInput] = [],
         to targetLanguage: TranslationLanguage,
         mode: TranslationMode = .selection,
-        appCategory: AppCategory,
         composition: CompositionSettings? = nil,
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
@@ -91,7 +90,6 @@ struct OllamaClient: LLMBackend {
                     role: "system",
                     content: mode.systemPrompt(
                         targetLanguage: targetLanguage,
-                        appCategory: appCategory,
                         composition: composition
                     )
                 ),

@@ -55,7 +55,6 @@ struct OpenAICodexClient: LLMBackend {
         images: [ImageInput],
         to targetLanguage: TranslationLanguage,
         mode: TranslationMode,
-        appCategory: AppCategory,
         composition: CompositionSettings?,
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
@@ -80,7 +79,6 @@ struct OpenAICodexClient: LLMBackend {
 
         let systemPrompt = mode.systemPrompt(
             targetLanguage: targetLanguage,
-            appCategory: appCategory,
             composition: composition
         )
         // TEMP DIAGNOSTIC (voice-sample issue) — remove once resolved.

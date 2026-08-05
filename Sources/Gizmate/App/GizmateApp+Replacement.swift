@@ -164,7 +164,6 @@ extension GizmateApp {
                     images: images,
                     to: language,
                     mode: mode,
-                    appCategory: currentAppCategory,
                     composition: currentComposition,
                     thinkingLevel: currentThinkingLevel
                 ) { _ in }

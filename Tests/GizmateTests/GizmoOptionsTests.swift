@@ -95,7 +95,6 @@ final class GizmoOptionsTests: XCTestCase {
 
         let system = TranslationMode.custom(tool).systemPrompt(
             targetLanguage: TranslationLanguage.language(id: "en"),
-            appCategory: .other,
             composition: nil
         )
         XCTAssertTrue(system.contains("Write a long version of the text."))

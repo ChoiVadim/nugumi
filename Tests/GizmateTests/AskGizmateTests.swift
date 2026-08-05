@@ -157,7 +157,6 @@ final class AskGizmateTests: XCTestCase {
 
         let prompt = TranslationMode.selection.systemPrompt(
             targetLanguage: TranslationLanguage.defaultLanguage,
-            appCategory: .other,
             composition: nil
         )
 

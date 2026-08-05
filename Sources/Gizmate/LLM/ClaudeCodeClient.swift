@@ -30,7 +30,6 @@ struct ClaudeCodeClient: LLMBackend {
         images: [ImageInput] = [],
         to targetLanguage: TranslationLanguage,
         mode: TranslationMode = .selection,
-        appCategory: AppCategory,
         composition: CompositionSettings? = nil,
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
@@ -55,7 +54,6 @@ struct ClaudeCodeClient: LLMBackend {
 
         let systemPrompt = mode.systemPrompt(
             targetLanguage: targetLanguage,
-            appCategory: appCategory,
             composition: composition
         )
         let userContent = Self.contentBlocks(text: sourceText, images: images)

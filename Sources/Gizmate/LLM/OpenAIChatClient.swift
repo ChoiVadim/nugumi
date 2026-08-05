@@ -82,7 +82,6 @@ struct OpenAIChatClient: LLMBackend {
         images: [ImageInput] = [],
         to targetLanguage: TranslationLanguage,
         mode: TranslationMode = .selection,
-        appCategory: AppCategory,
         composition: CompositionSettings? = nil,
         thinkingLevel: ThinkingLevel,
         onPartial: @escaping (String) -> Void
@@ -112,7 +111,6 @@ struct OpenAIChatClient: LLMBackend {
 
         let systemPrompt = mode.systemPrompt(
             targetLanguage: targetLanguage,
-            appCategory: appCategory,
             composition: composition
         )
         let userContent: OpenAIContent = images.isEmpty

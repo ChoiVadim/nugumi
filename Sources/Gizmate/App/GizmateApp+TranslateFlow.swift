@@ -246,7 +246,6 @@ extension GizmateApp {
                     targetLanguage: selectedLanguage,
                     mode: mode,
                     thinkingLevel: currentThinkingLevel,
-                    appCategory: currentAppCategory,
                     composition: currentComposition,
                     useCache: useCache,
                     usageKind: usageKind
@@ -290,7 +289,6 @@ extension GizmateApp {
             targetLanguage: language,
             mode: mode,
             thinkingLevel: currentThinkingLevel,
-            appCategory: currentAppCategory,
             composition: currentComposition,
             useCache: useCache,
             usageKind: usageKind,
@@ -325,7 +323,6 @@ extension GizmateApp {
         targetLanguage language: TranslationLanguage,
         mode: TranslationMode,
         thinkingLevel: ThinkingLevel,
-        appCategory: AppCategory,
         composition: CompositionSettings?,
         useCache: Bool,
         usageKind: UsageStatsEventKind
@@ -340,7 +337,6 @@ extension GizmateApp {
             targetLanguage: language,
             mode: mode,
             thinkingLevel: thinkingLevel,
-            appCategory: appCategory,
             composition: composition,
             useCache: useCache,
             usageKind: usageKind,
@@ -384,7 +380,6 @@ extension GizmateApp {
             targetLanguage: controller.currentTargetLanguageValue,
             mode: reviseMode,
             thinkingLevel: textThinkingLevel,
-            appCategory: appCategory,
             composition: composition,
             useCache: false,
             usageKind: usageKind,
@@ -400,7 +395,6 @@ extension GizmateApp {
         targetLanguage language: TranslationLanguage,
         mode: TranslationMode,
         thinkingLevel: ThinkingLevel,
-        appCategory: AppCategory,
         composition: CompositionSettings?,
         useCache: Bool,
         usageKind: UsageStatsEventKind,
@@ -437,7 +431,6 @@ extension GizmateApp {
                     images: images,
                     to: language,
                     mode: mode,
-                    appCategory: appCategory,
                     composition: composition,
                     thinkingLevel: thinkingLevel
                 ) { partialTranslation in

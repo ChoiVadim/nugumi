@@ -8,10 +8,9 @@ import XCTest
 final class BuiltInPromptTemplateTests: XCTestCase {
 
     private let language = TranslationLanguage.language(id: "en")   // promptName "English"
-    private let category = AppCategory.workMessages
 
     private static let tokenNames = [
-        "language", "app", "writingStyle", "genZ", "voice", "cleanup", "glossary",
+        "language", "writingStyle", "genZ", "voice", "cleanup", "glossary",
     ]
 
     /// Every token-bearing block is deliberately non-empty, so a dropped token
@@ -29,7 +28,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     private func rendered(_ mode: TranslationMode) -> String {
         mode.systemPrompt(
             targetLanguage: language,
-            appCategory: category,
             composition: composition
         )
     }
@@ -54,7 +52,7 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     /// the refactor, so its template must carry eight `{language}` tokens.
     /// Counting is what catches "replaced the first one and moved on".
     ///
-    /// Counted on the template, not the rendered output: the app-context hint
+    /// Counted on the template, not the rendered output: the writing-style block
     /// names the language too, so counting "English" in the result would measure
     /// something else and drift whenever that block is reworded.
     func testSelectionTemplateKeepsEveryLanguageToken() {
@@ -72,7 +70,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
         XCTAssertTrue(output.contains("Writing style — "))
         XCTAssertTrue(output.contains("Cleanup — "))
         XCTAssertTrue(output.contains("Voice sample — "))
-        XCTAssertTrue(output.contains(category.promptHint))
     }
 
     /// Gen Z's whole substance is the `{genZ}` block, and it has to be the block
@@ -88,7 +85,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
 
         let russian = TranslationMode.genZ.systemPrompt(
             targetLanguage: .language(id: "ru"),
-            appCategory: category,
             composition: composition
         )
         XCTAssertTrue(russian.contains("база"), "Russian slang block missing")
@@ -100,7 +96,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
         XCTAssertTrue(output.contains("Writing style — "))
         XCTAssertTrue(output.contains("Cleanup — "))
         XCTAssertTrue(output.contains("Voice sample — "))
-        XCTAssertTrue(output.contains(category.promptHint))
     }
 
     /// `.summarizeChat` and `.summarizePage` were deliberately left interpolated.

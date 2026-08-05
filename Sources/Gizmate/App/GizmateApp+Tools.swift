@@ -343,7 +343,6 @@ extension GizmateApp {
                     images: images,
                     to: language,
                     mode: mode,
-                    appCategory: appCategory,
                     composition: composition,
                     thinkingLevel: thinkingLevel
                 ) { _ in }
