@@ -131,7 +131,7 @@ struct EdgesSectionContent: View {
         ) {
             PageBanner(
                 title: "One list per side",
-                message: "Note, Files, and any gizmo that keeps something on screen can sit on the "
+                message: "Note, the folder hub, and any gizmo that keeps something on screen can sit on the "
                     + "top, left or right edge, revealed when the pointer gets close. Drag a row to "
                     + "reorder it, drop it on another edge, or drop it back here to take it off.",
                 symbol: "rectangle.lefthalf.inset.filled",

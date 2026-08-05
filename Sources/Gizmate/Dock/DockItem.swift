@@ -95,7 +95,7 @@ enum DockCatalog {
     private static func folderHubItem(host: any SettingsHost) -> DockItem {
         DockItem(
             id: ToolRef.folderHub.storageID,
-            title: "Files",
+            title: "Folder hub",
             icon: .symbol("folder")
         ) { [weak host] in
             guard let host else { return NSView() }
