@@ -2,15 +2,21 @@ import SwiftUI
 
 /// The front door: every tool in one list, whichever way it came to exist — a
 /// shipped ring action or a gizmo the user built — with where it currently
-/// lives. Before Task 4 of the navigation restructure this screen *was* the
-/// ring (see `MainWindowSection`'s doc comment); the ring moved to its own
-/// section, and this one now answers a different question: not "how do I
-/// summon a tool" but "what do I have, and where is it".
+/// lives, plus the one place to start building a new one without picking a
+/// ring slot first. Before Task 4 of the navigation restructure this screen
+/// *was* the ring (see `MainWindowSection`'s doc comment); the ring moved to
+/// its own section, and this one now answers a different question: not "how
+/// do I summon a tool" but "what do I have, and where is it" — Task 5 (the
+/// header's "New gizmo" button) adds "and how do I make one" beside it.
 ///
 /// Home never edits placement — picking a row opens the same editor its ring
 /// slot or Edges row would (`RingSheet.builtInEditor` / `.toolEditor`), and
 /// moving a tool between the ring and an edge stays the Ring tab's and
-/// `EdgesSection`'s job. This is a directory, not a third picker.
+/// `EdgesSection`'s job. "New gizmo" opens that same tool editor with
+/// `assignTo: nil` — exactly what already happens when editing any tool that
+/// isn't sitting on a ring slot — so a freshly built gizmo lands unplaced,
+/// findable right here afterwards as "Lives nowhere yet." This is a
+/// directory with one door into the builder, not a placement picker.
 struct HomeSection: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
@@ -71,13 +77,14 @@ private struct HomeSectionContent: View {
     var body: some View {
         DetailContainer(
             "Home",
-            subtitle: "Every tool you have, and where it lives."
+            subtitle: "Every tool you have, and where it lives.",
+            accessory: AnyView(headerButtons)
         ) {
             PageBanner(
                 title: "Everything you've built",
                 message: "Shipped actions and your own gizmos, all in one place, each one saying "
                     + "where it currently sits — a ring slot, a screen edge, or nowhere yet. "
-                    + "Pick one to open its editor.",
+                    + "Pick one to open its editor, or start a new one above.",
                 symbol: "square.grid.2x2",
                 dismissKey: "homeBannerDismissed"
             )
@@ -85,8 +92,25 @@ private struct HomeSectionContent: View {
             group(
                 title: "Your gizmos",
                 rows: gizmoRows,
-                emptyText: "No gizmos yet. Open a ring slot and choose “New gizmo” to build one."
+                emptyText: "No gizmos yet. Use “New gizmo” above to build one."
             )
+        }
+    }
+
+    /// The front door itself: opens the same builder chat a ring slot's "New
+    /// gizmo" button does, but with no slot to land in — `assignTo: nil` is
+    /// already the value `select(_:)` passes when editing a tool that isn't
+    /// on the ring, so nothing downstream needed to learn a new state for
+    /// this. The tool comes back unplaced, findable in the "Your gizmos" list
+    /// below as "Lives nowhere yet."; giving it somewhere to live is a ring
+    /// slot or an Edges pick away, same as for any other unplaced tool today.
+    private var headerButtons: some View {
+        ResetDiscButton(
+            symbol: "plus",
+            label: "New gizmo",
+            accessibilityTitle: "New gizmo"
+        ) {
+            bridge.ringSheet = .toolEditor(id: nil, assignTo: nil)
         }
     }
 
