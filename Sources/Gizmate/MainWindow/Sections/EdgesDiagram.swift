@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// The Edges screen, drawn as the thing it is about: one screen, with a rail
 /// along each edge a dock can hang off.
@@ -11,11 +10,24 @@ import UniformTypeIdentifiers
 /// actually be. Here every resident is somewhere on the figure, exactly once:
 /// on a rail, or in the middle, which *is* "not on an edge".
 ///
-/// Unlike `RingDiagram` this uses SwiftUI's own `.draggable` / `.dropDestination`
-/// rather than a hand-rolled `DragGesture`. The ring needs the custom one
-/// because its targets are discs on a circle and its folders spring open under
-/// a carried button; here the targets are four rectangles, and the system drag
-/// image already follows the cursor for free.
+/// It carries its own `DragGesture` rather than `.draggable` /
+/// `.dropDestination`, and that is not a style preference. SwiftUI's drag and
+/// drop moves the payload through the pasteboard, which means a
+/// `Transferable` needs a content type the system recognises. The type this
+/// used was `UTType(exportedAs: "com.nugumi.app.edge-resident")`, which is
+/// declared in no `Info.plist` — and under `swift run` there is no bundle to
+/// declare it in at all. Every drag picked up and every drop silently did
+/// nothing, in the old edge cards as well as the first version of this figure.
+/// `RingDiagram` never had the problem because it never used the pasteboard:
+/// a drag inside one view is not a transfer between two apps, and modelling it
+/// as one bought a system that has to be told about the payload in a file the
+/// dev build doesn't have.
+///
+/// The trade this makes is deliberate: hit-testing becomes ours. That is the
+/// good half — `zone(at:in:leftCount:rightCount:)` is a pure function of a
+/// point and a size, so `EdgesDiagramTests` can drive every landing this
+/// figure has without rendering it, which nothing about the pasteboard version
+/// could be.
 struct EdgesDiagram: View {
     @ObservedObject var dock: DockStore
     /// Everything that can wait on an edge, in a stable order. Ids `dock` holds
@@ -24,19 +36,38 @@ struct EdgesDiagram: View {
     /// nowhere — the same thing `EdgeDockController.dockItems()` does with them.
     let residents: [DockItem]
 
+    /// The tool currently being carried, and where the pointer has it.
+    @State private var drag: Carried?
+
+    private struct Carried {
+        let id: String
+        var location: CGPoint
+    }
+
     /// One width for every tile, everywhere on the figure. The top rail used to
     /// size its single occupant to the room it had, which made the same tool
     /// visibly wider up there than on a side rail — three sizes of the same
     /// component, read as three different kinds of thing. Every other dimension
     /// here is derived from this one so they cannot drift again.
-    private static let tileWidth: CGFloat = 96
-    private static let railPadding: CGFloat = 10
-    private static let sideRailWidth: CGFloat = tileWidth + railPadding * 2
-    private static let topRailHeight: CGFloat = 82
+    static let tileWidth: CGFloat = 96
+    static let tileHeight: CGFloat = 62
+    static let tileSpacing: CGFloat = 6
+    static let railPadding: CGFloat = 10
+    static let sideRailWidth: CGFloat = tileWidth + railPadding * 2
+    static let topRailHeight: CGFloat = 82
+    /// Where a side rail's first tile starts, measured from the top of the
+    /// figure: past the top rail, past the rail's own vertical padding, past
+    /// its label and the gap under it. Approximate on purpose — the label's
+    /// real height is whatever the system font gives it, and a few points of
+    /// slop only decides which half of a tile a drop counts as, never which
+    /// rail it lands on.
+    static let railContentTop: CGFloat = topRailHeight + 12 + 13 + tileSpacing
+
     /// Screen-ish. Without a cap the figure stretches to whatever the window
     /// gives it and stops reading as a monitor.
     private static let aspect: CGFloat = 1.6
     private static let minWidth: CGFloat = 520
+    private static let space = "edgesFigure"
 
     private var byID: [String: DockItem] {
         Dictionary(uniqueKeysWithValues: residents.map { ($0.id, $0) })
@@ -67,24 +98,31 @@ struct EdgesDiagram: View {
             // fit-to-window move `RingDiagram` makes, for the same reason: a
             // small window should show a small screen, not a broken one.
             let fit = min(1, geo.size.width / width, geo.size.height / height)
-            figure
+            figure(size: CGSize(width: width, height: height))
                 .frame(width: width, height: height)
+                // Named inside the scale, so a carried tile's location arrives
+                // in the figure's own points and needs no undoing of `fit`.
+                .coordinateSpace(name: Self.space)
                 .scaleEffect(fit)
                 .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 
-    private var figure: some View {
-        VStack(spacing: 0) {
-            topRail
-            Divider().background(FlowTheme.hairline)
-            HStack(spacing: 0) {
-                sideRail(.left)
+    private func figure(size: CGSize) -> some View {
+        let landing = drag.flatMap { zone(at: $0.location, in: size) }
+        return ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                topRail(size: size, highlighted: landing == .edge(.top, 0))
                 Divider().background(FlowTheme.hairline)
-                centerWell
-                Divider().background(FlowTheme.hairline)
-                sideRail(.right)
+                HStack(spacing: 0) {
+                    sideRail(.left, size: size, highlighted: landing?.edge == .left)
+                    Divider().background(FlowTheme.hairline)
+                    centerWell(size: size, highlighted: landing == .middle)
+                    Divider().background(FlowTheme.hairline)
+                    sideRail(.right, size: size, highlighted: landing?.edge == .right)
+                }
             }
+            carriedTile
         }
         .background(Color.black.opacity(0.22))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -94,6 +132,19 @@ struct EdgesDiagram: View {
         )
     }
 
+    /// The tool under the pointer, drawn above everything and hit-testing
+    /// nothing — it must not become the thing the gesture thinks it is over.
+    @ViewBuilder
+    private var carriedTile: some View {
+        if let drag, let item = byID[drag.id] {
+            EdgeToolTile(item: item)
+                .frame(width: Self.tileWidth)
+                .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                .position(drag.location)
+                .allowsHitTesting(false)
+        }
+    }
+
     // MARK: - Rails
 
     /// One tile, always. The top dock has no tab strip — `EdgeDockController`
@@ -101,7 +152,7 @@ struct EdgesDiagram: View {
     /// only ever stored, never shown. Dropping onto an occupied top rail sends
     /// whatever was there back to the middle rather than refusing the drop:
     /// a rail that quietly declines reads as broken, which is what it did.
-    private var topRail: some View {
+    private func topRail(size: CGSize, highlighted: Bool) -> some View {
         let occupant = tiles(on: .top).first
         return ZStack {
             HStack {
@@ -110,7 +161,7 @@ struct EdgesDiagram: View {
             }
             Group {
                 if let occupant {
-                    EdgeToolTile(item: occupant)
+                    tile(occupant, size: size)
                 } else {
                     emptyHint("Drop one here")
                 }
@@ -120,22 +171,15 @@ struct EdgesDiagram: View {
         .padding(.horizontal, Self.railPadding)
         .frame(height: Self.topRailHeight)
         .frame(maxWidth: .infinity)
-        .dropTarget { EdgesSection.placeOnTop($0, dock: dock, residentIDs: residentIDs) }
+        .background(highlight(highlighted))
     }
 
-    /// Top to bottom is tab order, the same order `DockTabStrip` draws. A drop
-    /// onto a tile lands in front of it; a drop anywhere else in the rail lands
-    /// at the end.
-    private func sideRail(_ edge: DockEdge) -> some View {
+    /// Top to bottom is tab order, the same order `DockTabStrip` draws.
+    private func sideRail(_ edge: DockEdge, size: CGSize, highlighted: Bool) -> some View {
         let items = tiles(on: edge)
-        return VStack(spacing: 6) {
+        return VStack(spacing: Self.tileSpacing) {
             railLabel(edge.displayName)
-            ForEach(items, id: \.id) { item in
-                EdgeToolTile(item: item)
-                    .dropTarget {
-                        EdgesSection.moveOntoResident($0, target: item.id, edge: edge, dock: dock)
-                    }
-            }
+            ForEach(items, id: \.id) { tile($0, size: size) }
             if items.isEmpty { emptyHint("Drop here") }
             Spacer(minLength: 0)
         }
@@ -143,7 +187,7 @@ struct EdgesDiagram: View {
         .padding(.vertical, 12)
         .frame(width: Self.sideRailWidth)
         .frame(maxHeight: .infinity)
-        .dropTarget { EdgesSection.moveToEnd($0, edge: edge, dock: dock) }
+        .background(highlight(highlighted))
     }
 
     private func railLabel(_ text: String) -> some View {
@@ -154,9 +198,6 @@ struct EdgesDiagram: View {
             .kerning(0.7)
     }
 
-    /// `fills` is what makes the middle's version a real target rather than a
-    /// caption: a dashed well that grows to the whole empty area is both the
-    /// affordance and the thing the pointer has to be over to let go.
     private func emptyHint(_ text: String, fills: Bool = false) -> some View {
         Text(text)
             .font(.system(size: 11))
@@ -172,46 +213,128 @@ struct EdgesDiagram: View {
             )
     }
 
+    private func highlight(_ on: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(on ? FlowTheme.accentSoft : Color.clear)
+    }
+
     // MARK: - Middle
 
     /// The middle is not a fourth place, it is the absence of the other three —
-    /// which is why dropping here is `dock(_:to: nil)` and not a placement of
-    /// its own. It is also the only way back off an edge: rail tiles carry no
-    /// picker, because a picker would fight the drag gesture for the same click.
-    private var centerWell: some View {
+    /// which is why landing here is `dock(_:to: nil)` and not a placement of
+    /// its own. It is also the only way back off an edge: a tile carries no
+    /// picker, so dragging it here is how a tool stops waiting on a bezel.
+    private func centerWell(size: CGSize, highlighted: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             railLabel("Not on an edge")
-            wellBody
+            if unplaced.isEmpty {
+                emptyHint("Drag a tool here to take it off its edge", fills: true)
+            } else {
+                // ponytail: no ScrollView. A 96pt tile grid fits about sixteen
+                // in the middle of the figure, and the residents are Note, the
+                // folder hub and however many `.surface` gizmos exist. Wrap it
+                // in one if that stops being true.
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: Self.tileWidth, maximum: Self.tileWidth),
+                                       spacing: 12, alignment: .leading)],
+                    spacing: 12
+                ) {
+                    ForEach(unplaced, id: \.id) { tile($0, size: size) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .dropTarget { dock.dock($0, to: nil) }
+        .background(highlight(highlighted))
     }
 
-    /// Both branches fill the height on purpose. An empty middle used to be one
-    /// line of text with a `Spacer` under it, and a `.frame` with nothing drawn
-    /// in it is not somewhere a drop can land — the affordance and the hit
-    /// target are the same object here, so there has to be one.
-    @ViewBuilder
-    private var wellBody: some View {
-        if unplaced.isEmpty {
-            emptyHint("Drag a tool here to take it off its edge", fills: true)
-        } else {
-            // ponytail: no ScrollView. A 96pt tile grid fits about sixteen in
-            // the middle of the figure, and the residents are Note, the folder
-            // hub and however many `.surface` gizmos exist. Wrap it in one if
-            // that stops being true — but a ScrollView here also swallows the
-            // drop this well exists for, so it needs its own `dropTarget` on
-            // the scrolled content when it arrives.
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: Self.tileWidth, maximum: Self.tileWidth),
-                                   spacing: 12, alignment: .leading)],
-                spacing: 12
-            ) {
-                ForEach(unplaced, id: \.id) { EdgeToolTile(item: $0) }
+    // MARK: - Dragging
+
+    private func tile(_ item: DockItem, size: CGSize) -> some View {
+        EdgeToolTile(item: item)
+            .opacity(drag?.id == item.id ? 0.25 : 1)
+            .gesture(
+                DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
+                    .onChanged { drag = Carried(id: item.id, location: $0.location) }
+                    .onEnded { _ in land(in: size) }
+            )
+    }
+
+    /// Let go. The zone is resolved from the last reported location rather than
+    /// `onEnded`'s own: the two agree, and reading one place means the highlight
+    /// the user was looking at is exactly what decides where it lands.
+    private func land(in size: CGSize) {
+        guard let carried = drag else { return }
+        drag = nil
+        guard let zone = zone(at: carried.location, in: size) else { return }
+        switch zone {
+        case .middle:
+            guard dock.edge(of: carried.id) != nil else { return }
+            dock.dock(carried.id, to: nil)
+        case .edge(.top, _):
+            EdgesSection.placeOnTop(carried.id, dock: dock, residentIDs: residentIDs)
+        case .edge(let edge, let index):
+            // `index` counts drawn tiles; `DockStore.move` counts raw entries,
+            // and a `.panel` placement on this edge sits in the raw list with
+            // no tile. Naming the neighbour and letting `moveOntoResident`
+            // resolve its raw position is what keeps the two in one space.
+            let items = tiles(on: edge)
+            if let neighbour = items[safe: index], neighbour.id != carried.id {
+                EdgesSection.moveOntoResident(carried.id, target: neighbour.id, edge: edge, dock: dock)
+            } else {
+                EdgesSection.moveToEnd(carried.id, edge: edge, dock: dock)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+
+    private func zone(at point: CGPoint, in size: CGSize) -> Zone? {
+        Self.zone(
+            at: point,
+            in: size,
+            leftCount: tiles(on: .left).count,
+            rightCount: tiles(on: .right).count
+        )
+    }
+}
+
+extension EdgesDiagram {
+    /// Where a point on the figure lands. Pure, and `internal`, so
+    /// `EdgesDiagramTests` can check every rail, every insertion slot and every
+    /// miss without rendering anything — the whole reason hit-testing is ours
+    /// rather than the pasteboard's.
+    ///
+    /// `index` counts *drawn* tiles on that rail, 0 meaning "before the first".
+    /// The top rail always reports 0: it holds one.
+    enum Zone: Equatable {
+        case edge(DockEdge, Int)
+        case middle
+
+        var edge: DockEdge? {
+            if case .edge(let edge, _) = self { return edge }
+            return nil
+        }
+    }
+
+    static func zone(at point: CGPoint, in size: CGSize, leftCount: Int, rightCount: Int) -> Zone? {
+        guard size.width > 0, size.height > 0,
+              (0...size.width).contains(point.x), (0...size.height).contains(point.y)
+        else { return nil }
+        if point.y < topRailHeight { return .edge(.top, 0) }
+        if point.x < sideRailWidth { return .edge(.left, slot(at: point.y, count: leftCount)) }
+        if point.x > size.width - sideRailWidth {
+            return .edge(.right, slot(at: point.y, count: rightCount))
+        }
+        return .middle
+    }
+
+    /// Which gap between tiles a height falls in. Rounding rather than
+    /// truncating is what makes the top half of a tile mean "in front of this
+    /// one" and the bottom half "behind it" — truncating makes every drop land
+    /// in front, so dragging something to the end of a rail is impossible.
+    private static func slot(at y: CGFloat, count: Int) -> Int {
+        let raw = (y - railContentTop) / (tileHeight + tileSpacing)
+        return min(max(Int(raw.rounded()), 0), count)
     }
 }
 
@@ -240,7 +363,7 @@ private struct EdgeToolTile: View {
         .padding(.horizontal, 6)
         // Uniform height as well as width: a one-word name and a two-word one
         // otherwise make neighbouring tiles different sizes down a rail.
-        .frame(maxWidth: .infinity, minHeight: 62)
+        .frame(maxWidth: .infinity, minHeight: EdgesDiagram.tileHeight)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(FlowTheme.subtleFill)
@@ -250,55 +373,6 @@ private struct EdgeToolTile: View {
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
         .contentShape(Rectangle())
-        .draggable(EdgeResidentDrag(id: item.id))
         .help(item.title)
-    }
-}
-
-// MARK: - Drag and drop
-
-/// What a tile hands a drop target: just its dock id. A dedicated type rather
-/// than bare `String` so a stray text drag from another app can't land here and
-/// read as though it named a real one.
-private struct EdgeResidentDrag: Codable, Transferable {
-    let id: String
-
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .gizmateEdgeResident)
-    }
-}
-
-private extension UTType {
-    static let gizmateEdgeResident = UTType(exportedAs: "com.nugumi.app.edge-resident")
-}
-
-private extension View {
-    /// A drop target that lights up while something is over it. Every target on
-    /// the figure wants the same two behaviours, and `dropDestination`'s two
-    /// trailing closures plus the `@State` for the highlight is four lines each
-    /// at five call sites.
-    func dropTarget(_ handle: @escaping (String) -> Void) -> some View {
-        modifier(EdgeDropTarget(handle: handle))
-    }
-}
-
-private struct EdgeDropTarget: ViewModifier {
-    let handle: (String) -> Void
-    @State private var isTargeted = false
-
-    func body(content: Content) -> some View {
-        content
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isTargeted ? FlowTheme.accentSoft : Color.clear)
-            )
-            // Every target on the figure is mostly empty space inside a frame,
-            // and empty space inside a frame is not somewhere a drop lands.
-            .contentShape(Rectangle())
-            .dropDestination(for: EdgeResidentDrag.self) { drags, _ in
-                guard let dragged = drags.first else { return false }
-                handle(dragged.id)
-                return true
-            } isTargeted: { isTargeted = $0 }
     }
 }

@@ -57,8 +57,7 @@ struct EdgesSectionContent: View {
             Text("Edges")
                 .font(FlowTheme.serif(30))
                 .foregroundStyle(FlowTheme.ink)
-            Text("Drag a tool onto an edge to park it there. The sides hold as many as you "
-                + "like, top to bottom in tab order — the top holds one.")
+            Text("Drag a tool onto an edge. The sides hold several, the top holds one.")
                 .font(.system(size: 14))
                 .foregroundStyle(FlowTheme.inkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
