@@ -3,14 +3,15 @@ import Foundation
 
 /// The folders the built-in folder hub offers, and which one it last showed.
 ///
-/// Same `@Published` + `onChange` contract `DockStore` uses: `FolderHubView`
-/// binds to `folders` directly, and `onChange` exists for any future caller
-/// that needs to react without polling, the same reasoning `DockStore`'s own
-/// comment gives.
+/// No `onChange` callback the way `DockStore` carries one: `DockStore`'s
+/// consumers are `EdgeDockController`s, plain `NSView` code outside SwiftUI's
+/// observation tree, so they need an explicit hook to know when to rebuild.
+/// `FolderHubView` is a SwiftUI view holding this store as `@ObservedObject`,
+/// so `@Published folders` already redraws it on its own — a second callback
+/// here would have no caller.
 @MainActor
 final class FolderHubStore: ObservableObject {
     @Published private(set) var folders: [URL]
-    var onChange: (() -> Void)?
 
     static let defaultsKey = "com.nugumi.app.folderHub.v1"
 
@@ -32,7 +33,6 @@ final class FolderHubStore: ObservableObject {
         guard !folders.contains(where: { $0.path == url.path }) else { return }
         folders.append(url)
         save()
-        onChange?()
     }
 
     /// Removing the last folder leaves the list empty rather than reviving
@@ -42,7 +42,6 @@ final class FolderHubStore: ObservableObject {
     func remove(_ url: URL) {
         folders.removeAll { $0.path == url.path }
         save()
-        onChange?()
     }
 
     // MARK: - Persistence

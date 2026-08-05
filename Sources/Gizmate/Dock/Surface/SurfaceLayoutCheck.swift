@@ -4,12 +4,22 @@ import GizmateToolAgentCore
 /// Whether a layout's bindings can actually be drawn from the rows a surface
 /// script's stdout produced — checked against a real validation run, never a
 /// fixture the model wrote to suit itself. `CandidateValidation` and this
-/// file's tests both call it, so it stays a pure function: no `FileManager`
-/// access, because a validation run and the moment the user docks the gizmo
-/// are two different points in time, and a check that depended on what's on
-/// disk right now would answer a question that changes underneath it. "Looks
-/// like an absolute path" is the shape a `file:` binding promises; whether
-/// that path is still reachable is the renderer's problem, not the build's.
+/// file's tests both call it.
+///
+/// No `FileManager` access: a validation run and the moment the user docks
+/// the gizmo are two different points in time, and a check that depended on
+/// what's on disk right now would answer a question that changes underneath
+/// it. "Looks like an absolute path" is the shape a `file:` binding
+/// promises; whether that path is still reachable is the renderer's
+/// problem, not the build's.
+///
+/// The SF Symbol check below is a different kind of environment dependency,
+/// and an acceptable one: which glyphs exist is a property of the OS this
+/// process is running on, not of a particular run, so it can't go stale
+/// between one validation and the next the way a file on disk does. The one
+/// case it can't rule out — a later OS upgrade retiring a glyph a past
+/// validation approved — isn't silent either: `ToolIcons.resolved` falls
+/// back to a known-good symbol at render time rather than draw a blank.
 enum SurfaceLayoutCheck {
     static func diagnostic(for layout: ToolAgentLayoutV1, against rows: [SurfaceRow]) -> String? {
         // Checked before the rows guard below, on purpose: a `symbol:` name

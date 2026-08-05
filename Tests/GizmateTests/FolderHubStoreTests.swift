@@ -96,30 +96,9 @@ final class FolderHubStoreTests: XCTestCase {
 
         let sut = FolderHubStore(defaults: defaults)
         sut.add(dir)
-        var changes = 0
-        sut.onChange = { changes += 1 }
         sut.add(dir)
 
-        XCTAssertEqual(changes, 0, "nothing changed, so nobody should be told to rebuild")
         XCTAssertEqual(sut.folders.count, 1)
-    }
-
-    @MainActor
-    func testOnChangeFiresOnAddAndRemove() throws {
-        let (defaults, cleanup) = store()
-        defer { cleanup() }
-        defaults.set([String](), forKey: FolderHubStore.defaultsKey)
-        let dir = try makeTempDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        let sut = FolderHubStore(defaults: defaults)
-        var changes = 0
-        sut.onChange = { changes += 1 }
-
-        sut.add(dir)
-        XCTAssertEqual(changes, 1)
-        sut.remove(dir)
-        XCTAssertEqual(changes, 2)
     }
 
     @MainActor

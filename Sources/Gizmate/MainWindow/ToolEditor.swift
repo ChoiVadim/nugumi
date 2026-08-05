@@ -856,7 +856,7 @@ struct ToolEditorPanel: View {
             fieldLabel(
                 "Edge",
                 hint: "This gizmo runs on its own, whenever its edge opens — docking it "
-                    + "here is what approves that. Leave it off and it stays saved but never runs."
+                    + "here is what turns that on. Leave it off and it stays saved but never runs."
             )
             DockPlacementPicker(
                 store: bridge.dock,

@@ -63,9 +63,11 @@ enum DockCatalog {
     /// no run to exist, so unlike every ring action it is not something a
     /// user opts into — it has no `RingActionID` behind it (see
     /// `ToolRef.folderHub`) and so no entry in `dockableBuiltIns` or
-    /// `BuiltInEditor` either. That also means there is, today, no settings
-    /// surface through which a user can choose its edge — the same gap Ask
-    /// and Live have for their own panels, noted above.
+    /// `BuiltInEditor` either. That is a missing identity, not a missing
+    /// control: `BuiltInEditor`'s "Panel" section and `ToolEditor`'s are both
+    /// gated on an identity the folder hub doesn't have, so its placement
+    /// picker lives in Settings → General instead, keyed by
+    /// `SettingsSection.residentWithoutARingSlot` — see `DESIGN.md` §11.
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
         let ringResidents = residentBuiltIns.map { action in

@@ -1,3 +1,4 @@
+import GizmateToolAgentCore
 import XCTest
 @testable import Gizmate
 
@@ -20,5 +21,30 @@ final class SurfaceCardTests: XCTestCase {
     func testAMissingKeyResolvesToNil() {
         let row = SurfaceRow(id: "1", values: [:])
         XCTAssertNil(SurfaceCard.path(for: "path", in: row))
+    }
+
+    // MARK: - dragProvider
+
+    func testATextDragWithAPresentValueIsLive() {
+        let row = SurfaceRow(id: "1", values: ["note": "hello"])
+        let provider = SurfaceCard.dragProvider(for: .text(key: "note"), in: row)
+        XCTAssertFalse(provider.registeredTypeIdentifiers.isEmpty)
+    }
+
+    /// New Breakage #4 in the surface gizmos final re-review: a `.text`
+    /// drag on a row missing its key used to build
+    /// `NSItemProvider(object: "" as NSString)` — a provider that looks
+    /// live and drops an empty string. It must be as inert as the `.file`
+    /// case is for the same missing key.
+    func testATextDragWithAMissingKeyIsInert() {
+        let row = SurfaceRow(id: "1", values: [:])
+        let provider = SurfaceCard.dragProvider(for: .text(key: "note"), in: row)
+        XCTAssertTrue(provider.registeredTypeIdentifiers.isEmpty)
+    }
+
+    func testATextDragWithAnEmptyValueIsInert() {
+        let row = SurfaceRow(id: "1", values: ["note": ""])
+        let provider = SurfaceCard.dragProvider(for: .text(key: "note"), in: row)
+        XCTAssertTrue(provider.registeredTypeIdentifiers.isEmpty)
     }
 }

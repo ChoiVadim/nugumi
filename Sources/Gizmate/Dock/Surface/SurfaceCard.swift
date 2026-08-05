@@ -112,15 +112,45 @@ struct SurfaceCard: View {
     }
 
     /// A row's value for `key`, or `nil` when the key is missing or empty —
-    /// the one place "there is no path here" is decided, so the icon, the
-    /// drag and the tap all treat a stale or absent row the same way.
-    /// Getting this wrong is not cosmetic: `URL(fileURLWithPath: "")`
-    /// resolves to the process's working directory, so treating `""` as a
-    /// real path the way `row[key] ?? ""` used to hands a drag the volume
-    /// root instead of doing nothing.
+    /// the one place "there is no path here" is decided, so the icon, both
+    /// drags and the tap all treat a stale or absent row the same way.
+    /// Getting this wrong is not cosmetic for a `.file` binding:
+    /// `URL(fileURLWithPath: "")` resolves to the process's working
+    /// directory, so treating `""` as a real path the way `row[key] ?? ""`
+    /// used to hands a drag the volume root instead of doing nothing. A
+    /// `.text` binding has no such hazard, but the same missing-key case
+    /// still shouldn't hand out a drag that looks live and drops an empty
+    /// string.
     static func path(for key: String, in row: SurfaceRow) -> String? {
         guard let value = row[key], !value.isEmpty else { return nil }
         return value
+    }
+
+    /// The drag payload for one row, or a bare, inert provider when the
+    /// bound key is missing or empty. Internal rather than folded into
+    /// `SurfaceCardDragModifier` so `SurfaceCardTests` can pin the inert
+    /// case directly, the same reasoning `SurfaceRefresh.caption` was
+    /// pulled out for.
+    static func dragProvider(for drag: ToolAgentLayoutDragV1, in row: SurfaceRow) -> NSItemProvider {
+        switch drag {
+        case let .file(key):
+            // A real file URL, so the drop lands as a file in Finder, Slack
+            // or anything else — this is the whole point of a surface, and
+            // it is native-only: no web view can hand a real file to another
+            // app. A missing or empty key returns a bare, inert provider
+            // rather than reach `URL(fileURLWithPath:)` at all — that
+            // initialiser turns "" into the process's working directory,
+            // which `NSItemProvider(contentsOf:)` happily hands to whatever
+            // the card was dropped on.
+            guard let path = path(for: key, in: row) else { return NSItemProvider() }
+            return NSItemProvider(contentsOf: URL(fileURLWithPath: path)) ?? NSItemProvider()
+        case let .text(key):
+            // Same rule as the `.file` case above: a missing or empty key
+            // returns a bare, inert provider rather than one that looks
+            // live and drops an empty string.
+            guard let text = path(for: key, in: row) else { return NSItemProvider() }
+            return NSItemProvider(object: text as NSString)
+        }
     }
 }
 
@@ -132,28 +162,9 @@ private struct SurfaceCardDragModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if let drag {
-            content.onDrag { provider(for: drag) }
+            content.onDrag { SurfaceCard.dragProvider(for: drag, in: row) }
         } else {
             content
-        }
-    }
-
-    private func provider(for drag: ToolAgentLayoutDragV1) -> NSItemProvider {
-        switch drag {
-        case let .file(key):
-            // A real file URL, so the drop lands as a file in Finder, Slack
-            // or anything else — this is the whole point of a surface, and
-            // it is native-only: no web view can hand a real file to another
-            // app. A missing or empty key returns a bare, inert provider
-            // rather than reach `URL(fileURLWithPath:)` at all — that
-            // initialiser turns "" into the process's working directory,
-            // which `NSItemProvider(contentsOf:)` happily hands to whatever
-            // the card was dropped on.
-            guard let path = SurfaceCard.path(for: key, in: row) else { return NSItemProvider() }
-            return NSItemProvider(contentsOf: URL(fileURLWithPath: path)) ?? NSItemProvider()
-        case let .text(key):
-            let text = row[key] ?? ""
-            return NSItemProvider(object: text as NSString)
         }
     }
 }
