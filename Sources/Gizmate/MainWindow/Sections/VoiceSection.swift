@@ -75,11 +75,10 @@ private struct StyleTab: View {
                 dismissKey: "styleBannerDismissed"
             )
 
-            ForEach(AppCategory.allCases.filter { $0 != .custom }, id: \.self) { category in
+            ForEach(AppCategory.allCases, id: \.self) { category in
                 StyleCard(category: category, selection: bridge.writingStyleBinding(category))
             }
 
-            CustomStyleCard()
 
             SubCard {
                 VStack(alignment: .leading, spacing: 14) {

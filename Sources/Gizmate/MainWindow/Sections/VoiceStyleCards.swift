@@ -87,95 +87,13 @@ struct StyleCard: View {
             case .polite: return "Hi Alex! Any time next week for a quick call about the proposal? Thanks, Sam"
             case .casual: return "hey alex! free next week for a quick call about the proposal?"
             }
-        case .other, .custom:
+        case .other:
             switch style {
             case .formal: return "Hello, could you let me know the best time to reach you?"
             case .polite: return "Hi! When's a good time to reach you?"
             case .casual: return "hey whats a good time to reach you?"
             }
         }
-    }
-}
-
-/// The single user-authored style: a free-text instruction that replaces the
-/// register, plus the apps it applies to. Sits at the bottom of the Style page.
-struct CustomStyleCard: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
-
-    var body: some View {
-        SubCard {
-            // Two columns: the description + apps on the left, the instruction
-            // editor on the right where it gets the full column height.
-            HStack(alignment: .top, spacing: 22) {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Custom style")
-                        .font(FlowTheme.serif(19))
-                        .foregroundStyle(FlowTheme.ink)
-
-                    Text("Write your own instruction and pick the apps it applies to. It replaces the register (Formal/Polite/Casual) for those apps.")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    // Pins the apps to the bottom so they line up with the
-                    // editor's foot; the editor's minHeight sets the column height.
-                    // No label — the description already explains the apps.
-                    Spacer(minLength: 16)
-
-                    AppIconStrip(category: .custom, apps: bridge.settings.apps(for: .custom))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Rectangle()
-                    .fill(FlowTheme.hairline)
-                    .frame(width: 1)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    fieldLabel("Instruction")
-                    CustomInstructionEditor(text: bridge.settings.customStyleInstruction)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func fieldLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(FlowTheme.inkSecondary)
-    }
-}
-
-/// Multi-line editor for the custom style instruction. Mirrors
-/// `EmailVoiceSampleEditor`: a local draft persisted on every change.
-private struct CustomInstructionEditor: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
-    @State private var draft: String
-
-    init(text: String) {
-        _draft = State(initialValue: text)
-    }
-
-    var body: some View {
-        PlainTextEditor(text: $draft)
-            .frame(minHeight: 150, maxHeight: .infinity)
-            .padding(.vertical, 7)
-            .padding(.horizontal, 11)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-            .overlay(alignment: .topLeading) {
-                if draft.isEmpty {
-                    Text("e.g. Reply in lowercase, keep it short, no emojis - like texting a close friend.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
-                        .padding(.vertical, 7)
-                        .padding(.horizontal, 11)
-                        .allowsHitTesting(false)
-                }
-            }
-            .onChange(of: draft) { _, newValue in
-                bridge.perform(.setCustomStyleInstruction(newValue))
-            }
     }
 }
 

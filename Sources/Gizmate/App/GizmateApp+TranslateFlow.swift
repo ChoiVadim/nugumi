@@ -304,16 +304,11 @@ extension GizmateApp {
         let voiceSample = appCategory == .email
             ? emailVoiceSample.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
-        let instruction = appCategory == .custom
-            ? customStyleInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
-            : ""
-        let resolvedStyle = writingStyle(for: appCategory)
         return CompositionSettings(
-            style: resolvedStyle,
+            style: writingStyle(for: appCategory),
             cleanup: cleanupLevel,
             snippets: snippetsStore.usableSnippets(),
-            voiceSample: voiceSample.isEmpty ? nil : voiceSample,
-            customInstruction: instruction.isEmpty ? nil : instruction
+            voiceSample: voiceSample.isEmpty ? nil : voiceSample
         )
     }
 

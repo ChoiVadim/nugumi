@@ -255,17 +255,11 @@ struct CompositionSettings: Equatable {
     /// greeting, rhythm, and sign-off the model mirrors. Only populated for the
     /// `email` category; `nil`/empty elsewhere, so the prompt section vanishes.
     let voiceSample: String?
-    /// Free-text instruction for the `custom` category. When set, it replaces
-    /// the register directive in compose prompts. `nil` everywhere else.
-    var customInstruction: String? = nil
 
-    /// The writing-style directive injected into compose prompts: the user's
-    /// custom instruction when present, otherwise the chosen register's text.
+    /// The writing-style directive injected into compose prompts.
     func writingStyleDirective(for languageID: String) -> String {
-        if let customInstruction, !customInstruction.isEmpty { return customInstruction }
-        return style.promptDescription(for: languageID)
+        style.promptDescription(for: languageID)
     }
-
 }
 
 final class TranslationCache {

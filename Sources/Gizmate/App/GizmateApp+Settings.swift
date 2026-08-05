@@ -176,7 +176,6 @@ extension GizmateApp: SettingsHost {
             selectionDisplayMode: selectionDisplayMode,
             cleanupLevel: cleanupLevel,
             emailVoiceSample: emailVoiceSample,
-            customStyleInstruction: customStyleInstruction,
             invisibilityEnabled: invisibilityModeEnabled,
             launchAtLogin: isRunningFromAppBundle && LaunchAtLogin.isEnabled,
             writingStyles: styles,
@@ -294,8 +293,6 @@ extension GizmateApp: SettingsHost {
             LaunchAtLogin.set(enabled)
         case .setEmailVoiceSample(let sample):
             emailVoiceSample = sample
-        case .setCustomStyleInstruction(let text):
-            customStyleInstruction = text
         case .setWritingStyle(let style, let category):
             setWritingStyle(style, for: category)
             updateMenuState()

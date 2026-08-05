@@ -588,10 +588,16 @@ enum AppCategory: String, CaseIterable, Codable {
     case workMessages
     case email
     case other
-    /// User-authored style: apps the user explicitly assigns here use a
-    /// free-text instruction (see `customStyleInstruction`) in place of a
-    /// register. Never an auto-fallback — reachable only via explicit assignment.
-    case custom
+
+    /// A raw value this build no longer knows decodes as `.other` rather than
+    /// throwing. `CustomAppAssignment` is decoded as one array, so a single
+    /// unknown category would otherwise take *every* per-app assignment down
+    /// with it — which is exactly what retiring the `custom` category would
+    /// have done to anyone who had used it.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AppCategory(rawValue: raw) ?? .other
+    }
 
     var displayName: String {
         switch self {
@@ -599,7 +605,6 @@ enum AppCategory: String, CaseIterable, Codable {
         case .workMessages: return "Work messages"
         case .email: return "Email"
         case .other: return "Other"
-        case .custom: return "Custom"
         }
     }
 
@@ -695,7 +700,7 @@ extension AppCategory {
     var defaultWritingStyle: WritingStyle {
         switch self {
         case .personalMessages: return .casual
-        case .workMessages, .other, .custom: return .polite
+        case .workMessages, .other: return .polite
         case .email: return .formal
         }
     }

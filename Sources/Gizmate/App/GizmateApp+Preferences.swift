@@ -160,13 +160,6 @@ extension GizmateApp {
         set { UserDefaults.standard.set(newValue, forKey: "voiceSample.email") }
     }
 
-    /// Free-text instruction for the `custom` style. Personal content (like the
-    /// email voice sample and Snippets), so it survives a settings reset.
-    var customStyleInstruction: String {
-        get { UserDefaults.standard.string(forKey: "customStyleInstructionV1") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "customStyleInstructionV1") }
-    }
-
     var invisibilityModeEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: InvisibilityState.defaultsKey) }
         set { UserDefaults.standard.set(newValue, forKey: InvisibilityState.defaultsKey) }

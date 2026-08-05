@@ -14,8 +14,6 @@ struct SettingsSnapshot {
     /// The user's saved email voice sample (style reference for the email
     /// category). Empty when unset.
     var emailVoiceSample: String = ""
-    /// The user's free-text instruction for the custom style. Empty when unset.
-    var customStyleInstruction: String = ""
     var invisibilityEnabled: Bool
     var launchAtLogin: Bool = false
     var writingStyles: [AppCategory: WritingStyle]
@@ -64,7 +62,6 @@ enum SettingsIntent {
     case setSelectionDisplayMode(SelectionDisplayMode)
     case setCleanupLevel(CleanupLevel)
     case setEmailVoiceSample(String)
-    case setCustomStyleInstruction(String)
     case setWritingStyle(WritingStyle, AppCategory)
     case addAppToCategory(AppCategory)
     case removeApp(String)
