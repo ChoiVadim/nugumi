@@ -54,6 +54,20 @@ final class EdgeDockController {
     /// forbids it.
     private var screen: NSScreen? { NSScreen.main }
 
+    /// What a top dock has to keep clear at its own top edge.
+    ///
+    /// The panel deliberately starts at `screenFrame.maxY` so it reads as the
+    /// notch growing rather than as a window appearing under it
+    /// (`DockGeometry.expandedFrame`) — which means its first menu-bar-height
+    /// points are physically behind the housing on a notched Mac. Content
+    /// there isn't dim or clipped, it is simply not visible, and the folder
+    /// hub's chips landed in exactly that strip. Zero for the side docks,
+    /// which have no such overlap to pay for.
+    private var topContentInset: CGFloat {
+        guard edge == .top, let screen else { return 0 }
+        return DockGeometry.menuBarHeight(of: screen)
+    }
+
     init(edge: DockEdge, store: DockStore, host: any SettingsHost) {
         self.edge = edge
         self.store = store
@@ -313,9 +327,11 @@ final class EdgeDockController {
                 view: expandedView(items: items, active: item),
                 showsDragHandle: edge != .top
             )
+            // The notch's height is added to the panel rather than taken out
+            // of it, so a top dock still gets its full 300pt of content.
             let size = NSSize(
                 width: edge == .top ? 620 : 380,
-                height: edge == .top ? 300 : 520
+                height: (edge == .top ? 300 : 520) + topContentInset
             )
             present(
                 frame: DockGeometry.expandedFrame(edge, contentSize: size, on: screen),
@@ -415,14 +431,16 @@ final class EdgeDockController {
         glass = host
 
         // Keep the content off the flare — the shape pulls in by
-        // `inverseCornerRadius` on the bezel side.
+        // `inverseCornerRadius` on the bezel side — and, at the top, off the
+        // notch as well.
         let insets = DockGeometry.contentInsets(for: edge)
+        let topInset = insets.top + topContentInset
         view.translatesAutoresizingMaskIntoConstraints = false
         host.contentView.addSubview(view)
         NSLayoutConstraint.activate([
             view.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor, constant: insets.left),
             view.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor, constant: -insets.right),
-            view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: insets.top),
+            view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: topInset),
             view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
         ])
 

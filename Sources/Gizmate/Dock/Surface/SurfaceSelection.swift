@@ -57,6 +57,7 @@ struct SurfaceCardMouse: NSViewRepresentable {
     /// handlers were frozen at first layout would drag whatever was selected
     /// the moment the panel opened.
     private func update(_ view: SurfaceCardMouseView) {
+        view.isSelected = { selection.ids.contains(row.id) }
         view.onClick = { command in selection.click(row, command) }
         view.onActivate = { activate?(row) }
         view.urls = { selection.dragURLs(row) }
@@ -64,6 +65,7 @@ struct SurfaceCardMouse: NSViewRepresentable {
 }
 
 final class SurfaceCardMouseView: NSView, NSDraggingSource {
+    var isSelected: () -> Bool = { false }
     var onClick: (Bool) -> Void = { _ in }
     var onActivate: () -> Void = {}
     var urls: () -> [URL] = { [] }
@@ -78,6 +80,9 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
     /// self-reference outlives the hosting view so the end-of-session callback
     /// has something to land on.
     private var sessionRetain: SurfaceCardMouseView?
+    /// A plain press landed on a card that was already selected, and the
+    /// collapse to that one card is waiting to see whether a drag happens.
+    private var collapseOnMouseUp = false
 
     /// The panel is non-activating, so without this the click that reaches a
     /// card from another app is spent activating Gizmate instead.
@@ -85,10 +90,21 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
 
     override func mouseDown(with event: NSEvent) {
         pressed = event
+        collapseOnMouseUp = false
         if event.clickCount == 2 {
             onActivate()
+        } else if event.modifierFlags.contains(.command) {
+            onClick(true)
+        } else if isSelected() {
+            // Finder's rule, and the whole reason multi-drag works at all: a
+            // plain press on an already-selected card must not collapse the
+            // selection, because the drag that may follow reads the selection
+            // as it stands. Collapsing here is what made every drag carry
+            // exactly one file no matter how many were lit. The collapse is
+            // still owed — it just waits for a mouse-up no drag intervened in.
+            collapseOnMouseUp = true
         } else {
-            onClick(event.modifierFlags.contains(.command))
+            onClick(false)
         }
     }
 
@@ -102,6 +118,8 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
         )
         guard delta.x * delta.x + delta.y * delta.y > 9 else { return }
         self.pressed = nil
+        // The press turned out to be a drag, so the collapse it owed is off.
+        collapseOnMouseUp = false
 
         let files = urls()
         guard !files.isEmpty else { return }
@@ -126,6 +144,9 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
 
     override func mouseUp(with event: NSEvent) {
         pressed = nil
+        guard collapseOnMouseUp else { return }
+        collapseOnMouseUp = false
+        onClick(false)
     }
 
     func draggingSession(

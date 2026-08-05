@@ -221,6 +221,16 @@ share of users regardless of what looks right.
   another app is how you _use_ what is on the edge, so it must not dismiss it.
 - **Every way out has a visible affordance.** A dock that stays open carries
   `DockDragHandle` on its inner edge. An exit nobody can see is not an exit.
+- **A top dock keeps the notch's height clear, and grows to pay for it.** The
+  panel starts at `screenFrame.maxY` on purpose, so it reads as the notch
+  growing rather than as a window appearing beneath it — which puts its first
+  menu-bar-height points physically behind the housing on a notched Mac.
+  Content there isn't dim or clipped, it is invisible, and the folder hub's
+  chips sat in exactly that strip. The inset belongs to
+  `EdgeDockController.topContentInset` rather than to any one view: every top
+  resident pays the same toll, and a hub that padded itself would leave the
+  next one to rediscover the notch. The inset is added to the panel's height
+  as well as to its content, so a top dock still gets its full 300pt.
 - **Never auto-close over a text field.** While the panel holds key focus in an
   `NSTextView`, the pointer is parked elsewhere by definition, and closing throws
   away what was typed.
@@ -451,6 +461,14 @@ Inside that fixed cell:
   it is not a shelf's call to make. Dragging a card outside the selection
   drags it alone and makes it the selection, Finder's rule, so a selection
   made three folders ago can't ride along with the file under the pointer.
+- **A plain press collapses a selection on mouse-_up_, not mouse-down.** This
+  is the difference between multi-drag working and not: a drag reads the
+  selection as it stands, so collapsing to one card the moment the button goes
+  down means every drag carries exactly one file however many were lit — which
+  is precisely how it shipped. The collapse is still owed; it just waits for a
+  mouse-up that no drag intervened in. ⌘-click is the exception and toggles
+  immediately, since no drag can follow a modifier the user is still holding
+  for a second click.
 
 Metadata competes with the preview for the same two lines, so a shelf shows
 neither by default — the folder hub dropped its size line to buy the preview
