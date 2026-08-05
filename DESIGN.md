@@ -301,6 +301,26 @@ share of users regardless of what looks right.
   `EdgesSection` carries a second, independent view onto the same
   `FolderHubStore` so a user can add a folder before ever placing the hub
   anywhere.
+- **A tool with no edge is not necessarily a tool with a home, and only Home
+  says which one it has.** Everything above is about `DockCatalog`'s
+  residents — how a resident earns an edge, and who writes it. A tool doesn't
+  have to be a resident, or even dockable, to need somewhere to live: once
+  "New gizmo" could save a tool with `assignTo: nil` instead of requiring a
+  ring slot first, a tool could exist on no ring slot and no edge at all — a
+  state the ring's old placement-by-construction made impossible. Nothing in
+  this section, and nothing `DockCatalog` computes, ever checks the ring, so
+  none of it can tell that state apart from a resident correctly sitting on
+  an edge. `HomeSectionContent.location` is the one place that checks both
+  homes a tool can have — a ring slot, then `DockStore` — and reads back
+  `.nowhere` when neither claims it, worded plainly on the tool's own row
+  (`FlowTheme.inkTertiary`, not a banner) rather than left for someone to
+  notice only by trying to run it. A `.clipboard` or `.notify` gizmo can
+  never earn an edge at all, so for one of those `.nowhere` is the only way
+  to fail, and Home is the only screen that was ever going to catch it.
+  `DockPlacementParityTests` pins this against real `ToolsStore` /
+  `RingLayoutStore` / `DockStore` instances — the same shape as the built-in
+  resident check earlier in this section, generalized from "does a control
+  exist for this" to "does either home exist at all."
 
 ## 12. Reuse before variants
 

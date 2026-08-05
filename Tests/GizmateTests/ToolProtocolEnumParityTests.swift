@@ -320,6 +320,79 @@ final class DockPlacementParityTests: XCTestCase {
                 + "doesn't offer a picker for it"
         )
     }
+
+    /// The fourth occurrence of the class-header shape, and the one Task 5
+    /// created: decoupling "New gizmo" from picking a ring slot first means a
+    /// tool can now be saved on neither a ring slot nor an edge, something
+    /// that used to be impossible by construction. `HomeSectionContent.location`
+    /// is the one place that has to keep saying so — this pins it against real
+    /// stores rather than trusting the row still renders `.nowhere`'s label by
+    /// eye.
+    ///
+    /// The stranded tool's output is deliberately `.clipboard`, not `.panel`
+    /// or `.surface`: those two are the ones `DockCatalog` and `EdgesSection`
+    /// already reason about, but a `.clipboard` (or `.notify`) gizmo has no
+    /// edge it could ever sit on — for one of those, "reachable" collapses to
+    /// "on a ring slot", and nothing outside this test's target function has
+    /// ever had to get that narrower case right.
+    func testAToolOnNeitherARingSlotNorAnEdgeIsReportedAsLivingNowhere() {
+        let toolsDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "gizmate-home-reachability-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+        let tools = ToolsStore(directoryURL: toolsDirectory, migrateLegacy: false)
+
+        let ringSuiteName = "HomeReachabilityParityTests.ring.\(UUID().uuidString)"
+        let ringDefaults = UserDefaults(suiteName: ringSuiteName)!
+        defer { ringDefaults.removePersistentDomain(forName: ringSuiteName) }
+        let ringLayout = RingLayoutStore(defaults: ringDefaults)
+
+        let dockSuiteName = "HomeReachabilityParityTests.dock.\(UUID().uuidString)"
+        let dockDefaults = UserDefaults(suiteName: dockSuiteName)!
+        defer { dockDefaults.removePersistentDomain(forName: dockSuiteName) }
+        let dock = DockStore(defaults: dockDefaults)
+
+        let overridesSuiteName = "HomeReachabilityParityTests.overrides.\(UUID().uuidString)"
+        let overridesDefaults = UserDefaults(suiteName: overridesSuiteName)!
+        defer { overridesDefaults.removePersistentDomain(forName: overridesSuiteName) }
+        let overrides = BuiltInOverridesStore(defaults: overridesDefaults)
+
+        let home = HomeSectionContent(tools: tools, ringLayout: ringLayout, dock: dock, overrides: overrides)
+
+        let ringed = tools.save(GizmateTool(name: "Ringed", kind: .python, input: .selection, output: .clipboard))
+        let docked = tools.save(GizmateTool(name: "Docked", kind: .python, input: .selection, output: .clipboard))
+        let stranded = tools.save(GizmateTool(name: "Stranded", kind: .python, input: .selection, output: .clipboard))
+
+        ringLayout.assign(.tool(ringed.id), to: 0)
+        dock.dock(ToolRef.generated(docked.id).storageID, to: .left)
+        // `stranded` is saved and usable but never placed anywhere — the
+        // scenario Task 5 made possible for the first time.
+
+        func location(for tool: GizmateTool) -> HomeLocation {
+            home.location(for: .tool(tool.id), storageID: ToolRef.generated(tool.id).storageID)
+        }
+
+        // The fixture has to actually discriminate before the real assertion
+        // below means anything: if placing a tool on the ring or an edge
+        // still came back `.nowhere`, the assertion on `stranded` would pass
+        // for the wrong reason — every tool reading `.nowhere` regardless of
+        // where it sits — rather than for catching the one truly unplaced
+        // tool.
+        for (tool, label) in [(ringed, "ringed"), (docked, "docked")] {
+            if case .nowhere = location(for: tool) {
+                XCTFail("this stub's whole point is a \(label) tool that isn't `.nowhere` — "
+                    + "without that, the assertion below would pass by comparing a case "
+                    + "against itself")
+            }
+        }
+
+        guard case .nowhere = location(for: stranded) else {
+            return XCTFail("a tool on no ring slot and no edge must read back as `.nowhere`")
+        }
+        XCTAssertEqual(
+            location(for: stranded).label, "Lives nowhere yet.",
+            "the row's own copy for this state changed without this test noticing"
+        )
+    }
 }
 
 /// The smallest `SettingsHost` `DockCatalog.builtIns` needs: it only reads

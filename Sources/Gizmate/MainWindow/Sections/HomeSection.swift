@@ -34,7 +34,14 @@ struct HomeSection: View {
 /// as `EdgesSectionContent`: `GizmateSettingsBridge` holds these as plain
 /// `let` properties and never forwards their own publishers, so a tool being
 /// added, renamed or moved needs its own subscription to redraw this list.
-private struct HomeSectionContent: View {
+///
+/// Internal, not private: `DockPlacementParityTests` builds one directly on
+/// scratch `ToolsStore`/`RingLayoutStore`/`DockStore` instances and calls
+/// `location(for:storageID:)` on it, the same reason
+/// `ToolEditorPanel.outputsWithPlacementControl` is internal rather than
+/// private — a test that reimplemented "is this reachable" as its own second
+/// formula would guard nothing against this one drifting from it.
+struct HomeSectionContent: View {
     @ObservedObject var tools: ToolsStore
     @ObservedObject var ringLayout: RingLayoutStore
     @ObservedObject var dock: DockStore
@@ -165,7 +172,13 @@ private struct HomeSectionContent: View {
     /// slot never touches `DockStore` and vice versa, so nothing can ever
     /// match both, but checking ring-then-edge keeps the search cheap for the
     /// common case of a freshly-placed built-in.
-    private func location(for content: RingSlotContent, storageID: String) -> HomeLocation {
+    ///
+    /// This is the one place that answers "is this tool reachable" for every
+    /// kind of result, dockable or not — a `.clipboard` or `.notify` gizmo has
+    /// no edge to ever sit on, so for one of those "reachable" collapses to
+    /// "on a ring slot", and this function is what still gets that right,
+    /// since it never branches on output kind at all.
+    func location(for content: RingSlotContent, storageID: String) -> HomeLocation {
         if ringLayout.layout.slots.contains(content) {
             return .ring(folder: nil)
         }
@@ -205,8 +218,10 @@ private struct HomeRow: Identifiable {
 /// Where a tool lives today, worded the same way the "locality pointer" text
 /// in `BuiltInEditorPanel` and `ToolEditorPanel` already describes an edge
 /// (see DESIGN.md §11) — this just also has a ring slot to name, since Home
-/// is the one screen that has to speak for both.
-private enum HomeLocation {
+/// is the one screen that has to speak for both. Internal for the same
+/// reason `location(for:storageID:)` is: `DockPlacementParityTests` matches
+/// on `.nowhere` and reads `.label` back from a real instance.
+enum HomeLocation {
     case ring(folder: String?)
     case edge(DockEdge)
     /// Saved but unreachable from anywhere a user would think to look — not a

@@ -67,6 +67,17 @@ enum DockCatalog {
     /// resident's placement is written from `EdgesSection` now, keyed by
     /// `EdgesSection.residentWithoutARingSlot` for this one — see
     /// `DESIGN.md` §11.
+    ///
+    /// This catalog only ever answers "does this resident have an edge" — a
+    /// built-in that isn't in `residentBuiltIns` at all, or a gizmo whose
+    /// output isn't in `dockableGizmoOutputs`, simply never appears here,
+    /// which says nothing about whether it has a ring slot instead. A ring
+    /// slot needs no dock entry to work, so this file has no way to ask that
+    /// question and never tries to. `HomeSectionContent.location` is where
+    /// the two answers — an edge from this catalog, a slot from
+    /// `RingLayoutStore` — combine into the one thing a person actually
+    /// needs: where does this thing live, full stop, or does it live nowhere
+    /// at all. See `DESIGN.md` §11.
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
         let ringResidents = residentBuiltIns.map { action in
