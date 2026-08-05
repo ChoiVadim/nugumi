@@ -8,18 +8,18 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 
 ### Palette
 
-| Role            | Token                                        | Light                  | Dark                   | Usage                                           |
-| --------------- | -------------------------------------------- | ---------------------- | ---------------------- | ----------------------------------------------- |
-| Surface/glass   | `FlowTheme.glass`                            | transparent            | transparent            | Visual-effect-backed window background          |
-| Surface/card    | `FlowTheme.card`                             | rgba(255,255,255,0.06) | rgba(255,255,255,0.06) | Settings panels and setup cards                 |
-| Surface/subtle  | `FlowTheme.subtleFill`                       | rgba(255,255,255,0.08) | rgba(255,255,255,0.08) | Secondary fills and inactive controls           |
-| Text/primary    | `FlowTheme.ink`                              | #FFFFFF                | #FFFFFF                | Headings, body, active controls                 |
-| Text/secondary  | `FlowTheme.inkSecondary`                     | #BDBDBD                | #BDBDBD                | Supporting copy and secondary labels            |
-| Text/tertiary   | `FlowTheme.inkTertiary`                      | #8C8C8C                | #8C8C8C                | Disabled, metadata, inactive icons              |
-| Border/hairline | `FlowTheme.hairline`                         | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines                     |
-| Accent/primary  | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9                | #C9C9C9                | Success, selected state, primary setup progress |
-| Accent/soft     | `FlowTheme.accentSoft`                       | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds                       |
-| Status/error    | inline status error                          | #FF8C8C                | #FF8C8C                | Failed setup status only                        |
+| Role            | Token                                        | Light                  | Dark                   | Usage                                               |
+| --------------- | -------------------------------------------- | ---------------------- | ---------------------- | --------------------------------------------------- |
+| Surface/glass   | `FlowTheme.glass`                            | transparent            | transparent            | Visual-effect-backed window background              |
+| Surface/card    | `FlowTheme.card`                             | rgba(255,255,255,0.06) | rgba(255,255,255,0.06) | Settings panels and setup cards                     |
+| Surface/subtle  | `FlowTheme.subtleFill`                       | rgba(255,255,255,0.08) | rgba(255,255,255,0.08) | Secondary fills and inactive controls               |
+| Text/primary    | `FlowTheme.ink`                              | #FFFFFF                | #FFFFFF                | Headings, body, active controls                     |
+| Text/secondary  | `FlowTheme.inkSecondary`                     | #BDBDBD                | #BDBDBD                | Supporting copy and secondary labels                |
+| Text/tertiary   | `FlowTheme.inkTertiary`                      | #8C8C8C                | #8C8C8C                | Disabled, metadata, inactive icons                  |
+| Border/hairline | `FlowTheme.hairline`                         | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines                         |
+| Accent/primary  | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9                | #C9C9C9                | Success, selected state, primary setup progress     |
+| Accent/soft     | `FlowTheme.accentSoft`                       | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds                           |
+| Status/error    | `FlowTheme.danger`                           | #FF8C8C                | #FF8C8C                | Failed setup status, and armed destructive controls |
 
 ### Rules
 
@@ -379,16 +379,27 @@ share of users regardless of what looks right.
   fires on the first half of every double click, which is how a browse would
   also reveal in Finder on its way. Double-click, not single: a card is a drag
   source first, and a shelf's files are picked up more often than opened.
-- **A destructive action on a chip is revealed, not inserted.** The hub's
-  folder chips carry their remove ✕ in the layout at all times and fade it in
-  on hover — inserting it would shove every chip to its right as the pointer
-  crosses the row. The context menu stays beside it: on a trackpad, hover and
-  click are the same gesture, and the menu was the only route for two months
-  precisely because nobody found it. Back is a chip too, in the same row,
-  carrying the current folder's name — an unlabelled arrow says you can leave
-  but not where you are. That name is capped at 140pt: a folder a browser
-  saved is named after a page title, and an uncapped one pushed every root
-  chip off the row.
+- **An irreversible removal is armed, then confirmed — never revealed on
+  hover.** A hover-revealed ✕ on a folder chip sat one stray click away from
+  deleting a folder the pointer was only reaching past, and nothing about it
+  can be undone: `remove(_:)` saves `[]` on purpose rather than revive the
+  Downloads default. So a double-click arms the chip instead — `FlowTheme.danger`
+  fill, ✕ inserted — and the ✕ is what removes. Arming is a state the user
+  asked for and is looking at, which is why the ✕ is inserted rather than
+  faded in: the row shifting under a chip that just turned red is the feedback.
+  Leaving the chip disarms it, so an armed capsule can't be stranded red with
+  no way out but deletion. This replaced the context menu as well — two routes
+  to an irreversible action is one more than it deserves.
+- **One chip row shows the roots or the trail, never both.** Standing three
+  folders deep, "which folders did I add" is not a question you have; "where
+  am I" is. So browsing swaps the roots for `Downloads › sub › sub`, each
+  crumb a jump back to that level — which makes the crumb left of the last one
+  the back button, and retires the separate arrow that had to be kept in step
+  with the path. The trail is derived by trimming components off the current
+  folder, never stored: a stack is a second copy of where you are, and the two
+  disagree the first time anything else moves the current folder. Each crumb's
+  name is capped at 140pt — a folder a browser saved is named after a page
+  title, and an uncapped one pushed every other chip off the row.
 - **A tool with no edge is not necessarily a tool with a home, and only Home
   says which one it has.** Everything above is about `DockCatalog`'s
   residents — how a resident earns an edge, and who writes it. A tool doesn't

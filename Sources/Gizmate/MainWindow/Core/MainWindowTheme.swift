@@ -33,6 +33,14 @@ enum FlowTheme {
     static let hairline = Color.white.opacity(0.10)
     static let subtleFill = Color.white.opacity(0.08)
 
+    /// The one break in a monochrome palette, and it earns it: red is the only
+    /// colour a control can wear that means "this deletes something" without a
+    /// word of copy. Light rather than saturated for the same reason `accent`
+    /// is — it has to stay legible as text on the dark sheet. The palette's
+    /// "Status/error" row in `DESIGN.md` §2 is this value; anything destructive
+    /// takes it from here rather than mint its own red.
+    static let danger = Color(red: 1.0, green: 0.549, blue: 0.549)  // #FF8C8C
+
     // MARK: Elevation
     //
     // Depth comes from stacked translucent sheets over one backdrop, the way

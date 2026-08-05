@@ -23,8 +23,9 @@ struct FolderHubView: View {
     /// no trail to keep in step with anything.
     @State private var current: URL?
     @State private var rows: [SurfaceRow]
-    /// The chip the pointer is over, by path — what reveals its remove ✕.
-    @State private var hoveredChip: String?
+    /// The chip a double-click armed for removal, by path. At most one: arming
+    /// a second disarms the first for free, since one string can only hold one.
+    @State private var armedChip: String?
     /// The cards lit for a drag, by row id. Cleared whenever the listing
     /// changes: an id that is no longer on screen would keep contributing a
     /// file to every drag from a folder it isn't even in.
@@ -108,10 +109,9 @@ struct FolderHubView: View {
             refresh(in: folder)
         }
         .onChange(of: store.folders) { _, folders in
-            // The selected folder itself may have just been removed from the
-            // chip row's own context menu — fall back the same way a fresh
-            // open would rather than keep rendering a chip that no longer
-            // exists.
+            // The selected folder itself may have just been removed by its own
+            // armed ✕ — fall back the same way a fresh open would rather than
+            // keep rendering a chip that no longer exists.
             guard selected == nil || !folders.contains(where: { $0.path == selected?.path }) else { return }
             selected = folders.first
         }
@@ -131,12 +131,28 @@ struct FolderHubView: View {
         }
     }
 
+    /// One row, two jobs, never both at once: the folders you added, or the
+    /// path you are standing in. Showing the roots beside a trail asks the row
+    /// to mean "pick a folder" and "you are here" in the same six chips, and
+    /// the trail is the only one of the two that answers a question you have
+    /// while you're deep in a folder. The roots come back the moment the trail
+    /// collapses to its first crumb.
     private var folderChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                if isBrowsingDeeper { backChip }
-                ForEach(store.folders, id: \.path) { folder in
-                    chip(for: folder)
+                if isBrowsingDeeper {
+                    ForEach(Array(trail.enumerated()), id: \.element.path) { index, folder in
+                        if index > 0 {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(FlowTheme.inkTertiary)
+                        }
+                        crumb(for: folder)
+                    }
+                } else {
+                    ForEach(store.folders, id: \.path) { folder in
+                        chip(for: folder)
+                    }
                 }
             }
             .padding(.horizontal, 1)
@@ -146,78 +162,110 @@ struct FolderHubView: View {
 
     private var isBrowsingDeeper: Bool { current?.path != selected?.path }
 
-    /// Back is a chip in the chips' own row rather than a disc beside the `+`:
-    /// it has a name to carry. Two folders down, an unlabelled arrow says you
-    /// can leave but not where you are, and the chip you started from is still
-    /// lit two chips to its right.
-    private var backChip: some View {
-        Button {
-            current = current?.deletingLastPathComponent()
+    /// The root chip, then every folder walked into on the way here.
+    ///
+    /// Built by trimming components off `current` rather than by keeping a
+    /// stack: a stack is a second copy of where you are, and the two disagree
+    /// the first time anything else moves `current`. The loop terminates on
+    /// the root's own path because descending is the only way `current` is
+    /// ever set — the length guard is what keeps a mismatch from walking to
+    /// the volume root instead of hanging.
+    private var trail: [URL] {
+        guard let root = selected, var url = current else { return [] }
+        var crumbs: [URL] = []
+        while url.path != root.path, url.path.count > root.path.count {
+            crumbs.append(url)
+            url = url.deletingLastPathComponent()
+        }
+        crumbs.append(root)
+        return crumbs.reversed()
+    }
+
+    /// A step in the trail. Tapping one goes there, which makes the crumb to
+    /// the left of the last one the back button — there is no separate arrow
+    /// to keep in step with the path any more.
+    private func crumb(for folder: URL) -> some View {
+        let isCurrent = folder.path == current?.path
+        return Button {
+            current = folder
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "chevron.left").font(.system(size: 9, weight: .semibold))
+                if folder.path == selected?.path {
+                    Image(systemName: "folder").font(.system(size: 9))
+                }
                 // Capped: a folder saved by a browser is named after a page
-                // title, and one of those spends the whole row on its own —
-                // the root chips it sits beside got pushed off the edge.
-                Text(current?.lastPathComponent ?? "")
+                // title, and one of those spends a whole row on its own.
+                Text(folder.lastPathComponent)
                     .font(.system(size: 11, weight: .medium))
                     .lineLimit(1)
                     .frame(maxWidth: 140, alignment: .leading)
             }
-            .foregroundStyle(FlowTheme.ink)
+            .foregroundStyle(isCurrent ? FlowTheme.ink : FlowTheme.inkSecondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(FlowTheme.raised))
+            .background(Capsule().fill(isCurrent ? FlowTheme.raised : FlowTheme.subtleFill))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Back")
     }
 
-    /// Not a `Button` wrapping the whole capsule any more: the ✕ inside it is
-    /// its own button, and a button nested in another button's label never
-    /// gets the click.
+    /// A root folder, and the only place one can be taken off the shelf.
+    ///
+    /// Removal is two gestures, not one: a double-click arms the chip — red,
+    /// with a ✕ — and the ✕ is what actually removes it. A ✕ that appeared on
+    /// hover was one stray click away from deleting a folder the user was only
+    /// reaching past, and nothing here can be undone: the store saves `[]`
+    /// deliberately rather than revive the Downloads default (see `DESIGN.md`
+    /// §11). Not a `Button` around the whole capsule, because the ✕ inside is
+    /// its own button and a button nested in another button's label never gets
+    /// the click.
     private func chip(for folder: URL) -> some View {
         let isSelected = folder.path == selected?.path
+        let isArmed = armedChip == folder.path
         return HStack(spacing: 4) {
             Image(systemName: "folder").font(.system(size: 9))
-            Text(folder.lastPathComponent).font(.system(size: 11, weight: .medium))
-            // Laid out always, faded until hover — inserting it on hover would
-            // shove every chip to its right by 12pt as the pointer crosses the
-            // row. Same trade `SnippetDisplayRow` makes for its own actions.
-            // The context menu below stays: it is the only route on a trackpad
-            // where hover and click are the same gesture.
-            Button {
-                store.remove(folder)
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-                    .contentShape(Rectangle())
+            Text(folder.lastPathComponent)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .frame(maxWidth: 140, alignment: .leading)
+            if isArmed {
+                // Inserted rather than faded in, unlike a hover affordance:
+                // arming is a state the user asked for and is looking at, so
+                // the row shifting under a chip that just turned red is the
+                // feedback, not a glitch.
+                Button {
+                    store.remove(folder)
+                    armedChip = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(folder.lastPathComponent)")
             }
-            .buttonStyle(.plain)
-            .opacity(hoveredChip == folder.path ? 1 : 0)
-            .accessibilityLabel("Remove \(folder.lastPathComponent)")
         }
-        .foregroundStyle(isSelected ? FlowTheme.ink : FlowTheme.inkSecondary)
+        .foregroundStyle(isArmed ? FlowTheme.danger : (isSelected ? FlowTheme.ink : FlowTheme.inkSecondary))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(Capsule().fill(isSelected ? FlowTheme.raised : FlowTheme.subtleFill))
+        .background(
+            Capsule().fill(
+                isArmed
+                    ? FlowTheme.danger.opacity(0.18)
+                    : (isSelected ? FlowTheme.raised : FlowTheme.subtleFill)
+            )
+        )
         .contentShape(Capsule())
-        .onTapGesture { selected = folder }
-        // Guarded rather than assigned outright: the exit of one chip can
-        // arrive after the entry of the next, and clearing unconditionally
-        // would blank the ✕ on the chip the pointer just moved onto.
-        .onHover { inside in
-            if inside {
-                hoveredChip = folder.path
-            } else if hoveredChip == folder.path {
-                hoveredChip = nil
-            }
+        // Declared before the single tap, which is what lets SwiftUI hand a
+        // double click to this one instead of firing the single twice.
+        .onTapGesture(count: 2) { armedChip = folder.path }
+        .onTapGesture {
+            selected = folder
+            armedChip = nil
         }
-        .contextMenu {
-            Button("Remove", role: .destructive) {
-                store.remove(folder)
-            }
+        // Leaving the chip disarms it: an armed chip left behind is a red
+        // capsule sitting in the row with no way back except deleting it.
+        .onHover { inside in
+            if !inside, isArmed { armedChip = nil }
         }
     }
 
