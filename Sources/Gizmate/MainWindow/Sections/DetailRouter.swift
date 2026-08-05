@@ -9,6 +9,7 @@ struct DetailRouter: View {
         case .insights: InsightsSection()
         case .voice: VoiceSection()
         case .notes: NotesSection()
+        case .edges: EdgesSection()
         case .settings: SettingsSection()
         case .help: HelpSection()
         }
