@@ -263,17 +263,20 @@ final class DockPlacementParityTests: XCTestCase {
         XCTAssertEqual(EdgesSection.offeredIDs(host: host), DockCatalog.knownIDs(host: host))
     }
 
-    /// The third occurrence of the shape the class header names: `.surface`
-    /// gizmos reached `DockCatalog.gizmos` with no editor control once, the
-    /// folder hub reached `DockCatalog.builtIns` with no editor control hours
-    /// later, and now `.panel` gizmos and the three non-resident ring actions
-    /// (Explain, Reply, Summarize) have a control — `BuiltInEditor`'s and
-    /// `ToolEditorPanel`'s locality pointers both say "Change it in Edges" —
-    /// with nothing pinning that Edges' "Panel placement" list actually lists
-    /// them. `EdgesSection.panelPlaceableIDs` is two hand-written filters
-    /// (`Sources/Gizmate/MainWindow/Sections/EdgesSection+PanelPlacement.swift`);
-    /// nothing fails today if either one drifts from the sets the two editors
-    /// are actually gated on.
+    /// The third occurrence of the shape the class header names, and the one
+    /// that survived the Edges rework: every dockable thing has to have exactly
+    /// one control, in exactly one place. `.surface` gizmos reached
+    /// `DockCatalog.gizmos` with no editor control once; the folder hub reached
+    /// `DockCatalog.builtIns` with no control hours later.
+    ///
+    /// The split is now by kind rather than by screen. A resident — Note, the
+    /// folder hub, a `.surface` gizmo — is placed on the `EdgesDiagram`, where
+    /// its order relative to its neighbours is visible. Everything else with a
+    /// dockable result panel (Explain, Reply, Summarize, a `.panel` gizmo) is
+    /// placed in its own editor, because a panel never shares an edge and has
+    /// no order to arrange. `PanelPlacement.offersPicker(for:)` is the live gate
+    /// both editors call; the two halves must not overlap, or a thing gets a
+    /// picker in its editor *and* a tile on the figure.
     ///
     /// Built against the live sets — `DockCatalog.dockableBuiltIns`/
     /// `residentBuiltIns` for the built-in half, `ToolEditorPanel.outputsWithPlacementControl`
@@ -281,7 +284,7 @@ final class DockPlacementParityTests: XCTestCase {
     /// than a literal `[.explain, .reply, .summarize]` or `.panel`, so a
     /// future change to any of those four sets is what this test actually
     /// tracks, not a snapshot of today's values.
-    func testEveryPanelOnlyPlaceableTheEditorsPointAtIsOfferedInEdges() {
+    func testEveryPanelOnlyPlaceableGetsItsPickerInItsOwnEditor() {
         let suiteName = "DockPlacementParityTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -312,17 +315,23 @@ final class DockPlacementParityTests: XCTestCase {
             .map { ToolRef.generated($0.id).storageID }
         let editorsPointAt = Set(nonResidentBuiltIns).union(panelOnlyGizmos)
 
-        // Equality, not a one-way subset: narrowing `panelPlaceableIDs` was
-        // already caught below, but widening it silently passed before this
-        // change — and widening is the real failure here. Let a resident in
-        // (drop the `!residentBuiltIns.contains` filter, say) and it gets a
-        // picker in this card *and* a row in the edge cards, the exact
-        // duplication Task 3 existed to remove.
         XCTAssertEqual(
-            EdgesSection.panelPlaceableIDs(host: host), editorsPointAt,
-            "EdgesSection's \"Panel placement\" list disagrees with what BuiltInEditor and "
-                + "ToolEditorPanel actually point a user at — either it's missing an id they "
-                + "promise a picker for, or it offers one for an id neither editor names"
+            PanelPlacement.placeableIDs(host: host), editorsPointAt,
+            "PanelPlacement disagrees with the sets BuiltInEditor and ToolEditorPanel are "
+                + "gated on — either an id promised a picker gets none, or one gets a picker "
+                + "nothing points at"
+        )
+
+        // The two halves must not overlap. Let a resident through (drop the
+        // `!residentBuiltIns.contains` filter, say) and it gets a picker in its
+        // own editor *and* a tile on the Edges figure — two controls writing
+        // one `DockStore` key, which is the duplication both this split and the
+        // one-screen rule before it existed to prevent.
+        XCTAssertTrue(
+            PanelPlacement.placeableIDs(host: host)
+                .isDisjoint(with: EdgesSection.offeredIDs(host: host)),
+            "something is both panel-placeable in its own editor and a resident on the Edges "
+                + "figure — it would carry two placement controls for one id"
         )
     }
 

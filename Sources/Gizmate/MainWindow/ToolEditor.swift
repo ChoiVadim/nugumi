@@ -977,10 +977,11 @@ struct ToolEditorPanel: View {
     /// so `DockPlacementParityTests` can hold this against
     /// `DockCatalog.dockableGizmoOutputs` — a gizmo that catalog is willing to
     /// list has to be one this set says something about, or nobody editing it
-    /// can ever discover it's dockable at all. The name predates Task 3: it
-    /// gated an actual `DockPlacementPicker` before, and gates the locality
-    /// pointer below now — kept rather than renamed because
-    /// `DockPlacementParityTests` pins it by this name.
+    /// can ever discover it's dockable at all. `PanelPlacement` splits this set
+    /// in two: the half outside `dockableGizmoOutputs` gets a real
+    /// `DockPlacementPicker` right here, the half inside it gets a pointer to
+    /// the Edges figure instead — a resident's edge is chosen there, beside the
+    /// neighbours it shares that edge with.
     static let outputsWithPlacementControl: Set<ToolOutput> = [.panel, .surface]
 
     @ViewBuilder

@@ -26,16 +26,14 @@ struct BuiltInEditorPanel: View {
         actionID.promptMode?.shippedPromptTemplate
     }
 
-    /// All four `dockableBuiltIns` actions still work fine floating — Note's
-    /// resident surface is the same placement as its panel, one id, so "off"
-    /// never means "never runs" here the way it does for a surface gizmo or
-    /// the folder hub. See `EdgesSectionContent.consentSentence` for the two
-    /// cases that do need that stronger wording.
+    /// Note only. Its notes list and its result panel are one id with one
+    /// placement, so choosing an edge for it is choosing where the *list*
+    /// waits — Edges' question, not this editor's. See `PanelPlacement`.
     private var panelLocalityText: String {
         if let edge = bridge.dock.edge(of: ToolRef.builtIn(actionID).storageID) {
-            return "On the \(edge.displayName) edge. Change it in Edges."
+            return "Waiting on the \(edge.displayName) edge. Change it in Edges."
         }
-        return "Floating at the cursor. Change it in Edges."
+        return "Not on an edge. Change it in Edges."
     }
 
     var body: some View {
@@ -121,14 +119,26 @@ struct BuiltInEditorPanel: View {
                     Text("Panel")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(FlowTheme.inkSecondary)
-                    // Read back from `DockStore` rather than chosen here —
-                    // `EdgesSection` is the one place that writes placement
-                    // now, the same store this used to write to directly with
-                    // its own `DockPlacementPicker`. See DESIGN.md §11.
-                    Text(panelLocalityText)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if PanelPlacement.offersPicker(for: actionID) {
+                        // Where this action's answer opens. Chosen here, not in
+                        // Edges: it draws nothing until the action runs, so it
+                        // never shares an edge with anything and has no tab
+                        // order to be arranged in. See DESIGN.md §11.
+                        DockPlacementPicker(
+                            store: bridge.dock,
+                            itemID: ToolRef.builtIn(actionID).storageID
+                        )
+                        Text("Floating opens it at the cursor. An edge opens it flush to "
+                            + "that side of the screen instead.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(panelLocalityText)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
