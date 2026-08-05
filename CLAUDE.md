@@ -7,9 +7,55 @@ This file is loaded as project context by Claude Code. It contains operational i
 - macOS menu bar app, Swift Package Manager, deployment target macOS 14.
 - Bundle ID: `com.nugumi.app`. GitHub repo: `ChoiVadim/nugumi` (`origin`).
 - GitHub CLI account for this repo: use `ChoiVadim`. If multiple accounts are configured locally, prefer `gh-vadim ...` or run `gh-use-vadim` before release/repo operations.
-- Sources are split by subsystem into feature folders under `Sources/Gizmate/` (`App/`, `Selection/`, `Panels/`, `Ask/`, `Ring/`, `LLM/`, `Live/`, `Archive/`, `MainWindow/`) — one subsystem per file. `App/GizmateApp.swift` holds the `@main` app delegate and lifecycle, while `App/GizmateApp+*.swift` owns domain extensions. SwiftPM discovers files recursively; adding a file needs no `Package.swift` change. `App/Bootstrap.swift` covers the Ollama setup wizard.
+- Sources are split by subsystem into feature folders under `Sources/Gizmate/` (`App/`, `Selection/`, `Panels/`, `Ask/`, `Ring/`, `Dock/`, `Tools/`, `LLM/`, `Live/`, `Archive/`, `MainWindow/`) — one subsystem per file. `App/GizmateApp.swift` holds the `@main` app delegate and lifecycle, while `App/GizmateApp+*.swift` owns domain extensions. SwiftPM discovers files recursively; adding a file needs no `Package.swift` change. `App/Bootstrap.swift` covers the Ollama setup wizard.
+- `Dock/` is the screen-edge subsystem: `Dock/Surface/` renders a generated gizmo's rows, `Dock/FolderHub/` is the shipped folder shelf. `Tools/` is gizmo storage and execution.
 - Distribution: ad-hoc signed `.app` + universal DMG packaged via `Scripts/build-app-bundle.sh`. In-app updates via Sparkle 2.9.1.
 - Renamed twice: "Yaku" → "Nugumi" at v0.6.0, then "Nugumi" → "Gizmate". Existing v0.5.0 (Yaku) installs never auto-migrated via Sparkle and must download the new bundle manually. The Gizmate rename deliberately kept the bundle ID, feed URL, and EdDSA key untouched, so it updates in place like any other release — see "Identity that must not change" below.
+
+## Two kinds of tool, three places
+
+Gizmate used to have one kind of tool: something you **summon**. Select text,
+invoke it, get an answer, done. The ring was the app, and `case .home:
+RingSection()` said so literally.
+
+There is now a second kind: something that **resides**. It sits on a screen edge
+showing what it has, and you look at it or drag things out of it. The Notes
+list, the built-in folder hub, and any gizmo whose result is `.surface` are all
+of this kind. Nothing about them is a run.
+
+The sidebar has one place per question a person actually has:
+
+| Section   | The question it answers                      |
+| --------- | -------------------------------------------- |
+| **Home**  | What can Gizmate do — and build me a new one |
+| **Ring**  | What is under my cursor                      |
+| **Edges** | What is on my screen borders                 |
+
+Rules that fall out of this, all of them paid for:
+
+- **An edge owns its contents, not the other way round.** `DockStore` models an
+  edge as an ordered list; `EdgesSection` is the one screen that writes to it.
+  Placement used to be a property of each tool, edited from three different
+  editors, which is why tab order was "the order they were docked" — there was
+  nowhere to decide it. The editors now carry a read-only pointer that reads
+  back through `bridge.dock.edge(of:)`, so a pointer cannot drift from the store.
+- **One tool never configures itself in the main window.** Which folders the
+  file hub shows belongs in the hub's own panel, beside the folders. A settings
+  card whose whole content is "go to Edges" is a signpost, not a setting —
+  both such cards existed and both were deleted.
+- **Nothing may live nowhere without saying so.** A tool is usable only if it
+  has a ring slot or an edge. Creating one no longer requires picking a slot
+  first, so "created" and "reachable" became independent; `HomeSection` states
+  a tool's home on its row, including "Lives nowhere yet."
+- **Every "what can be placed" set needs a parity test.** Five now exist in
+  `Tests/GizmateTests/ToolProtocolEnumParityTests.swift`. This defect class —
+  a thing reaching every layer and missing the one UI control that made it
+  reachable — shipped three times in three days before they were written.
+  Build them from live sets typed out independently on both sides, and assert
+  inside the test that its own fixture discriminates.
+
+`MainWindowSection`'s raw values are the persisted sidebar selection. `home`
+keeps its raw value forever; new sections take new ones.
 
 ## Identity that must not change
 
