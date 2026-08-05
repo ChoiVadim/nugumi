@@ -8,10 +8,9 @@ import SwiftUI
 enum RingSheet: Equatable {
     /// Choosing what goes in one slot.
     case slot(RingSlotAddress)
-    /// Writing a prompt tool. `id` is nil for a new one; `assignTo` carries the
-    /// slot the user came from, so "empty slot → New prompt gizmo → Save" lands
-    /// the finished tool in that slot without a second trip through the picker.
-    case toolEditor(id: UUID?, assignTo: RingSlotAddress?)
+    /// Writing a prompt tool. `id` is nil for a new one. Building a gizmo never
+    /// places it: that is Home's job, and where it lives is Ring's or Edges'.
+    case toolEditor(id: UUID?)
     /// Naming a sub-ring. `id` is nil for a new folder, in which case
     /// `assignTo` is the slot it lands in; a non-nil `id` is a rename.
     case folderEditor(id: UUID?, assignTo: RingSlotAddress?)
@@ -34,8 +33,8 @@ struct RingSheetOverlay: View {
             switch sheet {
             case .slot(let address):
                 RingSlotPickerPanel(toolsStore: bridge.tools, address: address)
-            case .toolEditor(let id, let assignTo):
-                ToolEditorPanel(toolID: id, assignTo: assignTo)
+            case .toolEditor(let id):
+                ToolEditorPanel(toolID: id)
             case .folderEditor(let id, let assignTo):
                 RingFolderEditorPanel(folderID: id, assignTo: assignTo)
             case .builtInEditor(let id):
@@ -110,9 +109,7 @@ private struct RingSlotPickerPanel: View {
                 Text("Choose an action")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(FlowTheme.ink)
-                // The only affordance left now that the footer is gone, so it
-                // has to say so.
-                Text("Currently: \(describe(current)) · double-click to put one here")
+                Text("Currently: \(describe(current))")
                     .font(.system(size: 11.5))
                     .foregroundStyle(FlowTheme.inkTertiary)
             }
@@ -151,16 +148,17 @@ private struct RingSlotPickerPanel: View {
         .padding(.vertical, 10)
     }
 
-    /// Building a gizmo is the point of this panel, not a side errand — so it
-    /// gets the full width at the bottom rather than a link in the source bar.
+    /// This panel answers one question — what goes in this slot — so its full
+    /// width belongs to the answer. Building a gizmo used to sit here; it lives
+    /// on Home now, which is the section that answers "what can Gizmate do".
     private var footer: some View {
         Button {
-            bridge.ringSheet = .toolEditor(id: nil, assignTo: address)
+            if let pending { assign(pending) }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "plus.circle.fill")
+                Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14, weight: .semibold))
-                Text("New gizmo")
+                Text("Save to ring")
                     .font(.system(size: 13.5, weight: .semibold))
             }
             .foregroundStyle(Color(white: 0.08))
@@ -173,7 +171,9 @@ private struct RingSlotPickerPanel: View {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help("Write a gizmo of your own and drop it in this slot.")
+        .disabled(pending == nil)
+        .opacity(pending == nil ? 0.4 : 1)
+        .help("Puts the selected action in this slot.")
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
@@ -239,7 +239,7 @@ private struct RingSlotPickerPanel: View {
                     }
                 case .tools:
                     if tools.isEmpty {
-                        Text("No gizmos yet. Use “New gizmo” above.")
+                        Text("No gizmos yet. Build one from Home.")
                             .font(.system(size: 12.5))
                             .foregroundStyle(FlowTheme.inkTertiary)
                             .padding(.horizontal, 14)
@@ -256,7 +256,7 @@ private struct RingSlotPickerPanel: View {
                             // Managing tools lives here: the Ring tab itself shows
                             // only the ring.
                             onEdit: {
-                                bridge.ringSheet = .toolEditor(id: tool.id, assignTo: nil)
+                                bridge.ringSheet = .toolEditor(id: tool.id)
                             },
                             onDelete: { delete(tool) }
                         )

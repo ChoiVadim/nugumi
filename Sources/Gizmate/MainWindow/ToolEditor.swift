@@ -67,14 +67,6 @@ struct ToolEditorPanel: View {
 
     @EnvironmentObject var bridge: GizmateSettingsBridge
     let toolID: UUID?
-    /// The ring slot this draft lands in on Save, when there is one. `nil`
-    /// covers two different origins: editing a tool that already lives
-    /// somewhere else (or nowhere), and — since Home's "New gizmo" button —
-    /// building a brand-new one with no destination chosen yet. `save()`
-    /// doesn't distinguish them: it only ever touches ring placement when
-    /// `assignTo` is set, so a tool built from Home simply comes out
-    /// unplaced, the same as any other tool nothing points at.
-    let assignTo: RingSlotAddress?
 
     @State private var draft = GizmateTool()
     @State private var script = ""
@@ -707,9 +699,8 @@ struct ToolEditorPanel: View {
         } else {
             ToolApprovals.revoke(tool.id)
         }
-        if let assignTo {
-            bridge.ringLayout.assign(.tool(tool.id), to: assignTo.index, in: assignTo.path)
-        }
+        // Saving never places the tool: a gizmo is built on Home and given a
+        // home from the Ring or Edges section afterwards.
         dismiss()
     }
 

@@ -12,11 +12,14 @@ import SwiftUI
 /// Home never edits placement — picking a row opens the same editor its ring
 /// slot or Edges row would (`RingSheet.builtInEditor` / `.toolEditor`), and
 /// moving a tool between the ring and an edge stays the Ring tab's and
-/// `EdgesSection`'s job. "New gizmo" opens that same tool editor with
-/// `assignTo: nil` — exactly what already happens when editing any tool that
-/// isn't sitting on a ring slot — so a freshly built gizmo lands unplaced,
+/// `EdgesSection`'s job. "New gizmo" opens that same tool editor, and the
+/// editor never places what it saves, so a freshly built gizmo lands unplaced,
 /// findable right here afterwards as "Lives nowhere yet." This is a
 /// directory with one door into the builder, not a placement picker.
+///
+/// This is now the *only* door: the ring's slot picker used to carry its own
+/// "New gizmo" button, which meant building one and placing one were the same
+/// gesture and a gizmo could not be made without first choosing a slot.
 struct HomeSection: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
 
@@ -101,20 +104,17 @@ struct HomeSectionContent: View {
         }
     }
 
-    /// The front door itself: opens the same builder chat a ring slot's "New
-    /// gizmo" button does, but with no slot to land in — `assignTo: nil` is
-    /// already the value `select(_:)` passes when editing a tool that isn't
-    /// on the ring, so nothing downstream needed to learn a new state for
-    /// this. The tool comes back unplaced, findable in the "Your gizmos" list
-    /// below as "Lives nowhere yet."; giving it somewhere to live is a ring
-    /// slot or an Edges pick away, same as for any other unplaced tool today.
+    /// The front door itself: opens the builder chat with no slot to land in.
+    /// The tool comes back unplaced, findable in the "Your gizmos" list below
+    /// as "Lives nowhere yet."; giving it somewhere to live is a ring slot or
+    /// an Edges pick away, same as for any other unplaced tool today.
     private var headerButtons: some View {
         ResetDiscButton(
             symbol: "plus",
             label: "New gizmo",
             accessibilityTitle: "New gizmo"
         ) {
-            bridge.ringSheet = .toolEditor(id: nil, assignTo: nil)
+            bridge.ringSheet = .toolEditor(id: nil)
         }
     }
 
@@ -160,7 +160,7 @@ struct HomeSectionContent: View {
         case .builtIn(let action):
             bridge.ringSheet = .builtInEditor(action)
         case .tool(let tool):
-            bridge.ringSheet = .toolEditor(id: tool.id, assignTo: nil)
+            bridge.ringSheet = .toolEditor(id: tool.id)
         }
     }
 
