@@ -230,10 +230,21 @@ share of users regardless of what looks right.
   it) and not a gizmo output in `dockableGizmoOutputs` (no `GizmateTool`
   behind it either) — `DockCatalog.builtIns` appends it directly, because a
   folder listing passes the same "something to draw before any run starts"
-  test Note and a `.surface` gizmo do, without a run to speak of at all. It
-  is also, today, the one resident with no placement control: `BuiltInEditor`
-  and `ToolEditor` are the only two places `DockPlacementPicker` is wired in,
-  and both need exactly the identity the folder hub doesn't have.
+  test Note and a `.surface` gizmo do, without a run to speak of at all.
+- **Missing an identity a `DockPlacementPicker` gate needs is not the same as
+  missing a place to put one.** `BuiltInEditor`'s "Panel" section is gated on
+  a `RingActionID`, and `ToolEditor`'s on a `GizmateTool` — both need exactly
+  the identity the folder hub doesn't have, so neither can ever host its
+  picker. Settings → General can, because it isn't gated on an item at all:
+  it is the page for "how Gizmate shows up while you work," which is what
+  docking a resident with no ring slot and no gizmo _is_.
+  `SettingsSection.residentWithoutARingSlot` names the one id today; a future
+  resident of this same ring-slot-less kind joins it there, not a new page.
+  `DockPlacementParityTests` holds it, together with `dockableBuiltIns`
+  mapped to ring-action ids, against every id `DockCatalog.builtIns(host:)`
+  actually returns — the same shape as the gizmo-output parity test below,
+  generalized from a fixed enum to a live list because built-ins have no enum
+  to diff against.
 - **A placement control can be the only consent screen a background run
   gets.** A surface's script runs on pointer hover, not a press — the first
   trigger in Gizmate the user doesn't cause directly. Nothing new executes
@@ -247,6 +258,14 @@ share of users regardless of what looks right.
   works undocked, so its picker calls `nil` "Floating"; a surface has no
   working undocked state, so its picker calls the same `nil` "Off" rather
   than borrow a word that would say otherwise.
+- **The consent sentence says what's actually true of the resident, not the
+  sentence a neighbouring one happens to use.** The folder hub's picker also
+  calls `nil` "Off" — same invisible-until-docked reasoning as a surface's —
+  but its hint doesn't borrow the surface's wording about running and
+  approving. A surface executes a script on every hover; the folder hub reads
+  a folder with `FileManager` on every hover, which is not a thing a user
+  approves at all. Saying "nothing to run or approve" is the honest claim for
+  this resident specifically, not a shorter version of the gizmo's sentence.
 
 ## 12. Reuse before variants
 

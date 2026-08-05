@@ -198,4 +198,120 @@ final class DockPlacementParityTests: XCTestCase {
                 + "control in the editor, so it could never be docked"
         )
     }
+
+    /// The built-in half of the same gap: `DockCatalog.builtIns` is not built
+    /// from a fixed enum like `ToolOutput`, so there is no static "every
+    /// possible resident" list to diff against `dockableBuiltIns`. Comparing
+    /// the actual returned ids instead is what caught the folder hub, which
+    /// shipped in `DockCatalog.builtIns` a full review cycle before anything
+    /// in the interface could dock it — the exact shape `testEveryDockable-
+    /// GizmoOutputHasAPlacementControlInTheEditor` above catches for gizmos.
+    func testEveryBuiltInDockResidentHasAPlacementControlSomewhereInTheInterface() {
+        let suiteName = "DockPlacementParityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let host = StubBuiltInResidentsHost(builtInOverrides: BuiltInOverridesStore(defaults: defaults))
+
+        let residentIDs = Set(DockCatalog.builtIns(host: host).map(\.id))
+        // The two ways a resident's id can be reachable today: a ring action
+        // BuiltInEditor shows the picker for, or the one id General's own
+        // placement control names because it has no ring slot to route
+        // through instead.
+        let ringReachable = Set(DockCatalog.dockableBuiltIns.map { ToolRef.builtIn($0).storageID })
+        let unreachable = residentIDs
+            .subtracting(ringReachable)
+            .subtracting([SettingsSection.residentWithoutARingSlot])
+
+        XCTAssertTrue(
+            unreachable.isEmpty,
+            "DockCatalog.builtIns lists a resident — \(unreachable.sorted()) — with no "
+                + "placement control anywhere in the app: it names no RingActionID in "
+                + "DockCatalog.dockableBuiltIns, and SettingsSection.residentWithoutARingSlot "
+                + "doesn't cover it either"
+        )
+    }
+}
+
+/// The smallest `SettingsHost` `DockCatalog.builtIns` needs: it only reads
+/// `host.builtInOverrides` for each ring-action resident's display name and
+/// icon. Everything else is `fatalError` per the convention
+/// `DockCatalogSurfaceTests`'s own stub uses — a future test on this stub that
+/// needs one more member gets told exactly which, instead of a stub that
+/// silently returns a plausible-looking default.
+@MainActor
+private final class StubBuiltInResidentsHost: SettingsHost {
+    let builtInOverrides: BuiltInOverridesStore
+
+    init(builtInOverrides: BuiltInOverridesStore) {
+        self.builtInOverrides = builtInOverrides
+    }
+
+    func makeSettingsSnapshot() -> SettingsSnapshot { fatalError("unused by DockPlacementParityTests") }
+    func performSettingsIntent(_ intent: SettingsIntent) { fatalError("unused by DockPlacementParityTests") }
+    var usageStats: UsageStatsStore { fatalError("unused by DockPlacementParityTests") }
+    var snippets: SnippetsStore { fatalError("unused by DockPlacementParityTests") }
+    var notes: NotesStore { fatalError("unused by DockPlacementParityTests") }
+    var tools: ToolsStore { fatalError("unused by DockPlacementParityTests") }
+    var ringLayout: RingLayoutStore { fatalError("unused by DockPlacementParityTests") }
+    var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
+    var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
+    var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
+    func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func runTool(_ tool: GizmateTool, selection: String) { fatalError("unused by DockPlacementParityTests") }
+    func performBuiltIn(_ id: RingActionID) { fatalError("unused by DockPlacementParityTests") }
+    func presentMainWindow(section: MainWindowSection?) { fatalError("unused by DockPlacementParityTests") }
+    var uvIsReady: Bool { fatalError("unused by DockPlacementParityTests") }
+    func testScriptTool(
+        _ tool: GizmateTool,
+        script: String,
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async -> ToolTestState {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func generateScriptTool(
+        description: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
+    ) async -> Result<GeneratedTool, Error> {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func reviseScriptTool(
+        tool: GizmateTool,
+        script: String,
+        instruction: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
+    ) async -> Result<GeneratedTool, Error> {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func repairScriptTool(
+        tool: GizmateTool,
+        script: String,
+        failure: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
+    ) async -> Result<GeneratedTool, Error> {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func runCloudTest(for provider: CloudProvider) async -> CloudTestResult {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    var bootstrapState: BootstrapState { fatalError("unused by DockPlacementParityTests") }
+    func refreshBootstrap() { fatalError("unused by DockPlacementParityTests") }
+    var ollamaModels: [OllamaModelOption] { fatalError("unused by DockPlacementParityTests") }
+    var appVersionString: String { fatalError("unused by DockPlacementParityTests") }
+    var isAppBundle: Bool { fatalError("unused by DockPlacementParityTests") }
+    var availableUpdateVersion: String? { fatalError("unused by DockPlacementParityTests") }
+    func installAvailableUpdate() { fatalError("unused by DockPlacementParityTests") }
 }

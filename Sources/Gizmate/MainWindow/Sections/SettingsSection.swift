@@ -121,8 +121,55 @@ private struct GeneralTab: View {
                 }
             }
 
+            filesOnEdgeCard
         }
     }
+
+    /// The folder hub's placement control. It has no `RingActionID`, so it
+    /// never reaches `BuiltInEditor`'s "Panel" section the way Note, Explain,
+    /// Reply and Summarize do (`DockCatalog.dockableBuiltIns` only names ring
+    /// actions) — General is where a setting lands when it isn't tied to one
+    /// thing the ring can trigger, which describes this exactly.
+    ///
+    /// `unplacedLabel: "Off"` for the same reason a `.surface` gizmo's picker
+    /// uses it: the folder hub has no floating form. Undocked, it is saved
+    /// but draws nowhere, so calling that state "Floating" would claim a
+    /// working mode that doesn't exist.
+    private var filesOnEdgeCard: some View {
+        SubCard {
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Files")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                    Text("Puts a folder's files on a screen edge to drag out — off keeps it "
+                        + "saved but out of sight. It only reads the folder, so there's nothing "
+                        + "to run or approve; add and remove folders from its own panel once "
+                        + "it's docked.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                DockPlacementPicker(
+                    store: bridge.dock,
+                    itemID: SettingsSection.residentWithoutARingSlot,
+                    unplacedLabel: "Off"
+                )
+            }
+        }
+    }
+}
+
+extension SettingsSection {
+    /// The one built-in dock resident with no `RingActionID` to route its
+    /// placement control through `BuiltInEditor` — the folder hub (see
+    /// `DockCatalog.builtIns`'s doc comment on why it has none). `filesOnEdgeCard`
+    /// docks it directly by this id instead. `DockPlacementParityTests` checks
+    /// this, together with `DockCatalog.dockableBuiltIns` mapped to ring-action
+    /// ids, against every id `DockCatalog.builtIns(host:)` returns — a future
+    /// resident of this same ring-slot-less kind that lands without a matching
+    /// entry here fails a test instead of shipping unreachable.
+    static let residentWithoutARingSlot = ToolRef.folderHub.storageID
 }
 
 /// Free-text background about the user, appended to every prompt so answers
