@@ -1,12 +1,14 @@
-import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
 /// One card per screen edge, each listing its residents in tab order, plus
 /// every other resident that currently sits on none of them (deliberately
-/// "resident", not the wider "placeable" — see `unplaced`'s doc comment),
-/// plus everything placeable that is never a resident at all, plus the
-/// folder hub's own setup.
+/// "resident", not the wider "placeable" — see `unplaced`'s doc comment).
+/// `EdgesSection+PanelPlacement.swift` adds a list for everything placeable
+/// that is never a resident at all, and `EdgesSection+FolderHub.swift` adds
+/// the folder hub's own setup — both are `extension EdgesSectionContent`,
+/// this file's `struct`, split out purely because the three concerns don't
+/// need to see each other's internals and together ran past ~400 lines.
 ///
 /// This is now the one place placement is written. `BuiltInEditor`, `ToolEditor`
 /// and `SettingsSection`'s General tab each used to carry their own
@@ -38,7 +40,14 @@ struct EdgesSection: View {
 /// — `GizmateSettingsBridge` holds them but never forwards their own
 /// publishers, the same reason `NotesGrid` and `DockPlacementPicker` take
 /// their store as a parameter instead of reading it off the bridge.
-private struct EdgesSectionContent: View {
+///
+/// Not `private`: `EdgesSection+PanelPlacement.swift` and
+/// `EdgesSection+FolderHub.swift` both extend this type from a different
+/// file, which Swift's file-scoped `private` would make impossible to name.
+/// Everything on it stays `private` (file-scoped) except `cardHeading`,
+/// which both of those files also call — promoted no further than that one
+/// symbol needed.
+struct EdgesSectionContent: View {
     @ObservedObject var dock: DockStore
     // Neither is read by name below — `DockCatalog.all(host:)` reaches into
     // both through `host` itself. They're still held as `@ObservedObject`
@@ -69,9 +78,10 @@ private struct EdgesSectionContent: View {
     /// `.replace`/`.notify`/`.notes`/`.speak`/`.annotate` gizmo that, once
     /// placed, draws nothing anywhere. `EdgesSection.offeredIDs` (below) is
     /// the same expression, exposed so a parity test can hold it against the
-    /// live catalog directly. `panelPlaceables` below is where a `.panel`
-    /// gizmo and a panel-only built-in get their picker instead — they are
-    /// placeable but never resident, so they don't belong in this list.
+    /// live catalog directly. `EdgesSection+PanelPlacement.swift`'s list is
+    /// where a `.panel` gizmo and a panel-only built-in get their picker
+    /// instead — they are placeable but never resident, so they don't
+    /// belong in this list.
     private var unplaced: [DockItem] {
         let placed = Set(DockEdge.allCases.flatMap { dock.items(on: $0) })
         let residents = residents
@@ -247,178 +257,18 @@ private struct EdgesSectionContent: View {
         .padding(.vertical, 9)
     }
 
-    // MARK: - Panel placement
-
-    /// Ring actions whose result panel can dock but that are never resident —
-    /// every `dockableBuiltIns` action except `saveNote`, which already has a
-    /// resident row above (Note's surface and Note's panel are the same
-    /// placement, one id). None of the three ever draws anything before it
-    /// runs, so DESIGN.md §11's rule that a result panel is not a resident
-    /// applies to all three — they can only ever be a picker, never a card row.
-    private var panelOnlyBuiltIns: [PanelPlaceable] {
-        DockCatalog.dockableBuiltIns
-            .filter { !DockCatalog.residentBuiltIns.contains($0) }
-            .map { action in
-                PanelPlaceable(
-                    id: ToolRef.builtIn(action).storageID,
-                    title: overrides.displayName(for: action),
-                    icon: overrides.icon(for: action)
-                )
-            }
-    }
-
-    /// The other half of `ToolEditorPanel.outputsWithPlacementControl` —
-    /// `.surface` gizmos are already covered by `residents`/`unplaced` above,
-    /// so this is `.panel` alone: a gizmo whose result opens somewhere but
-    /// draws nothing while idle.
-    private var panelOnlyGizmos: [PanelPlaceable] {
-        tools.usableTools()
-            .filter { $0.output == .panel }
-            .map { tool in
-                PanelPlaceable(
-                    id: ToolRef.generated(tool.id).storageID,
-                    title: tool.name,
-                    icon: .symbol(tool.resolvedSymbolName)
-                )
-            }
-    }
-
-    private var panelPlaceables: [PanelPlaceable] {
-        (panelOnlyBuiltIns + panelOnlyGizmos)
-            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-    }
-
-    private var panelPlacementCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cardHeading("Panel placement")
-            Text("These don't wait on the edge — they still run from the Ring. Choosing an "
-                + "edge here only changes where the answer opens, instead of floating at the cursor.")
-                .font(.system(size: 12))
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            let rows = panelPlaceables
-            if rows.isEmpty {
-                SubCard {
-                    Text("Nothing placeable here yet.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            } else {
-                SubCard {
-                    VStack(spacing: 2) {
-                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, ref in
-                            if index > 0 { Divider().background(FlowTheme.hairline) }
-                            panelPlaceableRow(ref)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func panelPlaceableRow(_ ref: PanelPlaceable) -> some View {
-        HStack(spacing: 10) {
-            Image(nsImage: ref.icon.image(pointSize: 15))
-                .renderingMode(.template)
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .frame(width: 18)
-            Text(ref.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(FlowTheme.ink)
-            Spacer(minLength: 12)
-            DockPlacementPicker(store: dock, itemID: ref.id)
-        }
-        .padding(.vertical, 9)
-    }
-
-    // MARK: - Folder hub setup
-
-    /// The folder hub's own configuration — which folders it offers — folded
-    /// in here rather than left reachable only after docking it and opening
-    /// its panel, which was discovery by accident. `FolderHubView`'s chips
-    /// and `+` stay exactly where they are for use once it's docked; this is
-    /// a second, independent view onto the same `FolderHubStore` so setup
-    /// doesn't require placing it on an edge first. Not shared code with
-    /// `FolderHubView`: that view's chips also select which folder its own
-    /// preview grid shows, a behavior this list has no use for — see
-    /// DESIGN.md §12 on making a real difference a parameter rather than
-    /// forcing one shape to do two jobs.
-    private var folderHubSetupCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            cardHeading("Files' folders")
-            SubCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Which folders the Files edge shows.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                    HStack(spacing: 8) {
-                        if !folderHub.folders.isEmpty { folderChips }
-                        Spacer(minLength: 0)
-                        ResetDiscButton(symbol: "plus", label: "", accessibilityTitle: "Add folder") {
-                            addFolder()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var folderChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(folderHub.folders, id: \.path) { folder in
-                    folderChip(folder)
-                }
-            }
-            .padding(.horizontal, 1)
-        }
-        .frame(height: 24)
-    }
-
-    private func folderChip(_ folder: URL) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "folder").font(.system(size: 9))
-            Text(folder.lastPathComponent).font(.system(size: 11, weight: .medium))
-        }
-        .foregroundStyle(FlowTheme.inkSecondary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(FlowTheme.subtleFill))
-        // Native, no new UI to design — the same way `FolderHubView`'s own
-        // chip has no remove button of its own.
-        .contextMenu {
-            Button("Remove", role: .destructive) { folderHub.remove(folder) }
-        }
-    }
-
-    private func addFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add"
-        panel.message = "Choose a folder to show on the edge."
-        guard panel.runModal() == .OK, let picked = panel.url else { return }
-        folderHub.add(picked)
-    }
-
-    private func cardHeading(_ text: String) -> some View {
+    /// Uppercase, kerned section label shared by every card on this page —
+    /// including the two `extension EdgesSectionContent` blocks in
+    /// `EdgesSection+PanelPlacement.swift` and `EdgesSection+FolderHub.swift`,
+    /// which is the one reason this is `internal` rather than `private` like
+    /// everything else declared in this file.
+    func cardHeading(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(FlowTheme.inkSecondary)
             .textCase(.uppercase)
             .kerning(0.6)
     }
-}
-
-/// Title and icon for something whose result panel can dock but that is
-/// never a resident — enough to draw a row, unlike `DockItem` which also
-/// carries a view this list never instantiates. See `panelPlaceables`.
-private struct PanelPlaceable: Identifiable {
-    let id: String
-    let title: String
-    let icon: RingIconKind
 }
 
 extension EdgesSection {
@@ -453,10 +303,11 @@ extension EdgesSection {
     /// `placement[edge]` array — what `dock.items(on:)` returns — and that is
     /// not the same array a card renders. `edgeCard` only draws ids that
     /// resolve to a resident `DockItem`; a built-in like Explain can be
-    /// docked (its picker lives in `panelPlaceables` now) with nothing to
-    /// show while idle, so it sits in the raw list without a row. Indexing
-    /// into the rendered list and handing that number to `move` names the
-    /// wrong slot whenever such an id sits before the drop target —
+    /// docked (its picker lives in `EdgesSection+PanelPlacement.swift` now)
+    /// with nothing to show while idle, so it sits in the raw list without a
+    /// row. Indexing into the rendered list and handing that number to
+    /// `move` names the wrong slot whenever such an id sits before the
+    /// drop target —
     /// silently, since a bad-but-in-bounds index just lands somewhere else in
     /// the raw list rather than failing. Resolving `targetID`'s own position
     /// in the raw list, fresh at drop time, is what keeps the two in the same

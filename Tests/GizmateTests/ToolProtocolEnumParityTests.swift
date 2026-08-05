@@ -262,6 +262,64 @@ final class DockPlacementParityTests: XCTestCase {
         )
         XCTAssertEqual(EdgesSection.offeredIDs(host: host), DockCatalog.knownIDs(host: host))
     }
+
+    /// The third occurrence of the shape the class header names: `.surface`
+    /// gizmos reached `DockCatalog.gizmos` with no editor control once, the
+    /// folder hub reached `DockCatalog.builtIns` with no editor control hours
+    /// later, and now `.panel` gizmos and the three non-resident ring actions
+    /// (Explain, Reply, Summarize) have a control — `BuiltInEditor`'s and
+    /// `ToolEditorPanel`'s locality pointers both say "Change it in Edges" —
+    /// with nothing pinning that Edges' "Panel placement" list actually lists
+    /// them. `EdgesSection.panelPlaceableIDs` is two hand-written filters
+    /// (`Sources/Gizmate/MainWindow/Sections/EdgesSection+PanelPlacement.swift`);
+    /// nothing fails today if either one drifts from the sets the two editors
+    /// are actually gated on.
+    ///
+    /// Built against the live sets — `DockCatalog.dockableBuiltIns`/
+    /// `residentBuiltIns` for the built-in half, `ToolEditorPanel.outputsWithPlacementControl`
+    /// minus `DockCatalog.dockableGizmoOutputs` for the gizmo half — rather
+    /// than a literal `[.explain, .reply, .summarize]` or `.panel`, so a
+    /// future change to any of those four sets is what this test actually
+    /// tracks, not a snapshot of today's values.
+    func testEveryPanelOnlyPlaceableTheEditorsPointAtIsOfferedInEdges() {
+        let suiteName = "DockPlacementParityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let host = StubEdgesUnplacedHost(builtInOverrides: BuiltInOverridesStore(defaults: defaults))
+
+        // Seeded so the gizmo half of `editorsPointAt` below isn't vacuously
+        // empty — the built-in half (Explain/Reply/Summarize) can never be
+        // empty on its own, since it's driven by the fixed `dockableBuiltIns`/
+        // `residentBuiltIns` arrays rather than anything this stub seeds, so
+        // without this the test could still pass while checking nothing about
+        // gizmos at all.
+        let panelGizmo = GizmateTool(name: "Panel Gizmo", kind: .python, input: .selection, output: .panel)
+        _ = host.tools.save(panelGizmo)
+        XCTAssertTrue(
+            host.tools.usableTools().contains { $0.output == .panel },
+            "this stub's whole point is a seeded, usable .panel gizmo — without one the "
+                + "assertion below would pass by comparing two sets that are each missing "
+                + "the half this test means to check"
+        )
+
+        let nonResidentBuiltIns = DockCatalog.dockableBuiltIns
+            .filter { !DockCatalog.residentBuiltIns.contains($0) }
+            .map { ToolRef.builtIn($0).storageID }
+        let gizmoOnlyOutputs = ToolEditorPanel.outputsWithPlacementControl
+            .subtracting(DockCatalog.dockableGizmoOutputs)
+        let panelOnlyGizmos = host.tools.usableTools()
+            .filter { gizmoOnlyOutputs.contains($0.output) }
+            .map { ToolRef.generated($0.id).storageID }
+        let editorsPointAt = Set(nonResidentBuiltIns).union(panelOnlyGizmos)
+
+        let unoffered = editorsPointAt.subtracting(EdgesSection.panelPlaceableIDs(host: host))
+        XCTAssertTrue(
+            unoffered.isEmpty,
+            "BuiltInEditor or ToolEditorPanel points a user at Edges for — "
+                + "\(unoffered.sorted()) — but EdgesSection's \"Panel placement\" list "
+                + "doesn't offer a picker for it"
+        )
+    }
 }
 
 /// The smallest `SettingsHost` `DockCatalog.builtIns` needs: it only reads
