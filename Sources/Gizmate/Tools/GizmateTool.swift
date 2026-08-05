@@ -322,7 +322,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     // Both default to off, and both are ignored by `.python` and `.native`,
     // which have no model in the loop to hand context to.
 
-    /// Hands the gizmo the user's Voice settings — writing register, cleanup
+    /// Hands the gizmo the user's Voice settings — writing register,
     /// level, dictionary and snippets. Off by default because a gizmo's own
     /// prompt is authoritative: layering a register directive over "turn this
     /// into JSON" corrupts the output rather than styling it.

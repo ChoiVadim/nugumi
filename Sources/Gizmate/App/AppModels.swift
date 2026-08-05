@@ -31,7 +31,6 @@ enum MenuItemTag: Int {
     case selectionDisplayMode = 115
     case usageStatsSummary = 116
     case writingStyle = 117
-    case cleanupLevel = 118
     case snippets = 119
     case keyboardShortcuts = 121
     case translateOrReplySelection = 122

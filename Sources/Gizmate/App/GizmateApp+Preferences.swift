@@ -142,16 +142,6 @@ extension GizmateApp {
             askGizmateThinkingLevel = level
         }
     }
-    var cleanupLevel: CleanupLevel {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "cleanupLevel") ?? CleanupLevel.light.rawValue
-            return CleanupLevel(rawValue: raw) ?? .light
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: "cleanupLevel")
-        }
-    }
-
     /// The user's email voice sample — a typical email they write, used as a
     /// style reference for the `email` category only. Empty by default. Treated
     /// as personal content (like Snippets), so it survives a settings reset.

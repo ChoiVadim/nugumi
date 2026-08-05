@@ -249,7 +249,6 @@ enum TextNormalizer {
 
 struct CompositionSettings: Equatable {
     let style: WritingStyle
-    let cleanup: CleanupLevel
     let snippets: [Snippet]
     /// The user's saved email voice sample — a representative email whose
     /// greeting, rhythm, and sign-off the model mirrors. Only populated for the

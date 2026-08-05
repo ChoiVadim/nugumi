@@ -306,7 +306,6 @@ extension GizmateApp {
             : ""
         return CompositionSettings(
             style: writingStyle(for: appCategory),
-            cleanup: cleanupLevel,
             snippets: snippetsStore.usableSnippets(),
             voiceSample: voiceSample.isEmpty ? nil : voiceSample
         )

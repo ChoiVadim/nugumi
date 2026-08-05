@@ -10,7 +10,7 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     private let language = TranslationLanguage.language(id: "en")   // promptName "English"
 
     private static let tokenNames = [
-        "language", "writingStyle", "genZ", "voice", "cleanup", "glossary",
+        "language", "writingStyle", "genZ", "voice", "glossary",
     ]
 
     /// Every token-bearing block is deliberately non-empty, so a dropped token
@@ -19,7 +19,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     private var composition: CompositionSettings {
         CompositionSettings(
             style: .casual,
-            cleanup: .light,
             snippets: [],
             voiceSample: "Hi there,\n\nThanks!\n\nVadim"
         )
@@ -68,7 +67,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     func testDraftMessageCarriesEveryCompositionBlock() {
         let output = rendered(.draftMessage)
         XCTAssertTrue(output.contains("Writing style — "))
-        XCTAssertTrue(output.contains("Cleanup — "))
         XCTAssertTrue(output.contains("Voice sample — "))
     }
 
@@ -94,7 +92,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     func testSmartReplyCarriesEveryCompositionBlock() {
         let output = rendered(.smartReply)
         XCTAssertTrue(output.contains("Writing style — "))
-        XCTAssertTrue(output.contains("Cleanup — "))
         XCTAssertTrue(output.contains("Voice sample — "))
     }
 

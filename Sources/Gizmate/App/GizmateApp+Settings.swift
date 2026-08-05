@@ -51,7 +51,8 @@ extension GizmateApp {
             ModelUseScope.askGizmate.thinkingDefaultsKey,
             "selectedOllamaModel",
             "thinkingLevel",
-            "cleanupLevel",
+            "cleanupLevel",              // retired Auto Cleanup; cleared so a reset
+                                        // still sweeps it off old installs
             "genZMode",                         // retired global toggle; cleared so a
                                                 // reset still sweeps it off old installs
             "replacementMode",
@@ -174,7 +175,6 @@ extension GizmateApp: SettingsHost {
             writingToggleAlternate: writingToggleAlternate,
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
-            cleanupLevel: cleanupLevel,
             emailVoiceSample: emailVoiceSample,
             invisibilityEnabled: invisibilityModeEnabled,
             launchAtLogin: isRunningFromAppBundle && LaunchAtLogin.isEnabled,
@@ -285,9 +285,6 @@ extension GizmateApp: SettingsHost {
         case .setSelectionDisplayMode(let mode):
             selectionDisplayMode = mode
             applySelectionDisplayMode()
-        case .setCleanupLevel(let level):
-            cleanupLevel = level
-            updateMenuState()
         case .setLaunchAtLogin(let enabled):
             guard isRunningFromAppBundle else { break }
             LaunchAtLogin.set(enabled)

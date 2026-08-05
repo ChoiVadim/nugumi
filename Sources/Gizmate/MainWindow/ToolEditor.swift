@@ -1021,7 +1021,7 @@ struct ToolEditorPanel: View {
         VStack(alignment: .leading, spacing: 18) {
             SettingRow(
                 "Use my Voice",
-                subtitle: "Writes in your register, with your cleanup level, dictionary, and snippets."
+                subtitle: "Writes in your register, with your dictionary and snippets."
             ) {
                 Toggle("", isOn: $draft.usesVoice)
                     .labelsHidden()

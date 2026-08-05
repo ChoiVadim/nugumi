@@ -91,7 +91,7 @@ enum TranslationMode: Equatable {
         case .custom(let tool):
             // The user's own prompt is authoritative, so composition stays off
             // unless they ticked "Use my Voice" on this gizmo — layering the
-            // writing style, cleanup, and glossary directives over "turn this
+            // writing style and glossary directives over "turn this
             // into JSON" would fight it.
             return tool.usesVoice
         }
@@ -180,7 +180,7 @@ enum TranslationMode: Equatable {
 
         Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
 
-        Writing style — {writingStyle}{voice}{cleanup}{glossary}
+        Writing style — {writingStyle}{voice}{glossary}
 
         Return only the final {language} message, with no commentary, labels, alternatives, quotes, or explanations.
         """
@@ -194,9 +194,7 @@ enum TranslationMode: Equatable {
 
         If it is an open question: give a clear, direct answer. Keep it short unless the question demands depth.
 
-        Writing style — {writingStyle}{voice}
-
-        Cleanup — {cleanup}{glossary}
+        Writing style — {writingStyle}{voice}{glossary}
 
         Return only the reply or answer text. No commentary, no labels, no preface, no explanation of what you're doing, no quotes around the answer.
         """
@@ -300,11 +298,9 @@ enum TranslationMode: Equatable {
         return result + rest
     }
 
-    /// Built per mode, not once globally: `.draftMessage` splices
-    /// `cleanupSection(for:)`, which emits its own "Cleanup — " heading, while
-    /// `.smartReply` has that heading written into the prompt and splices only
-    /// `cleanup.promptDescription`. Same concept, different spelling — keeping
-    /// the maps separate is what makes both byte-identical to what shipped.
+    /// Built per mode rather than once globally: no two of the four editable
+    /// built-ins carry the same set of tokens, and a mode is handed only the
+    /// keys its own template names.
     private func promptTokens(
         targetLanguage: TranslationLanguage,
         composition: CompositionSettings?
@@ -325,7 +321,6 @@ enum TranslationMode: Equatable {
         case .draftMessage:
             tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
             tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
-            tokens["cleanup"] = Self.cleanupSection(for: composition?.cleanup)
             tokens["glossary"] = Self.glossarySection(
                 for: composition?.snippets ?? [],
                 includeSnippets: true
@@ -333,7 +328,6 @@ enum TranslationMode: Equatable {
         case .smartReply:
             tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
             tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
-            tokens["cleanup"] = composition?.cleanup.promptDescription ?? ""
             tokens["glossary"] = Self.glossarySection(
                 for: composition?.snippets ?? [],
                 includeSnippets: true
@@ -472,7 +466,7 @@ enum TranslationMode: Equatable {
 
     /// The context blocks a built-in's editor toggles bring in, for the parts
     /// its template does not already carry. Rewrite and Reply splice the Voice
-    /// through `{writingStyle}` / `{cleanup}` / `{glossary}` — a nil
+    /// through `{writingStyle}` / `{glossary}` — a nil
     /// composition is how "off" reaches them — so only Explain needs the block
     /// appended. Gen Z is left out of it: that built-in's template splices the
     /// only piece of the Voice it wants through `{glossary}`. No shipped
@@ -485,7 +479,6 @@ enum TranslationMode: Equatable {
         if self == .selection, usesVoiceContext, let composition {
             sections += "\n\nWriting style — "
                 + composition.writingStyleDirective(for: targetLanguage.id)
-                + Self.cleanupSection(for: composition.cleanup)
                 + Self.glossarySection(for: composition.snippets, includeSnippets: true)
         }
         if usesNotesContext {
@@ -495,7 +488,7 @@ enum TranslationMode: Equatable {
     }
 
     /// The context blocks a user gizmo opted into: the user's Voice (register,
-    /// cleanup, dictionary, snippets) and their ticked notes.
+    /// dictionary, snippets) and their ticked notes.
     ///
     /// Shared with `.agent` gizmos, which never pass through a `TranslationMode`
     /// at all — `AgentToolRunner` gets its instruction assembled by the caller
@@ -511,7 +504,6 @@ enum TranslationMode: Equatable {
         if tool.usesVoice, let composition {
             sections += "\n\nWriting style — "
                 + composition.writingStyleDirective(for: targetLanguage.id)
-                + cleanupSection(for: composition.cleanup)
                 + glossarySection(for: composition.snippets, includeSnippets: true)
         }
         if tool.usesNotes {
@@ -546,14 +538,6 @@ enum TranslationMode: Equatable {
         }
 
         return "\n\n" + sections.joined(separator: "\n\n")
-    }
-
-    /// Cleanup/polish instruction block. Empty string for `.none` (and nil), so
-    /// "no cleanup" injects no prompt at all and the writing style stays the only
-    /// authority — cleanup is a polish axis, orthogonal to register.
-    private static func cleanupSection(for level: CleanupLevel?) -> String {
-        guard let level, level != .none else { return "" }
-        return "\n\nCleanup — \(level.promptDescription)"
     }
 
     /// The user's email voice sample as a template block. Empty string when
@@ -706,34 +690,6 @@ extension AppCategory {
     }
 }
 
-enum CleanupLevel: String, CaseIterable, Codable {
-    case none
-    case light
-    case medium
-    case high
-
-    var displayName: String {
-        switch self {
-        case .none: return "None"
-        case .light: return "Light"
-        case .medium: return "Medium"
-        case .high: return "High"
-        }
-    }
-
-    var promptDescription: String {
-        switch self {
-        case .none:
-            return "do not polish wording — preserve the source phrasing as faithfully as the target language allows."
-        case .light:
-            return "fix obvious typos, grammar errors, OCR/line-break artifacts. Do not rewrite for style."
-        case .medium:
-            return "edit lightly for clarity and flow — fix typos and awkward phrasing, but do not rephrase aggressively."
-        case .high:
-            return "polish thoroughly for brevity and clarity. Tighten verbose sentences, drop filler words, keep meaning intact."
-        }
-    }
-}
 
 /// The body of the Gen Z built-in's prompt (`TranslationMode.genZ`), spliced in
 /// as its `{genZ}` token. The language-neutral `coreGuidance` always leads — its
