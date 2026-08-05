@@ -181,4 +181,66 @@ final class DockStoreTests: XCTestCase {
         XCTAssertEqual(loaded.items(on: .right), ["weather"])
         XCTAssertNil(loaded.edge(of: "notes"))
     }
+
+    // MARK: - Reordering
+
+    private func scratchDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "DockStoreTests.\(UUID().uuidString)")!
+    }
+
+    @MainActor
+    func testMoveInsertsAtTheRequestedIndex() {
+        let store = DockStore(defaults: scratchDefaults())
+        store.dock("a", to: .right)
+        store.dock("b", to: .right)
+        store.move("c", to: .right, at: 1)
+        XCTAssertEqual(store.items(on: .right), ["a", "c", "b"])
+    }
+
+    /// The case remove-then-insert gets wrong: every index after the removed one
+    /// shifts down, so a naive implementation lands one short.
+    @MainActor
+    func testMovingAnItemForwardWithinItsOwnEdgeLandsWhereAsked() {
+        let store = DockStore(defaults: scratchDefaults())
+        ["a", "b", "c"].forEach { store.dock($0, to: .right) }
+        store.move("a", to: .right, at: 2)
+        XCTAssertEqual(store.items(on: .right), ["b", "c", "a"])
+    }
+
+    @MainActor
+    func testMovingAnItemBackwardWithinItsOwnEdgeLandsWhereAsked() {
+        let store = DockStore(defaults: scratchDefaults())
+        ["a", "b", "c"].forEach { store.dock($0, to: .right) }
+        store.move("c", to: .right, at: 0)
+        XCTAssertEqual(store.items(on: .right), ["c", "a", "b"])
+    }
+
+    @MainActor
+    func testMovingBetweenEdgesLeavesTheOldOne() {
+        let store = DockStore(defaults: scratchDefaults())
+        store.dock("a", to: .left)
+        store.dock("b", to: .right)
+        store.move("a", to: .right, at: 0)
+        XCTAssertEqual(store.items(on: .left), [])
+        XCTAssertEqual(store.items(on: .right), ["a", "b"])
+    }
+
+    /// An index past the end is a drop below the last row, which is a normal
+    /// gesture, not a programming error.
+    @MainActor
+    func testAnIndexPastTheEndAppends() {
+        let store = DockStore(defaults: scratchDefaults())
+        store.dock("a", to: .right)
+        store.move("b", to: .right, at: 99)
+        XCTAssertEqual(store.items(on: .right), ["a", "b"])
+    }
+
+    @MainActor
+    func testMoveSurvivesAReload() {
+        let defaults = scratchDefaults()
+        let store = DockStore(defaults: defaults)
+        ["a", "b"].forEach { store.dock($0, to: .top) }
+        store.move("b", to: .top, at: 0)
+        XCTAssertEqual(DockStore(defaults: defaults).items(on: .top), ["b", "a"])
+    }
 }

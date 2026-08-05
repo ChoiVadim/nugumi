@@ -69,6 +69,28 @@ final class DockStore: ObservableObject {
         onChange?()
     }
 
+    /// Moves `id` to `edge`, landing at `index` in the tab order there.
+    ///
+    /// Removes it from everywhere first, same as `dock(_:to:)`. That removal
+    /// is exactly what makes moving an item within its own edge awkward:
+    /// once the item is gone, every id after its old position has shifted
+    /// down by one, so the index the caller asked for (measured against the
+    /// list *before* removal) can be one too high. Clamping happens against
+    /// the post-removal count, not before it, so a drag from position 0 to
+    /// position 2 actually lands at 2 instead of 1.
+    func move(_ id: String, to edge: DockEdge, at index: Int) {
+        for existing in DockEdge.allCases {
+            placement[existing]?.removeAll { $0 == id }
+            if placement[existing]?.isEmpty == true { placement[existing] = nil }
+        }
+        var ids = placement[edge] ?? []
+        let clamped = min(max(index, 0), ids.count)
+        ids.insert(id, at: clamped)
+        placement[edge] = ids
+        save()
+        onChange?()
+    }
+
     /// Drops ids nothing resolves any more — a gizmo the user deleted after
     /// docking it. Silent on purpose: the item is gone, and a tab that opens
     /// nothing is worse than a tab that quietly went with it.
