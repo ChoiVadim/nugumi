@@ -221,6 +221,14 @@ share of users regardless of what looks right.
   currently is, not from where it opened, so a side dock dragged halfway to its
   bezel by hand carries on in that same direction rather than snapping back to
   finish the trip.
+- **A frame animation is for one object resizing, not for one object becoming
+  another.** Switching between two expanded panels morphs: same panel, new
+  contents, and the tab you clicked stays on screen the whole way. The tab
+  strip is a different object — it is the trigger, not a small version of the
+  panel — so clicking it makes it vanish at once and the panel arrives out of
+  the bezel exactly as it does from hidden. Morphing the two instead stretched
+  a 40pt tab into a 380pt panel, dragging the glass the whole distance and
+  laying out squashed content at every frame of the trip.
 
 ## 11. Dock behaviour
 

@@ -333,9 +333,18 @@ final class EdgeDockController {
                 width: edge == .top ? 620 : 380,
                 height: (edge == .top ? 300 : 520) + topContentInset
             )
+            // Only a panel already expanded morphs into the next one — that is
+            // one object resizing, and it keeps the tab you clicked on screen
+            // throughout. Coming from the strip is not that: a 40pt tab
+            // stretching into a 380pt panel drags the glass across the whole
+            // trip and lays out squashed content at every frame of it. The tab
+            // is a trigger, so it leaves the instant it is pressed, and the
+            // panel arrives out of the bezel exactly as it does from hidden.
+            var morph = false
+            if case .expanded = state { morph = wasVisible }
             present(
                 frame: DockGeometry.expandedFrame(edge, contentSize: size, on: screen),
-                animateFrame: wasVisible
+                animateFrame: morph
             )
             state = .expanded(itemID: item.id)
             installDismissMonitors()
