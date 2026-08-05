@@ -69,6 +69,31 @@ final class SurfaceGridRenderingTests: XCTestCase {
         XCTAssertGreaterThan(document.height, 0)
     }
 
+    /// A cell's size is the grid's, not its content's: the same rows with
+    /// names long enough to wrap to two lines must occupy exactly the same
+    /// height. The folder hub shipped the opposite — one card per row of the
+    /// grid grew to fit its filename and left its neighbours short — and the
+    /// document's own height is the cheapest place that difference shows,
+    /// since a card is SwiftUI-internal and has no `NSView` to measure.
+    func testCardHeightDoesNotDependOnHowLongTheNameIs() {
+        let layout = ToolAgentLayoutV1.grid(
+            cell: .card(title: .key("name"), subtitle: .key("size"), icon: nil, drag: nil, tap: nil),
+            minimumWidth: 96,
+            empty: "Nothing here yet."
+        )
+        let panel = NSSize(width: 620, height: 300)
+
+        func height(names: (Int) -> String) -> CGFloat {
+            let rows = (0..<12).map { SurfaceRow(id: "\($0)", values: ["name": names($0), "size": "1 KB"]) }
+            return renderedScrollDocument(for: SurfaceView(layout: layout, rows: rows, stale: nil), panelSize: panel).height
+        }
+
+        let short = height { "f\($0).txt" }
+        let wrapping = height { "a-considerably-longer-file-name-\($0).txt" }
+
+        XCTAssertEqual(short, wrapping, accuracy: 0.5, "card height tracked the title's line count instead of the grid's cell size")
+    }
+
     // MARK: - Harness
 
     /// Reproduces `EdgeDockController.install`'s exact wiring: the content

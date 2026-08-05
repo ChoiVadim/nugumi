@@ -16,6 +16,11 @@ struct SurfaceCard: View {
     let drag: ToolAgentLayoutDragV1?
     let tap: ToolAgentLayoutTapV1?
     let row: SurfaceRow
+    /// The exact height every cell of a grid takes, so a two-line name can't
+    /// make one card taller than its neighbours — `SurfaceGrid` passes its own
+    /// column width here, which is what makes a cell square. `nil` in a list,
+    /// where a row is as tall as its own content and always was.
+    var height: CGFloat? = nil
 
     private var resolvedTitle: String { SurfaceBinding.resolve(title, in: row) }
 
@@ -59,6 +64,10 @@ struct SurfaceCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity)
+        // `nil` is a no-op for `frame(height:)`, so the list path below reads
+        // exactly as it did before this existed. Content stays centred in the
+        // square — top-aligning it would leave a short card mostly empty.
+        .frame(height: height)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(FlowTheme.subtleFill)

@@ -163,7 +163,11 @@ private struct SurfaceGrid: View {
             ForEach(Array(chunkedRows.enumerated()), id: \.offset) { _, rowChunk in
                 HStack(alignment: .top, spacing: Self.spacing) {
                     ForEach(rowChunk, id: \.id) { row in
-                        SurfaceLeafView(node: cell, row: row)
+                        // Square: the height a cell gets is the width it was
+                        // already given. Every card in the grid is then the
+                        // same size whatever its name wraps to, which is the
+                        // one thing a grid of files has to look like.
+                        SurfaceLeafView(node: cell, row: row, height: columnWidth)
                             .frame(width: columnWidth, alignment: .topLeading)
                     }
                 }
@@ -183,11 +187,14 @@ private struct SurfaceGrid: View {
 private struct SurfaceLeafView: View {
     let node: ToolAgentLayoutV1
     let row: SurfaceRow
+    /// Passed straight to `SurfaceCard` — a grid fixes it so its cells match,
+    /// a list leaves it `nil`. See that property's own comment.
+    var height: CGFloat? = nil
 
     var body: some View {
         switch node {
         case let .card(title, subtitle, icon, drag, tap):
-            SurfaceCard(title: title, subtitle: subtitle, icon: icon, drag: drag, tap: tap, row: row)
+            SurfaceCard(title: title, subtitle: subtitle, icon: icon, drag: drag, tap: tap, row: row, height: height)
 
         case let .text(binding):
             Text(SurfaceBinding.resolve(binding, in: row))
