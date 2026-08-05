@@ -436,6 +436,22 @@ Inside that fixed cell:
   and the extension is the one thing a preview genuinely cannot tell you: a
   video's thumbnail is a still frame and reads as a photo.
 
+- **A selectable card gives its whole mouse to AppKit, or none of it.**
+  Dragging more than one file has no SwiftUI expression — `.onDrag` returns one
+  `NSItemProvider`, and one provider is one item however many representations
+  it registers — so a multi-file drag is `beginDraggingSession` with an
+  `NSDraggingItem` each. The AppKit view that catches the drag catches the
+  clicks with it, which is why selection and double-click moved there too
+  rather than stay as SwiftUI gestures that would never fire underneath it. A
+  host opts in by installing a `SurfaceSelection`; every gizmo surface installs
+  none and keeps the `.onDrag`/`.onTapGesture` pair it always had. Selection is
+  drawn as a lit fill (`FlowTheme.accentSoft`), never a border: at 110pt a
+  border reads as a second card edge. The session offers `.copy` and `.link`
+  and never `.move` — deleting the user's file because a drop target preferred
+  it is not a shelf's call to make. Dragging a card outside the selection
+  drags it alone and makes it the selection, Finder's rule, so a selection
+  made three folders ago can't ride along with the file under the pointer.
+
 Metadata competes with the preview for the same two lines, so a shelf shows
 neither by default — the folder hub dropped its size line to buy the preview
 53pt instead of 34pt in a ~110pt cell. A surface gizmo that has something to

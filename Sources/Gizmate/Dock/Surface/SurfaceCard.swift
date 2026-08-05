@@ -22,6 +22,13 @@ struct SurfaceCard: View {
     /// where a row is as tall as its own content and always was.
     var height: CGFloat? = nil
 
+    /// Only a host that installed a `SurfaceSelection` has selected cards to
+    /// draw; for every gizmo surface this stays `nil` and the card looks and
+    /// behaves exactly as it did before selection existed.
+    @Environment(\.surfaceSelection) private var selection
+
+    private var isSelected: Bool { selection?.ids.contains(row.id) == true }
+
     private var resolvedTitle: String { SurfaceBinding.resolve(title, in: row) }
 
     /// `nil` both when the layout never asked for a subtitle and when the key
@@ -86,11 +93,13 @@ struct SurfaceCard: View {
         .frame(height: height)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(FlowTheme.subtleFill)
+                // Selection is a lit fill, not a border: a border on a square
+                // that already sits on a hairline-free glass panel reads as a
+                // second card edge, and at 110pt there is no room for both.
+                .fill(isSelected ? FlowTheme.accentSoft : FlowTheme.subtleFill)
         )
         .contentShape(Rectangle())
-        .modifier(SurfaceCardDragModifier(drag: drag, row: row))
-        .modifier(SurfaceCardTapModifier(tap: tap, row: row))
+        .modifier(SurfaceCardInteractionModifier(drag: drag, tap: tap, row: row))
     }
 
     /// Whether `iconView` will draw anything for this icon against this row
@@ -182,6 +191,31 @@ struct SurfaceCard: View {
             // live and drops an empty string.
             guard let text = path(for: key, in: row) else { return NSItemProvider() }
             return NSItemProvider(object: text as NSString)
+        }
+    }
+}
+
+/// Decides who owns a card's mouse, and is the only place that decision is
+/// made: a host that installed a `SurfaceSelection` takes all of it — one
+/// AppKit view over the card doing selection, activation and a multi-file drag
+/// — because an overlay that has to catch a drag catches the clicks too, and a
+/// SwiftUI gesture underneath it would simply never fire. Everything else
+/// keeps the SwiftUI pair it always had.
+private struct SurfaceCardInteractionModifier: ViewModifier {
+    let drag: ToolAgentLayoutDragV1?
+    let tap: ToolAgentLayoutTapV1?
+    let row: SurfaceRow
+    @Environment(\.surfaceSelection) private var selection
+    @Environment(\.surfaceActivate) private var activate
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let selection {
+            content.overlay(SurfaceCardMouse(row: row, selection: selection, activate: activate))
+        } else {
+            content
+                .modifier(SurfaceCardDragModifier(drag: drag, row: row))
+                .modifier(SurfaceCardTapModifier(tap: tap, row: row))
         }
     }
 }

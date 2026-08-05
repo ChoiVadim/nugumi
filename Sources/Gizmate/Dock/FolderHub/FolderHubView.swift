@@ -25,6 +25,10 @@ struct FolderHubView: View {
     @State private var rows: [SurfaceRow]
     /// The chip the pointer is over, by path — what reveals its remove ✕.
     @State private var hoveredChip: String?
+    /// The cards lit for a drag, by row id. Cleared whenever the listing
+    /// changes: an id that is no longer on screen would keep contributing a
+    /// file to every drag from a folder it isn't even in.
+    @State private var selectedFiles: Set<String> = []
 
     /// The one layout this hub ever draws — declared once rather than built
     /// per render, the same way a gizmo's candidate layout is decoded once
@@ -73,6 +77,25 @@ struct FolderHubView: View {
             // or exit non-zero — so there is no failure caption to show.
             SurfaceView(layout: Self.layout, rows: rows, stale: nil)
                 .environment(\.surfaceActivate, activate)
+                .environment(\.surfaceSelection, SurfaceSelection(
+                    ids: selectedFiles,
+                    click: { row, command in
+                        if command {
+                            // The only way back to nothing selected — there is
+                            // no empty space to click in a grid that fills its
+                            // panel, and a shelf you have to close and reopen
+                            // to deselect is a shelf with a mode.
+                            if selectedFiles.contains(row.id) {
+                                selectedFiles.remove(row.id)
+                            } else {
+                                selectedFiles.insert(row.id)
+                            }
+                        } else {
+                            selectedFiles = [row.id]
+                        }
+                    },
+                    dragURLs: dragURLs
+                ))
         }
         .padding(14)
         .foregroundStyle(FlowTheme.ink)
@@ -230,7 +253,25 @@ struct FolderHubView: View {
         }
     }
 
+    /// What a drag off this card carries. Dragging a card that isn't in the
+    /// selection drags that card alone and makes it the selection — Finder's
+    /// own rule, and the one that stops a selection made three folders ago
+    /// from riding along with the file actually under the pointer. Order is
+    /// the grid's, not the selection's: a `Set` has none, and a drop that
+    /// reshuffles the files is a drop the user has to sort out afterwards.
+    private func dragURLs(from row: SurfaceRow) -> [URL] {
+        guard selectedFiles.contains(row.id) else {
+            selectedFiles = [row.id]
+            return SurfaceCard.path(for: "path", in: row).map { [URL(fileURLWithPath: $0)] } ?? []
+        }
+        return rows
+            .filter { selectedFiles.contains($0.id) }
+            .compactMap { SurfaceCard.path(for: "path", in: $0) }
+            .map { URL(fileURLWithPath: $0) }
+    }
+
     private func refresh(in folder: URL?) {
         rows = folder.map { FolderHubRows.rows(in: $0, limit: FolderHubRows.defaultLimit) } ?? []
+        selectedFiles = []
     }
 }
