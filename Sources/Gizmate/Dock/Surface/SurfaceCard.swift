@@ -52,7 +52,19 @@ struct SurfaceCard: View {
                 Text(resolvedTitle)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(FlowTheme.ink)
-                    .lineLimit(2)
+                    // Two lines always in a grid, even for a short name: the
+                    // label is what the flexible preview above sizes itself
+                    // against, so a one-line name would otherwise hand its
+                    // card a taller thumbnail than its neighbours and the row
+                    // would stop lining up — the same reason the cell has a
+                    // fixed height at all.
+                    .lineLimit(2, reservesSpace: height != nil)
+                    // The tail is the half worth keeping: a card two lines
+                    // tall truncates most real filenames, and truncating the
+                    // end ate the extension — which is exactly the thing a
+                    // preview cannot tell you, since a video's thumbnail is a
+                    // still frame and looks like a photo.
+                    .truncationMode(.middle)
                     .multilineTextAlignment(.center)
                 if let resolvedSubtitle {
                     Text(resolvedSubtitle)
@@ -62,7 +74,11 @@ struct SurfaceCard: View {
                 }
             }
         }
-        .padding(12)
+        // A fixed cell spends its budget on the preview, not on chrome — 8pt
+        // against a ~110pt square is the difference between a thumbnail you
+        // can recognise a photo in and one you can't. A list row has no such
+        // trade to make and keeps the roomier 12.
+        .padding(height == nil ? 12 : 8)
         .frame(maxWidth: .infinity)
         // `nil` is a no-op for `frame(height:)`, so the list path below reads
         // exactly as it did before this existed. Content stays centred in the
@@ -94,14 +110,21 @@ struct SurfaceCard: View {
     private func iconView(_ icon: ToolAgentLayoutIconV1) -> some View {
         switch icon {
         case let .file(key):
-            // The icon Finder itself shows for this path, thumbnails
+            // What Finder itself shows for this path, real previews
             // included — a script only ever prints a path, never art, so
             // this is the one place a surface can draw something richer
-            // than a glyph.
+            // than a glyph. See `FileThumbnail`.
             if let path = SurfaceCard.path(for: key, in: row) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: path))
-                    .resizable()
-                    .frame(width: 24, height: 24)
+                if height == nil {
+                    FileThumbnail(path: path)
+                        .frame(width: 24, height: 24)
+                } else {
+                    // Everything the fixed-height cell has left after the
+                    // label, so a wider column buys a bigger preview with no
+                    // second constant to keep in step with the first.
+                    FileThumbnail(path: path)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         case let .symbol(name):
             // SF Symbols — the same catalog `GizmateTool.resolvedSymbolName`

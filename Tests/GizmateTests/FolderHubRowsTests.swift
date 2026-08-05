@@ -65,7 +65,10 @@ final class FolderHubRowsTests: XCTestCase {
         XCTAssertEqual(rows.map { $0["name"] }, ["visible.txt"])
     }
 
-    func testSubdirectoriesAreExcluded() throws {
+    /// The reverse of what this file used to pin. A folder is draggable
+    /// everywhere except Slack, and hiding it meant a Downloads shelf showed
+    /// the archive but never the folder it unpacked into.
+    func testSubdirectoriesAreListedToo() throws {
         let dir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         try FileManager.default.createDirectory(
@@ -76,7 +79,25 @@ final class FolderHubRowsTests: XCTestCase {
 
         let rows = FolderHubRows.rows(in: dir, limit: 10)
 
-        XCTAssertEqual(rows.map { $0["name"] }, ["file.txt"])
+        XCTAssertEqual(rows.compactMap { $0["name"] }.sorted(), ["file.txt", "nested"])
+    }
+
+    /// A directory's `fileSize` is the size of its own record — a few hundred
+    /// bytes that say nothing about what's inside it — so it carries no size
+    /// at all rather than a number that reads as one.
+    func testAFolderRowCarriesNoSize() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("nested"),
+            withIntermediateDirectories: true
+        )
+
+        let rows = FolderHubRows.rows(in: dir, limit: 10)
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0]["name"], "nested")
+        XCTAssertNil(rows[0]["size"])
     }
 
     func testAnUnreadableFolderYieldsNoRowsRatherThanThrowing() {

@@ -372,8 +372,38 @@ that would drift out of step with the first.
 Where a real difference exists, make it a parameter and attach the reason —
 `NoteCard(fixedHeight:)` is fixed in a grid row so cards line up, and
 content-sized in a single column where uniform height only buys dead space.
+`SurfaceCard(height:)` is the same parameter for the same reason, and carries
+the three rules below with it.
 
-## 13. Copy
+## 13. Cards in a grid of files
+
+A grid cell is a square: `SurfaceGrid` hands each card the column width it
+already computed as the card's height. Uniform cells are the whole point — a
+two-line filename must not make one card taller than its neighbours — and
+reusing the width means there is no second constant to keep in step with the
+first, so a wider column buys a bigger cell for free.
+
+Inside that fixed cell:
+
+- **The label reserves its lines, the preview takes the rest.**
+  `.lineLimit(2, reservesSpace:)` in a grid, then the thumbnail gets
+  `maxHeight: .infinity`. Sizing the preview instead and letting the label
+  fall where it may puts every icon in the row on a different line.
+- **A file draws its real preview, not its type glyph.** `FileThumbnail` asks
+  QuickLook — the same source Finder's icon view reads — so an image is the
+  image and a video is a frame from it. It falls back to
+  `NSWorkspace.icon(forFile:)` while the answer is in flight, so the worst
+  case is what a card drew before previews existed.
+- **Filenames truncate in the middle.** The end is where the extension lives,
+  and the extension is the one thing a preview genuinely cannot tell you: a
+  video's thumbnail is a still frame and reads as a photo.
+
+Metadata competes with the preview for the same two lines, so a shelf shows
+neither by default — the folder hub dropped its size line to buy the preview
+53pt instead of 34pt in a ~110pt cell. A surface gizmo that has something to
+say beyond the name still passes a `subtitle`; it just pays for it.
+
+## 14. Copy
 
 Never write "translate", "translation" or "translator" in anything the user
 reads. Prefer results, replies, output. Code identifiers are exempt.

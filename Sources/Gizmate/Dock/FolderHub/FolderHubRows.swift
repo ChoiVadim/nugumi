@@ -15,7 +15,9 @@ enum FolderHubRows {
     /// than crash or propagate an error — this runs every time the pointer
     /// nears a screen edge, with no user action to blame for a failure.
     static func rows(in folder: URL, limit: Int) -> [SurfaceRow] {
-        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey, .fileSizeKey]
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey, .isDirectoryKey, .contentModificationDateKey, .fileSizeKey,
+        ]
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: folder,
             includingPropertiesForKeys: Array(keys),
@@ -24,16 +26,24 @@ enum FolderHubRows {
             return []
         }
 
-        // A folder inside Downloads is not something you drag into Slack, so
-        // it is filtered out here rather than left for the layout to ignore.
-        // A file whose resource values can't be read (a broken symlink, a
-        // permission edge case) is skipped rather than failing the whole
-        // listing — one bad entry should not blank the shelf.
-        let files: [(url: URL, modified: Date, size: Int)] = entries.compactMap { url in
-            guard let values = try? url.resourceValues(forKeys: keys), values.isRegularFile == true else {
-                return nil
+        // Folders are listed alongside files. They used to be filtered out on
+        // the grounds that you don't drag a folder into Slack — true of Slack,
+        // false of the Finder, a Terminal prompt, or any of the other places a
+        // shelf actually drops onto, and a Downloads folder that hides the
+        // unpacked half of every archive is answering a question nobody asked.
+        // Anything that is neither (a broken symlink, a device node) is still
+        // skipped, as is an entry whose resource values can't be read at all —
+        // one bad entry should not blank the shelf.
+        let files: [(url: URL, modified: Date, size: Int?)] = entries.compactMap { url in
+            guard let values = try? url.resourceValues(forKeys: keys) else { return nil }
+            if values.isRegularFile == true {
+                return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
             }
-            return (url, values.contentModificationDate ?? .distantPast, values.fileSize ?? 0)
+            // A directory's own `fileSize` is the size of its record, not of
+            // what's inside it, so it carries no size rather than a number
+            // that would read as a lie.
+            guard values.isDirectory == true else { return nil }
+            return (url, values.contentModificationDate ?? .distantPast, nil)
         }
 
         let formatter = ByteCountFormatter()
@@ -43,11 +53,14 @@ enum FolderHubRows {
             .sorted { $0.modified > $1.modified }
             .prefix(limit)
             .map { entry in
-                SurfaceRow(id: entry.url.path, values: [
+                var values = [
                     "path": entry.url.path,
-                    "name": entry.url.lastPathComponent,
-                    "size": formatter.string(fromByteCount: Int64(entry.size))
-                ])
+                    "name": entry.url.lastPathComponent
+                ]
+                if let size = entry.size {
+                    values["size"] = formatter.string(fromByteCount: Int64(size))
+                }
+                return SurfaceRow(id: entry.url.path, values: values)
             }
     }
 }

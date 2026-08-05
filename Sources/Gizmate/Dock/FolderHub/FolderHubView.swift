@@ -19,10 +19,14 @@ struct FolderHubView: View {
     /// The one layout this hub ever draws — declared once rather than built
     /// per render, the same way a gizmo's candidate layout is decoded once
     /// and reused across refreshes.
+    /// No size line, deliberately. A cell is square and roughly 110pt wide, so
+    /// the two lines it can spend go to the preview or to the metadata, not
+    /// both — and you pick a file out of a shelf by recognising it, not by its
+    /// byte count. The rows still carry `size` for anything that wants it.
     private static let layout: ToolAgentLayoutV1 = .grid(
         cell: .card(
             title: .key("name"),
-            subtitle: .key("size"),
+            subtitle: nil,
             icon: .file(key: "path"),
             drag: .file(key: "path"),
             tap: .reveal(key: "path")
