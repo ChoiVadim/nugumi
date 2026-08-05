@@ -80,13 +80,19 @@ extension GizmateApp {
         }
     }
 
+    /// `mode` is what the caller's built-in rewrites *into* — Rewrite's own
+    /// `.draftMessage`, or Gen Z's `.genZ`. Everything else about the flow (read
+    /// the selection, replace it in place) is identical, which is why Gen Z is
+    /// this one parameter rather than a second copy of it.
     @MainActor
-    func startSelectedTextTranslationForReplacement() {
+    func startSelectedTextTranslationForReplacement(mode: TranslationMode = .draftMessage) {
         guard accessibilityIsTrusted() else {
             requestAccessibilityPermissionInteractively()
             return
         }
 
+        // Name the key the user actually pressed, not Rewrite's.
+        let shortcutAction: GlobalShortcutAction = mode == .genZ ? .genZSelection : .translateSelection
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self else { return }
@@ -97,7 +103,7 @@ extension GizmateApp {
                 guard let selection else {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.presentSelectionTranslationError("Select text first, then press \(self.shortcut(for: .translateSelection).displayString).")
+                    self.presentSelectionTranslationError("Select text first, then press \(self.shortcut(for: shortcutAction).displayString).")
                     return
                 }
 
@@ -105,7 +111,7 @@ extension GizmateApp {
                 guard !cleanedDraft.isEmpty else {
                     self.translateButtonController?.close()
                     self.translateButtonController = nil
-                    self.presentSelectionTranslationError("Select text first, then press \(self.shortcut(for: .translateSelection).displayString).")
+                    self.presentSelectionTranslationError("Select text first, then press \(self.shortcut(for: shortcutAction).displayString).")
                     return
                 }
 
@@ -113,6 +119,7 @@ extension GizmateApp {
                 self.rewriteSelectedDraftText(
                     cleanedDraft,
                     near: mouseLocation,
+                    mode: mode,
                     selectionRect: selection.selectionRect,
                     panelSide: self.panelSideForSelectionEnding(at: mouseLocation),
                     restoresReadyOnUserDismiss: true

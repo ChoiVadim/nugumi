@@ -39,7 +39,7 @@ struct ClaudeCodeClient: LLMBackend {
         switch mode {
         case .selection, .smartReply, .custom:
             sourceText = TextNormalizer.cleanedSelection(text)
-        case .draftMessage:
+        case .draftMessage, .genZ:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
         case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the
@@ -96,7 +96,7 @@ struct ClaudeCodeClient: LLMBackend {
         ])
 
         let answer = try await stream(
-            systemPrompt: AskGizmatePromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled),
+            systemPrompt: AskGizmatePromptBuilder.systemPrompt(),
             messages: messages,
             thinkingLevel: thinkingLevel,
             onPartial: onPartial

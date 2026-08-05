@@ -16,6 +16,7 @@ enum GlobalShortcutAction: String, CaseIterable {
     /// `migrateRetiredSelectionShortcut`.
     case explainSelection
     case replyToSelection
+    case genZSelection
     case dictate
     case saveNote
 
@@ -36,6 +37,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .replyToSelection: return 10
         case .dictate: return 11
         case .saveNote: return 12
+        case .genZSelection: return 13
         }
     }
 
@@ -54,6 +56,7 @@ enum GlobalShortcutAction: String, CaseIterable {
         case .quickMenu: return "Open quick menu"
         case .explainSelection: return "Explain selected text"
         case .replyToSelection: return "Reply to selected text"
+        case .genZSelection: return "Rewrite selected text in Gen Z"
         case .dictate: return "Dictate"
         case .saveNote: return "Keep selection as a note"
         }
@@ -73,7 +76,7 @@ enum GlobalShortcutAction: String, CaseIterable {
     var group: ShortcutGroup {
         switch self {
         case .translateSelection, .explainSelection, .replyToSelection,
-             .dictate, .saveNote:
+             .genZSelection, .dictate, .saveNote:
             return .text
         case .screenshotArea, .liveTranslation:
             return .capture
@@ -117,6 +120,8 @@ enum GlobalShortcutAction: String, CaseIterable {
             return Self.comboDefault(keyCode: UInt32(kVK_ANSI_D), letter: "D")
         case .saveNote:
             return Self.comboDefault(keyCode: UInt32(kVK_ANSI_N), letter: "N")
+        case .genZSelection:
+            return Self.comboDefault(keyCode: UInt32(kVK_ANSI_Z), letter: "Z")
         }
     }
 

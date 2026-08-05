@@ -43,6 +43,7 @@ extension GizmateApp {
             (.replyToSelection, { [weak self] in
                 self?.startSelectionTranslateOrReply(forcing: .smartReply)
             }),
+            (.genZSelection, { [weak self] in self?.performBuiltIn(.genZ) }),
             (.dictate, { [weak self] in self?.toggleDictation() }),
             // The empty string routes through the read-the-selection-now branch
             // in `saveSelectionToNote`, the same way the quick menu does.

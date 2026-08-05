@@ -68,6 +68,16 @@ extension GizmateApp {
             onAsk: { [weak self] in
                 self?.startAskGizmatePrompt()
             },
+            onGenZ: { [weak self] text in
+                self?.rewriteSelectedDraftText(
+                    text,
+                    near: screenPoint,
+                    mode: .genZ,
+                    selectionRect: selectionRect,
+                    panelSide: panelSide,
+                    restoresReadyOnUserDismiss: true
+                )
+            },
             onScreenshot: { [weak self] in
                 self?.startScreenshotTranslation()
             },
@@ -112,6 +122,7 @@ extension GizmateApp {
     func rewriteSelectedDraftText(
         _ text: String,
         near screenPoint: NSPoint,
+        mode: TranslationMode = .draftMessage,
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right,
         restoresReadyOnUserDismiss: Bool = false
@@ -122,7 +133,9 @@ extension GizmateApp {
         guard !cleanedDraft.isEmpty else {
             translateButtonController?.close()
             translateButtonController = nil
-            presentSelectionTranslationError("Select text first, then run Rewrite my text.")
+            presentSelectionTranslationError(
+                "Select text first, then run \(mode == .genZ ? "Gen Z" : "Rewrite my text")."
+            )
             return
         }
 
@@ -131,7 +144,7 @@ extension GizmateApp {
         case .editable, .unknown:
             // .unknown inserts: in AX-broken apps (KakaoTalk) the blind
             // Cmd+V has always worked, and a panel here would regress them.
-            runInstantTranslation(cleanedDraft, language: language, near: screenPoint)
+            runInstantTranslation(cleanedDraft, language: language, near: screenPoint, mode: mode)
         case .notEditable:
             translateButtonController?.close()
             translateButtonController = nil
@@ -139,7 +152,7 @@ extension GizmateApp {
                 cleanedDraft,
                 near: screenPoint,
                 targetLanguage: language,
-                mode: .draftMessage,
+                mode: mode,
                 useCache: false,
                 usageKind: .draftMessage,
                 selectionRect: selectionRect,
@@ -289,14 +302,7 @@ extension GizmateApp {
 
     @MainActor
     func compositionSettings(for mode: TranslationMode, appCategory: AppCategory) -> CompositionSettings? {
-        guard mode.usesCompositionSettings else {
-            // Translate/selection ignores writing style, cleanup, snippets, and
-            // voice sample. The only composition input it honors is the global
-            // Gen Z toggle, so synthesize a minimal carrier — and only when that
-            // toggle is on, so default (off) behavior stays exactly as before.
-            guard genZModeEnabled else { return nil }
-            return CompositionSettings(style: .casual, cleanup: .none, snippets: [], genZ: true, voiceSample: nil)
-        }
+        guard mode.usesCompositionSettings else { return nil }
         let voiceSample = appCategory == .email
             ? emailVoiceSample.trimmingCharacters(in: .whitespacesAndNewlines)
             : ""
@@ -308,11 +314,6 @@ extension GizmateApp {
             style: resolvedStyle,
             cleanup: cleanupLevel,
             snippets: snippetsStore.usableSnippets(),
-            // Gen Z is a casual-chat register. It clobbers email's formal
-            // greeting + signature, and directly contradicts the formal
-            // register's no-contractions / deferential rules — so never apply
-            // it to email or to formal style.
-            genZ: genZModeEnabled && appCategory != .email && resolvedStyle != .formal,
             voiceSample: voiceSample.isEmpty ? nil : voiceSample,
             customInstruction: instruction.isEmpty ? nil : instruction
         )

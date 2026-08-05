@@ -73,19 +73,14 @@ Annotation rules:
 Do not click, automate, or claim you took an action.
 """
 
-    /// Base prompt, plus the Gen Z styling suffix when the global toggle is on,
-    /// plus the user's "About you" background when present.
-    static func systemPrompt(genZ: Bool, aboutUser: String? = nil) -> String {
-        let base = genZ ? systemPromptBase + "\n\n" + genZSuffix : systemPromptBase
-        return UserAboutContext.appending(to: base, about: aboutUser)
+    /// Base prompt, plus the user's "About you" background when present.
+    ///
+    /// Ask used to carry a Gen Z styling suffix here, layered on by the global
+    /// toggle. Gen Z is a built-in you aim at a selection now
+    /// (`RingActionID.genZ`), so there is nothing global left to overlay.
+    static func systemPrompt(aboutUser: String? = nil) -> String {
+        UserAboutContext.appending(to: systemPromptBase, about: aboutUser)
     }
-
-    /// Gen Z overlay for Ask answers. Ask replies in the question's own language
-    /// (unknown at prompt-build time), so this stays language-agnostic and leans
-    /// on the model's multilingual slang — and must not break the answer format.
-    private static let genZSuffix = """
-Gen Z mode is ON. Write the answer text the way a Gen Z native (born ~1997–2012) would actually text it — casual, all-lowercase, ironic and a little deadpan, using the native youth slang of whatever language you are answering in (never switch languages to do it). Keep it short. The #1 rule is restraint: at most 1–2 slang markers — piling it on is the dead giveaway of an adult faking it; when unsure, drop the slang. Write laughter as 💀 or 😭, never 😂. This restyles ONLY the answer wording — keep the annotations block format and its rules above exactly as specified.
-"""
 
     static func prompt(question: String, hasImage: Bool) -> String {
         let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)

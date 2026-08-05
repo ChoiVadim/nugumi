@@ -48,6 +48,7 @@ enum ToolRef: Hashable {
         switch mode {
         case .selection: return .builtIn(.explain)
         case .draftMessage, .smartReply: return .builtIn(.reply)
+        case .genZ: return .builtIn(.genZ)
         case .summarizeChat, .summarizePage: return .builtIn(.summarize)
         case .custom(let tool): return .generated(tool.id)
         case .revise, .reviseMessage: return nil

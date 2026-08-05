@@ -49,6 +49,9 @@ extension GizmateApp {
             onAsk: { [weak self] in
                 self?.startAskGizmatePrompt()
             },
+            onGenZ: { [weak self] _ in
+                self?.startSelectedTextTranslationForReplacement(mode: .genZ)
+            },
             onScreenshot: { [weak self] in
                 self?.startScreenshotTranslation()
             },

@@ -52,7 +52,6 @@ struct VoiceSection: View {
 
     private var accessory: AnyView? {
         switch bridge.voiceTab {
-        case 0: return AnyView(genZToggle)
         case 3, 4:
             return AnyView(
                 SecondaryButton(title: snippetKind == .snippet ? "Add snippet" : "Add word") {
@@ -61,19 +60,6 @@ struct VoiceSection: View {
             )
         default: return nil
         }
-    }
-
-    private var genZToggle: some View {
-        HStack(spacing: 8) {
-            Text("Gen Z")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(FlowTheme.inkSecondary)
-            Toggle("", isOn: bridge.binding(\.genZMode) { .setGenZMode($0) })
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(FlowTheme.accent)
-        }
-        .help("works both ways 💀 your texts come out in gen z AND gizmate explains everything back to you in it too, zero unc energy anywhere")
     }
 }
 

@@ -22,7 +22,6 @@ final class BuiltInPromptTemplateTests: XCTestCase {
             style: .casual,
             cleanup: .light,
             snippets: [],
-            genZ: true,
             voiceSample: "Hi there,\n\nThanks!\n\nVadim"
         )
     }
@@ -40,7 +39,7 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     /// Every token must actually resolve. A surviving `{language}` means the map
     /// is missing that key for this mode.
     func testNoTokenSurvivesRendering() {
-        for mode in [TranslationMode.selection, .draftMessage, .smartReply] {
+        for mode in [TranslationMode.selection, .draftMessage, .smartReply, .genZ] {
             let output = rendered(mode)
             for token in Self.tokenNames {
                 XCTAssertFalse(
@@ -55,8 +54,8 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     /// the refactor, so its template must carry eight `{language}` tokens.
     /// Counting is what catches "replaced the first one and moved on".
     ///
-    /// Counted on the template, not the rendered output: the Gen Z block names
-    /// the language too, so counting "English" in the result would measure
+    /// Counted on the template, not the rendered output: the app-context hint
+    /// names the language too, so counting "English" in the result would measure
     /// something else and drift whenever that block is reworded.
     func testSelectionTemplateKeepsEveryLanguageToken() {
         let template = try? XCTUnwrap(TranslationMode.selection.shippedPromptTemplate)
@@ -74,6 +73,26 @@ final class BuiltInPromptTemplateTests: XCTestCase {
         XCTAssertTrue(output.contains("Cleanup — "))
         XCTAssertTrue(output.contains("Voice sample — "))
         XCTAssertTrue(output.contains(category.promptHint))
+    }
+
+    /// Gen Z's whole substance is the `{genZ}` block, and it has to be the block
+    /// for the *writing* language — a Russian rewrite briefed with the English
+    /// slang list is the failure this catches. The writing style is deliberately
+    /// absent: Gen Z is the register, so splicing the user's own in would fight
+    /// it (see `genZTemplate`).
+    func testGenZCarriesTheWritingLanguagesSlangBlockAndNoWritingStyle() {
+        let output = rendered(.genZ)
+        XCTAssertTrue(output.contains(GenZStyle.coreGuidance))
+        XCTAssertTrue(output.contains("no cap"), "English slang block missing")
+        XCTAssertFalse(output.contains("Writing style — "))
+
+        let russian = TranslationMode.genZ.systemPrompt(
+            targetLanguage: .language(id: "ru"),
+            appCategory: category,
+            composition: composition
+        )
+        XCTAssertTrue(russian.contains("база"), "Russian slang block missing")
+        XCTAssertFalse(russian.contains("no cap"), "English block leaked into ru")
     }
 
     func testSmartReplyCarriesEveryCompositionBlock() {

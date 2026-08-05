@@ -18,6 +18,8 @@ final class FloatingTranslateButtonController {
     private let selectedText: String
     private let onTranslate: (String) -> Void
     private let onRewrite: (String) -> Void
+    /// Rewrite's sibling: same replace-in-place flow, Gen Z's prompt.
+    private let onGenZ: (String) -> Void
     private let onSmartReply: (String) -> Void
     private let buttonView: FloatingTranslateButtonView
     private let onAsk: () -> Void
@@ -50,6 +52,7 @@ final class FloatingTranslateButtonController {
         onRewrite: @escaping (String) -> Void,
         onSmartReply: @escaping (String) -> Void,
         onAsk: @escaping () -> Void,
+        onGenZ: @escaping (String) -> Void = { _ in },
         onScreenshot: @escaping () -> Void = {},
         onLive: @escaping () -> Void = {},
         onDictate: @escaping () -> Void = {},
@@ -61,6 +64,7 @@ final class FloatingTranslateButtonController {
         self.selectedText = selectedText
         self.onTranslate = onTranslate
         self.onRewrite = onRewrite
+        self.onGenZ = onGenZ
         self.onSmartReply = onSmartReply
         self.onAsk = onAsk
         self.onScreenshot = onScreenshot
@@ -248,6 +252,7 @@ final class FloatingTranslateButtonController {
         let text = selectedText
         let translate = onTranslate
         let rewrite = onRewrite
+        let genZ = onGenZ
         let smartReply = onSmartReply
         let ask = onAsk
         let screenshot = onScreenshot
@@ -258,6 +263,7 @@ final class FloatingTranslateButtonController {
         var handlers = RingActionHandlers()
         handlers.explain = { translate(text) }
         handlers.rewrite = { rewrite(text) }
+        handlers.genZ = { genZ(text) }
         handlers.reply = { smartReply(text) }
         handlers.ask = ask
         handlers.capture = screenshot
@@ -619,7 +625,7 @@ final class FloatingTranslateButtonView: NSView {
             // The gizmo, not a generic sparkles glyph: the button that
             // opens the radial menu wears the app's own mark.
             return gizmoGlyphImage()
-        case .draftMessage:
+        case .draftMessage, .genZ:
             name = "text.insert"
         case .smartReply:
             name = "bubble.left.fill"

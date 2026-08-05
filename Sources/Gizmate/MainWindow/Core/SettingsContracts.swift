@@ -11,7 +11,6 @@ struct SettingsSnapshot {
     var floatingDefaultMode: FloatingButtonDefaultMode
     var selectionDisplayMode: SelectionDisplayMode
     var cleanupLevel: CleanupLevel
-    var genZMode: Bool = false
     /// The user's saved email voice sample (style reference for the email
     /// category). Empty when unset.
     var emailVoiceSample: String = ""
@@ -64,7 +63,6 @@ enum SettingsIntent {
     case setFloatingDefaultMode(FloatingButtonDefaultMode)
     case setSelectionDisplayMode(SelectionDisplayMode)
     case setCleanupLevel(CleanupLevel)
-    case setGenZMode(Bool)
     case setEmailVoiceSample(String)
     case setCustomStyleInstruction(String)
     case setWritingStyle(WritingStyle, AppCategory)

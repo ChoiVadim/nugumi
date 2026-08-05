@@ -33,7 +33,7 @@ struct OllamaClient: LLMBackend {
         }
 
         var messages: [ChatMessage] = [
-            ChatMessage(role: "system", content: AskGizmatePromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled))
+            ChatMessage(role: "system", content: AskGizmatePromptBuilder.systemPrompt())
         ]
         for turn in history {
             messages.append(ChatMessage(role: "user", content: turn.question))
@@ -69,7 +69,7 @@ struct OllamaClient: LLMBackend {
         switch mode {
         case .selection, .smartReply, .custom:
             sourceText = TextNormalizer.cleanedSelection(text)
-        case .draftMessage:
+        case .draftMessage, .genZ:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
         case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the

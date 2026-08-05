@@ -59,7 +59,7 @@ final class AskGizmateTests: XCTestCase {
     }
 
     func testSystemPromptDescribesGeneralAgentWithOptionalScreenshot() {
-        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+        let prompt = AskGizmatePromptBuilder.systemPrompt()
 
         XCTAssertTrue(prompt.contains("desktop assistant"))
         XCTAssertTrue(prompt.contains("When the user attaches a screenshot"))
@@ -71,19 +71,17 @@ final class AskGizmateTests: XCTestCase {
     }
 
     func testSystemPromptAllowsMarkdownInMessage() {
-        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+        let prompt = AskGizmatePromptBuilder.systemPrompt()
         XCTAssertTrue(prompt.contains("Markdown is welcome"))
         XCTAssertTrue(prompt.contains("numbered lists for steps"))
     }
 
     func testSystemPromptUsesPlainTextPlusAnnotationsFenceProtocol() {
-        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+        let prompt = AskGizmatePromptBuilder.systemPrompt()
         XCTAssertTrue(prompt.contains("plain text, not JSON"))
         XCTAssertTrue(prompt.contains("```annotations"))
         XCTAssertFalse(prompt.contains("Return only JSON"))
         XCTAssertFalse(prompt.contains("emotion"))
-        // Gen Z suffix must not resurrect the retired protocol either.
-        XCTAssertFalse(AskGizmatePromptBuilder.systemPrompt(genZ: true).contains("emotion"))
     }
 
     @MainActor
@@ -147,7 +145,7 @@ final class AskGizmateTests: XCTestCase {
     }
 
     func testAskSystemPromptIncludesAboutUser() {
-        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false, aboutUser: "I'm a PostgreSQL developer.")
+        let prompt = AskGizmatePromptBuilder.systemPrompt(aboutUser: "I'm a PostgreSQL developer.")
 
         XCTAssertTrue(prompt.contains("desktop assistant"))
         XCTAssertTrue(prompt.contains("I'm a PostgreSQL developer."))

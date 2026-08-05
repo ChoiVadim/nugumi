@@ -48,6 +48,11 @@ enum TranslationMode: Equatable {
     case selection
     case draftMessage
     case smartReply
+    /// Restyles the user's own text into Gen Z slang and writes it back where
+    /// they were typing — the same shape as `.draftMessage`, with its own
+    /// prompt. Used to be a global toggle layered over every other mode; it is
+    /// one built-in you aim now (`RingActionID.genZ`).
+    case genZ
     /// Internal re-render of an existing `.selection` result: the user typed a
     /// "revise or ask a follow-up" instruction and we regenerate the answer in
     /// place. Never assigned to a floating surface — only the result panel.
@@ -75,11 +80,13 @@ enum TranslationMode: Equatable {
             return false
         case .reviseMessage:
             return true
-        case .selection, .draftMessage, .smartReply:
-            // The three editable built-ins carry "Use my Voice" in their own
+        case .selection, .draftMessage, .smartReply, .genZ:
+            // The four editable built-ins carry "Use my Voice" in their own
             // editor. Off means Rewrite and Reply render their style tokens
             // empty and Explain appends no style block — see
-            // `builtInContextSections`.
+            // `builtInContextSections`. Gen Z takes only the glossary half of
+            // it: the register is the whole point of that built-in, so the
+            // writing style must not be spliced in to argue with it.
             return usesVoiceContext
         case .custom(let tool):
             // The user's own prompt is authoritative, so composition stays off
@@ -97,14 +104,14 @@ enum TranslationMode: Equatable {
         switch self {
         case .selection, .summarizeChat, .summarizePage, .custom:
             return true
-        case .draftMessage, .smartReply, .revise, .reviseMessage:
+        case .draftMessage, .smartReply, .genZ, .revise, .reviseMessage:
             return false
         }
     }
 
     var resultLabel: String? {
         switch self {
-        case .selection, .draftMessage, .revise:
+        case .selection, .draftMessage, .genZ, .revise:
             return nil
         case .smartReply, .reviseMessage:
             return "Reply"
@@ -119,7 +126,7 @@ enum TranslationMode: Equatable {
         switch self {
         case .smartReply:
             return "Thinking"
-        case .draftMessage:
+        case .draftMessage, .genZ:
             return "Rewriting"
         case .selection:
             return "Thinking"
@@ -163,7 +170,7 @@ enum TranslationMode: Equatable {
 
         Keep every fact, name, date, number, quotation, URL, proper noun, and the original paragraph/bullet/list structure exactly. Do not summarize, do not drop content, do not add new claims, opinions, or facts — examples and analogies must only illustrate what is already there, never extend it. If your output differs from a literal translation only by swapping a few synonyms (e.g. "specialized" → "special", "utilize" → "use") or replacing punctuation, you have not simplified — go further: add an illustrative example, restructure the sentence, or name the topic in plainer terms.
 
-        Context — the source text is from {app}{genZ}
+        Context — the source text is from {app}
 
         Return only the {language} output. No preamble, no commentary, no quotes around the output. Never write a wrapper like "Here is the translation:" — output the text directly.
         """
@@ -177,7 +184,7 @@ enum TranslationMode: Equatable {
 
         Context — the user is composing this message in {app}
 
-        Writing style — {writingStyle}{genZ}{voice}{cleanup}{glossary}
+        Writing style — {writingStyle}{voice}{cleanup}{glossary}
 
         Return only the final {language} message, with no commentary, labels, alternatives, quotes, or explanations.
         """
@@ -193,11 +200,28 @@ enum TranslationMode: Equatable {
 
         Context — the user is replying inside {app}
 
-        Writing style — {writingStyle}{genZ}{voice}
+        Writing style — {writingStyle}{voice}
 
         Cleanup — {cleanup}{glossary}
 
         Return only the reply or answer text. No commentary, no labels, no preface, no explanation of what you're doing, no quotes around the answer.
+        """
+
+    /// Deliberately short next to the other three: the substance is the
+    /// `{genZ}` block, which is `GenZStyle`'s research for the writing language
+    /// and would be ~60 lines of slang notes to scroll past in the editor.
+    /// Every other built-in's writing-style layer is left out on purpose — Gen Z
+    /// *is* a register, and splicing the user's own in would argue with it.
+    private static let genZTemplate = """
+        Rewrite the user's text in {language} the way a Gen Z native would text it. This is a restyle, not a response: keep their meaning, information, and intent exactly, and never answer, summarize, continue, or comment on the text.
+
+        If the text is already in {language}, restyle it where it stands. If it is in another language, render it into {language} first, then restyle. Keep emojis, URLs, @usernames, numbers, and deliberate line breaks as written.
+
+        {genZ}
+
+        Context — the user is writing this in {app}{glossary}
+
+        Return only the rewritten {language} text. No commentary, no labels, no quotes, no alternatives.
         """
 
     /// The shipped prompt as an editable template. Tokens stand in for the
@@ -211,6 +235,7 @@ enum TranslationMode: Equatable {
         case .selection:    return Self.selectionTemplate
         case .draftMessage: return Self.draftMessageTemplate
         case .smartReply:   return Self.smartReplyTemplate
+        case .genZ:         return Self.genZTemplate
         default:            return nil
         }
     }
@@ -294,12 +319,17 @@ enum TranslationMode: Equatable {
         var tokens: [String: String] = [
             "language": targetLanguage.promptName,
             "app": appCategory.promptHint,
-            "genZ": Self.genZSection(
-                for: targetLanguage.id,
-                enabled: composition?.genZ ?? false
-            ),
         ]
         switch self {
+        case .genZ:
+            // No `{writingStyle}` — see `genZTemplate`. The glossary half of
+            // "Use my Voice" still applies: a name the user pinned stays spelled
+            // the way they pinned it, slang or not.
+            tokens["genZ"] = GenZStyle.promptSection(for: targetLanguage.id)
+            tokens["glossary"] = Self.glossarySection(
+                for: composition?.snippets ?? [],
+                includeSnippets: true
+            )
         case .draftMessage:
             tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
             tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
@@ -345,7 +375,7 @@ enum TranslationMode: Equatable {
             ))
         }
         let base: String = switch self {
-        case .selection, .draftMessage, .smartReply:
+        case .selection, .draftMessage, .smartReply, .genZ:
             ""   // Rendered above from the template; unreachable.
         case .revise:
             """
@@ -365,7 +395,7 @@ enum TranslationMode: Equatable {
 
             Write the result in \(targetLanguage.promptName), natural and ready to send, in the user's voice. Match the selected Writing style below. Don't restate or quote the original, don't add greetings or sign-offs unless warranted, and don't address the user — produce only the message body they would paste into the field.
 
-            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.genZSection(for: targetLanguage.id, enabled: composition?.genZ ?? false))\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
+            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
 
             Return only the updated message text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
             """
@@ -450,9 +480,9 @@ enum TranslationMode: Equatable {
     /// its template does not already carry. Rewrite and Reply splice the Voice
     /// through `{writingStyle}` / `{cleanup}` / `{glossary}` — a nil
     /// composition is how "off" reaches them — so only Explain needs the block
-    /// appended. Gen Z is left out of it: Explain's template has its own
-    /// `{genZ}` token. No shipped template mentions notes, so those append for
-    /// all three.
+    /// appended. Gen Z is left out of it: that built-in's template splices the
+    /// only piece of the Voice it wants through `{glossary}`. No shipped
+    /// template mentions notes, so those append for all four.
     private func builtInContextSections(
         targetLanguage: TranslationLanguage,
         composition: CompositionSettings?
@@ -487,7 +517,6 @@ enum TranslationMode: Equatable {
         if tool.usesVoice, let composition {
             sections += "\n\nWriting style — "
                 + composition.writingStyleDirective(for: targetLanguage.id)
-                + genZSection(for: targetLanguage.id, enabled: composition.genZ)
                 + cleanupSection(for: composition.cleanup)
                 + glossarySection(for: composition.snippets, includeSnippets: true)
         }
@@ -525,16 +554,9 @@ enum TranslationMode: Equatable {
         return "\n\n" + sections.joined(separator: "\n\n")
     }
 
-    /// Language-specific Gen Z styling block, appended to compose prompts when
-    /// the Gen Z toggle is on. Empty string when off (so callsites stay inline).
-    private static func genZSection(for languageID: String, enabled: Bool) -> String {
-        guard enabled else { return "" }
-        return "\n\n" + GenZStyle.promptSection(for: languageID)
-    }
-
     /// Cleanup/polish instruction block. Empty string for `.none` (and nil), so
     /// "no cleanup" injects no prompt at all and the writing style stays the only
-    /// authority — cleanup is a polish axis, orthogonal to register/Gen Z styling.
+    /// authority — cleanup is a polish axis, orthogonal to register.
     private static func cleanupSection(for level: CleanupLevel?) -> String {
         guard let level, level != .none else { return "" }
         return "\n\nCleanup — \(level.promptDescription)"
@@ -728,22 +750,16 @@ enum CleanupLevel: String, CaseIterable, Codable {
     }
 }
 
-/// Gen Z styling overlay for compose prompts. Activated by the global Gen Z
-/// toggle (`CompositionSettings.genZ`). The language-neutral `coreGuidance`
-/// always leads — its load-bearing instruction is FULL transformation (rewrite
-/// the whole message in slang, don't sprinkle one marker on formal text) —
-/// followed by one target language's native-youth-slang block.
+/// The body of the Gen Z built-in's prompt (`TranslationMode.genZ`), spliced in
+/// as its `{genZ}` token. The language-neutral `coreGuidance` always leads — its
+/// load-bearing instruction is FULL transformation (rewrite the whole message in
+/// slang, don't sprinkle one marker on formal text) — followed by one target
+/// language's native-youth-slang block.
 ///
 /// Synthesized from 2024–2026 per-language research. Slang churns fast, so each
 /// block favors the durable signal (lowercase, dropped end-period, 💀/😭 over 😂,
 /// tone) over fleeting vocabulary, and flags terms that already read as cringe.
 enum GenZStyle {
-    /// UserDefaults key for the global Gen Z toggle — single source of truth.
-    static let defaultsKey = "genZMode"
-    /// Current state of the global Gen Z toggle. Read wherever the prompt is
-    /// assembled (delegate-owned compose path and the Ask client classes alike).
-    static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
-
     static let coreGuidance = """
         Gen Z mode is ON. Rewrite the message the way a Gen Z native (born ~1997–2012) would text it to a friend — casual digital register, not formal writing.
         CRITICAL — preserve the user's real meaning, intent, and information exactly. Change only the voice and styling, never what they are saying, and never invent new content.

@@ -152,13 +152,6 @@ extension GizmateApp {
         }
     }
 
-    /// Global Gen Z styling toggle. Off by default; injected into compose
-    /// prompts via `CompositionSettings.genZ`.
-    var genZModeEnabled: Bool {
-        get { GenZStyle.isEnabled }
-        set { UserDefaults.standard.set(newValue, forKey: GenZStyle.defaultsKey) }
-    }
-
     /// The user's email voice sample — a typical email they write, used as a
     /// style reference for the `email` category only. Empty by default. Treated
     /// as personal content (like Snippets), so it survives a settings reset.

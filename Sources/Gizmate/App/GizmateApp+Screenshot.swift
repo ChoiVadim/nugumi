@@ -75,8 +75,8 @@ extension GizmateApp {
                     case .smartReply:
                         usageKind = .smartReply
                         language = self.draftTargetLanguage
-                    case .selection, .draftMessage, .revise, .reviseMessage, .summarizeChat,
-                         .summarizePage, .custom:
+                    case .selection, .draftMessage, .genZ, .revise, .reviseMessage,
+                         .summarizeChat, .summarizePage, .custom:
                         // `.custom` is unreachable here — a prompt tool is never a
                         // floating-button default mode — but the switch is exhaustive.
                         usageKind = .screenArea

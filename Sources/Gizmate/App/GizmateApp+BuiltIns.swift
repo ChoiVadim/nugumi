@@ -18,6 +18,7 @@ extension GizmateApp {
         switch id {
         case .explain: startSelectionTranslateOrReply(forcing: .translate)
         case .rewrite: startSelectedTextTranslationForReplacement()
+        case .genZ: startSelectedTextTranslationForReplacement(mode: .genZ)
         case .reply: startSelectionTranslateOrReply(forcing: .smartReply)
         case .ask: startAskGizmatePrompt()
         case .capture: startScreenshotTranslation()

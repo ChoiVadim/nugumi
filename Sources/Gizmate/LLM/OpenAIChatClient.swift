@@ -56,7 +56,7 @@ struct OpenAIChatClient: LLMBackend {
         }
 
         var messages: [OpenAIMessage] = [
-            OpenAIMessage(role: "system", content: .string(AskGizmatePromptBuilder.systemPrompt(genZ: GenZStyle.isEnabled)))
+            OpenAIMessage(role: "system", content: .string(AskGizmatePromptBuilder.systemPrompt()))
         ]
         for turn in history {
             messages.append(OpenAIMessage(role: "user", content: .string(turn.question)))
@@ -95,7 +95,7 @@ struct OpenAIChatClient: LLMBackend {
         switch mode {
         case .selection, .smartReply, .custom:
             sourceText = TextNormalizer.cleanedSelection(text)
-        case .draftMessage:
+        case .draftMessage, .genZ:
             sourceText = TextNormalizer.cleanedDraftMessage(text)
         case .revise, .reviseMessage, .summarizeChat, .summarizePage:
             // Already composed deliberately (labeled sections) — don't let the

@@ -52,7 +52,8 @@ extension GizmateApp {
             "selectedOllamaModel",
             "thinkingLevel",
             "cleanupLevel",
-            "genZMode",
+            "genZMode",                         // retired global toggle; cleared so a
+                                                // reset still sweeps it off old installs
             "replacementMode",
             InvisibilityState.defaultsKey,
             InvisibilityState.firstRunShownKey,
@@ -174,7 +175,6 @@ extension GizmateApp: SettingsHost {
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
             cleanupLevel: cleanupLevel,
-            genZMode: genZModeEnabled,
             emailVoiceSample: emailVoiceSample,
             customStyleInstruction: customStyleInstruction,
             invisibilityEnabled: invisibilityModeEnabled,
@@ -288,16 +288,6 @@ extension GizmateApp: SettingsHost {
             applySelectionDisplayMode()
         case .setCleanupLevel(let level):
             cleanupLevel = level
-            updateMenuState()
-        case .setGenZMode(let enabled):
-            if genZModeEnabled != enabled {
-                // Replayed Ask turns are few-shot style examples: history written
-                // in the old register overrides the new system prompt, so a
-                // style flip must start the Ask conversation fresh.
-                askHistory = []
-                AskGizmateHistoryStore.save(askHistory)
-            }
-            genZModeEnabled = enabled
             updateMenuState()
         case .setLaunchAtLogin(let enabled):
             guard isRunningFromAppBundle else { break }

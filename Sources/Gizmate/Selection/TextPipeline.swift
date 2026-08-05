@@ -251,9 +251,6 @@ struct CompositionSettings: Equatable {
     let style: WritingStyle
     let cleanup: CleanupLevel
     let snippets: [Snippet]
-    /// When true, the compose prompt gets a language-specific Gen Z styling
-    /// overlay (see `GenZStyle`). Global toggle, orthogonal to `style`.
-    let genZ: Bool
     /// The user's saved email voice sample — a representative email whose
     /// greeting, rhythm, and sign-off the model mirrors. Only populated for the
     /// `email` category; `nil`/empty elsewhere, so the prompt section vanishes.

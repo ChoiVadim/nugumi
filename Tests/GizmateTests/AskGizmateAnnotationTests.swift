@@ -244,7 +244,7 @@ final class AskGizmateAnnotationTests: XCTestCase {
     }
 
     func testSystemPromptTeachesAnnotations() {
-        let prompt = AskGizmatePromptBuilder.systemPrompt(genZ: false)
+        let prompt = AskGizmatePromptBuilder.systemPrompt()
         XCTAssertTrue(prompt.contains("```annotations"))
         XCTAssertTrue(prompt.contains("\"type\":\"ellipse\""))
         XCTAssertTrue(prompt.contains("\"type\":\"arrow\""))

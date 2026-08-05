@@ -17,6 +17,7 @@ enum RingIconKind: Equatable {
 enum RingActionID: String, Codable, CaseIterable {
     case explain
     case rewrite
+    case genZ
     case reply
     case ask
     case capture
@@ -31,6 +32,7 @@ enum RingActionID: String, Codable, CaseIterable {
         switch self {
         case .explain:   return "Explain"
         case .rewrite:   return "Rewrite"
+        case .genZ:      return "Gen Z"
         case .reply:     return "Reply"
         case .ask:       return "Ask"
         case .capture:   return "Capture"
@@ -53,6 +55,7 @@ enum RingActionID: String, Codable, CaseIterable {
         switch self {
         case .explain:   return .phosphor("magnifying-glass")
         case .rewrite:   return .phosphor("pencil-line")
+        case .genZ:      return .symbol("flame")
         case .reply:     return .phosphor("arrow-bend-up-left")
         case .ask:       return .phosphor("question")
         case .capture:   return .phosphor("scan")
@@ -71,6 +74,8 @@ enum RingActionID: String, Codable, CaseIterable {
             return "Explain the selected text in plain language."
         case .rewrite:
             return "Rewrite your draft in the target language and your writing style."
+        case .genZ:
+            return "Rewrite your draft the way a Gen Z native would text it."
         case .reply:
             return "Draft a reply to the selected message, or answer the question in it."
         case .ask:
@@ -102,6 +107,7 @@ enum RingActionID: String, Codable, CaseIterable {
         switch self {
         case .explain: return .selection
         case .rewrite: return .draftMessage
+        case .genZ:    return .genZ
         case .reply:   return .smartReply
         default:       return nil
         }
@@ -117,6 +123,7 @@ enum RingActionID: String, Codable, CaseIterable {
         switch self {
         case .explain:   return .explainSelection
         case .rewrite:   return .translateSelection
+        case .genZ:      return .genZSelection
         case .reply:     return .replyToSelection
         case .ask:       return .askGizmate
         case .capture:   return .screenshotArea

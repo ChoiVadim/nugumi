@@ -8,6 +8,7 @@ import Foundation
 struct RingActionHandlers {
     var explain: (() -> Void)?
     var rewrite: (() -> Void)?
+    var genZ: (() -> Void)?
     var reply: (() -> Void)?
     var ask: (() -> Void)?
     var capture: (() -> Void)?
@@ -178,6 +179,7 @@ enum RingBuilder {
         switch id {
         case .explain:   handler = handlers.explain
         case .rewrite:   handler = handlers.rewrite
+        case .genZ:      handler = handlers.genZ
         case .reply:     handler = handlers.reply
         case .ask:       handler = handlers.ask
         case .capture:   handler = handlers.capture
