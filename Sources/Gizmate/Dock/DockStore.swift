@@ -71,13 +71,21 @@ final class DockStore: ObservableObject {
 
     /// Moves `id` to `edge`, landing at `index` in the tab order there.
     ///
-    /// Removes it from everywhere first, same as `dock(_:to:)`. That removal
-    /// is exactly what makes moving an item within its own edge awkward:
-    /// once the item is gone, every id after its old position has shifted
-    /// down by one, so the index the caller asked for (measured against the
-    /// list *before* removal) can be one too high. Clamping happens against
-    /// the post-removal count, not before it, so a drag from position 0 to
-    /// position 2 actually lands at 2 instead of 1.
+    /// `index` names the position `id` occupies in the edge's list **as it
+    /// will look after the move** — not an offset into the list as it looked
+    /// before `id` was pulled out. `id` is removed from every edge first,
+    /// then `index` is clamped against whatever remains and inserted there.
+    /// No separate correction is applied for the item's own removal: the
+    /// clamp against that already-reduced count *is* the whole adjustment.
+    ///
+    /// This is the detail a caller wiring up SwiftUI's `.onMove(perform:)`
+    /// cannot skip straight past: `.onMove`'s `destination` is measured in
+    /// the list as it looked *before* the drag, one coordinate space earlier
+    /// than what this method expects. Pass it through unconverted and
+    /// forward drags land one short of where the user dropped them while
+    /// backward drags happen to work anyway — which reads as the user's own
+    /// hand slipping, not as a bug. Convert first (subtract one from
+    /// `destination` when it is past `source`).
     func move(_ id: String, to edge: DockEdge, at index: Int) {
         for existing in DockEdge.allCases {
             placement[existing]?.removeAll { $0 == id }
