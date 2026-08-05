@@ -124,4 +124,23 @@ final class FolderHubRowsTests: XCTestCase {
         XCTAssertNotEqual(rows[0]["size"], "")
         XCTAssertNotNil(rows[0]["size"])
     }
+
+    /// The one branch double-click hangs off: browse in, or hand to
+    /// `NSWorkspace`. A bundle is the case worth pinning — it is a directory
+    /// by every `FileManager` check, so `isDirectory` alone would walk into
+    /// an app instead of launching it.
+    func testOnlyARealDirectoryIsBrowsable() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sub = dir.appendingPathComponent("inner")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        let bundle = dir.appendingPathComponent("Fake.app")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        let file = try write("file.txt", in: dir, modified: Date())
+
+        XCTAssertTrue(FolderHubRows.isBrowsable(sub))
+        XCTAssertFalse(FolderHubRows.isBrowsable(bundle))
+        XCTAssertFalse(FolderHubRows.isBrowsable(file))
+        XCTAssertFalse(FolderHubRows.isBrowsable(dir.appendingPathComponent("gone")))
+    }
 }

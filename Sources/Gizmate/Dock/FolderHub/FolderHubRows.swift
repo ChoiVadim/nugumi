@@ -10,6 +10,18 @@ enum FolderHubRows {
     /// into something that has to scroll to be useful.
     static let defaultLimit = 200
 
+    /// Whether opening this entry means walking into it rather than handing it
+    /// to `NSWorkspace`. A bundle — an `.app`, an `.rtfd`, an `.xcodeproj` — is
+    /// a directory to `FileManager` and a single document to everyone else, so
+    /// checking `isDirectory` alone would unfold Calendar.app into its own guts
+    /// instead of launching it.
+    static func isBrowsable(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]) else {
+            return false
+        }
+        return values.isDirectory == true && values.isPackage != true
+    }
+
     /// Never throws. An unreadable folder, a revoked permission, or a folder
     /// deleted since it was added must all read as "nothing to show" rather
     /// than crash or propagate an error — this runs every time the pointer

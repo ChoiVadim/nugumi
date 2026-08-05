@@ -201,13 +201,43 @@ private struct SurfaceCardDragModifier: ViewModifier {
     }
 }
 
-/// Attaches `.onTapGesture` only when the layout declared one.
+/// A double-click handler the host of a surface installs, taking the place of
+/// the layout's own `tap` for every card it draws.
+///
+/// A layout `tap` can only name an action that depends on the row — open this
+/// path, reveal that one. Walking *into* a folder depends on the host's state
+/// instead, so teaching `ToolAgentLayoutTapV1` a case for it would cost the
+/// sidecar schema, the capability description and a parity test for the one
+/// caller that isn't a gizmo at all. The environment carries it down to the
+/// cards without threading a closure through four intermediate views.
+private struct SurfaceActivateKey: EnvironmentKey {
+    static let defaultValue: ((SurfaceRow) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var surfaceActivate: ((SurfaceRow) -> Void)? {
+        get { self[SurfaceActivateKey.self] }
+        set { self[SurfaceActivateKey.self] = newValue }
+    }
+}
+
+/// Attaches a tap only when there is one to attach — the host's handler if it
+/// installed one, the layout's otherwise. Never both: a single-click gesture
+/// beside a double-click one fires on the first half of every double click,
+/// so a host that browses on double-click would reveal in Finder on the way.
 private struct SurfaceCardTapModifier: ViewModifier {
     let tap: ToolAgentLayoutTapV1?
     let row: SurfaceRow
+    @Environment(\.surfaceActivate) private var activate
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        if let tap {
+        if let activate {
+            // Finder's own gesture for "open this", and the one a card can
+            // afford: a card is a drag source, and a shelf's files are picked
+            // up far more often than they are opened.
+            content.onTapGesture(count: 2) { activate(row) }
+        } else if let tap {
             content.onTapGesture { perform(tap) }
         } else {
             content

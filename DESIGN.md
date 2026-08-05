@@ -332,6 +332,26 @@ share of users regardless of what looks right.
   the folder list needs a way back into Edges — an empty, never-configured
   panel with no chips in it is exactly the discovery-by-accident problem that
   put the second view there the first time.
+- **A click whose meaning depends on the host is the host's, not the layout's.**
+  A layout `tap` names an action bound to a row — open this path, reveal that
+  one. The folder hub's click isn't that: a file opens, a folder is browsed
+  into, and "browsed into" is a position in a tree the host owns. Adding a case
+  to `ToolAgentLayoutTapV1` would have cost the sidecar schema, the capability
+  description and a parity test to serve the one caller that isn't a gizmo, so
+  the hub installs a handler through `EnvironmentValues.surfaceActivate`
+  instead and `SurfaceCard` reads it. The handler _replaces_ the layout tap
+  rather than joining it: a single-click gesture beside a double-click one
+  fires on the first half of every double click, which is how a browse would
+  also reveal in Finder on its way. Double-click, not single: a card is a drag
+  source first, and a shelf's files are picked up more often than opened.
+- **A destructive action on a chip is revealed, not inserted.** The hub's
+  folder chips carry their remove ✕ in the layout at all times and fade it in
+  on hover — inserting it would shove every chip to its right as the pointer
+  crosses the row. The context menu stays beside it: on a trackpad, hover and
+  click are the same gesture, and the menu was the only route for two months
+  precisely because nobody found it. Back is a chip too, in the same row,
+  carrying the current folder's name — an unlabelled arrow says you can leave
+  but not where you are.
 - **A tool with no edge is not necessarily a tool with a home, and only Home
   says which one it has.** Everything above is about `DockCatalog`'s
   residents — how a resident earns an edge, and who writes it. A tool doesn't
@@ -403,7 +423,51 @@ neither by default — the folder hub dropped its size line to buy the preview
 53pt instead of 34pt in a ~110pt cell. A surface gizmo that has something to
 say beyond the name still passes a `subtitle`; it just pays for it.
 
-## 14. Copy
+## 14. A settings page states its values; it does not lay out its fields
+
+A panel with more than about four settings shows each one as a **row carrying
+its current value**, and opens that row to the control. `ToolEditor`'s Details
+page is the worked example: `detailGroup` / `detailRow` there, one row open at a
+time, keyed by title in `openRow`.
+
+The alternative — every field expanded, each under its own heading and
+paragraph — is what that page shipped as, and it failed twice over in a 620pt
+panel. Nothing could be **found**: seven sections meant roughly a screen and a
+half of configuration below the fold with nothing naming what was down there.
+And nothing could be **read**: a paragraph per section plus a hint per field is
+a uniform grey texture, and uniform is the one thing hierarchy cannot be. Both
+are structural. Neither is reachable by adjusting spacing.
+
+- **The closed row must state the real value, never that one exists.** "Not
+  set", "12 lines", "120s · network", "Failed" — a row reading "Configured"
+  puts the page back where it started, because the only way to check would be
+  to open it. This is what makes the collapsed list _be_ the settings rather
+  than a table of contents over them, and it is the whole reason collapsing is
+  safe here: every setting on this page happens to have a short answer.
+- **The explanatory sentence belongs inside the row, not above the group.** It
+  is what you want while deciding and at no other time. Printed permanently it
+  is the texture described above; printed on open it answers the question you
+  just asked by opening.
+- **One row open at a time.** The closed rows are the only thing keeping the
+  whole configuration on one screen, so closing the previous one is the
+  mechanism, not a restriction.
+- **A warning is not a value and does not collapse.** The consent notices for
+  `.python` and `.agent` gizmos sit below the groups, always visible. A row is
+  for something the user set; a notice is for something they need to have read
+  before Save, and one hidden behind a chevron has not been read.
+- **Do not put a disclosure inside a disclosure.** The icon field used to carry
+  its own Change/Done toggle over `IconGrid`; inside a row that already opens,
+  that is two clicks to reach one grid. The row's own expansion is the
+  disclosure.
+- **Say each fact once.** The old page stated the gizmo's name in the window
+  header, again in a summary card, and again in the Name field, and stated its
+  kind in the header subtitle, the card's tag, and the Kind picker. The header
+  now carries identity (icon, name, kind tag, behaviour line) on Details, where
+  nothing else does; the chat page keeps `summaryCard` and a header naming the
+  job instead, because there the card is inline in a transcript and the header
+  is chrome.
+
+## 15. Copy
 
 Never write "translate", "translation" or "translator" in anything the user
 reads. Prefer results, replies, output. Code identifiers are exempt.
