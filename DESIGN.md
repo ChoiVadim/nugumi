@@ -174,6 +174,18 @@ share of users regardless of what looks right.
   nothing set on it sticks. Use `PlainTextEditor`, which owns its
   `NSScrollView` — and which also avoids the bug where dismissing a panel
   containing a SwiftUI `TextEditor` leaves the main window swallowing clicks.
+- **No `LazyVGrid`/`LazyVStack` — or a raw `GeometryReader` — directly inside
+  `OverlayScrollHost`.** Its document view leaves height deliberately
+  unbounded so the `NSScrollView` has something to scroll; a lazy container
+  or a `GeometryReader` asked to size itself against an unbounded axis
+  collapses to zero rather than picking a fallback, and the panel renders
+  nothing. Hit twice: `NotesGrid`'s dock path went eager (`add5b4f`), then
+  the folder hub's `.grid` surface shipped with a `LazyVGrid` anyway and
+  reproduced it exactly. Multi-column content should measure its width with
+  a `GeometryReader` placed _outside_ `OverlayScrollHost` — where the
+  container is already resolved on every side — and pass that down as a
+  plain value to an eager, chunked layout (`SurfaceGrid` in
+  `Dock/Surface/SurfaceView.swift`), not try to self-size from inside it.
 
 ## 9. Glass surfaces
 

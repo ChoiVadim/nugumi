@@ -35,20 +35,36 @@ struct SurfaceView: View {
     let stale: String?
 
     var body: some View {
-        OverlayScrollHost {
-            VStack(alignment: .leading, spacing: 8) {
-                SurfaceTreeView(node: layout, rows: rows)
-                if let stale {
-                    Text(stale)
-                        .font(.system(size: 12))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .frame(maxWidth: .infinity, alignment: .center)
+        // `GeometryReader` here, not inside `OverlayScrollHost`: its document
+        // view leaves height deliberately unbounded so the `NSScrollView` has
+        // something to scroll (see that file), and asking either a
+        // `GeometryReader` or a `LazyVGrid` to size itself against an
+        // unbounded axis is exactly what collapses to zero — a `LazyVGrid`
+        // needs a bound to know what to build, and `NSHostingView` never
+        // re-asks a self-sizing SwiftUI subtree for its height at the width
+        // Auto Layout eventually settles on, so a multi-column grid measured
+        // from inside the scroll host reads the wrong width and, in this
+        // one's case, the wrong height too. One level up, `SurfaceView`'s own
+        // frame is fully resolved on every side by the panel that hosts it
+        // (`EdgeDockController.install` pins all four edges), so measuring
+        // the width there and handing it down as a plain value sidesteps the
+        // chicken-and-egg entirely.
+        GeometryReader { geo in
+            OverlayScrollHost {
+                VStack(alignment: .leading, spacing: 8) {
+                    SurfaceTreeView(node: layout, rows: rows, availableWidth: geo.size.width)
+                    if let stale {
+                        Text(stale)
+                            .font(.system(size: 12))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
                 }
+                // Clear of the overlay scroller, which floats over the content —
+                // the same trailing/bottom pad `DockNotesView` uses.
+                .padding(.trailing, 4)
+                .padding(.bottom, 4)
             }
-            // Clear of the overlay scroller, which floats over the content —
-            // the same trailing/bottom pad `DockNotesView` uses.
-            .padding(.trailing, 4)
-            .padding(.bottom, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -60,6 +76,11 @@ struct SurfaceView: View {
 private struct SurfaceTreeView: View {
     let node: ToolAgentLayoutV1
     let rows: [SurfaceRow]
+    /// The width `SurfaceView`'s `GeometryReader` measured outside the scroll
+    /// host — see the comment there for why a grid can't measure its own
+    /// column count from inside it. Unused by `.list`, which was already
+    /// eager and never had this problem.
+    let availableWidth: CGFloat
 
     var body: some View {
         switch node {
@@ -67,15 +88,7 @@ private struct SurfaceTreeView: View {
             if rows.isEmpty {
                 SurfaceEmptyLabel(text: empty)
             } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: CGFloat(minimumWidth)), spacing: 8)],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(rows, id: \.id) { row in
-                        SurfaceLeafView(node: cell, row: row)
-                    }
-                }
+                SurfaceGrid(cell: cell, rows: rows, minimumWidth: CGFloat(minimumWidth), availableWidth: availableWidth)
             }
 
         case let .list(rowNode, empty):
@@ -97,6 +110,63 @@ private struct SurfaceTreeView: View {
             // panel, so the bug is visible instead of silent.
             if let first = rows.first {
                 SurfaceLeafView(node: node, row: first)
+            }
+        }
+    }
+}
+
+/// An eager stand-in for `LazyVGrid(columns: [.adaptive(minimum:)])`.
+///
+/// `LazyVGrid` needs a bounded proposal along its scroll axis to decide what
+/// to build; asked from inside `OverlayScrollHost`'s document view — whose
+/// height is deliberately unbounded, see that file — it collapses to zero
+/// size and renders nothing, which is the bug the folder hub shipped with
+/// (`SurfaceView`'s `GeometryReader` comment has the full chain). Instead of
+/// self-sizing at all, this takes the column width as a plain value computed
+/// once outside the scroll host and chunks rows into it eagerly — the same
+/// move `NotesGrid`'s single-column dock path already made (`add5b4f`),
+/// extended past one column.
+private struct SurfaceGrid: View {
+    let cell: ToolAgentLayoutV1
+    let rows: [SurfaceRow]
+    let minimumWidth: CGFloat
+    let availableWidth: CGFloat
+
+    private static let spacing: CGFloat = 8
+
+    /// Same formula `GridItem(.adaptive(minimum:))` uses: as many columns of
+    /// at least `minimumWidth` as fit, never fewer than one. Falls back to a
+    /// single column rather than dividing by a width that isn't known yet —
+    /// `GeometryReader` reports a real size from its first frame here (see
+    /// `SurfaceView`), but a defensive floor is cheaper than a crash if that
+    /// ever stops being true.
+    private var columns: Int {
+        guard availableWidth > 0 else { return 1 }
+        return max(1, Int((availableWidth + Self.spacing) / (minimumWidth + Self.spacing)))
+    }
+
+    private var columnWidth: CGFloat {
+        guard availableWidth > 0 else { return minimumWidth }
+        return max((availableWidth - CGFloat(columns - 1) * Self.spacing) / CGFloat(columns), 0)
+    }
+
+    /// A trailing row shorter than `columns` stays left-aligned rather than
+    /// stretching to fill — the same look `.adaptive` gives a partial row.
+    private var chunkedRows: [[SurfaceRow]] {
+        stride(from: 0, to: rows.count, by: columns).map {
+            Array(rows[$0..<min($0 + columns, rows.count)])
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Self.spacing) {
+            ForEach(Array(chunkedRows.enumerated()), id: \.offset) { _, rowChunk in
+                HStack(alignment: .top, spacing: Self.spacing) {
+                    ForEach(rowChunk, id: \.id) { row in
+                        SurfaceLeafView(node: cell, row: row)
+                            .frame(width: columnWidth, alignment: .topLeading)
+                    }
+                }
             }
         }
     }
