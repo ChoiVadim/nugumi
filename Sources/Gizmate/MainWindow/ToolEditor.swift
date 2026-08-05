@@ -1023,13 +1023,20 @@ struct ToolEditorPanel: View {
     /// Still a pointer, not a picker, and for the opposite reason to the panel
     /// above: a surface is a resident, it shares its edge with other residents,
     /// and the order they sit in is a thing only the Edges figure can show.
-    /// The consent line that used to live in this hint — "runs on its own,
-    /// whenever its edge opens" — lives there too, under the figure.
+    ///
+    /// The consent line DESIGN.md §11 requires is back in this hint, and this
+    /// is where it belongs. It was briefly a footnote under the Edges figure,
+    /// which said it about every resident drawn there — but Note and the folder
+    /// hub run no script at all, so most of that page was reading a warning
+    /// about something it wasn't doing. The claim is only ever true of one
+    /// gizmo at a time, and this is the screen about one gizmo.
     private var surfacePlacementPointer: some View {
         fieldLabel(
             "Edge",
-            hint: dockedEdge.map { "On the \($0.displayName) edge. Change it in Edges." }
-                ?? "Not on an edge, so it never runs. Change it in Edges."
+            hint: dockedEdge.map {
+                "On the \($0.displayName) edge, so it runs on its own every time that edge "
+                    + "opens. Change it in Edges."
+            } ?? "Not on an edge, so it never runs. Change it in Edges."
         )
     }
 

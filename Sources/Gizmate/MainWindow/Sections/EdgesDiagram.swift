@@ -24,11 +24,15 @@ struct EdgesDiagram: View {
     /// nowhere — the same thing `EdgeDockController.dockItems()` does with them.
     let residents: [DockItem]
 
-    /// How much of the figure each rail eats. A side rail has to fit an icon
-    /// over a two-line name; the top rail only ever holds one tile, so it is
-    /// sized for a single row.
-    private static let sideRailWidth: CGFloat = 104
-    private static let topRailHeight: CGFloat = 74
+    /// One width for every tile, everywhere on the figure. The top rail used to
+    /// size its single occupant to the room it had, which made the same tool
+    /// visibly wider up there than on a side rail — three sizes of the same
+    /// component, read as three different kinds of thing. Every other dimension
+    /// here is derived from this one so they cannot drift again.
+    private static let tileWidth: CGFloat = 96
+    private static let railPadding: CGFloat = 10
+    private static let sideRailWidth: CGFloat = tileWidth + railPadding * 2
+    private static let topRailHeight: CGFloat = 82
     /// Screen-ish. Without a cap the figure stretches to whatever the window
     /// gives it and stops reading as a monitor.
     private static let aspect: CGFloat = 1.6
@@ -106,14 +110,14 @@ struct EdgesDiagram: View {
             }
             Group {
                 if let occupant {
-                    EdgeToolTile(item: occupant, style: .rail)
+                    EdgeToolTile(item: occupant)
                 } else {
                     emptyHint("Drop one here")
                 }
             }
-            .frame(width: 148)
+            .frame(width: Self.tileWidth)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Self.railPadding)
         .frame(height: Self.topRailHeight)
         .frame(maxWidth: .infinity)
         .dropTarget { EdgesSection.placeOnTop($0, dock: dock, residentIDs: residentIDs) }
@@ -127,7 +131,7 @@ struct EdgesDiagram: View {
         return VStack(spacing: 6) {
             railLabel(edge.displayName)
             ForEach(items, id: \.id) { item in
-                EdgeToolTile(item: item, style: .rail)
+                EdgeToolTile(item: item)
                     .dropTarget {
                         EdgesSection.moveOntoResident($0, target: item.id, edge: edge, dock: dock)
                     }
@@ -135,7 +139,7 @@ struct EdgesDiagram: View {
             if items.isEmpty { emptyHint("Drop here") }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Self.railPadding)
         .padding(.vertical, 12)
         .frame(width: Self.sideRailWidth)
         .frame(maxHeight: .infinity)
@@ -150,12 +154,17 @@ struct EdgesDiagram: View {
             .kerning(0.7)
     }
 
-    private func emptyHint(_ text: String) -> some View {
+    /// `fills` is what makes the middle's version a real target rather than a
+    /// caption: a dashed well that grows to the whole empty area is both the
+    /// affordance and the thing the pointer has to be over to let go.
+    private func emptyHint(_ text: String, fills: Bool = false) -> some View {
         Text(text)
             .font(.system(size: 11))
             .foregroundStyle(FlowTheme.inkTertiary.opacity(0.7))
-            .frame(maxWidth: .infinity)
+            .multilineTextAlignment(.center)
             .padding(.vertical, 14)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -172,69 +181,72 @@ struct EdgesDiagram: View {
     private var centerWell: some View {
         VStack(alignment: .leading, spacing: 10) {
             railLabel("Not on an edge")
-            if unplaced.isEmpty {
-                Text("Everything that can sit on an edge is already there.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            } else {
-                ScrollView {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 112), spacing: 10)],
-                        spacing: 10
-                    ) {
-                        ForEach(unplaced, id: \.id) { EdgeToolTile(item: $0, style: .well) }
-                    }
-                    .padding(.bottom, 4)
-                }
-                .scrollIndicators(.never)
-            }
-            Spacer(minLength: 0)
+            wellBody
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .dropTarget { dock.dock($0, to: nil) }
     }
+
+    /// Both branches fill the height on purpose. An empty middle used to be one
+    /// line of text with a `Spacer` under it, and a `.frame` with nothing drawn
+    /// in it is not somewhere a drop can land — the affordance and the hit
+    /// target are the same object here, so there has to be one.
+    @ViewBuilder
+    private var wellBody: some View {
+        if unplaced.isEmpty {
+            emptyHint("Drag a tool here to take it off its edge", fills: true)
+        } else {
+            // ponytail: no ScrollView. A 96pt tile grid fits about sixteen in
+            // the middle of the figure, and the residents are Note, the folder
+            // hub and however many `.surface` gizmos exist. Wrap it in one if
+            // that stops being true — but a ScrollView here also swallows the
+            // drop this well exists for, so it needs its own `dropTarget` on
+            // the scrolled content when it arrives.
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: Self.tileWidth, maximum: Self.tileWidth),
+                                   spacing: 12, alignment: .leading)],
+                spacing: 12
+            ) {
+                ForEach(unplaced, id: \.id) { EdgeToolTile(item: $0) }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
 }
 
 // MARK: - Tiles
 
-/// One draggable tool on the figure. The same view in both sizes rather than a
-/// rail variant and a grid variant — DESIGN.md §12: the only real difference is
-/// how much room it has, so that is the parameter.
+/// One draggable tool on the figure — one size, wherever it sits. It had a
+/// `.rail` and a `.well` variant briefly, which DESIGN.md §12 would have
+/// allowed if the two had a real difference to encode; they didn't, and the
+/// only thing the parameter bought was the same tool looking bigger on the top
+/// rail than on a side one, as though it were a different kind of thing.
 private struct EdgeToolTile: View {
     let item: DockItem
-    let style: Style
-
-    enum Style {
-        case rail
-        case well
-
-        var iconSize: CGFloat { self == .well ? 20 : 17 }
-        var titleSize: CGFloat { self == .well ? 11.5 : 10.5 }
-        var padding: CGFloat { self == .well ? 12 : 8 }
-        var corner: CGFloat { self == .well ? 12 : 9 }
-    }
 
     var body: some View {
         VStack(spacing: 6) {
-            Image(nsImage: item.icon.image(pointSize: style.iconSize))
+            Image(nsImage: item.icon.image(pointSize: 19))
                 .renderingMode(.template)
                 .foregroundStyle(FlowTheme.ink)
             Text(item.title)
-                .font(.system(size: style.titleSize, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(FlowTheme.inkSecondary)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
         }
-        .padding(.vertical, style.padding)
+        .padding(.vertical, 10)
         .padding(.horizontal, 6)
-        .frame(maxWidth: .infinity)
+        // Uniform height as well as width: a one-word name and a two-word one
+        // otherwise make neighbouring tiles different sizes down a rail.
+        .frame(maxWidth: .infinity, minHeight: 62)
         .background(
-            RoundedRectangle(cornerRadius: style.corner, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(FlowTheme.subtleFill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: style.corner, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
         .contentShape(Rectangle())
@@ -280,6 +292,9 @@ private struct EdgeDropTarget: ViewModifier {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(isTargeted ? FlowTheme.accentSoft : Color.clear)
             )
+            // Every target on the figure is mostly empty space inside a frame,
+            // and empty space inside a frame is not somewhere a drop lands.
+            .contentShape(Rectangle())
             .dropDestination(for: EdgeResidentDrag.self) { drags, _ in
                 guard let dragged = drags.first else { return false }
                 handle(dragged.id)

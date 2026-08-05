@@ -306,28 +306,28 @@ share of users regardless of what looks right.
   (same `ToolRunner`, same approval hash as every other tool), but what
   changed is _when_, and approving "run once" is not the same consent as
   "run again on every hover, forever." Parking a gizmo on the figure is where
-  that choice is actually made — an edge is what turns a saved gizmo into one
-  that opens on its own — so the sentence lives under the figure, and nowhere
-  else: not copied onto whichever editor happens to also mention placement, the
-  way it briefly was on both `ToolEditor` and `SettingsSection`. It is a
-  footnote rather than per-row text because there are no rows left to hang it
-  off; a rail tile carries no picker at all.
-  Undocked still has two different meanings, though only one picker is left to
-  say so: a `.panel` result works fine floating, so `DockPlacementPicker`'s
-  `nil` pill keeps its default "Floating" in the editors. A surface has no
-  working undocked state — it is simply in the middle of the figure, which the
-  footnote already calls "saved but never runs" — so no word has to carry that
-  meaning on its own any more.
+  that choice is made, but the sentence saying so belongs on the gizmo, not on
+  the figure: `ToolEditorPanel`'s Edge hint carries it, worded from that
+  gizmo's actual state ("On the Right edge, so it runs on its own every time
+  that edge opens"). It sat under the figure for one round and was wrong there
+  for a reason worth keeping — the figure draws Note and the folder hub too,
+  and neither runs a script, so a page-wide warning had most of its readers
+  reading about something they weren't doing. A consent line has to be attached
+  to the thing it is true of, and the only screen that shows one tool at a time
+  is that tool's editor.
+  Undocked still has two different meanings: a `.panel` result works fine
+  floating, so `DockPlacementPicker`'s `nil` pill keeps its default "Floating"
+  in the editors. A surface has no working undocked state — it is simply in the
+  middle of the figure — and its own hint says "Not on an edge, so it never
+  runs" rather than borrowing a word that would claim otherwise.
 - **Say what's true of the resident, not the sentence a neighbouring one
   happens to use.** The folder hub used to carry a second consent sentence
   purely so it would not borrow the surface's wording about running and
   approving: a surface executes a script on every hover, while the hub reads a
-  folder with `FileManager`, which is not a thing anyone approves. That
-  sentence is gone, and the rule it came from is what allowed it to go — the
-  footnote names gizmos specifically, so it claims nothing about the hub, and a
-  correction with nothing left to correct is just more words. Had the footnote
-  been written as "anything on an edge runs on its own", the hub's sentence
-  would still be required.
+  folder with `FileManager`, which is not a thing anyone approves. It is gone,
+  and the rule is what let it go: the sentence now lives on one gizmo's editor,
+  where there is no neighbour to be confused with. The hub has no editor and
+  needs none — nothing anywhere claims it runs.
 - **One tool never configures itself in the main window.** The folder hub's
   folder list once lived two places at once: `FolderHubView`'s own chips, for
   use once it's docked, and a second, independent view onto the same

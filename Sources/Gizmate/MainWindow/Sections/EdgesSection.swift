@@ -47,9 +47,6 @@ struct EdgesSectionContent: View {
                 header
                 EdgesDiagram(dock: dock, residents: DockCatalog.all(host: host))
                     .padding(.horizontal, 30)
-                consentFootnote
-                    .padding(.horizontal, 38)
-                    .padding(.top, 16)
                     .padding(.bottom, 30)
             }
         }
@@ -71,24 +68,12 @@ struct EdgesSectionContent: View {
         .padding(.bottom, 20)
     }
 
-    /// DESIGN.md §11: the control that puts a gizmo on an edge is the only
-    /// consent screen its background runs ever get — approving "run once" is
-    /// not approving "run again on every hover, forever". There is no per-row
-    /// picker left to hang that sentence off, so it becomes one footnote under
-    /// the figure, said once.
-    ///
-    /// Deliberately about gizmos and nothing else. The folder hub used to carry
-    /// a second sentence of its own, purely so it would not borrow this one's
-    /// claim about running and approving — it reads a folder, which is not a
-    /// thing anyone approves. A footnote that names gizmos claims nothing about
-    /// the hub, so the second sentence has nothing left to correct.
-    private var consentFootnote: some View {
-        Text("A gizmo on an edge runs on its own, every time that edge opens — parking it "
-            + "there is what turns that on. In the middle it stays saved but never runs.")
-            .font(.system(size: 11.5))
-            .foregroundStyle(FlowTheme.inkTertiary)
-            .fixedSize(horizontal: false, vertical: true)
-    }
+    // No consent footnote here. DESIGN.md §11's rule — approving "run once" is
+    // not approving "run again on every hover, forever" — still holds, but a
+    // paragraph under the figure said it about every resident on screen when it
+    // is only ever true of a gizmo: Note and the folder hub run no script at
+    // all. It lives on `ToolEditorPanel`'s Edge hint instead, on the one tool
+    // it is actually about, where a person is already reading about that tool.
 }
 
 extension EdgesSection {
