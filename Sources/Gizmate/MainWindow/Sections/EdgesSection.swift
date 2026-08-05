@@ -2,7 +2,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// One card per screen edge, each listing its residents in tab order, plus
-/// everything placeable that currently sits on none of them.
+/// every other resident that currently sits on none of them. Deliberately
+/// "resident", not the wider "placeable" — see `unplaced`'s doc comment.
 ///
 /// This is a *view* onto `DockStore`, not a new owner of it — placement is
 /// still written from `BuiltInEditor`, `ToolEditor` and `SettingsSection`'s
@@ -29,6 +30,11 @@ struct EdgesSection: View {
 /// take their store as a parameter instead of reading it off the bridge.
 private struct EdgesSectionContent: View {
     @ObservedObject var dock: DockStore
+    // Neither is read by name below — `DockCatalog.all(host:)` reaches into
+    // both through `host` itself. They're still held as `@ObservedObject`
+    // purely so a gizmo being added/renamed or a built-in being renamed
+    // triggers a re-render; without one, SwiftUI has nothing telling it this
+    // view's `body` needs to run again.
     @ObservedObject var tools: ToolsStore
     @ObservedObject var overrides: BuiltInOverridesStore
     let host: any SettingsHost
@@ -42,63 +48,37 @@ private struct EdgesSectionContent: View {
         Dictionary(uniqueKeysWithValues: DockCatalog.all(host: host).map { ($0.id, $0) })
     }
 
-    /// Every id `DockCatalog.placeableIDs` names, with enough to draw a row
-    /// for it — title, icon, and the right word for "not placed". Wider than
-    /// `residents` on purpose: `placeableIDs(host:)` also counts a built-in's
-    /// result panel and a non-surface gizmo's, neither of which has a resident
-    /// preview to show before it runs, so `DockCatalog.item` can't name them.
-    private var placeableRefs: [String: PlaceableRef] {
-        var refs: [String: PlaceableRef] = [:]
+    /// Everything the "not on an edge" list may ever offer a control for —
+    /// deliberately `DockCatalog.knownIDs` (the resident set), never
+    /// `DockCatalog.placeableIDs`. `placeableIDs` is wider on purpose: `prune`
+    /// uses it to avoid dropping a docked `.panel` gizmo's placement even
+    /// though a panel draws nothing while idle. That wideness answers "whose
+    /// placement is worth keeping", not "what can sit on an edge" — building
+    /// this list off it directly offered a working-looking picker for a
+    /// `.replace`/`.notify`/`.notes`/`.speak`/`.annotate` gizmo that, once
+    /// placed, draws nothing anywhere. `EdgesSection.offeredIDs` (below) is
+    /// the same expression, exposed so a parity test can hold it against the
+    /// live catalog directly.
+    private var unplaced: [DockItem] {
+        let placed = Set(DockEdge.allCases.flatMap { dock.items(on: $0) })
         let residents = residents
-
-        // The folder hub is resident (drawn above), but like a surface it has
-        // no floating form — its own picker in `SettingsSection` already
-        // says "Off" rather than "Floating", and this list has to agree.
-        if let folderHub = residents[ToolRef.folderHub.storageID] {
-            refs[folderHub.id] = PlaceableRef(
-                id: folderHub.id, title: folderHub.title, icon: folderHub.icon, unplacedLabel: "Off"
-            )
-        }
-
-        // Ring actions whose result panel can dock. Note also has a resident
-        // row above, but undocked it still works fine — "Floating" is right
-        // for all four, the same word `BuiltInEditor`'s single picker uses
-        // for the group.
-        for action in DockCatalog.dockableBuiltIns {
-            let id = ToolRef.builtIn(action).storageID
-            refs[id] = PlaceableRef(
-                id: id,
-                title: overrides.displayName(for: action),
-                icon: overrides.icon(for: action),
-                unplacedLabel: "Floating"
-            )
-        }
-
-        // Every usable gizmo. `ToolEditor` only gives `.panel` and `.surface`
-        // outputs a real placement control, but `DockCatalog.placeableIDs`
-        // counts every one of them — a surface has no floating form (see
-        // `DockPlacementPicker`'s doc comment), everything else still works
-        // undocked.
-        for tool in tools.usableTools() {
-            let id = ToolRef.generated(tool.id).storageID
-            refs[id] = PlaceableRef(
-                id: id,
-                title: tool.name,
-                icon: .symbol(tool.resolvedSymbolName),
-                unplacedLabel: tool.output == .surface ? "Off" : "Floating"
-            )
-        }
-
-        return refs
+        return EdgesSection.offeredIDs(host: host)
+            .subtracting(placed)
+            .compactMap { residents[$0] }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
-    private var unplaced: [PlaceableRef] {
-        let placed = Set(DockEdge.allCases.flatMap { dock.items(on: $0) })
-        let refs = placeableRefs
-        return DockCatalog.placeableIDs(host: host)
-            .subtracting(placed)
-            .compactMap { refs[$0] }
-            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    /// `DockPlacementPicker`'s `nil` label isn't one word for every resident
+    /// — DESIGN.md §11 is explicit that a surface (and the folder hub, the
+    /// same shape) has no floating form, so `nil` there means "saved and
+    /// inert" rather than "works, just not docked". `ToolRef` already tells
+    /// the two apart: of the three kinds `residents` can ever hold, only a
+    /// `.builtIn` (Note, today the one ring resident) still works floating —
+    /// `.folderHub` and every `.generated` id here are `.surface` gizmos by
+    /// construction of `DockCatalog.gizmos`' own filter.
+    private func unplacedLabel(for item: DockItem) -> String {
+        if case .builtIn = ToolRef(storageID: item.id) { return "Floating" }
+        return "Off"
     }
 
     var body: some View {
@@ -197,17 +177,17 @@ private struct EdgesSectionContent: View {
         }
     }
 
-    private func unplacedRow(_ ref: PlaceableRef) -> some View {
+    private func unplacedRow(_ item: DockItem) -> some View {
         HStack(spacing: 10) {
-            Image(nsImage: ref.icon.image(pointSize: 15))
+            Image(nsImage: item.icon.image(pointSize: 15))
                 .renderingMode(.template)
                 .foregroundStyle(FlowTheme.inkSecondary)
                 .frame(width: 18)
-            Text(ref.title)
+            Text(item.title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(FlowTheme.ink)
             Spacer(minLength: 12)
-            DockPlacementPicker(store: dock, itemID: ref.id, unplacedLabel: ref.unplacedLabel)
+            DockPlacementPicker(store: dock, itemID: item.id, unplacedLabel: unplacedLabel(for: item))
         }
         .padding(.vertical, 9)
     }
@@ -221,14 +201,18 @@ private struct EdgesSectionContent: View {
     }
 }
 
-/// Title, icon, and the right "not placed" word for anything
-/// `DockCatalog.placeableIDs` names — lighter than `DockItem`, which also
-/// carries a resident view this list never instantiates.
-private struct PlaceableRef: Identifiable {
-    let id: String
-    let title: String
-    let icon: RingIconKind
-    let unplacedLabel: String
+extension EdgesSection {
+    /// Every id the "not on an edge" list will ever consider offering a row
+    /// and a picker for — exactly the resident set the three edge cards
+    /// already draw from (`DockCatalog.knownIDs`), never the wider
+    /// `DockCatalog.placeableIDs`. Exposed (rather than kept as a private
+    /// detail of `EdgesSectionContent`) so `DockPlacementParityTests` can
+    /// hold this against the live catalog directly: a regression back to
+    /// `placeableIDs` would offer a picker for something that, once placed,
+    /// draws nothing anywhere — see `unplaced`'s doc comment above.
+    static func offeredIDs(host: any SettingsHost) -> Set<String> {
+        DockCatalog.knownIDs(host: host)
+    }
 }
 
 // MARK: - Drag and drop

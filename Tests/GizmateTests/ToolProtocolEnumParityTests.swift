@@ -230,6 +230,37 @@ final class DockPlacementParityTests: XCTestCase {
                 + "doesn't cover it either"
         )
     }
+
+    /// The converse of the two tests above. Both check "the dock will show
+    /// this, so something must offer a control for it" — this checks the
+    /// direction that actually broke: `EdgesSection`'s "not on an edge" list
+    /// was first built off `DockCatalog.placeableIDs`, which is deliberately
+    /// wider than the resident set (`prune` needs the extra room to keep a
+    /// docked `.panel` gizmo's placement alive). Wider-than-resident is not
+    /// the same as wider-than-controllable: the list offered a working-
+    /// looking edge picker for e.g. a `.notify`-output gizmo, and placing one
+    /// drew nothing anywhere, silently — indistinguishable from the app being
+    /// broken. `EdgesSection.offeredIDs` is what the list actually consumes;
+    /// pinning it against `DockCatalog.knownIDs` here means a future edit
+    /// that widens it back to `placeableIDs` fails immediately rather than
+    /// waiting for someone to notice a dead control. The stub below carries
+    /// zero tools on purpose — `dockableBuiltIns` alone (Explain/Reply/
+    /// Summarize have a control but no resident row) already makes
+    /// `knownIDs` and `placeableIDs` disagree, so this cannot pass by
+    /// comparing two sets that happen to be equal for an unrelated reason.
+    func testEdgesSectionOnlyOffersAnEdgeForSomethingTheDockWillActuallyShow() {
+        let suiteName = "DockPlacementParityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let host = StubEdgesUnplacedHost(builtInOverrides: BuiltInOverridesStore(defaults: defaults))
+
+        XCTAssertNotEqual(
+            DockCatalog.knownIDs(host: host), DockCatalog.placeableIDs(host: host),
+            "this stub's whole point is a host where the two sets differ — if they don't, "
+                + "the assertion below would pass without checking anything"
+        )
+        XCTAssertEqual(EdgesSection.offeredIDs(host: host), DockCatalog.knownIDs(host: host))
+    }
 }
 
 /// The smallest `SettingsHost` `DockCatalog.builtIns` needs: it only reads
@@ -252,6 +283,99 @@ private final class StubBuiltInResidentsHost: SettingsHost {
     var snippets: SnippetsStore { fatalError("unused by DockPlacementParityTests") }
     var notes: NotesStore { fatalError("unused by DockPlacementParityTests") }
     var tools: ToolsStore { fatalError("unused by DockPlacementParityTests") }
+    var ringLayout: RingLayoutStore { fatalError("unused by DockPlacementParityTests") }
+    var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
+    var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
+    var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
+    func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func runTool(_ tool: GizmateTool, selection: String) { fatalError("unused by DockPlacementParityTests") }
+    func performBuiltIn(_ id: RingActionID) { fatalError("unused by DockPlacementParityTests") }
+    func presentMainWindow(section: MainWindowSection?) { fatalError("unused by DockPlacementParityTests") }
+    var uvIsReady: Bool { fatalError("unused by DockPlacementParityTests") }
+    func testScriptTool(
+        _ tool: GizmateTool,
+        script: String,
+        onOutput: @escaping @Sendable (String) -> Void
+    ) async -> ToolTestState {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func generateScriptTool(
+        description: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
+    ) async -> Result<GeneratedTool, Error> {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func reviseScriptTool(
+        tool: GizmateTool,
+        script: String,
+        instruction: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
+    ) async -> Result<GeneratedTool, Error> {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func repairScriptTool(
+        tool: GizmateTool,
+        script: String,
+        failure: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest
+    ) async -> Result<GeneratedTool, Error> {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func cloudProviderHasCredentials(_ provider: CloudProvider) -> Bool {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func runCloudTest(for provider: CloudProvider) async -> CloudTestResult {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    var bootstrapState: BootstrapState { fatalError("unused by DockPlacementParityTests") }
+    func refreshBootstrap() { fatalError("unused by DockPlacementParityTests") }
+    var ollamaModels: [OllamaModelOption] { fatalError("unused by DockPlacementParityTests") }
+    var appVersionString: String { fatalError("unused by DockPlacementParityTests") }
+    var isAppBundle: Bool { fatalError("unused by DockPlacementParityTests") }
+    var availableUpdateVersion: String? { fatalError("unused by DockPlacementParityTests") }
+    func installAvailableUpdate() { fatalError("unused by DockPlacementParityTests") }
+}
+
+/// The smallest `SettingsHost` `EdgesSection.offeredIDs`/`DockCatalog.all`
+/// need: `builtInOverrides` for a ring resident's title and icon, `tools` so
+/// `usableTools()` (reached through `DockCatalog.gizmos`) has something real
+/// to filter rather than crashing. Left empty on purpose — the disagreement
+/// this test needs between `knownIDs` and `placeableIDs` already comes from
+/// `dockableBuiltIns` alone, so no tool needs seeding. Same `fatalError`-
+/// everything-else convention as `StubBuiltInResidentsHost` above and
+/// `DockCatalogSurfaceTests`'s stub, whose scratch-directory `tools` this
+/// mirrors exactly.
+@MainActor
+private final class StubEdgesUnplacedHost: SettingsHost {
+    let builtInOverrides: BuiltInOverridesStore
+    private let toolsDirectory = FileManager.default.temporaryDirectory
+        .appending(path: "gizmate-edges-unplaced-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+    lazy var tools = ToolsStore(directoryURL: toolsDirectory, migrateLegacy: false)
+
+    init(builtInOverrides: BuiltInOverridesStore) {
+        self.builtInOverrides = builtInOverrides
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: toolsDirectory)
+    }
+
+    func makeSettingsSnapshot() -> SettingsSnapshot { fatalError("unused by DockPlacementParityTests") }
+    func performSettingsIntent(_ intent: SettingsIntent) { fatalError("unused by DockPlacementParityTests") }
+    var usageStats: UsageStatsStore { fatalError("unused by DockPlacementParityTests") }
+    var snippets: SnippetsStore { fatalError("unused by DockPlacementParityTests") }
+    var notes: NotesStore { fatalError("unused by DockPlacementParityTests") }
     var ringLayout: RingLayoutStore { fatalError("unused by DockPlacementParityTests") }
     var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
     var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
