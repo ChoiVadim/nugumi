@@ -405,30 +405,29 @@ final class EdgeDockController {
         }
     }
 
-    /// Never shrink — liquid glass takes its shape from the model frame and
+    /// Every dock leaves the way it came: back into its own bezel, fading as
+    /// it goes.
+    ///
+    /// Never a shrink — liquid glass takes its shape from the model frame and
     /// teleports on frame-one of a *resizing* close, popping a disc at the
     /// centre; the ring paid for that lesson already. A pure translation is a
     /// different animal: the window moves, the glass keeps its own geometry
-    /// inside it, and nothing has a new shape to snap to. So the top dock
-    /// retracts into the bezel it came out of, the mirror of its arrival,
-    /// while the side docks still fade in place — one of those is closed by
-    /// dragging it bezelward by hand, and a second motion after the user's own
-    /// reads as a bounce.
+    /// inside it, and nothing has a new shape to snap to. Measured from
+    /// `panel.frame` rather than from the frame the dock opened at, which is
+    /// what makes this continue a drag-to-close instead of fighting it: a
+    /// panel pulled halfway to the bezel by hand carries on in the same
+    /// direction from wherever the hand let go.
     private func fadeOut() {
-        let retract = edge == .top
-            ? DockGeometry.offscreenFrame(panel.frame, for: edge)
-            : nil
+        let retract = DockGeometry.offscreenFrame(panel.frame, for: edge)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = retract == nil ? 0.12 : 0.22
+            context.duration = 0.22
             // Accelerating away, the exact mirror of `present`'s decelerating
             // arrival: a panel that leaves the way it came reads as one thing
             // moving, not as two effects sharing an edge.
             context.timingFunction = CAMediaTimingFunction(
                 controlPoints: 0.5, 0, 0.84, 0.4
             )
-            if let retract {
-                panel.animator().setFrame(retract, display: true)
-            }
+            panel.animator().setFrame(retract, display: true)
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             self?.panel.orderOut(nil)
