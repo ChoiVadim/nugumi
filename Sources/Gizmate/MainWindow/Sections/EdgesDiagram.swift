@@ -55,13 +55,11 @@ struct EdgesDiagram: View {
     static let railPadding: CGFloat = 10
     static let sideRailWidth: CGFloat = tileWidth + railPadding * 2
     static let topRailHeight: CGFloat = 82
-    /// Where a side rail's first tile starts, measured from the top of the
-    /// figure: past the top rail, past the rail's own vertical padding, past
-    /// its label and the gap under it. Approximate on purpose — the label's
-    /// real height is whatever the system font gives it, and a few points of
-    /// slop only decides which half of a tile a drop counts as, never which
-    /// rail it lands on.
-    static let railContentTopInset: CGFloat = 12 + 13 + tileSpacing
+    /// Where a side rail's first tile starts: past the top rail, then past the
+    /// rail's own vertical padding. Exact now that the rails carry no caption
+    /// above their tiles, but it does not have to be: a few points of slop only
+    /// decides which half of a tile a landing counts as, never which rail.
+    static let railContentTopInset: CGFloat = 12
     static let railContentTop: CGFloat = topRailHeight + railContentTopInset
 
     /// Screen-ish. Without a cap the figure stretches to whatever the window
@@ -185,13 +183,12 @@ struct EdgesDiagram: View {
             .fill(highlighted ? FlowTheme.accentSoft : Color.white.opacity(0.045))
     }
 
-    private func railLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 9.5, weight: .semibold))
-            .foregroundStyle(FlowTheme.inkTertiary.opacity(0.75))
-            .textCase(.uppercase)
-            .kerning(0.8)
-    }
+    // No "TOP" / "LEFT" / "RIGHT" / "NOT ON AN EDGE" captions. Once the figure
+    // reads as a screen, a band along its top edge is the top edge, and naming
+    // it is the picture repeating itself in words. The middle needed a caption
+    // least of all: a tool sitting inside the screen rather than on a bezel is
+    // exactly what "not on an edge" means, and `centerWell` still says so in
+    // one line when there is nothing in it to make the point for it.
 
     /// One tile, always. The top dock has no tab strip (`EdgeDockController`
     /// expands straight to `items[0]` on hover), so a second thing up there was
@@ -201,17 +198,13 @@ struct EdgesDiagram: View {
     private func topRail(size: CGSize, landing: Zone?) -> some View {
         let occupant = tiles(on: .top).first
         return ZStack {
-            HStack {
-                railLabel(DockEdge.top.displayName)
-                Spacer(minLength: 0)
-            }
             if let occupant {
                 tile(occupant, size: size).frame(width: Self.tileWidth)
             } else if drag != nil {
                 slotOutline.frame(width: Self.tileWidth, height: Self.tileHeight)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, Self.railPadding)
         .frame(height: Self.topRailHeight)
         .frame(maxWidth: .infinity)
         .background(band(landing == .edge(.top, 0)))
@@ -225,7 +218,6 @@ struct EdgesDiagram: View {
             return index
         }()
         return VStack(spacing: Self.tileSpacing) {
-            railLabel(edge.displayName)
             ForEach(items, id: \.id) { tile($0, size: size) }
             if items.isEmpty, drag != nil {
                 slotOutline.frame(height: Self.tileHeight)
@@ -278,7 +270,6 @@ struct EdgesDiagram: View {
     /// picker, so dragging it here is how a tool stops waiting on a bezel.
     private func centerWell(size: CGSize, highlighted: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            railLabel("Not on an edge")
             if unplaced.isEmpty {
                 Text("Nothing off an edge")
                     .font(.system(size: 11.5))
