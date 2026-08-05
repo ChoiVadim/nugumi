@@ -243,75 +243,91 @@ share of users regardless of what looks right.
   behind it either) — `DockCatalog.builtIns` appends it directly, because a
   folder listing passes the same "something to draw before any run starts"
   test Note and a `.surface` gizmo do, without a run to speak of at all.
-- **Placement is written from exactly one screen.** `BuiltInEditor`'s "Panel"
-  section, `ToolEditor`'s panel/edge fields, and Settings → General's Files
-  card each used to carry their own `DockPlacementPicker`, writing straight to
-  `DockStore`. Two of the three now hold only a locality pointer — plain text
-  saying where the thing currently sits, or that it sits nowhere — and
-  `EdgesSection` is the one place that actually calls `DockPlacementPicker`
-  and writes. The third, Settings → General's Files card, held nothing besides
-  that same pointer once it stopped writing — a card whose whole content is
-  "go to Edges" is a signpost, not a setting, so it was deleted rather than
-  reduced to text like the other two. Reading a pointer back from the store
-  the same screen writes to needed no new plumbing: `bridge.dock.edge(of:)`
-  was already there. The identity gap that used to route the folder hub to
-  Settings → General still exists — `BuiltInEditor`'s gate is a
-  `RingActionID`, `ToolEditor`'s a `GizmateTool`, and the folder hub has
-  neither — but with that card gone, the gap means the folder hub is now the
-  one resident with no editor anywhere that can carry a pointer to it: an
-  asymmetry among the residents themselves, not only about which screen does
-  the writing. That's acceptable — there is no editor left to put it in — but
-  worth naming here rather than leaving it a silent gap.
-  `EdgesSection.residentWithoutARingSlot` names the folder hub's id today (it
-  moved from `SettingsSection` when the picker did); a future resident of this
-  same ring-slot-less kind joins it there, not a new constant.
-  `DockPlacementParityTests` holds it, together with `dockableBuiltIns` mapped
-  to ring-action ids, against every id `DockCatalog.builtIns(host:)` actually
-  returns — the same shape as the gizmo-output parity test below, generalized
-  from a fixed enum to a live list because built-ins have no enum to diff
-  against.
-- **Placeable is wider than resident, and both get a picker in `EdgesSection`
-  now, just not the same list.** A `.surface` gizmo, the folder hub, and Note
-  are residents — something to draw before any run starts — and sit in the
-  three edge cards or the "Not on an edge" list beneath them, the same list
-  `DockCatalog.knownIDs` names. A `.panel` gizmo and a dockable-but-not-
-  resident ring action (Explain, Reply, Summarize) are placeable but draw
-  nothing while idle, so a card row would either sit empty or promise a run
-  that hasn't happened — DESIGN.md said as much above, before this section
-  existed to act on it. Those get their own "Panel placement" list instead:
-  same `DockPlacementPicker`, same `DockStore`, no card, no drag — there is
-  nothing to reorder relative to since none of them ever render together.
-- **A resident with nothing to place still gets a way off an edge.** Once a
-  resident is docked it is drawn as a plain drag row with no picker — a
-  picker on every row would fight the row's own drag gesture for the same
-  click. The "Not on an edge" card is the drop target that takes its place:
-  dragging a docked resident there calls `dock.dock(_:to: nil)` the same as
-  picking "Off" used to. Removing this dropped the last way to undock
-  anything once the three editors stopped writing to `DockStore` themselves,
-  so it isn't optional polish — without it, taking something off an edge
-  would have been simply impossible.
+- **Placement splits by kind, not by screen.** Both halves write the same
+  `DockStore` key, and for a while both were written from `EdgesSection` alone
+  — one screen, one writer, which read as the tidy rule. It wasn't: it forced
+  five lists onto a page about three places, and put a segmented picker in
+  front of "where does Explain's answer open" as though that were a question
+  about the shape of the screen. It is a question about one tool. The split
+  that actually holds is between the two things a placement can mean.
+  **Where a resident waits** is a property of the screen: several share one
+  edge, in an order only that edge can decide, and every one of them draws
+  something before any run starts. That is `EdgesDiagram` and nothing else.
+  **Where a result panel opens** is a property of one tool: it draws nothing
+  until that tool runs, it never shares an edge, and there is no order to
+  arrange it in. That goes back to the tool's own editor — `ToolEditorPanel`
+  and `BuiltInEditor` each call `DockPlacementPicker` directly again.
+  `PanelPlacement` is the live gate both editors ask, and
+  `DockPlacementParityTests` pins two things about it: that it agrees with the
+  sets the editors are really gated on, and that it is **disjoint** from
+  `EdgesSection.offeredIDs`. Overlap is the failure that matters — one id with
+  two controls writing it is exactly what collapsing everything onto one
+  screen was meant to prevent, and the split only keeps that promise while the
+  two sides cannot both claim the same tool.
+  Settings → General's Files card stays deleted: a card whose whole content is
+  "go to Edges" is a signpost, not a setting. The folder hub remains the one
+  resident with no editor of its own — `BuiltInEditor`'s gate is a
+  `RingActionID`, `ToolEditorPanel`'s a `GizmateTool`, and it has neither —
+  but that costs nothing now, because a resident is placed on the figure
+  rather than from an editor. `EdgesSection.residentWithoutARingSlot` names its
+  id for `DockPlacementParityTests`, which holds it, together with
+  `dockableBuiltIns` mapped to ring-action ids, against every id
+  `DockCatalog.builtIns(host:)` actually returns.
+- **Edges is a picture of a screen, not a list of edge names.** Three cards
+  headed "Top", "Left", "Right" plus two more lists underneath made a person
+  translate three words back into a picture of their own monitor before they
+  could decide anything, and left five places a tool could be listed for three
+  places it could be. `EdgesDiagram` draws one screen with a rail on each edge
+  a dock can hang off, and every resident is on it exactly once: on a rail, or
+  in the middle — which _is_ "not on an edge", not a fourth place. That is why
+  dropping in the middle is `dock(_:to: nil)` and not a placement of its own,
+  and why it is still the only way back off an edge: a rail tile carries no
+  picker, because a picker would fight the tile's own drag for the same click.
+  Same reasoning as `RingDiagram`, and it borrows nothing else from it —
+  the ring needs a hand-rolled `DragGesture` because its targets are discs on
+  a circle with folders that spring open under a carried button, while four
+  rectangles are exactly what `.draggable` / `.dropDestination` already do.
+- **The top rail holds one, and that was always true.** `EdgeDockController`
+  expands straight to `items[0]` on hover — the top dock has no tab strip — so
+  a second resident up there was stored and then never shown again. The figure
+  states the rule instead of quietly discarding it, and a drop onto an
+  occupied top rail evicts rather than refuses: a rail that silently declines
+  a drop is indistinguishable from one that doesn't work, which is what the
+  old page felt like. The cap lives in `EdgesSection.placeOnTop`, not in
+  `DockStore`, because `placement[.top]` carries both meanings above in one
+  array — residents that wait there, and ids whose result panel merely opens
+  there — and only the first kind is capped. The store cannot tell them apart,
+  so a cap enforced down there would silently undo a `.panel` placement every
+  time someone parked a surface up top. `residentIDs` is a parameter for that
+  reason and not a convenience.
 - **A placement control can be the only consent screen a background run
   gets.** A surface's script runs on pointer hover, not a press — the first
   trigger in Gizmate the user doesn't cause directly. Nothing new executes
   (same `ToolRunner`, same approval hash as every other tool), but what
   changed is _when_, and approving "run once" is not the same consent as
-  "run again on every hover, forever." `EdgesSection`'s picker is where that
-  choice is actually made — picking an edge is what turns a saved gizmo into
-  one that opens on its own — so it is also the one place the sentence has to
-  live now: not copied onto whichever editor happens to also mention
-  placement, the way it briefly was on both `ToolEditor` and `SettingsSection`.
-  It follows that the two placement pickers cannot share one default label: a
-  `.panel` result still works undocked, so its picker calls `nil` "Floating";
-  a surface has no working undocked state, so its picker calls the same `nil`
-  "Off" rather than borrow a word that would say otherwise.
-- **The consent sentence says what's actually true of the resident, not the
-  sentence a neighbouring one happens to use.** The folder hub's picker also
-  calls `nil` "Off" — same invisible-until-docked reasoning as a surface's —
-  but its sentence doesn't borrow the surface's wording about running and
-  approving. A surface executes a script on every hover; the folder hub reads
-  a folder with `FileManager` on every hover, which is not a thing a user
-  approves at all. Saying "nothing to run or approve" is the honest claim for
-  this resident specifically, not a shorter version of the gizmo's sentence.
+  "run again on every hover, forever." Parking a gizmo on the figure is where
+  that choice is actually made — an edge is what turns a saved gizmo into one
+  that opens on its own — so the sentence lives under the figure, and nowhere
+  else: not copied onto whichever editor happens to also mention placement, the
+  way it briefly was on both `ToolEditor` and `SettingsSection`. It is a
+  footnote rather than per-row text because there are no rows left to hang it
+  off; a rail tile carries no picker at all.
+  Undocked still has two different meanings, though only one picker is left to
+  say so: a `.panel` result works fine floating, so `DockPlacementPicker`'s
+  `nil` pill keeps its default "Floating" in the editors. A surface has no
+  working undocked state — it is simply in the middle of the figure, which the
+  footnote already calls "saved but never runs" — so no word has to carry that
+  meaning on its own any more.
+- **Say what's true of the resident, not the sentence a neighbouring one
+  happens to use.** The folder hub used to carry a second consent sentence
+  purely so it would not borrow the surface's wording about running and
+  approving: a surface executes a script on every hover, while the hub reads a
+  folder with `FileManager`, which is not a thing anyone approves. That
+  sentence is gone, and the rule it came from is what allowed it to go — the
+  footnote names gizmos specifically, so it claims nothing about the hub, and a
+  correction with nothing left to correct is just more words. Had the footnote
+  been written as "anything on an edge runs on its own", the hub's sentence
+  would still be required.
 - **One tool never configures itself in the main window.** The folder hub's
   folder list once lived two places at once: `FolderHubView`'s own chips, for
   use once it's docked, and a second, independent view onto the same
@@ -351,7 +367,9 @@ share of users regardless of what looks right.
   click are the same gesture, and the menu was the only route for two months
   precisely because nobody found it. Back is a chip too, in the same row,
   carrying the current folder's name — an unlabelled arrow says you can leave
-  but not where you are.
+  but not where you are. That name is capped at 140pt: a folder a browser
+  saved is named after a page title, and an uncapped one pushed every root
+  chip off the row.
 - **A tool with no edge is not necessarily a tool with a home, and only Home
   says which one it has.** Everything above is about `DockCatalog`'s
   residents — how a resident earns an edge, and who writes it. A tool doesn't

@@ -133,7 +133,13 @@ struct FolderHubView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "chevron.left").font(.system(size: 9, weight: .semibold))
-                Text(current?.lastPathComponent ?? "").font(.system(size: 11, weight: .medium))
+                // Capped: a folder saved by a browser is named after a page
+                // title, and one of those spends the whole row on its own —
+                // the root chips it sits beside got pushed off the edge.
+                Text(current?.lastPathComponent ?? "")
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: 140, alignment: .leading)
             }
             .foregroundStyle(FlowTheme.ink)
             .padding(.horizontal, 8)
