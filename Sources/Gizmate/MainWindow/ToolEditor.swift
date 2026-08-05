@@ -100,7 +100,11 @@ struct ToolEditorPanel: View {
     @FocusState private var nameFocused: Bool
     @State private var stage: EditorStage = .new
     @State private var page: EditorPage = .overview
-    @State private var showIconPicker = false
+    /// Which detail row is expanded, keyed by its title. One at a time: the
+    /// closed rows are the only thing that keeps the whole configuration on one
+    /// screen, so opening a second by closing the first is the point, not a
+    /// restriction.
+    @State private var openRow: String?
     @State private var readyDraftFingerprint: String?
     /// Mirrors `draft.options` with stable per-row identity for `optionsEditor`.
     /// See `OptionRow` for why an array index can't serve as that identity.
@@ -221,14 +225,28 @@ struct ToolEditorPanel: View {
     // MARK: - Chrome
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(isNew ? "New gizmo" : "Edit gizmo")
-                    .font(.system(size: 15, weight: .semibold))
+        HStack(alignment: .top, spacing: 11) {
+            if showsIdentity {
+                Image(systemName: draft.resolvedSymbolName)
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(FlowTheme.ink)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(FlowTheme.subtleFill))
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 7) {
+                    Text(headerTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(FlowTheme.ink)
+                        .lineLimit(1)
+                    if showsIdentity {
+                        RingTag(text: draft.kind.displayName, accent: true)
+                    }
+                }
                 Text(headerSubtitle)
                     .font(.system(size: 11.5))
                     .foregroundStyle(FlowTheme.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
             Button(action: { dismiss() }) {
@@ -274,11 +292,6 @@ struct ToolEditorPanel: View {
                 .accessibilityAddTraits(page == item ? .isSelected : [])
             }
             Spacer(minLength: 0)
-            if page == .details {
-                Text("Exact settings")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
@@ -324,11 +337,24 @@ struct ToolEditorPanel: View {
     /// opened for editing.
     private var hasTool: Bool { stage == .ready }
 
+    /// Whether the header names the gizmo rather than the job.
+    ///
+    /// Details is the only page with nothing else that says what this thing is:
+    /// the chat page already carries `summaryCard` inline in its transcript, and
+    /// a header restating the same name and the same behaviour line 40pt above it
+    /// is where this panel's "everything is said three times" reading came from.
+    private var showsIdentity: Bool { page == .details && hasTool }
+
+    private var headerTitle: String {
+        guard showsIdentity else { return isNew ? "New gizmo" : "Edit gizmo" }
+        return draft.name.isEmpty ? "Untitled gizmo" : draft.name
+    }
+
     private var headerSubtitle: String {
-        if page == .overview {
+        guard showsIdentity else {
             return isNew ? "Build it with Gizmate" : "Edit it with Gizmate"
         }
-        return Self.subtitle(for: draft.kind)
+        return behaviourLine
     }
 
     /// What the model decided, in one readable block. This is the only thing the
@@ -382,157 +408,387 @@ struct ToolEditorPanel: View {
         return parts.joined(separator: " · ")
     }
 
+    /// Every setting states its current value on a closed row, and opens to the
+    /// control that changes it.
+    ///
+    /// This page used to be every section expanded at once — seven of them for a
+    /// script gizmo, each a heading, a paragraph of grey explanation, and its
+    /// fields, in a panel 620pt tall. Two things followed and neither was
+    /// fixable by spacing. Nothing could be *found*: about a screen and a half
+    /// of the config existed below the fold with nothing saying what was down
+    /// there. And nothing could be *read*: a section paragraph plus a hint under
+    /// every field is a uniform grey texture, and uniform is the one thing
+    /// hierarchy cannot be.
+    ///
+    /// Collapsing to values fixes both at once, and the reason it can is that
+    /// every setting here has a short answer — a name, an icon, one of eight
+    /// inputs, a timeout. So the closed list is not a table of contents that
+    /// hides the settings; it *is* the settings, all of them, legible at a
+    /// glance for the first time. Opening one is how you change it, not how you
+    /// see it.
     private var detailsContent: some View {
-        VStack(alignment: .leading, spacing: 26) {
-            summaryCard
-
-            editorSection(
-                "General",
-                subtitle: "How this gizmo appears in your Ring."
-            ) {
-                VStack(alignment: .leading, spacing: 18) {
-                    nameAndIcon
-                    kindPicker
+        VStack(alignment: .leading, spacing: 18) {
+            detailGroup("General") {
+                detailRow("Name", value: draft.name.isEmpty ? "Not set" : draft.name) {
+                    nameField
                 }
-            }
-
-            editorSection(
-                "Options",
-                subtitle: "Variants this gizmo offers. The Ring shows them as a "
-                    + "second orbit behind its button, and the first one is used "
-                    + "when you run the gizmo from a shortcut."
-            ) {
-                optionsEditor
+                rowDivider
+                detailRow(
+                    "Icon",
+                    value: ToolIcons.displayName(for: draft.resolvedSymbolName)
+                ) {
+                    IconGrid(selection: $draft.symbolName, height: 108)
+                }
+                rowDivider
+                // Out of "General", which called itself "how this gizmo appears
+                // in your Ring" — the kind is the one choice on this page that
+                // rewrites every row below it, and appearance is the one thing
+                // it does not touch.
+                detailRow(
+                    "Kind",
+                    value: draft.kind.displayName,
+                    hint: Self.subtitle(for: draft.kind)
+                ) {
+                    PillPicker(
+                        options: ToolKind.allCases,
+                        selection: $draft.kind,
+                        label: { $0.displayName }
+                    )
+                }
+                rowDivider
+                detailRow(
+                    "Options",
+                    value: optionsValue,
+                    hint: "Variants this gizmo offers. The Ring shows them as a "
+                        + "second orbit behind its button, and the first one is used "
+                        + "when you run the gizmo from a shortcut."
+                ) {
+                    optionsEditor
+                }
             }
 
             switch draft.kind {
             case .prompt:
-                editorSection(
-                    "Instruction",
-                    subtitle: "The exact prompt Gizmate sends to your current model."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        promptField
-                        languageToggle
-                    }
-                }
-                editorSection(
-                    "Result",
-                    subtitle: "Where the gizmo's answer goes."
-                ) {
-                    resultPicker
-                }
-                editorSection(
-                    "Your context",
-                    subtitle: "What this gizmo knows about you before it starts."
-                ) {
-                    contextToggles
-                }
-            case .native:
-                editorSection(
-                    "Action",
-                    subtitle: "A fixed macOS action. No script is executed."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        actionPicker
-                        if draft.nativeAction.targetLabel != nil {
-                            targetField
+                detailGroup("Behaviour") {
+                    detailRow(
+                        "Instruction",
+                        value: promptValue,
+                        hint: "The exact prompt Gizmate sends to your current model."
+                    ) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            promptField
+                            languageToggle
                         }
                     }
-                }
-                if draft.nativeAction.usesInput {
-                    editorSection(
-                        "Input",
-                        subtitle: "What the action receives."
+                    rowDivider
+                    detailRow(
+                        "Result",
+                        value: resultValue,
+                        hint: draft.output.explanation
                     ) {
-                        inputPicker
+                        resultPicker
+                    }
+                    rowDivider
+                    detailRow(
+                        "Your context",
+                        value: contextValue,
+                        hint: "What this gizmo knows about you before it starts."
+                    ) {
+                        contextToggles
+                    }
+                }
+            case .native:
+                detailGroup("Action") {
+                    detailRow(
+                        "Action",
+                        value: actionValue,
+                        hint: draft.nativeAction.explanation
+                    ) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            actionPicker
+                            if draft.nativeAction.targetLabel != nil {
+                                targetField
+                            }
+                        }
+                    }
+                    if draft.nativeAction.usesInput {
+                        rowDivider
+                        detailRow("Input", value: draft.input.displayName, hint: inputHint) {
+                            inputPicker
+                        }
                     }
                 }
             case .python:
-                editorSection(
-                    "Script",
-                    subtitle: "Review the exact code that will run."
-                ) {
-                    scriptField
-                }
-                editorSection(
-                    "Input and result",
-                    subtitle: "What the script receives, and where its output goes."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
+                detailGroup("Script") {
+                    detailRow(
+                        "Python script",
+                        value: scriptValue,
+                        hint: "A PEP 723 header declares the dependencies; the input "
+                            + "arrives as command-line arguments."
+                    ) {
+                        scriptField
+                    }
+                    rowDivider
+                    detailRow("Input", value: draft.input.displayName, hint: inputHint) {
                         inputPicker
-                        resultPicker
-                        if draft.output == .files {
-                            outputDirectoryField
+                    }
+                    rowDivider
+                    detailRow("Result", value: resultValue, hint: draft.output.explanation) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            resultPicker
+                            if draft.output == .files {
+                                outputDirectoryField
+                            }
                         }
                     }
                 }
-                editorSection(
-                    "Runtime",
-                    subtitle: "Set the time limit and declare network use."
-                ) {
-                    scriptSettings
-                }
-                editorSection(
-                    "Secrets",
-                    subtitle: "Keys this script may read from its environment. "
-                        + "It gets the ones ticked here and nothing else."
-                ) {
-                    ToolSecretsPicker(selection: $draft.secretNames)
-                }
-                editorSection(
-                    "Test before saving",
-                    subtitle: "Run this exact version once and inspect its output."
-                ) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        consentNotice
+                detailGroup("Running it") {
+                    detailRow(
+                        "Runtime",
+                        value: runtimeValue,
+                        hint: "Set the time limit and declare network use."
+                    ) {
+                        scriptSettings
+                    }
+                    rowDivider
+                    detailRow(
+                        "Secrets",
+                        value: secretsValue,
+                        hint: "Keys this script may read from its environment. "
+                            + "It gets the ones ticked here and nothing else."
+                    ) {
+                        ToolSecretsPicker(selection: $draft.secretNames)
+                    }
+                    rowDivider
+                    detailRow(
+                        "Test",
+                        value: testValue,
+                        valueTint: test.isFailure ? Self.warning : nil,
+                        hint: "Run this exact version once and inspect its output."
+                    ) {
                         testSection
                     }
                 }
+                consentNotice
             case .agent:
-                editorSection(
-                    "Instruction",
-                    subtitle: "What the agent should accomplish. It decides how, "
-                        + "one step at a time."
-                ) {
-                    promptField
-                }
-                editorSection(
-                    "Input and result",
-                    subtitle: "What it starts from, and where its answer goes."
-                ) {
-                    VStack(alignment: .leading, spacing: 18) {
+                detailGroup("Behaviour") {
+                    detailRow(
+                        "Instruction",
+                        value: promptValue,
+                        hint: "What the agent should accomplish. It decides how, "
+                            + "one step at a time."
+                    ) {
+                        promptField
+                    }
+                    rowDivider
+                    detailRow("Input", value: draft.input.displayName, hint: inputHint) {
                         inputPicker
+                    }
+                    rowDivider
+                    detailRow("Result", value: resultValue, hint: draft.output.explanation) {
                         resultPicker
                     }
+                    rowDivider
+                    detailRow(
+                        "Your context",
+                        value: contextValue,
+                        hint: "What this gizmo knows about you before it starts."
+                    ) {
+                        contextToggles
+                    }
                 }
-                editorSection(
-                    "Your context",
-                    subtitle: "What this gizmo knows about you before it starts."
-                ) {
-                    contextToggles
+                detailGroup("Running it") {
+                    detailRow(
+                        "Limits",
+                        value: limitsValue,
+                        hint: "The only bound on a gizmo whose steps nobody can "
+                            + "read in advance."
+                    ) {
+                        agentSettings
+                    }
+                    rowDivider
+                    detailRow(
+                        "Secrets",
+                        value: secretsValue,
+                        hint: "Keys the agent's scripts may read from their environment. "
+                            + "They get the ones ticked here and nothing else."
+                    ) {
+                        ToolSecretsPicker(selection: $draft.secretNames)
+                    }
                 }
-                editorSection(
-                    "Limits",
-                    subtitle: "The only bound on a gizmo whose steps nobody can "
-                        + "read in advance."
-                ) {
-                    agentSettings
-                }
-                editorSection(
-                    "Secrets",
-                    subtitle: "Keys the agent's scripts may read from their "
-                        + "environment. They get the ones ticked here and nothing else."
-                ) {
-                    ToolSecretsPicker(selection: $draft.secretNames)
-                }
-                editorSection(
-                    "What you are agreeing to",
-                    subtitle: "Read this before you save."
-                ) {
-                    agentConsentNotice
-                }
+                agentConsentNotice
             }
+        }
+    }
+
+    // MARK: - Detail rows
+
+    /// A titled set of rows in one panel. The caption carries the grouping that
+    /// per-section paragraphs used to carry at four times the height.
+    private func detailGroup<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(FlowTheme.inkTertiary)
+                .padding(.leading, 2)
+            VStack(spacing: 0) { content() }
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(FlowTheme.card)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(FlowTheme.hairline, lineWidth: 1)
+                )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Inset on the leading edge only, so the group's own outline stays the
+    /// outer shape and the dividers read as inside it.
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(FlowTheme.hairline)
+            .frame(height: 1)
+            .padding(.leading, 12)
+    }
+
+    /// One setting: its name, its current value, and — only once you ask — the
+    /// control and the sentence explaining it.
+    ///
+    /// The hint lives here rather than above the whole group because it is the
+    /// thing you want *while deciding*, and nowhere else. Printed permanently it
+    /// was the grey texture that flattened this page; printed on open it is the
+    /// answer to the question you just asked.
+    @ViewBuilder
+    private func detailRow<Content: View>(
+        _ title: String,
+        value: String,
+        valueTint: Color? = nil,
+        hint: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let isOpen = openRow == title
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    openRow = isOpen ? nil : title
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(FlowTheme.ink)
+                        .fixedSize()
+                    Spacer(minLength: 12)
+                    Text(value)
+                        .font(.system(size: 12))
+                        .foregroundStyle(valueTint ?? FlowTheme.inkSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .rotationEffect(.degrees(isOpen ? 90 : 0))
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(title), \(value)")
+            .accessibilityHint(isOpen ? "Collapse" : "Expand")
+
+            if isOpen {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let hint {
+                        Text(hint)
+                            .font(.system(size: 11))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    content()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 14)
+            }
+        }
+    }
+
+    // MARK: - Row values
+
+    /// What each closed row says. Every one of these has to be true of the draft
+    /// at a glance — a row that shrugs ("Configured") would put the page back
+    /// where it started, since the only way to check would be opening it.
+
+    private var optionsValue: String {
+        let live = draft.options.filter {
+            !$0.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return live.isEmpty ? "None" : live.joined(separator: ", ")
+    }
+
+    private var promptValue: String {
+        let first = draft.prompt
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        return first.isEmpty ? "Not set" : first
+    }
+
+    private var scriptValue: String {
+        guard !scriptIsEmpty else { return "Empty" }
+        let lines = script.split(separator: "\n", omittingEmptySubsequences: false).count
+        return lines == 1 ? "1 line" : "\(lines) lines"
+    }
+
+    private var resultValue: String {
+        guard draft.output == .files, let directory = draft.outputDirectory,
+              !directory.isEmpty else {
+            return draft.output.displayName
+        }
+        return "\(draft.output.displayName) → \(directory)"
+    }
+
+    private var runtimeValue: String {
+        "\(draft.timeoutSeconds)s" + (draft.declaresNetwork ? " · network" : "")
+    }
+
+    private var limitsValue: String {
+        "\(draft.maxSteps) steps · \(draft.timeoutSeconds)s"
+    }
+
+    private var secretsValue: String {
+        draft.secretNames.isEmpty ? "None" : draft.secretNames.joined(separator: ", ")
+    }
+
+    private var contextValue: String {
+        var sources: [String] = []
+        if draft.usesVoice { sources.append("Voice") }
+        if draft.usesNotes { sources.append("Notes") }
+        return sources.isEmpty ? "None" : sources.joined(separator: " · ")
+    }
+
+    private var actionValue: String {
+        draft.target.isEmpty
+            ? draft.nativeAction.displayName
+            : "\(draft.nativeAction.displayName) — \(draft.target)"
+    }
+
+    /// The one row whose value is a result rather than a setting, which is why
+    /// it is also the one that tints: a failed test collapsed into a grey line
+    /// reading "Failed" is exactly as invisible as no line at all.
+    private var testValue: String {
+        switch test {
+        case .idle: return "Not run"
+        case .running: return "Running — \(elapsed)s"
+        case .passed: return "Passed"
+        case .failed: return "Failed"
         }
     }
 
@@ -605,32 +861,9 @@ struct ToolEditorPanel: View {
         }
     }
 
-    private func editorSection<Content: View>(
-        _ title: String,
-        subtitle: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 2)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(FlowTheme.hairline)
-                .frame(height: 1)
-                .offset(y: -12)
-        }
-    }
+    /// Amber, for the two things on this page that are a warning rather than a
+    /// state: a failed test and the consent notices.
+    private static let warning = Color(red: 1.0, green: 0.78, blue: 0.42)
 
     private static func subtitle(for kind: ToolKind) -> String {
         switch kind {
@@ -706,86 +939,25 @@ struct ToolEditorPanel: View {
 
     // MARK: - Shared fields
 
-    private var nameAndIcon: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 9) {
-                fieldLabel("Name", hint: "Shown when you hover over the Ring button.")
-                TextField(draft.kind == .prompt ? "To JSON" : "Download video", text: $draft.name)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(FlowTheme.ink)
-                    .focused($nameFocused)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 11)
-                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
-                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-            }
-
-            VStack(alignment: .leading, spacing: 9) {
-                fieldLabel("Icon")
-                HStack(spacing: 10) {
-                    Image(systemName: draft.resolvedSymbolName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(FlowTheme.ink)
-                        .frame(width: 32, height: 32)
-                        .background(Circle().fill(FlowTheme.subtleFill))
-                    // The exact identifier stays reachable on hover, for the one
-                    // person who wants to search for it or type it somewhere.
-                    Text(ToolIcons.displayName(for: draft.resolvedSymbolName))
-                        .font(.system(size: 12))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(draft.resolvedSymbolName)
-                    Spacer(minLength: 0)
-                    Button(showIconPicker ? "Done" : "Change") {
-                        withAnimation(.easeOut(duration: 0.16)) {
-                            showIconPicker.toggle()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(FlowTheme.accent)
-                }
-                if showIconPicker {
-                    IconGrid(selection: $draft.symbolName, height: 108)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-        }
-    }
-
-    /// The builder normally decides the kind, but a tool is not locked into what
-    /// it was generated as — and without this there is no way to write an agent
-    /// tool by hand at all.
-    ///
-    /// On its own line rather than in a `SettingRow`: four pills are `.fixedSize`
-    /// at `minWidth: 78` each, so they demand ~320pt that they will not give
-    /// back. Sharing a row with a label and a sentence pushed the panel's whole
-    /// content wider than the panel and clipped it at both edges. The kind's
-    /// explanation is already the panel's subtitle, so there is nothing to
-    /// repeat here either.
-    private var kindPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel("Kind", hint: "What this gizmo does when you press it.")
-            PillPicker(
-                options: ToolKind.allCases,
-                selection: $draft.kind,
-                label: { $0.displayName }
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    private var nameField: some View {
+        TextField(draft.kind == .prompt ? "To JSON" : "Download video", text: $draft.name)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(FlowTheme.ink)
+            .focused($nameFocused)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 11)
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(FlowTheme.subtleFill))
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
     }
 
     /// Same story as `inputPicker`: a row of pills wide enough for "Save to
     /// notes" leaves `SettingRow`'s label column about one word wide, so the
     /// explanation next to it wraps into a ransom note. A grid takes the full
-    /// width and puts the explanation above it, where it has room.
+    /// width, and the row it opens inside already carries the explanation.
     private var resultPicker: some View {
         VStack(alignment: .leading, spacing: 16) {
-            wrappingPicker(
-                "Result",
-                hint: draft.output.explanation,
+            choiceGrid(
                 options: resultOptions,
                 selection: $draft.output,
                 label: { $0.displayName }
@@ -813,30 +985,33 @@ struct ToolEditorPanel: View {
 
     @ViewBuilder
     private var placementPointer: some View {
-        switch draft.output {
-        case .panel: panelPlacementPointer
-        case .surface: surfacePlacementPointer
-        default: EmptyView()
+        if PanelPlacement.offersPicker(for: draft.output) {
+            panelPlacementPicker
+        } else {
+            surfacePlacementPointer
         }
     }
 
-    /// This gizmo's own placement, read back from `DockStore` rather than
-    /// chosen here — `EdgesSection` is the one place that writes it now, for
-    /// every gizmo, built-in and the folder hub alike, so three call sites
-    /// didn't each need their own copy of the same picker. See DESIGN.md §11.
+    /// This gizmo's own placement in `DockStore`.
     private var dockedEdge: DockEdge? {
         bridge.dock.edge(of: ToolRef.generated(draft.id).storageID)
     }
 
-    /// Where this gizmo's result panel opens. A `.panel` gizmo works fine
-    /// left floating, so undocked just says that rather than implying
-    /// something is missing.
-    private var panelPlacementPointer: some View {
-        fieldLabel(
-            "Panel",
-            hint: dockedEdge.map { "On the \($0.displayName) edge. Change it in Edges." }
-                ?? "Floating at the cursor. Change it in Edges."
-        )
+    /// Where this gizmo's result panel opens. Chosen here rather than in Edges:
+    /// a panel draws nothing until the gizmo runs, so it never shares an edge
+    /// with anything and there is no tab order to arrange it in — the two
+    /// things Edges exists to decide. A `.panel` gizmo also works fine left
+    /// floating, which is why its `nil` pill keeps `DockPlacementPicker`'s
+    /// default "Floating" rather than the surface's "Off". See DESIGN.md §11.
+    private var panelPlacementPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            fieldLabel(
+                "Panel",
+                hint: "Floating opens the answer at the cursor. An edge opens it flush to "
+                    + "that side of the screen instead."
+            )
+            DockPlacementPicker(store: bridge.dock, itemID: ToolRef.generated(draft.id).storageID)
+        }
     }
 
     /// Whether this surface gizmo exists at all. A surface has no floating
@@ -844,10 +1019,11 @@ struct ToolEditorPanel: View {
     /// on an edge — so undocked says it never runs rather than "Floating",
     /// which would claim a working mode that doesn't exist.
     ///
-    /// The spec's consent line that used to live in this hint — "runs on its
-    /// own, whenever its edge opens" — now lives once, in `EdgesSection`,
-    /// right next to the picker that actually makes the choice. Repeating it
-    /// here would be the exact duplication Task 3 collapsed.
+    /// Still a pointer, not a picker, and for the opposite reason to the panel
+    /// above: a surface is a resident, it shares its edge with other residents,
+    /// and the order they sit in is a thing only the Edges figure can show.
+    /// The consent line that used to live in this hint — "runs on its own,
+    /// whenever its edge opens" — lives there too, under the figure.
     private var surfacePlacementPointer: some View {
         fieldLabel(
             "Edge",
@@ -920,37 +1096,32 @@ struct ToolEditorPanel: View {
     /// for eight — the row simply demands more than the 640pt panel has, and
     /// what overflows is not the picker but the entire panel's content, clipped
     /// at both edges. Anything past about five options belongs here instead.
-    private func wrappingPicker<Option: Hashable>(
-        _ title: String,
-        hint: String?,
+    private func choiceGrid<Option: Hashable>(
         options: [Option],
         selection: Binding<Option>,
         label: @escaping (Option) -> String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel(title, hint: hint)
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 150), spacing: 6)],
-                alignment: .leading,
-                spacing: 6
-            ) {
-                ForEach(options, id: \.self) { option in
-                    let isSelected = option == selection.wrappedValue
-                    Button { selection.wrappedValue = option } label: {
-                        Text(label(option))
-                            .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(isSelected ? FlowTheme.accent : Color.white.opacity(0.05))
-                            )
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 150), spacing: 6)],
+            alignment: .leading,
+            spacing: 6
+        ) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = option == selection.wrappedValue
+                Button { selection.wrappedValue = option } label: {
+                    Text(label(option))
+                        .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? .white : FlowTheme.inkSecondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(isSelected ? FlowTheme.accent : Color.white.opacity(0.05))
+                        )
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -959,9 +1130,7 @@ struct ToolEditorPanel: View {
     // MARK: - Action mode
 
     private var actionPicker: some View {
-        wrappingPicker(
-            "Action",
-            hint: draft.nativeAction.explanation,
+        choiceGrid(
             options: NativeAction.allCases,
             selection: $draft.nativeAction,
             label: { $0.displayName }
@@ -985,13 +1154,7 @@ struct ToolEditorPanel: View {
     // MARK: - Prompt mode
 
     private var promptField: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel(
-                "Prompt",
-                hint: "Write it as an instruction to the model, the way you'd brief a person."
-            )
-            codeEditor(text: $draft.prompt, lines: 7, monospaced: false)
-        }
+        codeEditor(text: $draft.prompt, lines: 7, monospaced: false)
     }
 
     private var languageToggle: some View {
@@ -1195,33 +1358,26 @@ struct ToolEditorPanel: View {
 
     private var scriptField: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .bottom) {
-                fieldLabel(
-                    "Python script",
-                    hint: "A PEP 723 header declares the dependencies; the input arrives as command-line arguments."
-                )
-                Spacer(minLength: 12)
-                // Always available, not just on an empty field: a correct starting
-                // point should be one click away even after a bad paste. Nothing is
-                // saved until Save, so replacing a draft is harmless.
-                Button(scriptIsEmpty ? "Insert template" : "Replace with template") {
-                    script = Self.scriptTemplate
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(FlowTheme.accent)
-                .fixedSize()
+            codeEditor(text: $script, lines: 14, monospaced: true)
+            // Always available, not just on an empty field: a correct starting
+            // point should be one click away even after a bad paste. Nothing is
+            // saved until Save, so replacing a draft is harmless.
+            Button(scriptIsEmpty ? "Insert template" : "Replace with template") {
+                script = Self.scriptTemplate
             }
-            codeEditor(text: $script, lines: 16, monospaced: true)
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(FlowTheme.accent)
+            .fixedSize()
             if !scriptIsEmpty, !script.contains("# /// script") {
-                HStack(spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 11, weight: .semibold))
                     Text("No `# /// script` header, so uv won't install any dependencies. This field takes Python, not a shell command.")
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.system(size: 11))
-                .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.42))
+                .foregroundStyle(Self.warning)
             }
         }
     }
@@ -1233,9 +1389,7 @@ struct ToolEditorPanel: View {
     /// Eight inputs, with labels as long as "Screen you mark up" — far past what
     /// a pill row fits, which is what pushed the whole panel wider than itself.
     private var inputPicker: some View {
-        wrappingPicker(
-            "Input",
-            hint: inputHint,
+        choiceGrid(
             options: ToolInput.allCases,
             selection: $draft.input,
             label: { $0.displayName }
@@ -1345,7 +1499,7 @@ struct ToolEditorPanel: View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.42))
+                .foregroundStyle(Self.warning)
             Text("An agent gizmo writes its own code and runs it, deciding what to do as it "
                 + "goes. There is no code to read before you allow it, because none exists "
                 + "until you press the button. What you approve is this instruction, the "
@@ -1365,7 +1519,7 @@ struct ToolEditorPanel: View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.42))
+                .foregroundStyle(Self.warning)
             Text("A script gizmo runs real code with your account's access. What you set above is shown to you before each new version runs — it is not a restriction Gizmate enforces. Read the code before you allow it.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(FlowTheme.inkSecondary)
