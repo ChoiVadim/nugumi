@@ -796,7 +796,7 @@ struct ToolEditorPanel: View {
             // that show a result picker: it is a detail of one result, and it
             // has to disappear with it.
             if Self.outputsWithPlacementControl.contains(draft.output) {
-                placementControl
+                placementPointer
             }
         }
     }
@@ -806,64 +806,56 @@ struct ToolEditorPanel: View {
     /// doesn't) depending on where it's docked. Internal, like `outputs(for:)`,
     /// so `DockPlacementParityTests` can hold this against
     /// `DockCatalog.dockableGizmoOutputs` — a gizmo that catalog is willing to
-    /// list has to be one this set can actually dock, or nobody can ever see it.
+    /// list has to be one this set says something about, or nobody editing it
+    /// can ever discover it's dockable at all. The name predates Task 3: it
+    /// gated an actual `DockPlacementPicker` before, and gates the locality
+    /// pointer below now — kept rather than renamed because
+    /// `DockPlacementParityTests` pins it by this name.
     static let outputsWithPlacementControl: Set<ToolOutput> = [.panel, .surface]
 
     @ViewBuilder
-    private var placementControl: some View {
+    private var placementPointer: some View {
         switch draft.output {
-        case .panel: panelPlacement
-        case .surface: surfacePlacement
+        case .panel: panelPlacementPointer
+        case .surface: surfacePlacementPointer
         default: EmptyView()
         }
     }
 
-    /// Where this gizmo's result panel opens.
-    ///
-    /// Kept on the dock rather than on the gizmo, exactly as the built-ins keep
-    /// theirs: a placement is an arrangement of the user's screen, not part of
-    /// what the tool does. `DockCatalog.placeableIDs` has always counted every
-    /// usable gizmo, and `TranslateFlow` already routes a custom mode's panel
-    /// through `resultHost(for:)` — this control was the only missing piece.
-    private var panelPlacement: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel(
-                "Panel",
-                hint: "Where the answer opens: floating at the cursor, or flush to a screen edge."
-            )
-            DockPlacementPicker(
-                store: bridge.dock,
-                itemID: ToolRef.generated(draft.id).storageID
-            )
-        }
+    /// This gizmo's own placement, read back from `DockStore` rather than
+    /// chosen here — `EdgesSection` is the one place that writes it now, for
+    /// every gizmo, built-in and the folder hub alike, so three call sites
+    /// didn't each need their own copy of the same picker. See DESIGN.md §11.
+    private var dockedEdge: DockEdge? {
+        bridge.dock.edge(of: ToolRef.generated(draft.id).storageID)
     }
 
-    /// Whether this surface gizmo exists at all.
+    /// Where this gizmo's result panel opens. A `.panel` gizmo works fine
+    /// left floating, so undocked just says that rather than implying
+    /// something is missing.
+    private var panelPlacementPointer: some View {
+        fieldLabel(
+            "Panel",
+            hint: dockedEdge.map { "On the \($0.displayName) edge. Change it in Edges." }
+                ?? "Floating at the cursor. Change it in Edges."
+        )
+    }
+
+    /// Whether this surface gizmo exists at all. A surface has no floating
+    /// form — it draws nothing until its dock opens, and its dock only opens
+    /// on an edge — so undocked says it never runs rather than "Floating",
+    /// which would claim a working mode that doesn't exist.
     ///
-    /// Not the same choice as `panelPlacement`, even though it reuses the same
-    /// picker: a `.panel` gizmo works fine left floating, so `nil` there is a
-    /// sensible default. A surface has no floating form — it draws nothing
-    /// until its dock opens, and its dock only opens on an edge — so `nil`
-    /// here means saved and inert, and the picker is told to say that rather
-    /// than offer "Floating" as though it were a neutral choice.
-    ///
-    /// The hint is also where the spec's consent line belongs: a surface is
-    /// the one gizmo that runs from a pointer crossing an edge rather than the
-    /// user pressing anything, so this is the screen where that has to be
-    /// said, not buried in a changelog.
-    private var surfacePlacement: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            fieldLabel(
-                "Edge",
-                hint: "This gizmo runs on its own, whenever its edge opens — docking it "
-                    + "here is what turns that on. Leave it off and it stays saved but never runs."
-            )
-            DockPlacementPicker(
-                store: bridge.dock,
-                itemID: ToolRef.generated(draft.id).storageID,
-                unplacedLabel: "Off"
-            )
-        }
+    /// The spec's consent line that used to live in this hint — "runs on its
+    /// own, whenever its edge opens" — now lives once, in `EdgesSection`,
+    /// right next to the picker that actually makes the choice. Repeating it
+    /// here would be the exact duplication Task 3 collapsed.
+    private var surfacePlacementPointer: some View {
+        fieldLabel(
+            "Edge",
+            hint: dockedEdge.map { "On the \($0.displayName) edge. Change it in Edges." }
+                ?? "Not on an edge, so it never runs. Change it in Edges."
+        )
     }
 
     /// Every kind with something to say may say it any way it likes — a prompt

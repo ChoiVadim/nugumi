@@ -182,12 +182,13 @@ final class InstalledApplicationResolutionTests: XCTestCase {
 @MainActor
 final class DockPlacementParityTests: XCTestCase {
     /// A gizmo `DockCatalog.gizmos` is willing to list has to be one
-    /// `ToolEditorPanel` offers a placement control for, or the dock can name
-    /// it and nothing can ever put it there. Comparing the two named sets
-    /// directly — rather than, say, asserting `.surface` is in both — means
-    /// narrowing either one independently fails here: this is what would have
-    /// caught the gate this fixes, and it stays honest if a future output
-    /// joins one side without the other.
+    /// `ToolEditorPanel` says something about — a locality pointer since Task
+    /// 3, a picker before it — or the dock can name it and its own editor
+    /// never even tells the user it's dockable at all. Comparing the two
+    /// named sets directly — rather than, say, asserting `.surface` is in
+    /// both — means narrowing either one independently fails here: this is
+    /// what would have caught the gate this fixes, and it stays honest if a
+    /// future output joins one side without the other.
     func testEveryDockableGizmoOutputHasAPlacementControlInTheEditor() {
         let undockable = DockCatalog.dockableGizmoOutputs
             .subtracting(ToolEditorPanel.outputsWithPlacementControl)
@@ -214,19 +215,19 @@ final class DockPlacementParityTests: XCTestCase {
 
         let residentIDs = Set(DockCatalog.builtIns(host: host).map(\.id))
         // The two ways a resident's id can be reachable today: a ring action
-        // BuiltInEditor shows the picker for, or the one id General's own
-        // placement control names because it has no ring slot to route
-        // through instead.
+        // BuiltInEditor names in its own locality pointer, or the one id
+        // EdgesSection itself names because it has no ring slot to route
+        // a pointer through instead.
         let ringReachable = Set(DockCatalog.dockableBuiltIns.map { ToolRef.builtIn($0).storageID })
         let unreachable = residentIDs
             .subtracting(ringReachable)
-            .subtracting([SettingsSection.residentWithoutARingSlot])
+            .subtracting([EdgesSection.residentWithoutARingSlot])
 
         XCTAssertTrue(
             unreachable.isEmpty,
             "DockCatalog.builtIns lists a resident — \(unreachable.sorted()) — with no "
                 + "placement control anywhere in the app: it names no RingActionID in "
-                + "DockCatalog.dockableBuiltIns, and SettingsSection.residentWithoutARingSlot "
+                + "DockCatalog.dockableBuiltIns, and EdgesSection.residentWithoutARingSlot "
                 + "doesn't cover it either"
         )
     }

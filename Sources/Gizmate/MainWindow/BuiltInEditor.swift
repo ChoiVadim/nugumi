@@ -26,6 +26,18 @@ struct BuiltInEditorPanel: View {
         actionID.promptMode?.shippedPromptTemplate
     }
 
+    /// All four `dockableBuiltIns` actions still work fine floating — Note's
+    /// resident surface is the same placement as its panel, one id, so "off"
+    /// never means "never runs" here the way it does for a surface gizmo or
+    /// the folder hub. See `EdgesSectionContent.consentSentence` for the two
+    /// cases that do need that stronger wording.
+    private var panelLocalityText: String {
+        if let edge = bridge.dock.edge(of: ToolRef.builtIn(actionID).storageID) {
+            return "On the \(edge.displayName) edge. Change it in Edges."
+        }
+        return "Floating at the cursor. Change it in Edges."
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -109,10 +121,14 @@ struct BuiltInEditorPanel: View {
                     Text("Panel")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(FlowTheme.inkSecondary)
-                    DockPlacementPicker(
-                        store: bridge.dock,
-                        itemID: ToolRef.builtIn(actionID).storageID
-                    )
+                    // Read back from `DockStore` rather than chosen here —
+                    // `EdgesSection` is the one place that writes placement
+                    // now, the same store this used to write to directly with
+                    // its own `DockPlacementPicker`. See DESIGN.md §11.
+                    Text(panelLocalityText)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

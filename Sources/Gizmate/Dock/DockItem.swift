@@ -62,12 +62,11 @@ enum DockCatalog {
     /// folder hub. The folder hub is the odd one out: a folder listing needs
     /// no run to exist, so unlike every ring action it is not something a
     /// user opts into — it has no `RingActionID` behind it (see
-    /// `ToolRef.folderHub`) and so no entry in `dockableBuiltIns` or
-    /// `BuiltInEditor` either. That is a missing identity, not a missing
-    /// control: `BuiltInEditor`'s "Panel" section and `ToolEditor`'s are both
-    /// gated on an identity the folder hub doesn't have, so its placement
-    /// picker lives in Settings → General instead, keyed by
-    /// `SettingsSection.residentWithoutARingSlot` — see `DESIGN.md` §11.
+    /// `ToolRef.folderHub`) and so no entry in `dockableBuiltIns`. That is a
+    /// missing identity, not a missing place to choose its edge: every
+    /// resident's placement is written from `EdgesSection` now, keyed by
+    /// `EdgesSection.residentWithoutARingSlot` for this one — see
+    /// `DESIGN.md` §11.
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
         let ringResidents = residentBuiltIns.map { action in

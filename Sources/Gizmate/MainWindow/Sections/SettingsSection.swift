@@ -125,51 +125,36 @@ private struct GeneralTab: View {
         }
     }
 
-    /// The folder hub's placement control. It has no `RingActionID`, so it
-    /// never reaches `BuiltInEditor`'s "Panel" section the way Note, Explain,
-    /// Reply and Summarize do (`DockCatalog.dockableBuiltIns` only names ring
-    /// actions) — General is where a setting lands when it isn't tied to one
-    /// thing the ring can trigger, which describes this exactly.
-    ///
-    /// `unplacedLabel: "Off"` for the same reason a `.surface` gizmo's picker
-    /// uses it: the folder hub has no floating form. Undocked, it is saved
-    /// but draws nowhere, so calling that state "Floating" would claim a
-    /// working mode that doesn't exist.
+    /// The folder hub's placement, read back from `DockStore` rather than
+    /// chosen here. It has no `RingActionID`, so it never reached
+    /// `BuiltInEditor`'s "Panel" section the way Note, Explain, Reply and
+    /// Summarize do (`DockCatalog.dockableBuiltIns` only names ring actions)
+    /// — this card is where that setting landed when it wasn't tied to one
+    /// thing the ring can trigger, and stays here as a pointer now that
+    /// `EdgesSection` is where the choice — and the folder hub's own folder
+    /// list — actually gets made. See DESIGN.md §11.
     private var filesOnEdgeCard: some View {
         SubCard {
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Files")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                    Text("Puts a folder's files on a screen edge to drag out — off keeps it "
-                        + "saved but out of sight. It only reads the folder, so there's nothing "
-                        + "to run or approve; add and remove folders from its own panel once "
-                        + "it's docked.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                DockPlacementPicker(
-                    store: bridge.dock,
-                    itemID: SettingsSection.residentWithoutARingSlot,
-                    unplacedLabel: "Off"
-                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Files")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                Text(filesLocalityText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(FlowTheme.inkTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
-}
 
-extension SettingsSection {
-    /// The one built-in dock resident with no `RingActionID` to route its
-    /// placement control through `BuiltInEditor` — the folder hub (see
-    /// `DockCatalog.builtIns`'s doc comment on why it has none). `filesOnEdgeCard`
-    /// docks it directly by this id instead. `DockPlacementParityTests` checks
-    /// this, together with `DockCatalog.dockableBuiltIns` mapped to ring-action
-    /// ids, against every id `DockCatalog.builtIns(host:)` returns — a future
-    /// resident of this same ring-slot-less kind that lands without a matching
-    /// entry here fails a test instead of shipping unreachable.
-    static let residentWithoutARingSlot = ToolRef.folderHub.storageID
+    /// "Off" rather than "Floating" for the same reason a `.surface` gizmo's
+    /// pointer says it never runs: the folder hub has no floating form, so
+    /// undocked it is saved but draws nowhere.
+    private var filesLocalityText: String {
+        let placement = bridge.dock.edge(of: EdgesSection.residentWithoutARingSlot)
+            .map { "On the \($0.displayName) edge." } ?? "Not on an edge — saved but out of sight."
+        return placement + " Change that, and which folders it shows, in Edges."
+    }
 }
 
 /// Free-text background about the user, appended to every prompt so answers

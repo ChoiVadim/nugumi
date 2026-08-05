@@ -231,41 +231,76 @@ share of users regardless of what looks right.
   behind it either) — `DockCatalog.builtIns` appends it directly, because a
   folder listing passes the same "something to draw before any run starts"
   test Note and a `.surface` gizmo do, without a run to speak of at all.
-- **Missing an identity a `DockPlacementPicker` gate needs is not the same as
-  missing a place to put one.** `BuiltInEditor`'s "Panel" section is gated on
-  a `RingActionID`, and `ToolEditor`'s on a `GizmateTool` — both need exactly
-  the identity the folder hub doesn't have, so neither can ever host its
-  picker. Settings → General can, because it isn't gated on an item at all:
-  it is the page for "how Gizmate shows up while you work," which is what
-  docking a resident with no ring slot and no gizmo _is_.
-  `SettingsSection.residentWithoutARingSlot` names the one id today; a future
-  resident of this same ring-slot-less kind joins it there, not a new page.
-  `DockPlacementParityTests` holds it, together with `dockableBuiltIns`
-  mapped to ring-action ids, against every id `DockCatalog.builtIns(host:)`
-  actually returns — the same shape as the gizmo-output parity test below,
-  generalized from a fixed enum to a live list because built-ins have no enum
-  to diff against.
+- **Placement is written from exactly one screen.** `BuiltInEditor`'s "Panel"
+  section, `ToolEditor`'s panel/edge fields, and Settings → General's Files
+  card each used to carry their own `DockPlacementPicker`, writing straight to
+  `DockStore`. All three now hold only a locality pointer — plain text saying
+  where the thing currently sits, or that it sits nowhere — and `EdgesSection`
+  is the one place that actually calls `DockPlacementPicker` and writes.
+  Reading a pointer back from the store the same screen writes to needed no
+  new plumbing: `bridge.dock.edge(of:)` was already there. The identity gap
+  that used to route the folder hub to Settings → General still exists —
+  `BuiltInEditor`'s gate is a `RingActionID`, `ToolEditor`'s a `GizmateTool`,
+  and the folder hub has neither — but it no longer matters which editor
+  _writes_ placement, because none of them do anymore.
+  `EdgesSection.residentWithoutARingSlot` names the folder hub's id today (it
+  moved from `SettingsSection` when the picker did); a future resident of this
+  same ring-slot-less kind joins it there, not a new constant.
+  `DockPlacementParityTests` holds it, together with `dockableBuiltIns` mapped
+  to ring-action ids, against every id `DockCatalog.builtIns(host:)` actually
+  returns — the same shape as the gizmo-output parity test below, generalized
+  from a fixed enum to a live list because built-ins have no enum to diff
+  against.
+- **Placeable is wider than resident, and both get a picker in `EdgesSection`
+  now, just not the same list.** A `.surface` gizmo, the folder hub, and Note
+  are residents — something to draw before any run starts — and sit in the
+  three edge cards or the "Not on an edge" list beneath them, the same list
+  `DockCatalog.knownIDs` names. A `.panel` gizmo and a dockable-but-not-
+  resident ring action (Explain, Reply, Summarize) are placeable but draw
+  nothing while idle, so a card row would either sit empty or promise a run
+  that hasn't happened — DESIGN.md said as much above, before this section
+  existed to act on it. Those get their own "Panel placement" list instead:
+  same `DockPlacementPicker`, same `DockStore`, no card, no drag — there is
+  nothing to reorder relative to since none of them ever render together.
+- **A resident with nothing to place still gets a way off an edge.** Once a
+  resident is docked it is drawn as a plain drag row with no picker — a
+  picker on every row would fight the row's own drag gesture for the same
+  click. The "Not on an edge" card is the drop target that takes its place:
+  dragging a docked resident there calls `dock.dock(_:to: nil)` the same as
+  picking "Off" used to. Removing this dropped the last way to undock
+  anything once the three editors stopped writing to `DockStore` themselves,
+  so it isn't optional polish — without it, taking something off an edge
+  would have been simply impossible.
 - **A placement control can be the only consent screen a background run
   gets.** A surface's script runs on pointer hover, not a press — the first
   trigger in Gizmate the user doesn't cause directly. Nothing new executes
   (same `ToolRunner`, same approval hash as every other tool), but what
   changed is _when_, and approving "run once" is not the same consent as
-  "run again on every hover, forever." The dock's placement control is where
-  that choice is actually made — picking an edge is what turns a saved gizmo
-  into one that opens on its own — so it is also where the sentence has to
-  live: _this gizmo runs whenever its dock opens._ It follows that the two
-  placement pickers cannot share one default label: a `.panel` result still
-  works undocked, so its picker calls `nil` "Floating"; a surface has no
-  working undocked state, so its picker calls the same `nil` "Off" rather
-  than borrow a word that would say otherwise.
+  "run again on every hover, forever." `EdgesSection`'s picker is where that
+  choice is actually made — picking an edge is what turns a saved gizmo into
+  one that opens on its own — so it is also the one place the sentence has to
+  live now: not copied onto whichever editor happens to also mention
+  placement, the way it briefly was on both `ToolEditor` and `SettingsSection`.
+  It follows that the two placement pickers cannot share one default label: a
+  `.panel` result still works undocked, so its picker calls `nil` "Floating";
+  a surface has no working undocked state, so its picker calls the same `nil`
+  "Off" rather than borrow a word that would say otherwise.
 - **The consent sentence says what's actually true of the resident, not the
   sentence a neighbouring one happens to use.** The folder hub's picker also
   calls `nil` "Off" — same invisible-until-docked reasoning as a surface's —
-  but its hint doesn't borrow the surface's wording about running and
+  but its sentence doesn't borrow the surface's wording about running and
   approving. A surface executes a script on every hover; the folder hub reads
   a folder with `FileManager` on every hover, which is not a thing a user
   approves at all. Saying "nothing to run or approve" is the honest claim for
   this resident specifically, not a shorter version of the gizmo's sentence.
+- **A resident's own configuration belongs where its placement does.** The
+  folder hub's folder list used to be reachable only by docking it, opening
+  its panel, and finding the chips there — discovery by accident, and the
+  reason Settings → General grew a Files card to begin with. `FolderHubView`'s
+  chips and `+` still live in the panel, for use once it's docked, but
+  `EdgesSection` carries a second, independent view onto the same
+  `FolderHubStore` so a user can add a folder before ever placing the hub
+  anywhere.
 
 ## 12. Reuse before variants
 
