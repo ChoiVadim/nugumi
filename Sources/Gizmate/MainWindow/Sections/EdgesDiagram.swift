@@ -61,12 +61,15 @@ struct EdgesDiagram: View {
     /// real height is whatever the system font gives it, and a few points of
     /// slop only decides which half of a tile a drop counts as, never which
     /// rail it lands on.
-    static let railContentTop: CGFloat = topRailHeight + 12 + 13 + tileSpacing
+    static let railContentTopInset: CGFloat = 12 + 13 + tileSpacing
+    static let railContentTop: CGFloat = topRailHeight + railContentTopInset
 
     /// Screen-ish. Without a cap the figure stretches to whatever the window
     /// gives it and stops reading as a monitor.
     private static let aspect: CGFloat = 1.6
-    private static let minWidth: CGFloat = 520
+    private static let minWidth: CGFloat = 460
+    private static let maxWidth: CGFloat = 620
+    static let standHeight: CGFloat = 20
     private static let space = "edgesFigure"
 
     private var byID: [String: DockItem] {
@@ -91,45 +94,70 @@ struct EdgesDiagram: View {
 
     var body: some View {
         GeometryReader { geo in
-            let width = max(min(geo.size.width, geo.size.height * Self.aspect), Self.minWidth)
+            // Capped, not stretched. A screen figure that grows with the window
+            // stops looking like a screen and starts looking like a panel with
+            // rules drawn on it, which is what the first version did in a
+            // maximised window. `RingDiagram` caps its own growth for the same
+            // reason.
+            let width = max(
+                min(geo.size.width, geo.size.height * Self.aspect, Self.maxWidth),
+                Self.minWidth
+            )
             let height = width / Self.aspect
             // Below `minWidth` the two rails would eat the middle, so the
-            // figure stops shrinking its layout and scales instead — the same
-            // fit-to-window move `RingDiagram` makes, for the same reason: a
-            // small window should show a small screen, not a broken one.
-            let fit = min(1, geo.size.width / width, geo.size.height / height)
-            figure(size: CGSize(width: width, height: height))
-                .frame(width: width, height: height)
-                // Named inside the scale, so a carried tile's location arrives
-                // in the figure's own points and needs no undoing of `fit`.
-                .coordinateSpace(name: Self.space)
-                .scaleEffect(fit)
-                .frame(width: geo.size.width, height: geo.size.height)
+            // figure stops shrinking its layout and scales instead.
+            let fit = min(1, geo.size.width / width, geo.size.height / (height + Self.standHeight))
+            VStack(spacing: 0) {
+                figure(size: CGSize(width: width, height: height))
+                    .frame(width: width, height: height)
+                    // Named inside the scale, so a carried tile's location
+                    // arrives in the figure's own points and needs no undoing
+                    // of `fit`.
+                    .coordinateSpace(name: Self.space)
+                stand
+            }
+            .scaleEffect(fit)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+    }
+
+    /// A neck and a foot under the figure. Nine lines of shapes, and they are
+    /// what makes the rectangle read as a monitor at a glance instead of as
+    /// four boxes that happen to touch. Everything else on this screen depends
+    /// on that reading: "the left rail" only means anything once the thing it
+    /// is a rail on is obviously a screen.
+    private var stand: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(width: 74, height: 14)
+            Capsule()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 150, height: 6)
+        }
+        .frame(height: Self.standHeight, alignment: .top)
     }
 
     private func figure(size: CGSize) -> some View {
         let landing = drag.flatMap { zone(at: $0.location, in: size) }
         return ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
-                topRail(size: size, highlighted: landing == .edge(.top, 0))
-                Divider().background(FlowTheme.hairline)
+                topRail(size: size, landing: landing)
                 HStack(spacing: 0) {
-                    sideRail(.left, size: size, highlighted: landing?.edge == .left)
-                    Divider().background(FlowTheme.hairline)
+                    sideRail(.left, size: size, landing: landing)
                     centerWell(size: size, highlighted: landing == .middle)
-                    Divider().background(FlowTheme.hairline)
-                    sideRail(.right, size: size, highlighted: landing?.edge == .right)
+                    sideRail(.right, size: size, landing: landing)
                 }
             }
             carriedTile
         }
-        .background(Color.black.opacity(0.22))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color.black.opacity(0.34))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
+        .animation(.easeOut(duration: 0.12), value: landing)
     }
 
     /// The tool under the pointer, drawn above everything and hit-testing
@@ -147,97 +175,124 @@ struct EdgesDiagram: View {
 
     // MARK: - Rails
 
-    /// One tile, always. The top dock has no tab strip — `EdgeDockController`
-    /// expands straight to `items[0]` on hover — so a second thing up there was
+    /// The three bands are filled and the middle is not, so the figure reads as
+    /// a screen with bezels rather than four boxes sharing hairlines. The
+    /// dividers that used to separate them are gone with the same change: the
+    /// fill already draws the boundary, and a hairline on top of it was a
+    /// second line saying the same thing.
+    private func band(_ highlighted: Bool) -> some View {
+        Rectangle()
+            .fill(highlighted ? FlowTheme.accentSoft : Color.white.opacity(0.045))
+    }
+
+    private func railLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9.5, weight: .semibold))
+            .foregroundStyle(FlowTheme.inkTertiary.opacity(0.75))
+            .textCase(.uppercase)
+            .kerning(0.8)
+    }
+
+    /// One tile, always. The top dock has no tab strip (`EdgeDockController`
+    /// expands straight to `items[0]` on hover), so a second thing up there was
     /// only ever stored, never shown. Dropping onto an occupied top rail sends
     /// whatever was there back to the middle rather than refusing the drop:
     /// a rail that quietly declines reads as broken, which is what it did.
-    private func topRail(size: CGSize, highlighted: Bool) -> some View {
+    private func topRail(size: CGSize, landing: Zone?) -> some View {
         let occupant = tiles(on: .top).first
         return ZStack {
             HStack {
                 railLabel(DockEdge.top.displayName)
                 Spacer(minLength: 0)
             }
-            Group {
-                if let occupant {
-                    tile(occupant, size: size)
-                } else {
-                    emptyHint("Drop one here")
-                }
+            if let occupant {
+                tile(occupant, size: size).frame(width: Self.tileWidth)
+            } else if drag != nil {
+                slotOutline.frame(width: Self.tileWidth, height: Self.tileHeight)
             }
-            .frame(width: Self.tileWidth)
         }
-        .padding(.horizontal, Self.railPadding)
+        .padding(.horizontal, 14)
         .frame(height: Self.topRailHeight)
         .frame(maxWidth: .infinity)
-        .background(highlight(highlighted))
+        .background(band(landing == .edge(.top, 0)))
     }
 
     /// Top to bottom is tab order, the same order `DockTabStrip` draws.
-    private func sideRail(_ edge: DockEdge, size: CGSize, highlighted: Bool) -> some View {
+    private func sideRail(_ edge: DockEdge, size: CGSize, landing: Zone?) -> some View {
         let items = tiles(on: edge)
+        let index: Int? = {
+            guard case .edge(let landed, let index) = landing, landed == edge else { return nil }
+            return index
+        }()
         return VStack(spacing: Self.tileSpacing) {
             railLabel(edge.displayName)
             ForEach(items, id: \.id) { tile($0, size: size) }
-            if items.isEmpty { emptyHint("Drop here") }
+            if items.isEmpty, drag != nil {
+                slotOutline.frame(height: Self.tileHeight)
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Self.railPadding)
         .padding(.vertical, 12)
         .frame(width: Self.sideRailWidth)
         .frame(maxHeight: .infinity)
-        .background(highlight(highlighted))
+        .background(band(index != nil))
+        .overlay(alignment: .top) { insertionBar(at: index, count: items.count) }
     }
 
-    private func railLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(FlowTheme.inkTertiary)
-            .textCase(.uppercase)
-            .kerning(0.7)
+    /// Where the carried tool will land in this rail's order. Drawn as an
+    /// overlay rather than inserted into the stack: a bar that takes part in
+    /// layout pushes every tile below it down by its own height, which moves
+    /// the very slots the pointer is being measured against and makes the
+    /// landing flicker between two indices under a still cursor.
+    @ViewBuilder
+    private func insertionBar(at index: Int?, count: Int) -> some View {
+        if let index, count > 0 {
+            Capsule()
+                .fill(FlowTheme.ink.opacity(0.8))
+                .frame(height: 2)
+                .padding(.horizontal, Self.railPadding)
+                .offset(
+                    y: Self.railContentTopInset
+                        + CGFloat(index) * (Self.tileHeight + Self.tileSpacing)
+                        - Self.tileSpacing / 2
+                )
+        }
     }
 
-    private func emptyHint(_ text: String, fills: Bool = false) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(FlowTheme.inkTertiary.opacity(0.7))
-            .multilineTextAlignment(.center)
-            .padding(.vertical, 14)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, maxHeight: fills ? .infinity : nil)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .foregroundStyle(FlowTheme.hairline)
-            )
-    }
-
-    private func highlight(_ on: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(on ? FlowTheme.accentSoft : Color.clear)
+    /// Where a tile would go, shown only while one is in flight. It used to be
+    /// drawn all the time, in all three empty places at once, and three dashed
+    /// rectangles asking to be filled is most of what made this page ugly:
+    /// nothing was being dragged, so nothing was being asked.
+    private var slotOutline: some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            .foregroundStyle(FlowTheme.hairline)
     }
 
     // MARK: - Middle
 
-    /// The middle is not a fourth place, it is the absence of the other three —
+    /// The middle is not a fourth place, it is the absence of the other three,
     /// which is why landing here is `dock(_:to: nil)` and not a placement of
     /// its own. It is also the only way back off an edge: a tile carries no
     /// picker, so dragging it here is how a tool stops waiting on a bezel.
     private func centerWell(size: CGSize, highlighted: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             railLabel("Not on an edge")
             if unplaced.isEmpty {
-                emptyHint("Drag a tool here to take it off its edge", fills: true)
+                Text("Nothing off an edge")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // ponytail: no ScrollView. A 96pt tile grid fits about sixteen
+                // ponytail: no ScrollView. A 96pt tile grid fits about a dozen
                 // in the middle of the figure, and the residents are Note, the
                 // folder hub and however many `.surface` gizmos exist. Wrap it
                 // in one if that stops being true.
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: Self.tileWidth, maximum: Self.tileWidth),
-                                       spacing: 12, alignment: .leading)],
-                    spacing: 12
+                                       spacing: 10, alignment: .leading)],
+                    spacing: 10
                 ) {
                     ForEach(unplaced, id: \.id) { tile($0, size: size) }
                 }
@@ -246,7 +301,7 @@ struct EdgesDiagram: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(highlight(highlighted))
+        .background(highlighted ? FlowTheme.accentSoft : Color.clear)
     }
 
     // MARK: - Dragging
