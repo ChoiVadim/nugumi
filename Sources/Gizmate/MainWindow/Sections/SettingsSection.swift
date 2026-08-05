@@ -120,41 +120,15 @@ private struct GeneralTab: View {
                     }
                 }
             }
-
-            filesOnEdgeCard
         }
     }
 
-    /// The folder hub's placement, read back from `DockStore` rather than
-    /// chosen here. It has no `RingActionID`, so it never reached
-    /// `BuiltInEditor`'s "Panel" section the way Note, Explain, Reply and
-    /// Summarize do (`DockCatalog.dockableBuiltIns` only names ring actions)
-    /// — this card is where that setting landed when it wasn't tied to one
-    /// thing the ring can trigger, and stays here as a pointer now that
-    /// `EdgesSection` is where the choice — and the folder hub's own folder
-    /// list — actually gets made. See DESIGN.md §11.
-    private var filesOnEdgeCard: some View {
-        SubCard {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Files")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-                Text(filesLocalityText)
-                    .font(.system(size: 11))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// "Off" rather than "Floating" for the same reason a `.surface` gizmo's
-    /// pointer says it never runs: the folder hub has no floating form, so
-    /// undocked it is saved but draws nowhere.
-    private var filesLocalityText: String {
-        let placement = bridge.dock.edge(of: EdgesSection.residentWithoutARingSlot)
-            .map { "On the \($0.displayName) edge." } ?? "Not on an edge — saved but out of sight."
-        return placement + " Change that, and which folders it shows, in Edges."
-    }
+    // No folder-hub card here. It lived on this page only while there was
+    // nowhere else to put it — the hub has no `RingActionID`, so it never
+    // reached `BuiltInEditor`'s Panel section the way Note, Explain, Reply and
+    // Summarize do. Edges now owns both its placement and its folder list, and
+    // a settings card whose whole content is "go to Edges" is a stop on the way
+    // to somewhere rather than a setting. See DESIGN.md §11.
 }
 
 /// Free-text background about the user, appended to every prompt so answers
