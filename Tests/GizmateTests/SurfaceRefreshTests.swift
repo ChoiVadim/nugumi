@@ -13,7 +13,14 @@ final class SurfaceRefreshTests: XCTestCase {
         let outcome = await SurfaceRefresh.outcome(
             for: tool, isApproved: false
         ) { _ in XCTFail("an unapproved surface must not run"); return "" }
-        guard case .failed = outcome else { return XCTFail("expected .failed") }
+        guard case .failed(let message) = outcome else { return XCTFail("expected .failed") }
+        // Pinned so the message can't drift back to naming a screen that
+        // doesn't run anything — Home opens a tool's editor, it doesn't run
+        // it itself, and this string is read straight off the dock.
+        XCTAssertEqual(
+            message,
+            "Not approved yet — run “\(tool.name)” once from the ring, or test it from its editor in Home."
+        )
     }
 
     func testRowsThatDidNotChangeReportUnchanged() async {
@@ -82,11 +89,10 @@ final class SurfaceRefreshCaptionTests: XCTestCase {
     /// the real reason has to be the whole caption, not discarded in favor
     /// of a generic one stacked over the layout's own empty-state copy.
     func testAFailureWithNoCachedRowsShowsTheRealMessage() {
-        let caption = SurfaceRefresh.caption(
-            for: .failed("Not approved yet — run “Downloads” once from the ring or Home first."),
-            rowsAreEmpty: true
-        )
-        XCTAssertEqual(caption, "Not approved yet — run “Downloads” once from the ring or Home first.")
+        let message = "Not approved yet — run “Downloads” once from the ring, "
+            + "or test it from its editor in Home."
+        let caption = SurfaceRefresh.caption(for: .failed(message), rowsAreEmpty: true)
+        XCTAssertEqual(caption, message)
     }
 
     /// Only when there is something cached behind it does "showing what was

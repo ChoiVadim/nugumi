@@ -23,7 +23,9 @@ enum SurfaceRefresh {
     ///   - isApproved: whether the user has already approved this exact
     ///     script, from `ToolApprovals.isApproved`. A refresh fires on
     ///     pointer hover, with nothing in the trigger a modal could hang off
-    ///     of — unlike a run started from the ring or Home, an unapproved
+    ///     of — unlike a run started from the ring or from a tool's own
+    ///     editor (Install & test, which approves on a matching Save — see
+    ///     `ToolEditorDraftVerification.savingApproves`), an unapproved
     ///     surface here simply does not run. `run` is never called when this
     ///     is false.
     ///   - previous: the rows currently cached for this gizmo, so a script
@@ -39,7 +41,14 @@ enum SurfaceRefresh {
         run: (GizmateTool) async throws -> String
     ) async -> SurfaceRefreshOutcome {
         guard isApproved else {
-            return .failed("Not approved yet — run “\(tool.name)” once from the ring or Home first.")
+            // Home (the tool list) doesn't run anything itself — it opens a
+            // row's editor, where Install & test is the actual run. Naming
+            // both real places running happens, not the screen you'd start
+            // from to reach one of them.
+            return .failed(
+                "Not approved yet — run “\(tool.name)” once from the ring, "
+                    + "or test it from its editor in Home."
+            )
         }
         do {
             let stdout = try await run(tool)

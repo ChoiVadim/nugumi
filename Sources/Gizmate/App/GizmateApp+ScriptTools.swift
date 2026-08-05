@@ -646,15 +646,16 @@ extension GizmateApp {
             // edge, so toasting the run itself would report an answer that is
             // not one. But this run is very likely the one that just approved
             // the script — `SurfaceRefresh.outcome` cannot run an unapproved
-            // surface at all, so "run it once from the ring or Home" (its own
-            // failure message) is the only route in, and the hover trigger
-            // that runs it from here on has nowhere to put a "this worked"
-            // message. This toast is that confirmation, and it names whatever
-            // is still missing — an edge — since "it worked" is not true yet
-            // for a gizmo nothing will ever open. Points at Edges, not Home:
-            // edge placement is Edges' screen now (Task 3), and sending
-            // someone to Home to do a thing Home no longer does is the exact
-            // failure the navigation restructure exists to remove.
+            // surface at all, so "run it once from the ring, or test it from
+            // its editor in Home" (its own failure message) is the only route
+            // in, and the hover trigger that runs it from here on has nowhere
+            // to put a "this worked" message. This toast is that
+            // confirmation, and it names whatever is still missing — an edge
+            // — since "it worked" is not true yet for a gizmo nothing will
+            // ever open. Points at Edges, not Home: edge placement is Edges'
+            // screen now (Task 3), and sending someone to Home to do a thing
+            // Home no longer does is the exact failure the navigation
+            // restructure exists to remove.
             let placed = dockStore.edge(of: ToolRef.generated(tool.id).storageID) != nil
             ToastHUD.shared.show(
                 text: placed
