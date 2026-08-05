@@ -301,13 +301,9 @@ extension GizmateApp {
     @MainActor
     func compositionSettings(for mode: TranslationMode, appCategory: AppCategory) -> CompositionSettings? {
         guard mode.usesCompositionSettings else { return nil }
-        let voiceSample = appCategory == .email
-            ? emailVoiceSample.trimmingCharacters(in: .whitespacesAndNewlines)
-            : ""
         return CompositionSettings(
             style: writingStyle(for: appCategory),
-            snippets: snippetsStore.usableSnippets(),
-            voiceSample: voiceSample.isEmpty ? nil : voiceSample
+            snippets: snippetsStore.usableSnippets()
         )
     }
 

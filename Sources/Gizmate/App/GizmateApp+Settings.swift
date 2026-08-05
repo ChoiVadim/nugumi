@@ -17,7 +17,7 @@ extension GizmateApp {
     @objc private func resetSettings() {
         let response = GizmateAlertController(
             title: "Reset settings?",
-            message: "This restores languages, per-app modes, main mode, display, output, AI mode, live captions, the ring layout, and keyboard shortcuts. Snippets, dictionary, your prompt tools, saved API keys, your email voice sample, and usage stats stay unchanged.",
+            message: "This restores languages, per-app modes, main mode, display, output, AI mode, live captions, the ring layout, and keyboard shortcuts. Snippets, dictionary, your prompt tools, saved API keys, and usage stats stay unchanged.",
             primaryButtonTitle: "Reset",
             secondaryButtonTitle: "Cancel"
         ).showModal()
@@ -175,7 +175,6 @@ extension GizmateApp: SettingsHost {
             writingToggleAlternate: writingToggleAlternate,
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
-            emailVoiceSample: emailVoiceSample,
             invisibilityEnabled: invisibilityModeEnabled,
             launchAtLogin: isRunningFromAppBundle && LaunchAtLogin.isEnabled,
             writingStyles: styles,
@@ -288,8 +287,6 @@ extension GizmateApp: SettingsHost {
         case .setLaunchAtLogin(let enabled):
             guard isRunningFromAppBundle else { break }
             LaunchAtLogin.set(enabled)
-        case .setEmailVoiceSample(let sample):
-            emailVoiceSample = sample
         case .setWritingStyle(let style, let category):
             setWritingStyle(style, for: category)
             updateMenuState()

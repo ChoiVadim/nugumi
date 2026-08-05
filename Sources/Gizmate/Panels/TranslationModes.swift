@@ -180,7 +180,7 @@ enum TranslationMode: Equatable {
 
         Emoji shorthand — replace `[X emoji]` patterns with the matching Unicode emoji (`[smile emoji]` → 😊, `[fire emoji]` → 🔥, `[thumbs up emoji]` → 👍, `[crying emoji]` → 😭). Pick the most common, neutral variant when several emojis fit the description. Only expand when the bracketed content reads as an emoji description — leave bracketed dates, citations, code, placeholders, and other non-emoji content untouched (e.g. `[2025-01-01]`, `[1]`, `[redacted]`, `[insert name]` stay as-is).
 
-        Writing style — {writingStyle}{voice}{glossary}
+        Writing style — {writingStyle}{glossary}
 
         Return only the final {language} message, with no commentary, labels, alternatives, quotes, or explanations.
         """
@@ -194,7 +194,7 @@ enum TranslationMode: Equatable {
 
         If it is an open question: give a clear, direct answer. Keep it short unless the question demands depth.
 
-        Writing style — {writingStyle}{voice}{glossary}
+        Writing style — {writingStyle}{glossary}
 
         Return only the reply or answer text. No commentary, no labels, no preface, no explanation of what you're doing, no quotes around the answer.
         """
@@ -273,7 +273,7 @@ enum TranslationMode: Equatable {
     /// Substitutes `{token}` placeholders in a single pass over the template.
     ///
     /// Single pass, not a `reduce` of `replacingOccurrences`, because the values
-    /// being spliced in are user content: a glossary snippet or voice sample
+    /// being spliced in are user content: a glossary snippet
     /// containing the literal text `{language}` would be rescanned and
     /// substituted by a later iteration. One pass means a value is never
     /// re-examined once written.
@@ -320,14 +320,12 @@ enum TranslationMode: Equatable {
             )
         case .draftMessage:
             tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
-            tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
             tokens["glossary"] = Self.glossarySection(
                 for: composition?.snippets ?? [],
                 includeSnippets: true
             )
         case .smartReply:
             tokens["writingStyle"] = composition?.writingStyleDirective(for: targetLanguage.id) ?? ""
-            tokens["voice"] = Self.voiceSampleSection(for: composition?.voiceSample)
             tokens["glossary"] = Self.glossarySection(
                 for: composition?.snippets ?? [],
                 includeSnippets: true
@@ -383,7 +381,7 @@ enum TranslationMode: Equatable {
 
             Write the result in \(targetLanguage.promptName), natural and ready to send, in the user's voice. Match the selected Writing style below. Don't restate or quote the original, don't add greetings or sign-offs unless warranted, and don't address the user — produce only the message body they would paste into the field.
 
-            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")\(TranslationMode.voiceSampleSection(for: composition?.voiceSample))
+            Writing style — \(composition?.writingStyleDirective(for: targetLanguage.id) ?? "")
 
             Return only the updated message text. No preamble, no labels, no quotes, never a wrapper like "Here is the revised version:" — just the text.
             """
@@ -540,23 +538,6 @@ enum TranslationMode: Equatable {
         return "\n\n" + sections.joined(separator: "\n\n")
     }
 
-    /// The user's email voice sample as a template block. Empty string when
-    /// there's no sample (so callsites stay inline). `compositionSettings` only
-    /// populates `voiceSample` for the email category, so this is a no-op
-    /// everywhere else.
-    ///
-    /// Division of authority (resolves the sample-vs-Writing-style conflict):
-    /// the sample owns STRUCTURE (that there's a greeting, a sign-off carrying the
-    /// name, the rhythm) and overrides the draft prompt's chat-style brevity; the
-    /// Writing style pill owns REGISTER (formality), overriding the sample's own
-    /// formality line by line — so a casual register yields a casual greeting and
-    /// sign-off even when the sample is written formally.
-    private static func voiceSampleSection(for sample: String?) -> String {
-        let trimmed = sample?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !trimmed.isEmpty else { return "" }
-        let instruction = "Voice sample — the example below is the user's own email template. Take its STRUCTURE from it: that the email opens with a greeting, closes with a sign-off carrying the user's name, plus its general rhythm and layout. This structure OVERRIDES any length-matching or brevity guidance above — always produce the full greeting + body + sign-off, even when the user's draft is a single short line or fragment; expand a terse draft into a complete email. The selected Writing style register, however, controls the FORMALITY of every line: render the greeting, body, and sign-off at that register even if the template itself is written more or less formally — e.g. if the register is casual, the greeting and sign-off become casual too, not the formal wording shown in the template. Write the body to convey the current draft's meaning; do not reuse the template's body text. Render everything in the target language. Reproduce the user's name in the signature exactly as written:"
-        return "\n\n" + instruction + "\n" + trimmed
-    }
 
     private static func promptLine(_ text: String) -> String {
         text

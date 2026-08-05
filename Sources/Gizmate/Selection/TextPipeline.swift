@@ -250,10 +250,6 @@ enum TextNormalizer {
 struct CompositionSettings: Equatable {
     let style: WritingStyle
     let snippets: [Snippet]
-    /// The user's saved email voice sample — a representative email whose
-    /// greeting, rhythm, and sign-off the model mirrors. Only populated for the
-    /// `email` category; `nil`/empty elsewhere, so the prompt section vanishes.
-    let voiceSample: String?
 
     /// The writing-style directive injected into compose prompts.
     func writingStyleDirective(for languageID: String) -> String {

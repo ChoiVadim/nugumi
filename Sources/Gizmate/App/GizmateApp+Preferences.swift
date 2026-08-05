@@ -142,13 +142,6 @@ extension GizmateApp {
             askGizmateThinkingLevel = level
         }
     }
-    /// The user's email voice sample — a typical email they write, used as a
-    /// style reference for the `email` category only. Empty by default. Treated
-    /// as personal content (like Snippets), so it survives a settings reset.
-    var emailVoiceSample: String {
-        get { UserDefaults.standard.string(forKey: "voiceSample.email") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "voiceSample.email") }
-    }
 
     var invisibilityModeEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: InvisibilityState.defaultsKey) }

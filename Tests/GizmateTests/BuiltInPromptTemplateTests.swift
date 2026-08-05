@@ -1,7 +1,7 @@
 import XCTest
 @testable import Gizmate
 
-/// Tokenising three ~600-word prompts is a mechanical find-replace, and a
+/// Tokenising the ~600-word prompts is a mechanical find-replace, and a
 /// dropped token does not crash — it silently strips the target language or the
 /// user's writing style out of every request. These tests are the only thing
 /// that notices.
@@ -10,17 +10,20 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     private let language = TranslationLanguage.language(id: "en")   // promptName "English"
 
     private static let tokenNames = [
-        "language", "writingStyle", "genZ", "voice", "glossary",
+        "language", "writingStyle", "genZ", "glossary",
     ]
 
     /// Every token-bearing block is deliberately non-empty, so a dropped token
-    /// changes the output instead of resolving to "" and looking fine.
-    /// No braces in the voice sample — the token assertions look for leftovers.
+    /// changes the output instead of resolving to "" and looking fine — which is
+    /// why the snippets are populated rather than `[]`.
+    /// No braces anywhere in them: the token assertions look for leftovers.
     private var composition: CompositionSettings {
         CompositionSettings(
             style: .casual,
-            snippets: [],
-            voiceSample: "Hi there,\n\nThanks!\n\nVadim"
+            snippets: [
+                Snippet(kind: .snippet, trigger: "brb", value: "be right back"),
+                Snippet(kind: .dictionaryTerm, trigger: "Gizmate", value: ""),
+            ]
         )
     }
 
@@ -67,7 +70,8 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     func testDraftMessageCarriesEveryCompositionBlock() {
         let output = rendered(.draftMessage)
         XCTAssertTrue(output.contains("Writing style — "))
-        XCTAssertTrue(output.contains("Voice sample — "))
+        XCTAssertTrue(output.contains("Dictionary — "))
+        XCTAssertTrue(output.contains("be right back"))
     }
 
     /// Gen Z's whole substance is the `{genZ}` block, and it has to be the block
@@ -92,7 +96,8 @@ final class BuiltInPromptTemplateTests: XCTestCase {
     func testSmartReplyCarriesEveryCompositionBlock() {
         let output = rendered(.smartReply)
         XCTAssertTrue(output.contains("Writing style — "))
-        XCTAssertTrue(output.contains("Voice sample — "))
+        XCTAssertTrue(output.contains("Dictionary — "))
+        XCTAssertTrue(output.contains("be right back"))
     }
 
     /// `.summarizeChat` and `.summarizePage` were deliberately left interpolated.
@@ -165,7 +170,7 @@ final class BuiltInPromptTemplateTests: XCTestCase {
         XCTAssertFalse(TranslationMode.smartReply.usesCompositionSettings)
     }
 
-    /// Values are spliced in, never rescanned: a snippet or voice sample holding
+    /// Values are spliced in, never rescanned: a snippet holding
     /// the literal text `{language}` must survive as written. A `reduce` of
     /// `replacingOccurrences` would substitute it.
     func testTokensInsideSubstitutedValuesAreNotRescanned() {

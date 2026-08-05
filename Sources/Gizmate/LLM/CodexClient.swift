@@ -81,8 +81,6 @@ struct OpenAICodexClient: LLMBackend {
             targetLanguage: targetLanguage,
             composition: composition
         )
-        // TEMP DIAGNOSTIC (voice-sample issue) — remove once resolved.
-        CodexDebugLog.append("[voice-debug] codex mode=\(mode) promptHasVoice=\(systemPrompt.contains("Voice sample —")) promptChars=\(systemPrompt.count)")
         let userContent: [CodexInputContent] = {
             var parts: [CodexInputContent] = [.text(sourceText, role: "user")]
             parts.append(contentsOf: images.map { .image($0.openAIDataURI) })

@@ -10,9 +10,6 @@ struct SettingsSnapshot {
     var writingToggleAlternate: TranslationLanguage
     var floatingDefaultMode: FloatingButtonDefaultMode
     var selectionDisplayMode: SelectionDisplayMode
-    /// The user's saved email voice sample (style reference for the email
-    /// category). Empty when unset.
-    var emailVoiceSample: String = ""
     var invisibilityEnabled: Bool
     var launchAtLogin: Bool = false
     var writingStyles: [AppCategory: WritingStyle]
@@ -59,7 +56,6 @@ enum SettingsIntent {
     case setWritingToggleAlternate(TranslationLanguage)
     case setFloatingDefaultMode(FloatingButtonDefaultMode)
     case setSelectionDisplayMode(SelectionDisplayMode)
-    case setEmailVoiceSample(String)
     case setWritingStyle(WritingStyle, AppCategory)
     case addAppToCategory(AppCategory)
     case removeApp(String)

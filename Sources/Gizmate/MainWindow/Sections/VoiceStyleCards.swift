@@ -50,11 +50,6 @@ struct StyleCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-
-                if category == .email {
-                    Divider().background(FlowTheme.hairline)
-                    EmailVoiceSampleEditor(sample: bridge.settings.emailVoiceSample)
-                }
             }
         }
     }

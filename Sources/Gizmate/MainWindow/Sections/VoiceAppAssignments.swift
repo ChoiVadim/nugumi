@@ -121,53 +121,6 @@ enum AppIconProvider {
     }
 }
 
-/// Multi-line editor for the email voice sample (email category only). Edits a
-/// local draft and persists every change through the settings intent, mirroring
-/// how the rest of the Style section saves immediately. The `TextEditor` binds
-/// to local `@State` rather than the republished snapshot, so the cursor stays
-/// put while the bridge refreshes after each write.
-struct EmailVoiceSampleEditor: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
-    @State private var draft: String
-
-    init(sample: String) {
-        _draft = State(initialValue: sample)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Voice sample")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(FlowTheme.inkSecondary)
-            Text("Paste an email you typically send. Gizmate mirrors its greeting, rhythm, and sign-off when it writes email replies.")
-                .font(.system(size: 12))
-                .foregroundStyle(FlowTheme.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            PlainTextEditor(text: $draft)
-                .frame(minHeight: 104)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 11)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.06)))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
-                .overlay(alignment: .topLeading) {
-                    if draft.isEmpty {
-                        Text("Hello,\n\n…\n\nBest regards,\nYour name")
-                            .font(.system(size: 13))
-                            .foregroundStyle(FlowTheme.inkTertiary.opacity(0.55))
-                            .padding(.vertical, 7)
-                            .padding(.horizontal, 11)
-                            .allowsHitTesting(false)
-                    }
-                }
-                .onChange(of: draft) { _, newValue in
-                    bridge.perform(.setEmailVoiceSample(newValue))
-                }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
 /// Minimal flow layout that wraps its children onto new rows as needed.
 private struct FlowWrap: Layout {
     var spacing: CGFloat = 6
