@@ -105,6 +105,7 @@ protocol SettingsHost: AnyObject {
     var ringLayout: RingLayoutStore { get }
     var builtInOverrides: BuiltInOverridesStore { get }
     var dock: DockStore { get }
+    var folderHub: FolderHubStore { get }
     /// The last rows each surface gizmo's script printed. The dock draws
     /// from this the instant the pointer reaches the edge, before a refresh
     /// has had a chance to run.

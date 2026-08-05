@@ -166,6 +166,7 @@ final class DockStoreTests: XCTestCase {
         let id = UUID()
         XCTAssertEqual(ToolRef(storageID: ToolRef.generated(id).storageID), .generated(id))
         XCTAssertEqual(ToolRef(storageID: ToolRef.builtIn(.live).storageID), .builtIn(.live))
+        XCTAssertEqual(ToolRef(storageID: ToolRef.folderHub.storageID), .folderHub)
         XCTAssertNil(ToolRef(storageID: "notes"))
     }
 

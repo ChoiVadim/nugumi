@@ -40,12 +40,14 @@ enum DockCatalog {
     /// See `docs/superpowers/specs/2026-08-03-one-tool-model-design.md`, phase 3.
     static let dockableBuiltIns: [RingActionID] = [.saveNote, .explain, .reply, .summarize]
 
-    /// Only surfaces that can sit on an edge *waiting*. A result panel is not
-    /// one: it exists after a run, and until then there is nothing to show, so
-    /// it must not put a tab there implying otherwise. `gizmos(host:)` below
-    /// applies the same rule to user-built tools — a `.surface` gizmo is
-    /// resident for the same reason Note is: both have something to draw
-    /// before any run starts.
+    /// Only ring actions whose surface can sit on an edge *waiting*. A result
+    /// panel is not one: it exists after a run, and until then there is
+    /// nothing to show, so it must not put a tab there implying otherwise.
+    /// `gizmos(host:)` below applies the same rule to user-built tools — a
+    /// `.surface` gizmo is resident for the same reason Note is: both have
+    /// something to draw before any run starts. The folder hub is resident
+    /// for that same reason again, but it is not a ring action at all, so it
+    /// cannot live in this array — `builtIns(host:)` appends it directly.
     static let residentBuiltIns: [RingActionID] = [.saveNote]
 
     /// Which gizmo outputs `gizmos(host:)` is willing to list. `.surface` is
@@ -56,9 +58,17 @@ enum DockCatalog {
     /// there is a gizmo the dock will list and no control can ever dock.
     static let dockableGizmoOutputs: Set<ToolOutput> = [.surface]
 
+    /// Note's surface, every ring action in `residentBuiltIns`, and the
+    /// folder hub. The folder hub is the odd one out: a folder listing needs
+    /// no run to exist, so unlike every ring action it is not something a
+    /// user opts into — it has no `RingActionID` behind it (see
+    /// `ToolRef.folderHub`) and so no entry in `dockableBuiltIns` or
+    /// `BuiltInEditor` either. That also means there is, today, no settings
+    /// surface through which a user can choose its edge — the same gap Ask
+    /// and Live have for their own panels, noted above.
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
-        return residentBuiltIns.map { action in
+        let ringResidents = residentBuiltIns.map { action in
             DockItem(
                 id: ToolRef.builtIn(action).storageID,
                 title: overrides.displayName(for: action),
@@ -66,6 +76,18 @@ enum DockCatalog {
             ) { [weak host] in
                 hosted(surface(for: action, host: host))
             }
+        }
+        return ringResidents + [folderHubItem(host: host)]
+    }
+
+    private static func folderHubItem(host: any SettingsHost) -> DockItem {
+        DockItem(
+            id: ToolRef.folderHub.storageID,
+            title: "Files",
+            icon: .symbol("folder")
+        ) { [weak host] in
+            guard let host else { return NSView() }
+            return hosted(AnyView(FolderHubView(store: host.folderHub)))
         }
     }
 

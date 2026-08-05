@@ -9,6 +9,10 @@ import Foundation
 enum ToolRef: Hashable {
     case builtIn(RingActionID)
     case generated(UUID)
+    /// The folder hub. Unlike the other two cases there is only ever one, so
+    /// it carries no payload — see `DockCatalog.builtIns` for why it has no
+    /// `RingActionID` to route through instead.
+    case folderHub
 
     /// Stable across launches. Prefixed so the two namespaces cannot collide —
     /// a gizmo whose UUID somehow read as "dictate" is not the Dictate built-in.
@@ -16,6 +20,7 @@ enum ToolRef: Hashable {
         switch self {
         case .builtIn(let id): return "builtin.\(id.rawValue)"
         case .generated(let id): return "tool.\(id.uuidString)"
+        case .folderHub: return "folderhub"
         }
     }
 
@@ -26,6 +31,8 @@ enum ToolRef: Hashable {
         } else if storageID.hasPrefix("tool."),
                   let id = UUID(uuidString: String(storageID.dropFirst("tool.".count))) {
             self = .generated(id)
+        } else if storageID == "folderhub" {
+            self = .folderHub
         } else {
             return nil
         }

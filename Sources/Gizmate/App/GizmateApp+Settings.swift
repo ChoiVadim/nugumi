@@ -135,6 +135,7 @@ extension GizmateApp {
 extension GizmateApp: SettingsHost {
     var usageStats: UsageStatsStore { usageStatsStore }
     var dock: DockStore { dockStore }
+    var folderHub: FolderHubStore { folderHubStore }
     var snippets: SnippetsStore { snippetsStore }
     var notes: NotesStore { notesStore }
     var tools: ToolsStore { toolsStore }

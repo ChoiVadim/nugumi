@@ -63,6 +63,7 @@ private final class StubSettingsHost: SettingsHost {
     var ringLayout: RingLayoutStore { fatalError("unused by DockCatalogSurfaceTests") }
     var builtInOverrides: BuiltInOverridesStore { fatalError("unused by DockCatalogSurfaceTests") }
     var dock: DockStore { fatalError("unused by DockCatalogSurfaceTests") }
+    var folderHub: FolderHubStore { fatalError("unused by DockCatalogSurfaceTests") }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockCatalogSurfaceTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockCatalogSurfaceTests")
