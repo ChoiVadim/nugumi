@@ -3,8 +3,8 @@ import SwiftUI
 /// Notes, sized for a dock rather than a settings window.
 ///
 /// `NotesSection` as a whole cannot be reused: it is built around
-/// `DetailContainer` with a title, subtitle, pinned tag bar and a `PageBanner`,
-/// which in a 360pt panel is a screenful of chrome before the first note. The
+/// `DetailContainer` with a title, subtitle and a pinned tag bar, which in a
+/// 360pt panel is a screenful of chrome before the first note. The
 /// part that matters — `NotesGrid` and its cards — is reused verbatim, so a note
 /// looks and edits the same on an edge as it does on the page.
 ///

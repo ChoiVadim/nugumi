@@ -68,13 +68,6 @@ private struct StyleTab: View {
 
     var body: some View {
         Group {
-            PageBanner(
-                title: "Your voice, per place",
-                message: "Gizmate picks a category automatically from the app you're in. Set the register for each below.",
-                symbol: "textformat.alt",
-                dismissKey: "styleBannerDismissed"
-            )
-
             ForEach(AppCategory.allCases, id: \.self) { category in
                 StyleCard(category: category, selection: bridge.writingStyleBinding(category))
             }

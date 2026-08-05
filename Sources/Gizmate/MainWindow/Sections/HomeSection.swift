@@ -92,14 +92,6 @@ struct HomeSectionContent: View {
             subtitle: "Every tool you have, and where it lives.",
             accessory: AnyView(headerButtons)
         ) {
-            PageBanner(
-                title: "Everything you've built",
-                message: "Shipped actions and your own gizmos, all in one place, each one saying "
-                    + "where it currently sits — a ring slot, a screen edge, a shortcut, or "
-                    + "nowhere yet. Pick one to open its editor, or start a new one above.",
-                symbol: "square.grid.2x2",
-                dismissKey: "homeBannerDismissed"
-            )
             group(title: "Built-in actions", rows: builtInRows, emptyText: nil)
             group(
                 title: "Your gizmos",

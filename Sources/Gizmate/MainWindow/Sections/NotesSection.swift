@@ -27,14 +27,6 @@ struct NotesSection: View {
             pinned: tagBar,
             accessory: AnyView(headerButtons)
         ) {
-            PageBanner(
-                title: "What Gizmate keeps for you",
-                message: "Save a note from any app with the ring's Note button — it opens into your tags "
-                    + "so the note is filed as you save it. Ticked notes are handed to gizmos that ask "
-                    + "for them; untick one to keep it out of prompts.",
-                symbol: "note.text",
-                dismissKey: "notesBannerDismissed"
-            )
             if let tagEditor {
                 TagEditorRow(
                     initialName: name(for: tagEditor),

@@ -129,14 +129,6 @@ struct EdgesSectionContent: View {
             "Edges",
             subtitle: "What waits on a screen edge, and in what order."
         ) {
-            PageBanner(
-                title: "One list per side",
-                message: "Note, the folder hub, and any gizmo that keeps something on screen can sit on the "
-                    + "top, left or right edge, revealed when the pointer gets close. Drag a row to "
-                    + "reorder it, drop it on another edge, or drop it back here to take it off.",
-                symbol: "rectangle.lefthalf.inset.filled",
-                dismissKey: "edgesBannerDismissed"
-            )
             ForEach(DockEdge.allCases, id: \.self) { edge in
                 edgeCard(edge)
             }

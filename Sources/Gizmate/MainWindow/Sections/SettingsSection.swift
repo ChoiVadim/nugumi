@@ -141,13 +141,6 @@ struct AboutYouTab: View {
 
     var body: some View {
         Group {
-            PageBanner(
-                title: "Better answers, your context",
-                message: "When a term has several meanings, Gizmate picks the one most relevant to you - \"RLS\" means row-level security to a developer, not a sleep disorder.",
-                symbol: "person.crop.circle",
-                dismissKey: "aboutYouBannerDismissed"
-            )
-
             SubCard {
                 HStack(alignment: .top, spacing: 22) {
                     VStack(alignment: .leading, spacing: 16) {
