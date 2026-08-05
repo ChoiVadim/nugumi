@@ -172,3 +172,30 @@ final class InstalledApplicationResolutionTests: XCTestCase {
         XCTAssertFalse(ToolAgentHostCandidateValidator.installedApplicationExists(""))
     }
 }
+
+/// The class-header comment above argues that nothing but a hand check
+/// catches an output reaching one allowlist and not another — this is that
+/// same argument applied to `.surface`. `DockCatalog.gizmos` listed it,
+/// `ToolAgentCandidateV1` validated it, the sidecar built it, and for one
+/// whole review cycle no editor control could ever dock it, so nobody who
+/// shipped it had ever seen one draw. `@MainActor` because `DockCatalog` is.
+@MainActor
+final class DockPlacementParityTests: XCTestCase {
+    /// A gizmo `DockCatalog.gizmos` is willing to list has to be one
+    /// `ToolEditorPanel` offers a placement control for, or the dock can name
+    /// it and nothing can ever put it there. Comparing the two named sets
+    /// directly — rather than, say, asserting `.surface` is in both — means
+    /// narrowing either one independently fails here: this is what would have
+    /// caught the gate this fixes, and it stays honest if a future output
+    /// joins one side without the other.
+    func testEveryDockableGizmoOutputHasAPlacementControlInTheEditor() {
+        let undockable = DockCatalog.dockableGizmoOutputs
+            .subtracting(ToolEditorPanel.outputsWithPlacementControl)
+        XCTAssertTrue(
+            undockable.isEmpty,
+            "DockCatalog.gizmos would list a gizmo whose output — "
+                + "\(undockable.map(\.rawValue).sorted()) — has no placement "
+                + "control in the editor, so it could never be docked"
+        )
+    }
+}

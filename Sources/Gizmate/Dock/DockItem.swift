@@ -48,6 +48,14 @@ enum DockCatalog {
     /// before any run starts.
     static let residentBuiltIns: [RingActionID] = [.saveNote]
 
+    /// Which gizmo outputs `gizmos(host:)` is willing to list. `.surface` is
+    /// the only member today, for the same reason `residentBuiltIns` above is
+    /// just Note — but this is its own named set, not an inline filter,
+    /// because `ToolEditorPanel.outputsWithPlacementControl` has to be
+    /// checked against it: an output added here without a matching entry
+    /// there is a gizmo the dock will list and no control can ever dock.
+    static let dockableGizmoOutputs: Set<ToolOutput> = [.surface]
+
     static func builtIns(host: any SettingsHost) -> [DockItem] {
         let overrides = host.builtInOverrides
         return residentBuiltIns.map { action in
@@ -72,7 +80,7 @@ enum DockCatalog {
     /// this replaced.
     static func gizmos(host: any SettingsHost) -> [DockItem] {
         host.tools.usableTools()
-            .filter { $0.output == .surface }
+            .filter { dockableGizmoOutputs.contains($0.output) }
             .map { tool in
                 DockItem(
                     id: ToolRef.generated(tool.id).storageID,

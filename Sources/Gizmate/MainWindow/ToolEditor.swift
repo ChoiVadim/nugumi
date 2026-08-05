@@ -795,9 +795,26 @@ struct ToolEditorPanel: View {
             // Folded in here rather than added to each of the three sections
             // that show a result picker: it is a detail of one result, and it
             // has to disappear with it.
-            if draft.output == .panel {
-                panelPlacement
+            if Self.outputsWithPlacementControl.contains(draft.output) {
+                placementControl
             }
+        }
+    }
+
+    /// The two results that are an arrangement of the screen rather than
+    /// something that happens: `.panel` opens somewhere, `.surface` runs (or
+    /// doesn't) depending on where it's docked. Internal, like `outputs(for:)`,
+    /// so `DockPlacementParityTests` can hold this against
+    /// `DockCatalog.dockableGizmoOutputs` — a gizmo that catalog is willing to
+    /// list has to be one this set can actually dock, or nobody can ever see it.
+    static let outputsWithPlacementControl: Set<ToolOutput> = [.panel, .surface]
+
+    @ViewBuilder
+    private var placementControl: some View {
+        switch draft.output {
+        case .panel: panelPlacement
+        case .surface: surfacePlacement
+        default: EmptyView()
         }
     }
 
@@ -817,6 +834,34 @@ struct ToolEditorPanel: View {
             DockPlacementPicker(
                 store: bridge.dock,
                 itemID: ToolRef.generated(draft.id).storageID
+            )
+        }
+    }
+
+    /// Whether this surface gizmo exists at all.
+    ///
+    /// Not the same choice as `panelPlacement`, even though it reuses the same
+    /// picker: a `.panel` gizmo works fine left floating, so `nil` there is a
+    /// sensible default. A surface has no floating form — it draws nothing
+    /// until its dock opens, and its dock only opens on an edge — so `nil`
+    /// here means saved and inert, and the picker is told to say that rather
+    /// than offer "Floating" as though it were a neutral choice.
+    ///
+    /// The hint is also where the spec's consent line belongs: a surface is
+    /// the one gizmo that runs from a pointer crossing an edge rather than the
+    /// user pressing anything, so this is the screen where that has to be
+    /// said, not buried in a changelog.
+    private var surfacePlacement: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            fieldLabel(
+                "Edge",
+                hint: "This gizmo runs on its own, whenever its edge opens — docking it "
+                    + "here is what approves that. Leave it off and it stays saved but never runs."
+            )
+            DockPlacementPicker(
+                store: bridge.dock,
+                itemID: ToolRef.generated(draft.id).storageID,
+                unplacedLabel: "Off"
             )
         }
     }

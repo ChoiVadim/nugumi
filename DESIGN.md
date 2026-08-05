@@ -151,12 +151,12 @@ that holds a track open while nothing is scrolling is the loudest thing in a
 small panel, and macOS's "Show scroll bars: Always" turns that on for a large
 share of users regardless of what looks right.
 
-| Context                            | How                                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------------------- |
-| SwiftUI `ScrollView`, main window | `.background(ScrollerConfigurator())` inside the content |
-| SwiftUI content, borderless panel | `OverlayScrollHost { … }` — **not** a `ScrollView` |
-| An `NSScrollView` you own | `scrollerStyle = .overlay`, `autohidesScrollers = true`, `scrollerKnobStyle = .light` |
-| An `NSScrollView` in a borderless panel | subclass `OverlayScrollView` |
+| Context                                 | How                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| SwiftUI `ScrollView`, main window       | `.background(ScrollerConfigurator())` inside the content                              |
+| SwiftUI content, borderless panel       | `OverlayScrollHost { … }` — **not** a `ScrollView`                                    |
+| An `NSScrollView` you own               | `scrollerStyle = .overlay`, `autohidesScrollers = true`, `scrollerKnobStyle = .light` |
+| An `NSScrollView` in a borderless panel | subclass `OverlayScrollView`                                                          |
 
 - In a borderless panel, AppKit **reverts** a manually-set `.overlay` back to the
   wide legacy scroller, whose track never hides. Setting the property is not
@@ -216,6 +216,28 @@ share of users regardless of what looks right.
   screen the pointer is says nothing about whether it is heading for an edge.
 - **Draw thin, but hit big.** `DockDragHandle` is 4pt of ink inside a 16pt
   target. A 4pt target is a miss waiting to happen.
+- **A gizmo can be a dock's resident, not just something it summons.** Every
+  other result exists only after a run finishes, so a tab for one is either
+  empty or a false promise until then. A `.surface` gizmo is the exception:
+  its script's last output is already sitting in `SurfaceRowsCache`, so its
+  tab has something to draw before it ever hovers into view. That is the same
+  rule `residentBuiltIns` states for Note, and `DockCatalog.dockableGizmoOutputs`
+  is where a gizmo output earns the same standing — an output added there
+  needs a real answer to "what does this tab show with nothing running yet?",
+  not just "what does it show after."
+- **A placement control can be the only consent screen a background run
+  gets.** A surface's script runs on pointer hover, not a press — the first
+  trigger in Gizmate the user doesn't cause directly. Nothing new executes
+  (same `ToolRunner`, same approval hash as every other tool), but what
+  changed is _when_, and approving "run once" is not the same consent as
+  "run again on every hover, forever." The dock's placement control is where
+  that choice is actually made — picking an edge is what turns a saved gizmo
+  into one that opens on its own — so it is also where the sentence has to
+  live: _this gizmo runs whenever its dock opens._ It follows that the two
+  placement pickers cannot share one default label: a `.panel` result still
+  works undocked, so its picker calls `nil` "Floating"; a surface has no
+  working undocked state, so its picker calls the same `nil` "Off" rather
+  than borrow a word that would say otherwise.
 
 ## 12. Reuse before variants
 
