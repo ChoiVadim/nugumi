@@ -19,4 +19,19 @@ final class MainWindowNavigationTests: XCTestCase {
             XCTAssertFalse(section.symbol.isEmpty, "\(section.rawValue) has no symbol")
         }
     }
+
+    func testRingIsItsOwnSection() {
+        XCTAssertTrue(MainWindowSection.primary.contains(.ring))
+    }
+
+    /// Home stays first: it is the front door now, not the ring.
+    func testHomeIsStillTheLandingSection() {
+        XCTAssertEqual(MainWindowSection.primary.first, .home)
+    }
+
+    /// Two cases must never share a raw value — the sidebar restores by it.
+    func testRawValuesAreUnique() {
+        let raws = MainWindowSection.allCases.map(\.rawValue)
+        XCTAssertEqual(Set(raws).count, raws.count)
+    }
 }

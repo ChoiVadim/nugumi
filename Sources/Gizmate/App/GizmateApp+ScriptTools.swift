@@ -651,12 +651,15 @@ extension GizmateApp {
             // that runs it from here on has nowhere to put a "this worked"
             // message. This toast is that confirmation, and it names whatever
             // is still missing — an edge — since "it worked" is not true yet
-            // for a gizmo nothing will ever open.
+            // for a gizmo nothing will ever open. Points at Edges, not Home:
+            // edge placement is Edges' screen now (Task 3), and sending
+            // someone to Home to do a thing Home no longer does is the exact
+            // failure the navigation restructure exists to remove.
             let placed = dockStore.edge(of: ToolRef.generated(tool.id).storageID) != nil
             ToastHUD.shared.show(
                 text: placed
                     ? "\(tool.name) — ready on its edge"
-                    : "\(tool.name) — approved. Pick an edge for it in Home."
+                    : "\(tool.name) — approved. Pick an edge for it in Edges."
             )
         }
     }

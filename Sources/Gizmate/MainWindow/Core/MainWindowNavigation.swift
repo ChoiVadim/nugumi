@@ -10,21 +10,23 @@ enum EngineSetupFocus: String, CaseIterable, Hashable {
 /// tab bar rather than as separate rows — `voice` covers how Gizmate writes plus
 /// the words it reuses, `settings` behaviour plus hotkeys.
 ///
-/// `home` hosts the ring today; Task 4 of the navigation restructure turns it
-/// into the tool list instead, so don't read the case name as a promise about
-/// its content. The raw value stays `home` regardless, because it is
-/// persisted as the restored selection — a rename here silently drops every
-/// user on a different screen than the one they left.
+/// `home` is the front door: every tool in one list, shipped actions and
+/// generated gizmos together, each row saying where it lives. `ring` is the
+/// radial menu on its own, split out from `home` by Task 4 of the navigation
+/// restructure — before that, `home` rendered the ring directly. `home` keeps
+/// its raw value regardless, because it is persisted as the restored
+/// selection — a rename here silently drops every user on a different screen
+/// than the one they left.
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     case home, insights
     case voice
-    case notes, edges
+    case notes, edges, ring
     case settings, help
 
     var id: String { rawValue }
 
     static var primary: [MainWindowSection] {
-        [.home, .edges, .notes, .voice, .insights]
+        [.home, .ring, .edges, .notes, .voice, .insights]
     }
     static var secondary: [MainWindowSection] { [.settings, .help] }
 
@@ -35,6 +37,7 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .voice: return "Voice"
         case .notes: return "Notes"
         case .edges: return "Edges"
+        case .ring: return "Ring"
         case .settings: return "Settings"
         case .help: return "Help"
         }
@@ -47,6 +50,7 @@ enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
         case .voice: return "textformat"
         case .notes: return "note.text"
         case .edges: return "rectangle.lefthalf.inset.filled"
+        case .ring: return "circle.grid.cross"
         case .settings: return "gearshape"
         case .help: return "questionmark.circle"
         }
