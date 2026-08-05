@@ -251,7 +251,10 @@ validation contract — and let the model find the answer.
 After any code change the user wants to see, restart the app — otherwise the user is looking at stale UI. **For testing, use `swift run Gizmate`, not a full bundle rebuild.** Kill the previous instance first and relaunch:
 
 ```sh
-pkill -f 'Gizmate' ; swift run Gizmate   # quick debug run — this is the default test step
+# `-x` matches the process name exactly. `pkill -f 'Gizmate'` matches whole
+# command lines — including this one's own shell — so it kills the shell
+# before `swift run` ever starts, and the launch dies with exit 143.
+pkill -x Gizmate ; swift run Gizmate   # quick debug run — this is the default test step
 ```
 
 - `swift run Gizmate` is the fast dev loop for UI/behavior iteration (a debug build, Sparkle inert). Do NOT run `bash Scripts/build-app-bundle.sh` just to see a change — that full universal signed bundle is only for release, Sparkle/update testing, or when a feature needs TCC permissions correctly attributed to `com.nugumi.app` rather than the shell (the "TCC launch trap").
