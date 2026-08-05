@@ -149,7 +149,7 @@ struct EdgesDiagram: View {
             }
             carriedTile
         }
-        .background(Color.black.opacity(0.34))
+        .background(Color.white.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -173,14 +173,15 @@ struct EdgesDiagram: View {
 
     // MARK: - Rails
 
-    /// The three bands are filled and the middle is not, so the figure reads as
-    /// a screen with bezels rather than four boxes sharing hairlines. The
-    /// dividers that used to separate them are gone with the same change: the
-    /// fill already draws the boundary, and a hairline on top of it was a
-    /// second line saying the same thing.
+    /// A rail draws nothing of its own until something is over it. The figure
+    /// carries one flat fill and the middle is marked out of it by a dashed
+    /// outline, so a rail is simply the part that is outside that outline, the
+    /// way the bezel of a real screen is. Filling the three bands and leaving
+    /// the middle dark did read as a screen, but the middle then landed as a
+    /// hard black rectangle with square corners sitting inside a rounded one.
     private func band(_ highlighted: Bool) -> some View {
         Rectangle()
-            .fill(highlighted ? FlowTheme.accentSoft : Color.white.opacity(0.045))
+            .fill(highlighted ? FlowTheme.accentSoft : Color.clear)
     }
 
     // No "TOP" / "LEFT" / "RIGHT" / "NOT ON AN EDGE" captions. Once the figure
@@ -290,9 +291,23 @@ struct EdgesDiagram: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
-        .padding(16)
+        .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(highlighted ? FlowTheme.accentSoft : Color.clear)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(highlighted ? FlowTheme.accentSoft : Color.clear)
+        )
+        // The dashed outline is what says "this is a place", now that the
+        // middle has no fill of its own. Inset from the rails on purpose: the
+        // zone `EdgesDiagram.zone` actually resolves runs all the way to them,
+        // so a landing just outside the dashes still counts as the middle
+        // rather than as a near miss.
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                .foregroundStyle(FlowTheme.hairline)
+        )
+        .padding(10)
     }
 
     // MARK: - Dragging
