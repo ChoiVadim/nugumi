@@ -225,6 +225,15 @@ share of users regardless of what looks right.
   is where a gizmo output earns the same standing — an output added there
   needs a real answer to "what does this tab show with nothing running yet?",
   not just "what does it show after."
+- **A resident does not have to be a ring action or a gizmo.** The folder hub
+  is a third kind: it is not in `residentBuiltIns` (no `RingActionID` names
+  it) and not a gizmo output in `dockableGizmoOutputs` (no `GizmateTool`
+  behind it either) — `DockCatalog.builtIns` appends it directly, because a
+  folder listing passes the same "something to draw before any run starts"
+  test Note and a `.surface` gizmo do, without a run to speak of at all. It
+  is also, today, the one resident with no placement control: `BuiltInEditor`
+  and `ToolEditor` are the only two places `DockPlacementPicker` is wired in,
+  and both need exactly the identity the folder hub doesn't have.
 - **A placement control can be the only consent screen a background run
   gets.** A surface's script runs on pointer hover, not a press — the first
   trigger in Gizmate the user doesn't cause directly. Nothing new executes
