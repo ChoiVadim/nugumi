@@ -144,7 +144,11 @@ struct EdgesSectionContent: View {
             }
             unplacedCard
             panelPlacementCard
-            folderHubSetupCard
+            // No folder-hub setup here. Which folders the hub shows is a
+            // setting of one resident, and a resident configures itself in its
+            // own panel — the hub's chip row and `+` already do exactly this
+            // where the folders are visible. This screen decides *where things
+            // sit*, which is the one question no single tool can answer alone.
         }
     }
 
