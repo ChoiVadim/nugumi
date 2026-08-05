@@ -309,13 +309,17 @@ share of users regardless of what looks right.
   itself anywhere but its own panel is the same "two places to keep in sync"
   problem placement itself was collapsed to `EdgesSection` to fix. This is
   safe only because `FolderHubStore.load` falls back to `~/Downloads` when
-  nothing has ever been saved: an undocked hub is never an empty hub, so
-  docking one for the first time already shows real chips beside real
-  contents, and there is no "the panel has nothing in it yet" case for this
-  rule to make worse. If that fallback is ever removed, the folder list needs
-  a way back into Edges — an empty panel with no chips in it is exactly the
-  discovery-by-accident problem that put the second view there the first
-  time.
+  nothing has ever been saved: a hub that has never been configured is never
+  an empty hub, so docking one for the first time already shows real chips
+  beside real contents, and there is no "the panel has nothing in it yet"
+  case for this rule to make worse. (A hub a user has since emptied on
+  purpose is a different case — `remove(_:)` deliberately saves `[]` rather
+  than reviving the default, so "silently un-removing the folder you just
+  took out" doesn't become the trade-off; that user was already standing in
+  the panel when they did it.) If the `~/Downloads` fallback is ever removed,
+  the folder list needs a way back into Edges — an empty, never-configured
+  panel with no chips in it is exactly the discovery-by-accident problem that
+  put the second view there the first time.
 - **A tool with no edge is not necessarily a tool with a home, and only Home
   says which one it has.** Everything above is about `DockCatalog`'s
   residents — how a resident earns an edge, and who writes it. A tool doesn't

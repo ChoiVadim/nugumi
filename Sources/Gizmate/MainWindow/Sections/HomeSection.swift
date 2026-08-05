@@ -198,8 +198,10 @@ struct HomeSectionContent: View {
     /// This is the one place that answers "is this tool reachable" for every
     /// kind of result, dockable or not — a `.clipboard` or `.notify` gizmo has
     /// no edge to ever sit on, so for one of those "reachable" collapses to
-    /// "on a ring slot", and this function is what still gets that right,
-    /// since it never branches on output kind at all.
+    /// "on a ring slot", and this function is what still gets that right.
+    /// `.surface` is the only output kind it branches on, and only to prefer
+    /// the edge when both homes are true; every other kind falls through the
+    /// same ring/edge/shortcut/nowhere checks with no special-casing at all.
     func location(for content: RingSlotContent, storageID: String) -> HomeLocation {
         if case .tool(let id) = content,
            let tool = tools.tool(id: id), tool.output == .surface,
