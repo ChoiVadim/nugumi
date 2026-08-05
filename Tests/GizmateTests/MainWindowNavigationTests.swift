@@ -2,9 +2,11 @@ import XCTest
 @testable import Gizmate
 
 final class MainWindowNavigationTests: XCTestCase {
-    /// The raw value is the restored sidebar selection, so a build that
-    /// renames one silently drops the user on a different screen.
-    func testHomeKeepsItsPersistedRawValue() {
+    /// Nothing restores the sidebar selection across launches today (see the
+    /// enum's doc comment) — but raw values are cheap to keep stable, and
+    /// free now is not free forever, so pin `.home`'s against a drive-by
+    /// rename.
+    func testHomeRawValueStaysStable() {
         XCTAssertEqual(MainWindowSection.home.rawValue, "home")
     }
 
@@ -27,11 +29,5 @@ final class MainWindowNavigationTests: XCTestCase {
     /// Home stays first: it is the front door now, not the ring.
     func testHomeIsStillTheLandingSection() {
         XCTAssertEqual(MainWindowSection.primary.first, .home)
-    }
-
-    /// Two cases must never share a raw value — the sidebar restores by it.
-    func testRawValuesAreUnique() {
-        let raws = MainWindowSection.allCases.map(\.rawValue)
-        XCTAssertEqual(Set(raws).count, raws.count)
     }
 }

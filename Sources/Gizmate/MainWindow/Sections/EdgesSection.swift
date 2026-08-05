@@ -29,7 +29,6 @@ struct EdgesSection: View {
                 dock: bridge.dock,
                 tools: bridge.tools,
                 overrides: bridge.builtInOverrides,
-                folderHub: host.folderHub,
                 host: host
             )
         }
@@ -56,7 +55,6 @@ struct EdgesSectionContent: View {
     // view's `body` needs to run again.
     @ObservedObject var tools: ToolsStore
     @ObservedObject var overrides: BuiltInOverridesStore
-    @ObservedObject var folderHub: FolderHubStore
     let host: any SettingsHost
 
     /// Resident items only — the same set `EdgeDockController` actually draws
@@ -210,7 +208,7 @@ struct EdgesSectionContent: View {
             Group {
                 if rows.isEmpty {
                     SubCard {
-                        Text("Everything placeable is already on an edge.")
+                        Text("Everything that can sit on an edge is already there.")
                             .font(.system(size: 13))
                             .foregroundStyle(FlowTheme.inkSecondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -248,6 +246,8 @@ struct EdgesSectionContent: View {
                 Text(item.title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(FlowTheme.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 12)
                 DockPlacementPicker(store: dock, itemID: item.id, unplacedLabel: unplacedLabel(for: item))
             }

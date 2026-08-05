@@ -126,8 +126,9 @@ private struct GeneralTab: View {
     // No folder-hub card here. It lived on this page only while there was
     // nowhere else to put it — the hub has no `RingActionID`, so it never
     // reached `BuiltInEditor`'s Panel section the way Note, Explain, Reply and
-    // Summarize do. Edges now owns both its placement and its folder list, and
-    // a settings card whose whole content is "go to Edges" is a stop on the way
+    // Summarize do. Edges owns its placement; the folder list itself lives
+    // back in the hub's own panel, beside the folders it shows, and a
+    // settings card whose whole content is "go to Edges" is a stop on the way
     // to somewhere rather than a setting. See DESIGN.md §11.
 }
 

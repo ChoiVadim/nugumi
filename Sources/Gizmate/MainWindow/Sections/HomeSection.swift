@@ -47,6 +47,11 @@ struct HomeSectionContent: View {
     @ObservedObject var dock: DockStore
     @ObservedObject var overrides: BuiltInOverridesStore
     @EnvironmentObject var bridge: GizmateSettingsBridge
+    /// Where a built-in's bound key is read from for `location(for:storageID:)`
+    /// — the real suite in production, a scratch one in a test that wants to
+    /// pin a specific binding without touching every other test's
+    /// `UserDefaults.standard`.
+    var shortcutDefaults: UserDefaults = .standard
 
     private var builtInRows: [HomeRow] {
         RingActionID.allCases.map { action in
@@ -90,8 +95,8 @@ struct HomeSectionContent: View {
             PageBanner(
                 title: "Everything you've built",
                 message: "Shipped actions and your own gizmos, all in one place, each one saying "
-                    + "where it currently sits — a ring slot, a screen edge, or nowhere yet. "
-                    + "Pick one to open its editor, or start a new one above.",
+                    + "where it currently sits — a ring slot, a screen edge, a shortcut, or "
+                    + "nowhere yet. Pick one to open its editor, or start a new one above.",
                 symbol: "square.grid.2x2",
                 dismissKey: "homeBannerDismissed"
             )
@@ -167,11 +172,28 @@ struct HomeSectionContent: View {
         }
     }
 
-    /// Where `content` sits: a slot in the root ring, a slot in one of its
-    /// sub-rings, an edge, or nowhere. The ring is checked first — assigning a
-    /// slot never touches `DockStore` and vice versa, so nothing can ever
-    /// match both, but checking ring-then-edge keeps the search cheap for the
-    /// common case of a freshly-placed built-in.
+    /// Where `content` sits, out of every home a tool can have: a slot in the
+    /// root ring, a slot in one of its sub-rings, an edge, a built-in's own
+    /// global shortcut, or nowhere.
+    ///
+    /// The ring and `DockStore` never write to each other — `RingLayoutStore
+    /// .assign` only vacates other slots in the *same* ring, and the only
+    /// `dock.dock(` call site is `EdgesSection` — so a tool can genuinely sit
+    /// on both at once, not "never both" the way an earlier version of this
+    /// comment claimed. The ordinary way that happens is a `.surface` gizmo:
+    /// `SurfaceRefresh` tells an unapproved one to "run it once from the
+    /// ring", which needs a slot, for a gizmo whose entire point is the edge
+    /// it draws rows on. When both are true for `.surface` content, the edge
+    /// is checked first and wins — it is the answer that actually describes
+    /// what the gizmo is for, where the ring slot is very possibly a leftover
+    /// from approving it once. Everything else still checks the ring first,
+    /// purely because it keeps the common case (a freshly-placed built-in)
+    /// cheap, not because the two stores are mutually exclusive.
+    ///
+    /// A built-in with no ring slot and no edge still isn't `.nowhere`: every
+    /// `RingActionID` with a `shortcutAction` always resolves a binding, saved
+    /// or default — `GlobalShortcutStore.shortcut(for:)` never returns nil —
+    /// so the key keeps running it regardless of ring or edge state.
     ///
     /// This is the one place that answers "is this tool reachable" for every
     /// kind of result, dockable or not — a `.clipboard` or `.notify` gizmo has
@@ -179,6 +201,11 @@ struct HomeSectionContent: View {
     /// "on a ring slot", and this function is what still gets that right,
     /// since it never branches on output kind at all.
     func location(for content: RingSlotContent, storageID: String) -> HomeLocation {
+        if case .tool(let id) = content,
+           let tool = tools.tool(id: id), tool.output == .surface,
+           let edge = dock.edge(of: storageID) {
+            return .edge(edge)
+        }
         if ringLayout.layout.slots.contains(content) {
             return .ring(folder: nil)
         }
@@ -187,6 +214,9 @@ struct HomeSectionContent: View {
         }
         if let edge = dock.edge(of: storageID) {
             return .edge(edge)
+        }
+        if case .builtIn(let action) = content, let shortcutAction = action.shortcutAction {
+            return .shortcut(GlobalShortcutStore.shortcut(for: shortcutAction, defaults: shortcutDefaults))
         }
         return .nowhere
     }
@@ -224,9 +254,11 @@ private struct HomeRow: Identifiable {
 enum HomeLocation {
     case ring(folder: String?)
     case edge(DockEdge)
+    /// A built-in with a `shortcutAction` and no ring slot or edge: it still
+    /// runs, from the key `GlobalShortcutStore` resolves for it.
+    case shortcut(GlobalShortcut)
     /// Saved but unreachable from anywhere a user would think to look — not a
-    /// warning, just the plain truth about a tool nothing points at yet. A
-    /// later task makes this state fixable straight from this row.
+    /// warning, just the plain truth about a tool nothing points at yet.
     case nowhere
 
     var label: String {
@@ -236,6 +268,8 @@ enum HomeLocation {
             return "In the ring, inside \u{201C}\(folder)\u{201D}."
         case .edge(let edge):
             return "On the \(edge.displayName) edge."
+        case .shortcut(let shortcut):
+            return "Runs with \(shortcut.displayString)."
         case .nowhere:
             return "Lives nowhere yet."
         }

@@ -30,7 +30,7 @@ enum ToolRunError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .uvMissing:
-            return "The uv runtime isn't installed yet. Open Ring ▸ the tool's editor to set it up."
+            return "The uv runtime isn't installed yet. Open its editor in Home to set it up."
         case .scriptMissing:
             return "This tool has no script yet."
         case .noInput(let input):

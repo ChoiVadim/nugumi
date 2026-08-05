@@ -225,9 +225,9 @@ final class DockPlacementParityTests: XCTestCase {
 
         XCTAssertTrue(
             unreachable.isEmpty,
-            "DockCatalog.builtIns lists a resident — \(unreachable.sorted()) — with no "
-                + "placement control anywhere in the app: it names no RingActionID in "
-                + "DockCatalog.dockableBuiltIns, and EdgesSection.residentWithoutARingSlot "
+            "DockCatalog.builtIns lists a resident — \(unreachable.sorted()) — whose own "
+                + "editor has no way to tell the user where it sits: it names no RingActionID "
+                + "in DockCatalog.dockableBuiltIns, and EdgesSection.residentWithoutARingSlot "
                 + "doesn't cover it either"
         )
     }
@@ -312,12 +312,17 @@ final class DockPlacementParityTests: XCTestCase {
             .map { ToolRef.generated($0.id).storageID }
         let editorsPointAt = Set(nonResidentBuiltIns).union(panelOnlyGizmos)
 
-        let unoffered = editorsPointAt.subtracting(EdgesSection.panelPlaceableIDs(host: host))
-        XCTAssertTrue(
-            unoffered.isEmpty,
-            "BuiltInEditor or ToolEditorPanel points a user at Edges for — "
-                + "\(unoffered.sorted()) — but EdgesSection's \"Panel placement\" list "
-                + "doesn't offer a picker for it"
+        // Equality, not a one-way subset: narrowing `panelPlaceableIDs` was
+        // already caught below, but widening it silently passed before this
+        // change — and widening is the real failure here. Let a resident in
+        // (drop the `!residentBuiltIns.contains` filter, say) and it gets a
+        // picker in this card *and* a row in the edge cards, the exact
+        // duplication Task 3 existed to remove.
+        XCTAssertEqual(
+            EdgesSection.panelPlaceableIDs(host: host), editorsPointAt,
+            "EdgesSection's \"Panel placement\" list disagrees with what BuiltInEditor and "
+                + "ToolEditorPanel actually point a user at — either it's missing an id they "
+                + "promise a picker for, or it offers one for an id neither editor names"
         )
     }
 
@@ -392,6 +397,132 @@ final class DockPlacementParityTests: XCTestCase {
             location(for: stranded).label, "Lives nowhere yet.",
             "the row's own copy for this state changed without this test noticing"
         )
+    }
+
+    /// I2: a built-in has a third home a gizmo never can — its own global
+    /// shortcut. `GlobalShortcutStore` always resolves one, saved or default,
+    /// for any `RingActionID` with a `shortcutAction`, so taking Explain off
+    /// the ring to free a slot (an ordinary act) must not make `location`
+    /// claim it lives nowhere while ⌃⌥T still runs it.
+    func testABuiltInWithAGlobalShortcutIsNeverReportedAsLivingNowhere() {
+        let toolsDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "gizmate-home-shortcut-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+        let tools = ToolsStore(directoryURL: toolsDirectory, migrateLegacy: false)
+
+        let ringSuiteName = "HomeShortcutParityTests.ring.\(UUID().uuidString)"
+        let ringDefaults = UserDefaults(suiteName: ringSuiteName)!
+        defer { ringDefaults.removePersistentDomain(forName: ringSuiteName) }
+        let ringLayout = RingLayoutStore(defaults: ringDefaults)
+
+        let dockSuiteName = "HomeShortcutParityTests.dock.\(UUID().uuidString)"
+        let dockDefaults = UserDefaults(suiteName: dockSuiteName)!
+        defer { dockDefaults.removePersistentDomain(forName: dockSuiteName) }
+        let dock = DockStore(defaults: dockDefaults)
+
+        let overridesSuiteName = "HomeShortcutParityTests.overrides.\(UUID().uuidString)"
+        let overridesDefaults = UserDefaults(suiteName: overridesSuiteName)!
+        defer { overridesDefaults.removePersistentDomain(forName: overridesSuiteName) }
+        let overrides = BuiltInOverridesStore(defaults: overridesDefaults)
+
+        // A scratch suite, never written to — an untouched install, where
+        // `GlobalShortcutStore` falls back to the action's default binding.
+        let shortcutSuiteName = "HomeShortcutParityTests.shortcuts.\(UUID().uuidString)"
+        let shortcutDefaults = UserDefaults(suiteName: shortcutSuiteName)!
+        defer { shortcutDefaults.removePersistentDomain(forName: shortcutSuiteName) }
+
+        let home = HomeSectionContent(
+            tools: tools, ringLayout: ringLayout, dock: dock, overrides: overrides,
+            shortcutDefaults: shortcutDefaults
+        )
+
+        // A fresh `RingLayoutStore` starts from `RingLayout.default`, which
+        // seeds Explain at root slot 0 — clear it to reach the state the
+        // review names: Explain taken off the ring to free the slot, and
+        // never docked either.
+        ringLayout.clear(0)
+        XCTAssertFalse(
+            ringLayout.layout.slots.contains(.builtIn(.explain)),
+            "this stub's whole point is Explain off the ring — without that, the assertion "
+                + "below would pass by reading `.ring`, not by reaching the shortcut fallback"
+        )
+
+        let location = home.location(
+            for: .builtIn(.explain), storageID: ToolRef.builtIn(.explain).storageID
+        )
+
+        guard case .shortcut(let shortcut) = location else {
+            return XCTFail(
+                "Explain has no ring slot and no edge here, but it still has a "
+                    + "shortcutAction — location must not read that back as .nowhere, or "
+                    + "Home tells the user Explain lives nowhere while its shortcut still runs it"
+            )
+        }
+        XCTAssertEqual(
+            shortcut, GlobalShortcutAction.explainSelection.defaultShortcut,
+            "an untouched suite should resolve to the action's default binding"
+        )
+        XCTAssertEqual(location.label, "Runs with \(shortcut.displayString).")
+    }
+
+    /// I3: `RingLayoutStore.assign` and `DockStore.dock` never call each
+    /// other, so a tool can genuinely sit on a ring slot and an edge at once
+    /// — the ordinary way that happens is a `.surface` gizmo approved via
+    /// `SurfaceRefresh`'s "run it once from the ring" message, which needs a
+    /// slot, for a gizmo whose entire point is the edge. When both are true,
+    /// `location` has to report the edge: it's the answer that actually
+    /// describes what the gizmo is for.
+    func testASurfaceGizmoOnBothARingSlotAndAnEdgeReportsTheEdge() {
+        let toolsDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "gizmate-home-surface-both-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+        let tools = ToolsStore(directoryURL: toolsDirectory, migrateLegacy: false)
+
+        let ringSuiteName = "HomeSurfaceBothParityTests.ring.\(UUID().uuidString)"
+        let ringDefaults = UserDefaults(suiteName: ringSuiteName)!
+        defer { ringDefaults.removePersistentDomain(forName: ringSuiteName) }
+        let ringLayout = RingLayoutStore(defaults: ringDefaults)
+
+        let dockSuiteName = "HomeSurfaceBothParityTests.dock.\(UUID().uuidString)"
+        let dockDefaults = UserDefaults(suiteName: dockSuiteName)!
+        defer { dockDefaults.removePersistentDomain(forName: dockSuiteName) }
+        let dock = DockStore(defaults: dockDefaults)
+
+        let overridesSuiteName = "HomeSurfaceBothParityTests.overrides.\(UUID().uuidString)"
+        let overridesDefaults = UserDefaults(suiteName: overridesSuiteName)!
+        defer { overridesDefaults.removePersistentDomain(forName: overridesSuiteName) }
+        let overrides = BuiltInOverridesStore(defaults: overridesDefaults)
+
+        let home = HomeSectionContent(tools: tools, ringLayout: ringLayout, dock: dock, overrides: overrides)
+
+        let surfaceGizmo = tools.save(
+            GizmateTool(name: "Surface Gizmo", kind: .python, input: .selection, output: .surface)
+        )
+
+        // Both writes are real and independent, the same way a user actually
+        // gets here: approve it once from the ring per SurfaceRefresh's
+        // message, then dock it too, since the edge is the gizmo's real job.
+        ringLayout.assign(.tool(surfaceGizmo.id), to: 0)
+        dock.dock(ToolRef.generated(surfaceGizmo.id).storageID, to: .left)
+
+        XCTAssertTrue(
+            ringLayout.layout.slots.contains(.tool(surfaceGizmo.id)),
+            "this stub's whole point is a tool that really is on the ring — without that, "
+                + "the assertion below would pass without checking that the ring is ever "
+                + "suppressed in favor of the edge"
+        )
+
+        let location = home.location(
+            for: .tool(surfaceGizmo.id), storageID: ToolRef.generated(surfaceGizmo.id).storageID
+        )
+        guard case .edge(let edge) = location else {
+            return XCTFail(
+                "a .surface gizmo on both a ring slot and an edge must report the edge — "
+                    + "it's what the gizmo is for; the ring slot is likely just a leftover "
+                    + "from approving it once"
+            )
+        }
+        XCTAssertEqual(edge, .left)
     }
 }
 

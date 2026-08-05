@@ -54,8 +54,11 @@ Rules that fall out of this, all of them paid for:
   Build them from live sets typed out independently on both sides, and assert
   inside the test that its own fixture discriminates.
 
-`MainWindowSection`'s raw values are the persisted sidebar selection. `home`
-keeps its raw value forever; new sections take new ones.
+Nothing persists the sidebar selection today — `MainWindowSection` is held
+only as an in-memory `@Published var` on `GizmateSettingsBridge`, reset to
+`.home` on every launch. A rename is currently free. Raw values are still
+cheap to keep stable, though: if launch-to-launch restoration is ever added,
+keeping them stable now is what makes that a no-op instead of a migration.
 
 ## Identity that must not change
 

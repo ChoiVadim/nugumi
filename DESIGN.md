@@ -234,15 +234,22 @@ share of users regardless of what looks right.
 - **Placement is written from exactly one screen.** `BuiltInEditor`'s "Panel"
   section, `ToolEditor`'s panel/edge fields, and Settings → General's Files
   card each used to carry their own `DockPlacementPicker`, writing straight to
-  `DockStore`. All three now hold only a locality pointer — plain text saying
-  where the thing currently sits, or that it sits nowhere — and `EdgesSection`
-  is the one place that actually calls `DockPlacementPicker` and writes.
-  Reading a pointer back from the store the same screen writes to needed no
-  new plumbing: `bridge.dock.edge(of:)` was already there. The identity gap
-  that used to route the folder hub to Settings → General still exists —
-  `BuiltInEditor`'s gate is a `RingActionID`, `ToolEditor`'s a `GizmateTool`,
-  and the folder hub has neither — but it no longer matters which editor
-  _writes_ placement, because none of them do anymore.
+  `DockStore`. Two of the three now hold only a locality pointer — plain text
+  saying where the thing currently sits, or that it sits nowhere — and
+  `EdgesSection` is the one place that actually calls `DockPlacementPicker`
+  and writes. The third, Settings → General's Files card, held nothing besides
+  that same pointer once it stopped writing — a card whose whole content is
+  "go to Edges" is a signpost, not a setting, so it was deleted rather than
+  reduced to text like the other two. Reading a pointer back from the store
+  the same screen writes to needed no new plumbing: `bridge.dock.edge(of:)`
+  was already there. The identity gap that used to route the folder hub to
+  Settings → General still exists — `BuiltInEditor`'s gate is a
+  `RingActionID`, `ToolEditor`'s a `GizmateTool`, and the folder hub has
+  neither — but with that card gone, the gap means the folder hub is now the
+  one resident with no editor anywhere that can carry a pointer to it: an
+  asymmetry among the residents themselves, not only about which screen does
+  the writing. That's acceptable — there is no editor left to put it in — but
+  worth naming here rather than leaving it a silent gap.
   `EdgesSection.residentWithoutARingSlot` names the folder hub's id today (it
   moved from `SettingsSection` when the picker did); a future resident of this
   same ring-slot-less kind joins it there, not a new constant.
@@ -293,14 +300,22 @@ share of users regardless of what looks right.
   a folder with `FileManager` on every hover, which is not a thing a user
   approves at all. Saying "nothing to run or approve" is the honest claim for
   this resident specifically, not a shorter version of the gizmo's sentence.
-- **A resident's own configuration belongs where its placement does.** The
-  folder hub's folder list used to be reachable only by docking it, opening
-  its panel, and finding the chips there — discovery by accident, and the
-  reason Settings → General grew a Files card to begin with. `FolderHubView`'s
-  chips and `+` still live in the panel, for use once it's docked, but
-  `EdgesSection` carries a second, independent view onto the same
-  `FolderHubStore` so a user can add a folder before ever placing the hub
-  anywhere.
+- **One tool never configures itself in the main window.** The folder hub's
+  folder list once lived two places at once: `FolderHubView`'s own chips, for
+  use once it's docked, and a second, independent view onto the same
+  `FolderHubStore` inside `EdgesSection`, added so a user could add a folder
+  before ever placing the hub anywhere. That second view is gone — the folder
+  list lives only in the hub's own panel now, because a resident configuring
+  itself anywhere but its own panel is the same "two places to keep in sync"
+  problem placement itself was collapsed to `EdgesSection` to fix. This is
+  safe only because `FolderHubStore.load` falls back to `~/Downloads` when
+  nothing has ever been saved: an undocked hub is never an empty hub, so
+  docking one for the first time already shows real chips beside real
+  contents, and there is no "the panel has nothing in it yet" case for this
+  rule to make worse. If that fallback is ever removed, the folder list needs
+  a way back into Edges — an empty panel with no chips in it is exactly the
+  discovery-by-accident problem that put the second view there the first
+  time.
 - **A tool with no edge is not necessarily a tool with a home, and only Home
   says which one it has.** Everything above is about `DockCatalog`'s
   residents — how a resident earns an edge, and who writes it. A tool doesn't
@@ -310,17 +325,26 @@ share of users regardless of what looks right.
   state the ring's old placement-by-construction made impossible. Nothing in
   this section, and nothing `DockCatalog` computes, ever checks the ring, so
   none of it can tell that state apart from a resident correctly sitting on
-  an edge. `HomeSectionContent.location` is the one place that checks both
-  homes a tool can have — a ring slot, then `DockStore` — and reads back
-  `.nowhere` when neither claims it, worded plainly on the tool's own row
-  (`FlowTheme.inkTertiary`, not a banner) rather than left for someone to
-  notice only by trying to run it. A `.clipboard` or `.notify` gizmo can
-  never earn an edge at all, so for one of those `.nowhere` is the only way
-  to fail, and Home is the only screen that was ever going to catch it.
-  `DockPlacementParityTests` pins this against real `ToolsStore` /
-  `RingLayoutStore` / `DockStore` instances — the same shape as the built-in
-  resident check earlier in this section, generalized from "does a control
-  exist for this" to "does either home exist at all."
+  an edge. `HomeSectionContent.location` is the one place that checks every
+  home a tool can have — a ring slot, `DockStore`, and, for a built-in, its
+  own global shortcut — and reads back `.nowhere` only when none of the three
+  claims it, worded plainly on the tool's own row (`FlowTheme.inkTertiary`,
+  not a banner) rather than left for someone to notice only by trying to run
+  it. The ring and `DockStore` never write to each other, so a tool can
+  genuinely sit on both — most often a `.surface` gizmo carrying a ring slot
+  left over from approving it once (`SurfaceRefresh`'s "run it once from the
+  ring" message asks the user to create exactly that state) — and when that
+  happens `location` checks the edge first for `.surface` content, since the
+  edge is what the gizmo is actually for. A built-in with a `shortcutAction`
+  is never `.nowhere` even off the ring and off every edge: `GlobalShortcutStore`
+  always resolves a binding, saved or default, so the key still runs it
+  regardless of where else it sits. A `.clipboard` or `.notify` gizmo can
+  never earn an edge or a shortcut at all, so for one of those `.nowhere` is
+  still the only way to fail, and Home is the only screen that was ever going
+  to catch it. `DockPlacementParityTests` pins this against real `ToolsStore`
+  / `RingLayoutStore` / `DockStore` instances — the same shape as the
+  built-in resident check earlier in this section, generalized from "does a
+  control exist for this" to "does any home exist at all."
 
 ## 12. Reuse before variants
 

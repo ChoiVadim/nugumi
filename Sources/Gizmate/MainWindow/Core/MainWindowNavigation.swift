@@ -13,10 +13,15 @@ enum EngineSetupFocus: String, CaseIterable, Hashable {
 /// `home` is the front door: every tool in one list, shipped actions and
 /// generated gizmos together, each row saying where it lives. `ring` is the
 /// radial menu on its own, split out from `home` by Task 4 of the navigation
-/// restructure — before that, `home` rendered the ring directly. `home` keeps
-/// its raw value regardless, because it is persisted as the restored
-/// selection — a rename here silently drops every user on a different screen
-/// than the one they left.
+/// restructure — before that, `home` rendered the ring directly.
+///
+/// Nothing restores the sidebar selection across launches today: it lives
+/// only as `GizmateSettingsBridge.section`, an in-memory `@Published` var
+/// that starts every launch at `.home`, and nothing in Sources calls
+/// `MainWindowSection(rawValue:)` — the window's autosave covers its frame,
+/// not this. A rename is currently free. Raw values are still cheap to keep
+/// stable, though, and worth not renaming gratuitously — if the selection is
+/// ever persisted, that costs a migration only for whichever case moved.
 enum MainWindowSection: String, CaseIterable, Identifiable, Hashable {
     case home, insights
     case voice

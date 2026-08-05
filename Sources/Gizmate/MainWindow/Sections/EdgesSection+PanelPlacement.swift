@@ -84,6 +84,8 @@ extension EdgesSectionContent {
             Text(ref.title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(FlowTheme.ink)
+                .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 12)
             DockPlacementPicker(store: dock, itemID: ref.id)
         }
