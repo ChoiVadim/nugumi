@@ -209,9 +209,18 @@ share of users regardless of what looks right.
   only round outward, so a concave corner needs a path.
 - **No window shadow.** macOS pairs a shadow with a thin light rim, and on a
   panel hugging the bezel that rim reads as a border along the screen edge.
-- **Slide in from the bezel, fade out in place.** Arriving from off-screen is
-  what makes a panel read as coming out of the edge rather than being placed on
-  top of it.
+- **Slide in from the bezel; leave the way you came, or fade in place.**
+  Arriving from off-screen is what makes a panel read as coming out of the edge
+  rather than being placed on top of it. The top dock now retracts the same
+  way — accelerating out, the mirror of its decelerating arrival — because a
+  panel that grows out of the notch and then simply stops existing reads as two
+  effects sharing an edge rather than one thing moving. What makes that safe is
+  that the retraction is a pure _translation_: liquid glass takes its shape
+  from the model frame and teleports on frame-one of a resizing close, so a
+  shrink still pops a disc at the centre, but a window that only moves carries
+  its glass along unchanged. The side docks keep the plain fade: one of them is
+  closed by dragging it bezelward by hand, and a second motion after the user's
+  own reads as a bounce.
 
 ## 11. Dock behaviour
 

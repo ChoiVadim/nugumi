@@ -391,7 +391,9 @@ final class EdgeDockController {
         }
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = animateFrame ? 0.2 : 0.26
+            // The top dock travels its whole height on the way in — further
+            // than a side strip's few points — so it gets the longer ride.
+            context.duration = animateFrame ? 0.2 : (edge == .top ? 0.3 : 0.26)
             // Decelerating rather than `.easeOut`: the panel arrives from
             // off-screen at speed and settles, which reads as coming out of the
             // bezel instead of being placed there.
@@ -403,12 +405,30 @@ final class EdgeDockController {
         }
     }
 
+    /// Never shrink — liquid glass takes its shape from the model frame and
+    /// teleports on frame-one of a *resizing* close, popping a disc at the
+    /// centre; the ring paid for that lesson already. A pure translation is a
+    /// different animal: the window moves, the glass keeps its own geometry
+    /// inside it, and nothing has a new shape to snap to. So the top dock
+    /// retracts into the bezel it came out of, the mirror of its arrival,
+    /// while the side docks still fade in place — one of those is closed by
+    /// dragging it bezelward by hand, and a second motion after the user's own
+    /// reads as a bounce.
     private func fadeOut() {
-        // Fade in place — never shrink. Liquid glass takes its shape from the
-        // model frame and teleports on frame-one of a closing frame animation,
-        // popping a disc at the centre. The ring paid for this lesson already.
+        let retract = edge == .top
+            ? DockGeometry.offscreenFrame(panel.frame, for: edge)
+            : nil
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.12
+            context.duration = retract == nil ? 0.12 : 0.22
+            // Accelerating away, the exact mirror of `present`'s decelerating
+            // arrival: a panel that leaves the way it came reads as one thing
+            // moving, not as two effects sharing an edge.
+            context.timingFunction = CAMediaTimingFunction(
+                controlPoints: 0.5, 0, 0.84, 0.4
+            )
+            if let retract {
+                panel.animator().setFrame(retract, display: true)
+            }
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             self?.panel.orderOut(nil)
