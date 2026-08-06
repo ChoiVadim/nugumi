@@ -34,11 +34,11 @@ enum DockCatalog {
     /// view — Ask, Live and the result panel still create their own windows, so
     /// there is nothing to hand a dock.
     ///
-    /// Ask and Live are still missing: they build their own windows, so there
-    /// is nothing to hand a dock yet. Rewrite and Dictate never join — they
-    /// write into the app you were in and show no panel at all.
+    /// Live is still missing: it builds its own window, so there is nothing to
+    /// hand a dock yet. Rewrite and Dictate never join — they write into the app
+    /// you were in and show no panel at all.
     /// See `docs/superpowers/specs/2026-08-03-one-tool-model-design.md`, phase 3.
-    static let dockableBuiltIns: [RingActionID] = [.saveNote, .explain, .reply, .summarize]
+    static let dockableBuiltIns: [RingActionID] = [.saveNote, .ask, .explain, .reply, .summarize]
 
     /// Only ring actions whose surface can sit on an edge *waiting*. A result
     /// panel is not one: it exists after a run, and until then there is
@@ -48,7 +48,13 @@ enum DockCatalog {
     /// something to draw before any run starts. The folder hub is resident
     /// for that same reason again, but it is not a ring action at all, so it
     /// cannot live in this array — `builtIns(host:)` appends it directly.
-    static let residentBuiltIns: [RingActionID] = [.saveNote]
+    ///
+    /// Ask joined once its chat became a view rather than a window. It passes
+    /// the same test Note does and for the same reason: `AskGizmateHistoryStore`
+    /// already holds the conversation, so the tab has a transcript to draw
+    /// before anything runs. The capsule at the cursor is the same conversation
+    /// with the transcript not shown.
+    static let residentBuiltIns: [RingActionID] = [.saveNote, .ask]
 
     /// Which gizmo outputs `gizmos(host:)` is willing to list. `.surface` is
     /// the only member today, for the same reason `residentBuiltIns` above is
@@ -156,8 +162,13 @@ enum DockCatalog {
     /// Note's surface is the notes list — which is what "keep this" is *for*.
     /// Nothing else is in `dockableBuiltIns` yet, so nothing else reaches here.
     private static func surface(for action: RingActionID, host: (any SettingsHost)?) -> AnyView {
-        guard action == .saveNote, let host else { return AnyView(EmptyView()) }
-        return AnyView(DockNotesView(notes: host.notes))
+        guard let host else { return AnyView(EmptyView()) }
+        switch action {
+        case .saveNote: return AnyView(DockNotesView(notes: host.notes))
+        case .ask: return AnyView(AskChatView(conversation: host.askConversation))
+        // Nothing else is in `residentBuiltIns`, so nothing else reaches here.
+        default: return AnyView(EmptyView())
+        }
     }
 
     private static func hosted(_ view: AnyView) -> NSView {

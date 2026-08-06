@@ -166,6 +166,24 @@ final class AskConversationStore: ObservableObject {
         }
     }
 
+    /// Records a turn that ran through the capsule's own submit path rather
+    /// than through `send`.
+    ///
+    /// Two paths exist while the floating capsule still presents its answer in
+    /// a `TranslationPanelController` and this store presents it in a
+    /// transcript. They must not become two conversations, which is what this
+    /// prevents: whichever surface asked, the turn lands in one history and the
+    /// other reads it as context.
+    func record(question: String, answer: String) {
+        let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let answer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty, !answer.isEmpty else { return }
+        turns = AskGizmatePromptBuilder.appending(
+            AskGizmateTurn(question: question, answer: answer), to: turns
+        )
+        AskGizmateHistoryStore.save(turns, defaults: defaults)
+    }
+
     func cancel() {
         task?.cancel()
         task = nil

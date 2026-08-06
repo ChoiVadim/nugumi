@@ -272,6 +272,34 @@ share of users regardless of what looks right.
   is where a gizmo output earns the same standing — an output added there
   needs a real answer to "what does this tab show with nothing running yet?",
   not just "what does it show after."
+- **A resident is anything with a transcript, not just anything with a view.**
+  Ask joined `residentBuiltIns` when its chat became a view instead of a
+  window, and it passes the same "something to draw before any run starts" test
+  Note does for the same reason: `AskGizmateHistoryStore` already holds the
+  conversation, so the tab has a transcript the moment it opens. The capsule at
+  the cursor is that same conversation with the transcript not shown, which is
+  what makes the Edges figure the switch between them: on an edge Ask is a
+  chat, in the middle it is the capsule. No second control was added for this,
+  and none should be.
+- **A shortcut for a resident opens the resident.** Every other way into a dock
+  is the pointer arriving, so nothing needed `EdgeDockController.reveal` before:
+  by the time the panel exists the pointer is already at the edge. A shortcut is
+  pressed from anywhere, so it has to expand the dock and place the caret
+  itself. `startAskGizmatePrompt` asks `DockStore` where Ask sits and does one
+  of two things; it never opens a second place to type the same question.
+- **Whatever starts a screen capture is what dates it.** Ask's floating capsule
+  captures the instant the shortcut fires, before the capsule appears, because
+  activating Gizmate closes the very menu the user is asking about. A docked
+  chat has no such moment: it is already open, and a permanently armed
+  full-screen canvas would swallow every drag on the desktop. So there are
+  exactly two triggers, and each one dates its own shot. The camera captures at
+  send. The pencil captures on **press**, and that is not a detail: strokes are
+  composited into a frame taken earlier and line up with what is underneath them
+  only while the two are moments apart, so a shot taken at send would be of a
+  screen the strokes were never drawn on. Arming is what pins the frame.
+  It follows that an answer's shapes need a life of their own once the surface
+  showing them stops closing. They clear on the next send, on arming the pencil,
+  on Escape, and with the dock; a modal answer used to take them with it.
 - **A resident does not have to be a ring action or a gizmo.** The folder hub
   is a third kind: it is not in `residentBuiltIns` (no `RingActionID` names
   it) and not a gizmo output in `dockableGizmoOutputs` (no `GizmateTool`

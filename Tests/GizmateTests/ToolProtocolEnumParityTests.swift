@@ -558,6 +558,7 @@ private final class StubBuiltInResidentsHost: SettingsHost {
     var ringLayout: RingLayoutStore { fatalError("unused by DockPlacementParityTests") }
     var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
     var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
+    var askConversation: AskConversationStore { fatalError("unused by DockPlacementParityTests") }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockPlacementParityTests")
@@ -651,6 +652,7 @@ private final class StubEdgesUnplacedHost: SettingsHost {
     var ringLayout: RingLayoutStore { fatalError("unused by DockPlacementParityTests") }
     var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
     var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
+    var askConversation: AskConversationStore { fatalError("unused by DockPlacementParityTests") }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockPlacementParityTests")

@@ -81,6 +81,78 @@ extension GizmateApp {
         button.openMenu()
     }
 
+    /// What `AskConversationStore` needs from the app, wired to the same
+    /// helpers both submit paths already use.
+    ///
+    /// Internal rather than private, unlike everything else it reaches for:
+    /// `GizmateApp.askConversation` builds the store with it, and that lives in
+    /// `GizmateApp.swift`. The helpers stay private here, which is why the
+    /// engine has to be assembled in this file rather than beside the store.
+    @MainActor
+    func makeAskEngine() -> AskEngine {
+        AskEngine(
+            capture: {
+                let snapshot = Self.hideAppWindowsFromScreenCapture()
+                defer { Self.restoreAppWindowSharing(snapshot) }
+                return try await ScreenshotCapture.captureActiveScreen(
+                    containing: NSEvent.mouseLocation
+                )
+            },
+            ask: { [weak self] history, question, image, onPartial in
+                guard let self else { throw CancellationError() }
+                return try await self.askBackend.ask(
+                    history: history,
+                    question: question,
+                    image: image,
+                    thinkingLevel: self.askGizmateThinkingLevel,
+                    onPartial: onPartial
+                )
+            },
+            setupError: { [weak self] needsImage in
+                guard let self else { return nil }
+                let model = LLMModel.option(id: self.askGizmateModelID)
+                // The vision requirement belongs to the message. Asked without
+                // a picture, a text-only model is a perfectly good chat.
+                if needsImage, !model.supportsImages {
+                    return "Ask needs a vision model to look at your screen."
+                }
+                guard let setupError = self.askGizmateSetupErrorIfNeeded(for: model) else {
+                    return nil
+                }
+                return Self.translationPanelErrorMessage(for: setupError)
+            },
+            showAnnotations: { [weak self] annotations, capture in
+                self?.presentAskAnnotations(annotations, capture: capture)
+            },
+            clearAnnotations: { [weak self] in
+                self?.closeAskAnnotationOverlay()
+            },
+            beginDrawing: { [weak self] in
+                guard let self,
+                      let capture = await self.captureScreenBeforeAskPromptTakesFocus()
+                else { return nil }
+                self.askDrawingOverlay?.close()
+                self.askDrawingOverlay = AskDrawingOverlayController(
+                    screenFrame: capture.screenFrame,
+                    hint: "Draw on what you're asking about, then send"
+                )
+                return capture
+            },
+            endDrawing: { [weak self] in
+                let strokes = self?.askDrawingOverlay?.strokes ?? []
+                self?.closeAskDrawingOverlay()
+                return strokes
+            }
+        )
+    }
+
+    /// Where Ask sits, if the user parked it on an edge.
+    @MainActor
+    private var askDockController: EdgeDockController? {
+        guard let edge = dockStore.edge(of: ToolRef.builtIn(.ask).storageID) else { return nil }
+        return dockControllers.first { $0.edge == edge }
+    }
+
     @MainActor
     func startAskGizmatePrompt() {
         // Toggle: if any Ask Gizmate UI (prompt, loading, answer, or an
@@ -89,6 +161,14 @@ extension GizmateApp {
         let askUIOpen = isAskGizmateRunning || askPromptController != nil
         if askUIOpen {
             dismissAskGizmate()
+            return
+        }
+
+        // Parked on an edge, the chat *is* Ask's surface, so the shortcut opens
+        // it rather than a second place to type the same question into. Nothing
+        // is captured on this path: the chat decides that per message, with its
+        // camera at send and its pencil on press.
+        if let dock = askDockController, dock.reveal(itemID: ToolRef.builtIn(.ask).storageID) {
             return
         }
 
@@ -531,9 +611,7 @@ extension GizmateApp {
         let trimmedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuestion.isEmpty, !trimmedAnswer.isEmpty else { return }
-        let turn = AskGizmateTurn(question: trimmedQuestion, answer: trimmedAnswer)
-        askHistory = AskGizmatePromptBuilder.appending(turn, to: askHistory)
-        AskGizmateHistoryStore.save(askHistory)
+        askConversation.record(question: trimmedQuestion, answer: trimmedAnswer)
     }
 
     @MainActor

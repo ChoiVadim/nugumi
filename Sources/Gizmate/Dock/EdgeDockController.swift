@@ -308,6 +308,26 @@ final class EdgeDockController {
         return store.items(on: edge).compactMap { DockCatalog.item(id: $0, host: host) }
     }
 
+    /// Opens this dock straight onto one of its residents and hands it the
+    /// keyboard, for a shortcut rather than for the pointer arriving.
+    ///
+    /// Every other way in is a hover, which is why nothing needed this before:
+    /// the pointer is already at the edge by the time the panel exists. Ask's
+    /// shortcut is pressed with the pointer anywhere, and it has to leave the
+    /// caret in the chat's composer, so both steps are explicit here.
+    /// Nothing here pins the panel open: a side dock already stays open in
+    /// `.expanded` (`staysOpen`), and on the notch what keeps it up is
+    /// `closeIfPointerStillAway` refusing to close over a focused text field,
+    /// which is exactly the state this leaves it in.
+    @discardableResult
+    func reveal(itemID: String) -> Bool {
+        guard dockItems().contains(where: { $0.id == itemID }) else { return false }
+        transition(to: .expanded(itemID: itemID))
+        SelfActivationGuard.activate()
+        panel.makeKeyAndOrderFront(nil)
+        return true
+    }
+
     private func transition(to next: DockState) {
         guard next != state, let screen else { return }
         let items = dockItems()

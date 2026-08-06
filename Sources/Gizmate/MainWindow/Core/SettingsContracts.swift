@@ -95,6 +95,11 @@ protocol SettingsHost: AnyObject {
     var builtInOverrides: BuiltInOverridesStore { get }
     var dock: DockStore { get }
     var folderHub: FolderHubStore { get }
+    /// The one Ask conversation, shared by the capsule at the cursor and the
+    /// docked chat. On `SettingsHost` rather than reached for through
+    /// `GizmateSettingsBridge` for the reason every store here is: a dock
+    /// outlives the main window by design.
+    var askConversation: AskConversationStore { get }
     /// The last rows each surface gizmo's script printed. The dock draws
     /// from this the instant the pointer reaches the edge, before a refresh
     /// has had a chance to run.

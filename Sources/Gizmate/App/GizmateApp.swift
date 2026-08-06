@@ -66,7 +66,12 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     var toolPromptController: AskPromptController?
     var askGizmateTask: Task<Void, Never>?
     var askGizmateRequestID: UUID?
-    var askHistory: [AskGizmateTurn] = AskGizmateHistoryStore.load()
+    /// The one Ask conversation. Both surfaces drive it: the docked chat
+    /// through `send`, the floating capsule through `record` while it still
+    /// runs its own submit path. `askHistory` reads through it so neither can
+    /// answer with the other's context missing.
+    lazy var askConversation = AskConversationStore(engine: makeAskEngine())
+    var askHistory: [AskGizmateTurn] { askConversation.turns }
     /// Screen capture taken the moment Ask Gizmate is summoned, before the
     /// prompt steals focus. Activating Gizmate deactivates the frontmost app,
     /// which instantly closes its open menus/popovers, so a submit-time
