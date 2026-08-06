@@ -150,8 +150,20 @@ struct FolderHubView: View {
         }
         .padding(14)
         .foregroundStyle(FlowTheme.ink)
+        // Moving `current` is what loads and re-watches, rather than each
+        // caller remembering to. The crumb trail is why: it set `current`
+        // directly, and the moment loading lived in `show` instead of here,
+        // walking back up the trail moved the crumbs and left the grid showing
+        // the folder you had just left.
         .onChange(of: current) { _, folder in
-            watch.start(folder) { if let folder { reload(folder) } }
+            guard let folder else {
+                rows = []
+                selectedFiles = []
+                watch.stop()
+                return
+            }
+            load(folder, keepingSelection: false)
+            watch.start(folder) { reload(folder) }
         }
         .onDisappear { watch.stop() }
         .onAppear {
@@ -167,7 +179,15 @@ struct FolderHubView: View {
             // armed ✕ — fall back the same way a fresh open would rather than
             // keep rendering a chip that no longer exists.
             guard selected == nil || !folders.contains(where: { $0.path == selected?.path }) else { return }
-            selected = folders.first
+            // Through the same door as every other move, or the chips fall back
+            // to a folder the grid is not showing. `selected` alone moves
+            // nothing now: `current` is what loads.
+            if let next = folders.first {
+                show(next, asRoot: true)
+            } else {
+                selected = nil
+                current = nil
+            }
         }
     }
 
@@ -293,7 +313,7 @@ struct FolderHubView: View {
     private func crumb(for folder: URL) -> some View {
         let isCurrent = folder.path == current?.path
         return Button {
-            current = folder
+            show(folder, asRoot: false)
         } label: {
             HStack(spacing: 4) {
                 if folder.path == selected?.path {
@@ -438,12 +458,19 @@ struct FolderHubView: View {
     /// subfolder moves `current` alone, which is what keeps the crumb trail.
     private func show(_ folder: URL, asRoot: Bool) {
         if asRoot { selected = folder }
-        current = folder
-        // Synchronously, so the frame that moves the highlight is drawing an
-        // empty grid rather than the old one.
+        guard current?.path != folder.path else {
+            // Already here. `current` would not change, so nothing downstream
+            // would fire — re-read in place rather than clearing a grid that
+            // nothing is going to refill.
+            reload(folder)
+            return
+        }
+        // Cleared in the same action as the switch, so the frame that moves the
+        // highlight draws an empty grid instead of the old folder's eighty
+        // cards. The load itself follows from `current` changing.
         rows = []
         selectedFiles = []
-        load(folder, keepingSelection: false)
+        current = folder
     }
 
     /// What a drag off this card carries. Dragging a card that isn't in the
@@ -473,8 +500,7 @@ struct FolderHubView: View {
     /// anyone expects from a folder; a button that doesn't answer is not.
     private func refresh(in folder: URL?) {
         guard let folder else {
-            rows = []
-            selectedFiles = []
+            current = nil
             return
         }
         show(folder, asRoot: false)

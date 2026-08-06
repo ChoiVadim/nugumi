@@ -506,6 +506,15 @@ share of users regardless of what looks right.
   and the rule is what let it go: the sentence now lives on one gizmo's editor,
   where there is no neighbour to be confused with. The hub has no editor and
   needs none — nothing anywhere claims it runs.
+- **One variable moves, and moving it is what loads.** The folder hub has four
+  ways to change folder — a chip, a crumb, walking into a card, and falling back
+  when the chip you were on is deleted — and for a while the loading lived in
+  the function three of them called. The fourth set `current` directly, so
+  walking back up the crumb trail moved the crumbs and left the grid showing the
+  folder you had just left. Loading now hangs off `current` changing, which no
+  caller can forget to do, and the callers only decide *what* to show. The one
+  thing they still do themselves is clear the old rows, in the same action as
+  the switch, because §6 needs the press to land on its own frame.
 - **Dropping files in follows Finder, because the hub shows Finder's folders.**
   The folder hub is a view onto real directories, so a drop onto it is the same
   act as a drop onto a Finder window and gets the same rule: within a volume it
