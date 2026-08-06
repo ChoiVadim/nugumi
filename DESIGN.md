@@ -487,6 +487,18 @@ share of users regardless of what looks right.
   not need you to switch to Documents first. And the work runs off the main
   actor, because copying a folder is unbounded and the panel that accepted the
   drop is the one that would freeze.
+- **Files can leave the hub as well as arrive.** `FileActionMenu` deliberately
+  had no Move to Trash while the hub was only a hand-off shelf: something whose
+  job is passing files to other apps should not be one stray click from
+  deleting them, and the Finder it can already reveal into had the real thing.
+  Taking drops is what changed that — a place you can put files into and cannot
+  take them out of is a one-way drawer. The stray-click objection is answered by
+  where it puts them: `NSWorkspace.recycle`, so the file is in the Trash with
+  Put Back working, never `removeItem`. The word on the menu says so too.
+  The shortcut is ⌘⌫ and never bare ⌫, and it does nothing with an empty
+  selection rather than falling back to whatever the pointer is over: a
+  destructive key acting on something you did not choose is the one miss the
+  Trash does not excuse.
 - **One tool never configures itself in the main window.** The folder hub's
   folder list once lived two places at once: `FolderHubView`'s own chips, for
   use once it's docked, and a second, independent view onto the same

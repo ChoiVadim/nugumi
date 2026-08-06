@@ -34,10 +34,17 @@ struct FolderHubView: View {
     /// changes: an id that is no longer on screen would keep contributing a
     /// file to every drag from a folder it isn't even in.
     @State private var selectedFiles: Set<String> = []
-    /// Why the last drop did not land. Cleared by the next one that does, so a
-    /// stale complaint never outlives the thing it was about.
-    @State private var dropProblem: String?
+    /// Why the last thing the user did to a file did not work. Cleared by the
+    /// next one that does, so a stale complaint never outlives what it was
+    /// about. Shared by dropping in and trashing: both act on the same files
+    /// and fail for the same reasons, and two lines saying "that did not work"
+    /// in the same place would be one line too many.
+    @State private var problem: String?
     @State private var isDropTargeted = false
+    /// Watches for ⌘⌫ while this hub's dock holds the keyboard. A monitor
+    /// rather than `.onKeyPress`, which needs focus, and a grid of cards that
+    /// takes focus is a grid whose clicks start fighting the focus ring.
+    @State private var trashKeyMonitor: KeyMonitorBox = KeyMonitorBox()
 
     /// The one layout this hub ever draws — declared once rather than built
     /// per render, the same way a gizmo's candidate layout is decoded once
@@ -86,8 +93,8 @@ struct FolderHubView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if let dropProblem {
-                Text(dropProblem)
+            if let problem {
+                Text(problem)
                     .font(.system(size: 11))
                     .foregroundStyle(Color(red: 1, green: 0.55, blue: 0.55))
                     .fixedSize(horizontal: false, vertical: true)
@@ -113,6 +120,10 @@ struct FolderHubView: View {
                         } else {
                             selectedFiles = [row.id]
                         }
+                    },
+                    onTrashed: { error in
+                        problem = error?.localizedDescription
+                        refresh(in: current)
                     },
                     dragURLs: dragURLs
                 ))
@@ -142,6 +153,8 @@ struct FolderHubView: View {
         .onChange(of: current) { _, folder in
             refresh(in: folder)
         }
+        .onAppear { trashKeyMonitor.start(trashSelection) }
+        .onDisappear { trashKeyMonitor.stop() }
         .onChange(of: store.folders) { _, folders in
             // The selected folder itself may have just been removed by its own
             // armed ✕ — fall back the same way a fresh open would rather than
@@ -200,6 +213,27 @@ struct FolderHubView: View {
 
     private var isBrowsingDeeper: Bool { current?.path != selected?.path }
 
+    // MARK: - Throwing out
+
+    /// ⌘⌫ on the selection, Finder's own shortcut for this.
+    ///
+    /// Nothing happens with an empty selection rather than falling back to
+    /// "whatever the pointer is over": a destructive key that acts on something
+    /// you did not choose is the one kind of miss the Trash does not excuse.
+    private func trashSelection() {
+        let urls = rows
+            .filter { selectedFiles.contains($0.id) }
+            .compactMap { SurfaceCard.path(for: "path", in: $0) }
+            .map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.recycle(urls) { _, error in
+            Task { @MainActor in
+                problem = error?.localizedDescription
+                refresh(in: current)
+            }
+        }
+    }
+
     // MARK: - Dropping in
 
     /// Takes files dropped from anywhere and reports what went wrong if it did.
@@ -217,9 +251,9 @@ struct FolderHubView: View {
                 _ = try await Task.detached(priority: .userInitiated) {
                     try FolderHubDrop.perform(urls, into: folder, optionHeld: optionHeld)
                 }.value
-                dropProblem = nil
+                problem = nil
             } catch {
-                dropProblem = error.localizedDescription
+                problem = error.localizedDescription
             }
             // Whatever happened, the folder on screen may no longer match the
             // folder on disk — a partial batch lands some of its files.
@@ -443,5 +477,39 @@ private extension View {
         } isTargeted: { targeted in
             isTargeted?.wrappedValue = targeted
         }
+    }
+}
+
+/// Holds the ⌘⌫ monitor for as long as a hub is on screen.
+///
+/// A reference type because `@State` on a struct would hand every re-render a
+/// fresh copy, and the monitor has to be the same object to be removed. It is
+/// scoped by the key window rather than by focus: the only windows that show a
+/// hub are dock panels, so "this app's dock has the keyboard" is the whole
+/// condition, and it needs no focus ring on a grid whose cards already own
+/// their own clicks.
+@MainActor
+final class KeyMonitorBox {
+    private var monitor: Any?
+
+    func start(_ trash: @escaping () -> Void) {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 51 is Delete. ⌘⌫ rather than ⌫ alone, exactly as in Finder: a
+            // bare Backspace is one fat-fingered keystroke from emptying a
+            // folder you were only looking at.
+            guard event.keyCode == 51,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  NSApp.keyWindow is EdgeDockPanel
+            else { return event }
+            trash()
+            return nil
+        }
+    }
+
+    func stop() {
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
     }
 }

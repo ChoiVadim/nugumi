@@ -4,10 +4,15 @@ import AppKit
 ///
 /// Finder's own menu cannot be borrowed — there is no API that hands it over —
 /// so this is the subset a shelf can honestly offer: open it, open it with
-/// something else, ask Finder about it, copy it. Deliberately no Move to
-/// Trash: a shelf whose job is handing files to other apps should not be one
-/// stray click from deleting them, and the Finder this menu can already reveal
-/// into has the real thing.
+/// something else, ask Finder about it, copy it, throw it away.
+///
+/// Move to Trash was deliberately absent while this was only a hand-off shelf:
+/// something whose job is passing files to other apps should not be one stray
+/// click from deleting them, and the Finder this menu can already reveal into
+/// had the real thing. The folder hub taking drops is what changed it. A place
+/// you can put files into and cannot take them out of is a one-way drawer, and
+/// the stray-click objection is answered by where it puts them: the Trash, with
+/// Put Back intact, not `removeItem`.
 ///
 /// An `NSMenuItem` holds its target weakly, so whoever builds one of these has
 /// to keep it alive for as long as the menu can be clicked —
@@ -15,9 +20,14 @@ import AppKit
 @MainActor
 final class FileActionMenu: NSObject {
     private let urls: [URL]
+    /// Told when something on disk moved, so whatever is showing these files can
+    /// stop showing one that is gone. `nil` on success. Optional because a
+    /// surface with no way to refresh is still allowed to offer the menu.
+    private let onTrashed: ((Error?) -> Void)?
 
-    init(urls: [URL]) {
+    init(urls: [URL], onTrashed: ((Error?) -> Void)? = nil) {
         self.urls = urls
+        self.onTrashed = onTrashed
     }
 
     /// `nil` when there is nothing to act on. AppKit takes that as "no menu",
@@ -36,6 +46,11 @@ final class FileActionMenu: NSObject {
         menu.addItem(item("Show in Finder", #selector(showInFinder)))
         menu.addItem(.separator())
         menu.addItem(item("Copy", #selector(copyFiles)))
+        menu.addItem(.separator())
+        // Last, after a separator, and named for the Trash rather than for
+        // deleting: the word is the difference between an action with a way
+        // back and one without, and this one has a way back.
+        menu.addItem(item("Move to Trash" + countSuffix, #selector(trashFiles)))
         return menu
     }
 
@@ -90,6 +105,16 @@ final class FileActionMenu: NSObject {
 
     @objc private func showInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    /// `NSWorkspace.recycle` rather than `FileManager.removeItem`, and the
+    /// difference is the whole feature: recycling is Finder's own move, so the
+    /// file lands in the Trash with Put Back working and the sound playing.
+    /// Deleting would make a right-click one slip away from unrecoverable.
+    @objc private func trashFiles() {
+        NSWorkspace.shared.recycle(urls) { [onTrashed] _, error in
+            Task { @MainActor in onTrashed?(error) }
+        }
     }
 
     @objc private func copyFiles() {

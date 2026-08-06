@@ -31,6 +31,9 @@ struct SurfaceSelection: Equatable {
     /// plain click means is the host's to decide, since the host owns both the
     /// selection and the order the rows are in.
     var click: (SurfaceRow, Bool) -> Void
+    /// Told when the card's menu moved files to the Trash, so the host can drop
+    /// them from what it is showing. `nil` means it worked.
+    var onTrashed: ((Error?) -> Void)?
     /// The files a drag starting on this row should carry, in the order shown.
     /// Empty means no drag at all — a row with nothing to hand over must not
     /// start a session that drops nothing.
@@ -73,6 +76,7 @@ struct SurfaceCardMouse: NSViewRepresentable {
         view.onClick = { command in selection.click(row, command) }
         view.onActivate = { activate?(row) }
         view.urls = { selection.dragURLs(row) }
+        view.onTrashed = selection.onTrashed
     }
 }
 
@@ -81,6 +85,7 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
     var onClick: (Bool) -> Void = { _ in }
     var onActivate: () -> Void = {}
     var urls: () -> [URL] = { [] }
+    var onTrashed: ((Error?) -> Void)?
 
     /// The press a drag would start from, cleared once one has or the button
     /// came back up. Held rather than re-read because `beginDraggingSession`
@@ -110,7 +115,7 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
     /// about what the user is looking at, never about a selection they left
     /// behind in another folder.
     override func menu(for event: NSEvent) -> NSMenu? {
-        let target = FileActionMenu(urls: urls())
+        let target = FileActionMenu(urls: urls(), onTrashed: onTrashed)
         menuTarget = target
         return target.makeMenu()
     }
