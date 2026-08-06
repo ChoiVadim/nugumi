@@ -405,6 +405,24 @@ final class EdgeDockController {
     /// Tabs beside the content, so switching items never means collapsing
     /// first. Skipped for a single item: one tab is chrome naming the thing you
     /// are already looking at.
+    /// The panel's contents when an edge holds more than one resident: the
+    /// active tool, and the rail for switching to another.
+    ///
+    /// Laid out with plain constraints rather than an `NSStackView`, after that
+    /// stack got this wrong twice in two different ways. It centres arranged
+    /// views at their intrinsic size on the cross axis, and an `NSHostingView`'s
+    /// intrinsic size is whatever its SwiftUI content would ideally be — so the
+    /// content took its own height instead of the panel's, and the folder hub's
+    /// chips sat halfway down an empty panel with its files cut off. Pinning
+    /// each view to the stack's cross axis fixed that until the rail's own
+    /// intrinsic height stopped being flexible, at which point the negotiation
+    /// went wrong again in the other direction and the content collapsed to a
+    /// couple of lines.
+    ///
+    /// None of that is a mystery worth keeping: there are two subviews and the
+    /// geometry is completely known. The rail is a fixed `stripMaxBreadth` on
+    /// the bezel side, the content takes the rest, and both run the panel's
+    /// full length. Nothing here negotiates.
     private func expandedView(items: [DockItem], active: DockItem) -> NSView {
         let content = active.makeView()
         guard items.count > 1 else { return content }
@@ -420,34 +438,46 @@ final class EdgeDockController {
             }
         )
 
-        let ordered: [NSView] = edge == .right ? [content, strip] : [strip, content]
-        let stack = NSStackView(views: ordered)
-        stack.orientation = edge == .top ? .vertical : .horizontal
-        stack.distribution = .fill
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        let axis: NSLayoutConstraint.Orientation = edge == .top ? .vertical : .horizontal
-        strip.setContentHuggingPriority(.required, for: axis)
-        strip.setContentCompressionResistancePriority(.required, for: axis)
-        content.setContentHuggingPriority(.defaultLow, for: axis)
-
-        // Fill the cross axis. `NSStackView` centres its arranged views at
-        // their intrinsic size there by default, and an `NSHostingView`'s
-        // intrinsic size is whatever its SwiftUI content would ideally be — so
-        // a dock with more than one resident stopped giving its content the
-        // panel's height and started giving it its own. That is the whole of
-        // why the folder hub's chips sat in the middle of an empty panel with
-        // the files cut off below, and why a long Ask transcript ran off the
-        // bottom. A single resident never showed it: with one item there is no
-        // stack, and `install` pins the view to all four edges.
-        for arranged in ordered {
-            let fill = edge == .top
-                ? arranged.widthAnchor.constraint(equalTo: stack.widthAnchor)
-                : arranged.heightAnchor.constraint(equalTo: stack.heightAnchor)
-            fill.isActive = true
+        let container = NSView()
+        for view in [content, strip] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
         }
-        return stack
+
+        let breadth = DockGeometry.stripMaxBreadth
+        var rules: [NSLayoutConstraint] = []
+        if edge == .top {
+            // The rail hangs under the notch, the content fills the rest.
+            rules = [
+                strip.topAnchor.constraint(equalTo: container.topAnchor),
+                strip.heightAnchor.constraint(equalToConstant: breadth),
+                content.topAnchor.constraint(equalTo: strip.bottomAnchor),
+                content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ] + [strip, content].flatMap {
+                [$0.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                 $0.trailingAnchor.constraint(equalTo: container.trailingAnchor)]
+            }
+        } else {
+            // The rail hugs the bezel; on a right dock that is the right side.
+            let bezelIsTrailing = edge == .right
+            rules = [
+                strip.widthAnchor.constraint(equalToConstant: breadth),
+                bezelIsTrailing
+                    ? strip.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+                    : strip.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                bezelIsTrailing
+                    ? content.leadingAnchor.constraint(equalTo: container.leadingAnchor)
+                    : content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                bezelIsTrailing
+                    ? content.trailingAnchor.constraint(equalTo: strip.leadingAnchor)
+                    : content.leadingAnchor.constraint(equalTo: strip.trailingAnchor),
+            ] + [strip, content].flatMap {
+                [$0.topAnchor.constraint(equalTo: container.topAnchor),
+                 $0.bottomAnchor.constraint(equalTo: container.bottomAnchor)]
+            }
+        }
+        NSLayoutConstraint.activate(rules)
+        return container
     }
 
     private func hostingView(_ view: some View) -> NSView {

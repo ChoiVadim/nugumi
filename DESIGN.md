@@ -267,16 +267,23 @@ share of users regardless of what looks right.
   The ink stays 4pt — a thick bar down the edge of every dock is a border — but
   the grab target is the panel's whole length rather than 38pt of it you have to
   find first.
-- **A dock with two residents must lay out like a dock with one.**
-  `EdgeDockController.expandedView` puts the content and the tab rail in an
-  `NSStackView`, and a stack centres its arranged views at their intrinsic size
-  on the cross axis. An `NSHostingView`'s intrinsic size is whatever its SwiftUI
-  content would ideally be, so the moment an edge held two residents the content
-  stopped getting the panel's height and started getting its own: the folder
-  hub's chips sat halfway down an empty panel with its files cut off, and a long
-  Ask transcript ran off both ends. One resident never showed it, because there
-  is no stack then and `install` pins the view to all four edges. Any arranged
-  view is now pinned to the stack's cross axis explicitly.
+- **A dock with two residents must lay out like a dock with one.** This broke
+  twice, in opposite directions, and both times through `NSStackView`. It
+  centres arranged views at their intrinsic size on the cross axis, and an
+  `NSHostingView`'s intrinsic size is whatever its SwiftUI content would ideally
+  be — so the content took its own height rather than the panel's, and the
+  folder hub's chips sat halfway down an empty panel with its files cut off.
+  Pinning each view to the stack's cross axis fixed that until the rail's own
+  intrinsic height stopped being flexible, at which point the negotiation went
+  wrong the other way and the content collapsed to two lines. A single resident
+  never showed either, because there is no stack then and `install` pins the
+  view to all four edges.
+  `expandedView` uses plain constraints now. There are two subviews and the
+  geometry is entirely known — the rail is a fixed `stripMaxBreadth` on the
+  bezel side, the content takes the rest, both run the panel's full length —
+  so there is nothing here worth letting a layout container negotiate. Reach
+  for a stack when the arrangement is genuinely a list; two views whose sizes
+  you already know is not that.
 - **A top dock keeps the notch's height clear, and grows to pay for it.** The
   panel starts at `screenFrame.maxY` on purpose, so it reads as the notch
   growing rather than as a window appearing beneath it — which puts its first
