@@ -267,18 +267,24 @@ share of users regardless of what looks right.
   The ink stays 4pt — a thick bar down the edge of every dock is a border — but
   the grab target is the panel's whole length rather than 38pt of it you have to
   find first.
-- **A full-bleed subview of an animated panel is pinned, never autoresized.**
-  `GlassHostView` already says why in its own file: interrupting an in-flight
-  `animator().frame` animation drops autoresizing deltas, so a masked subview
-  drifts smaller with every interrupted cycle. It heals its own subviews on
-  resize; nothing was healing the host itself, and a dock animates its frame on
-  every reveal. Enough hover cycles and the glass is a fraction of the window it
-  lives in, with the content laid out inside that fraction — a dock that opens
-  smaller each time, and looks like whatever was changed most recently. It is
-  worth naming here because it presents as a layout bug in the content and is
-  not one: three separate content-layout theories were tried against it first.
-  Anything pinned to the full bounds of a panel whose frame animates gets
-  constraints.
+- **A full-bleed subview of an animated panel gets its frame set on every
+  resize.** Not an autoresizing mask, and not constraints either — both were
+  tried and both failed here, for different reasons. A mask drops its deltas
+  when an in-flight `animator().frame` animation is interrupted, which a dock's
+  is on every hover cycle; that is why `GlassHostView` heals its own subviews
+  in `resizeSubviews`. Constraints against a borderless panel's content view do
+  not re-solve, because nothing in that subtree triggers a layout pass when the
+  window is resized with `display: false`, which is how a dock arrives.
+  `DockContentView` does the one thing that survives both.
+  The failure looks exactly like a content-layout bug and is not one: the glass
+  sits at whatever size it happened to have when it was installed, and the
+  content lays out correctly inside that. Four rounds went into content-layout
+  theories before anything was measured, and the measurement took one run —
+  `EdgeDockController.debugRevealCycle`, behind `GIZMATE_DOCK_DEBUG`, opens and
+  closes each dock and prints every frame that is meant to be full-bleed. It
+  read `panel=380x520 glass=380x189` on the first try. Reach for it before the
+  fifth theory, not after: a cumulative shrink is precisely the bug a person
+  cannot report accurately and a screenshot cannot show.
 - **A dock with two residents must lay out like a dock with one.** This broke
   twice, in opposite directions, and both times through `NSStackView`. It
   centres arranged views at their intrinsic size on the cross axis, and an

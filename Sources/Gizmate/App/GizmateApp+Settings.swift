@@ -120,6 +120,15 @@ extension GizmateApp {
             self?.dockControllers.forEach { $0.pointerMoved(to: point) }
         }
         DockHoverMonitor.shared.start()
+
+        guard ProcessInfo.processInfo.environment["GIZMATE_DOCK_DEBUG"] != nil else { return }
+        let controllers = dockControllers
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            for controller in controllers {
+                await controller.debugRevealCycle(times: 4)
+            }
+        }
     }
 
     /// Where this tool's result panel should open, if the user moved it to an

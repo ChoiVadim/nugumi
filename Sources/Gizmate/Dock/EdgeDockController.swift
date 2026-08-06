@@ -10,6 +10,27 @@ import SwiftUI
 /// `canBecomeKey` for the same reason `KeyableLivePanel` needs it: the docked
 /// notes view has a text field, and a `.nonactivatingPanel` will not take key
 /// focus by default — it would reveal and then swallow every keystroke.
+/// The dock panel's content view, whose one job is to keep whatever is inside
+/// it exactly its own size.
+///
+/// Neither of the usual mechanisms does that here. An autoresizing mask drops
+/// its deltas when an in-flight `animator().frame` animation is interrupted,
+/// which a dock's is on every hover cycle — the reason `GlassHostView` heals its
+/// own subviews the same way. Constraints against this view do not re-solve
+/// either: nothing in a borderless panel's subtree triggers a layout pass when
+/// the window is resized with `display: false`, which is how a dock arrives.
+/// Measured, not guessed: the panel read 380x520 while the glass inside it sat
+/// at 380x189 across four reveals, having been pinned once at the size it
+/// happened to have when it was installed.
+///
+/// Setting the frame on every resize is self-healing — any later resize
+/// restores exact geometry no matter what was missed.
+final class DockContentView: NSView {
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        subviews.forEach { $0.frame = bounds }
+    }
+}
+
 final class EdgeDockPanel: NSPanel {
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect
@@ -78,6 +99,7 @@ final class EdgeDockController {
             backing: .buffered,
             defer: false
         )
+        panel.contentView = DockContentView()
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
@@ -336,6 +358,34 @@ final class EdgeDockController {
         return true
     }
 
+    /// Opens and closes this dock a few times, reporting every frame that is
+    /// supposed to be full-bleed after each one.
+    ///
+    /// Gated behind `GIZMATE_DOCK_DEBUG` and driven from `startDocks`, so it
+    /// needs no pointer: the shrink-on-every-reveal it exists to measure is a
+    /// cumulative one, which is exactly the kind a person cannot report
+    /// accurately ("it was fine, now it is small") and a screenshot cannot
+    /// either. Four rounds of guessing at that symptom is what this replaces.
+    func debugRevealCycle(times: Int) async {
+        guard let item = dockItems().first else { return }
+        func rect(_ r: NSRect) -> String {
+            "\(Int(r.origin.x)),\(Int(r.origin.y)) \(Int(r.width))x\(Int(r.height))"
+        }
+        for round in 1...times {
+            reveal(itemID: item.id)
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            NSLog(
+                "[dock:\(edge)] #\(round) panel=\(rect(panel.frame)) "
+                    + "glass=\(rect(glass?.frame ?? .zero)) "
+                    + "glassContent=\(rect(glass?.contentView.frame ?? .zero)) "
+                    + "installed=\(rect(glass?.contentView.subviews.first?.frame ?? .zero)) "
+                    + "state=\(state)"
+            )
+            transition(to: .hidden)
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
     private func transition(to next: DockState) {
         guard next != state, let screen else { return }
         let items = dockItems()
@@ -552,24 +602,12 @@ final class EdgeDockController {
             style: .regular,
             cornerPath: { DockGeometry.panelPath(for: dockEdge, in: $0) }
         )
+        // No autoresizing mask and no constraints: `DockContentView` sets this
+        // frame to its own bounds on every resize, which is the only one of the
+        // three that survives an interrupted frame animation. See its doc.
         root.addSubview(host)
+        host.frame = root.bounds
         glass = host
-        // Constraints, not an autoresizing mask, and `GlassHostView` says why
-        // three lines below its own initialiser: interrupting an in-flight
-        // `animator().frame` animation drops autoresizing deltas, so a
-        // full-bleed subview drifts smaller with every interrupted cycle. That
-        // class heals its own subviews on resize; nothing was healing the host
-        // itself, and a dock's frame is animated on every single reveal. Open
-        // and close one enough times and the glass ends up a fraction of the
-        // window it lives in, with the content laid out inside that fraction.
-        // Constraints re-solve every layout pass and cannot drop anything.
-        host.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            host.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            host.topAnchor.constraint(equalTo: root.topAnchor),
-            host.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-        ])
 
         // Keep the content off the flare — the shape pulls in by
         // `inverseCornerRadius` on the bezel side — and, at the top, off the
