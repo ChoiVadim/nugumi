@@ -8,7 +8,16 @@ enum FolderHubRows {
     /// A downloads shelf is for what you just got, not an archive — capping
     /// the count keeps a folder with years of history from turning the grid
     /// into something that has to scroll to be useful.
-    static let defaultLimit = 200
+    ///
+    /// ponytail: 80 because `SurfaceGrid` is eager, so this is literally the
+    /// number of cards built on every folder switch — and a 380pt panel shows
+    /// about fifteen of them. Measured on a 2292-entry Downloads, the
+    /// filesystem side of a switch is ~10ms and the type icons ~13ms, so the
+    /// cost that was left is the cards themselves. The upgrade path is real
+    /// laziness, not a bigger number: `LazyVGrid` collapses to zero inside
+    /// `OverlayScrollHost`'s unbounded document view (see `SurfaceView`), so
+    /// it needs the scroll host to publish its visible rect first.
+    static let defaultLimit = 80
 
     /// Whether opening this entry means walking into it rather than handing it
     /// to `NSWorkspace`. A bundle — an `.app`, an `.rtfd`, an `.xcodeproj` — is

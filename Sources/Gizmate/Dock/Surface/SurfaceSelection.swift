@@ -12,7 +12,19 @@ import SwiftUI
 /// this, the card hands its *whole* mouse story to `SurfaceCardMouse` —
 /// select, activate and drag together — rather than keep half of it in
 /// SwiftUI gestures the overlay would swallow anyway.
-struct SurfaceSelection {
+struct SurfaceSelection: Equatable {
+    /// Compared by the selection alone. The closures are rebuilt on every
+    /// render of the host and can never compare equal, so without this an
+    /// environment value carrying them counts as changed whenever *anything*
+    /// in the host changes — a chip hovering, a chip arming — and every card
+    /// on the shelf re-evaluates for it. Ignoring them is safe because they
+    /// hold no captured state of their own: each one reads the host's
+    /// `@State` through its storage box, so a "stale" closure still sees the
+    /// current selection and the current rows.
+    static func == (lhs: SurfaceSelection, rhs: SurfaceSelection) -> Bool {
+        lhs.ids == rhs.ids
+    }
+
     /// The row ids lit right now — a snapshot, re-handed on every render.
     var ids: Set<String>
     /// A click landed on this row. `command` is held for a toggle; what a
