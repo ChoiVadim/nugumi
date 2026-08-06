@@ -107,6 +107,18 @@ struct AskGizmateResponse: Codable, Equatable {
         return AskGizmateResponse(message: trimmed)
     }
 
+    /// The visible part of a half-arrived answer.
+    ///
+    /// `parse` finds the machine block by its *closing* fence, and a stream
+    /// reaches the opening one first. Without this the raw ```annotations JSON
+    /// types itself across the chat for a second before the final parse takes
+    /// it away. Matching the whole opening fence rather than any ``` is what
+    /// keeps an ordinary code fence in the answer from truncating it.
+    static func streamingMessage(_ raw: String) -> String {
+        guard let fence = raw.range(of: "```annotations") else { return raw }
+        return String(raw[..<fence.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Detects the trailing machine block. A fenced block qualifies when its
     /// info string is `annotations`, or when its payload actually decodes to
     /// shapes (models sometimes label the block ```json — or wrap the array
