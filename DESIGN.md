@@ -303,11 +303,13 @@ share of users regardless of what looks right.
   arbitrary desktop, tell nobody which tool they are looking at. The rail's
   active tab carries a filled plate now. The peek strip does not, and not for
   consistency's sake: nothing is open yet there, so it has nothing to mark.
-  The two also size differently on purpose. A peek tab is tall because it is a
-  target you aim at from across the screen and reads as something to pull out of
-  the bezel; a rail tab is square and tight because the panel is already open,
-  and at the peek's 51pt three icons stood 57pt apart, reading as three
-  unrelated things rather than one control.
+  Size and position stay identical between the two, and that is the harder
+  rule: expanding a dock must not move its icons. The rail briefly used tighter,
+  squarer tabs grouped at the top, on the reference of web navigation rails —
+  the wrong reference, because those are navigation for a whole app with nothing
+  before them to stay continuous with. Here the peek strip is where the tool was
+  picked seconds earlier, so repeating its exact rhythm is what makes the two
+  read as one control growing rather than two swapping.
 - **A gizmo can be a dock's resident, not just something it summons.** Every
   other result exists only after a run finishes, so a tab for one is either
   empty or a false promise until then. A `.surface` gizmo is the exception:

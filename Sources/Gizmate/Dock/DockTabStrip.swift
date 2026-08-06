@@ -13,22 +13,22 @@ struct DockTabStrip: View {
     let activeID: String?
     let edge: DockEdge
     /// Whether this is the rail inside an open dock or the strip peeking out of
-    /// the bezel. Two different jobs, and they want opposite things.
+    /// the bezel.
     ///
-    /// The peek strip is a target you aim at from across the screen, so its
-    /// tabs are tall (`sideTabHeight`) and read as something to pull out of the
-    /// edge. The rail sits in a panel that is already open, nothing is being
-    /// pulled, and the same 51pt tabs put three icons 57pt apart, reading as
-    /// three unrelated things rather than one control. In the rail they are
-    /// square and tight, the rhythm every reference for this uses.
+    /// It changes one thing: whether a tab can be marked as the open one. Not
+    /// size, and not position — expanding a dock must not move its icons. The
+    /// peek strip is where you pick a tool, so its rhythm is the one a person
+    /// has already looked at by the time the panel is open, and the rail
+    /// repeating it exactly is what keeps the two reading as one control
+    /// growing rather than two controls swapping.
+    ///
+    /// (Web nav rails group their icons at the top, and this briefly did too,
+    /// on that reference. Wrong reference: those are navigation for a whole
+    /// app, with nothing before them to stay continuous with.)
     var inPanel: Bool = false
     let onPick: (String) -> Void
 
     private var axis: Axis { edge == .top ? .horizontal : .vertical }
-
-    private var extent: CGFloat {
-        inPanel ? DockGeometry.tabSize : DockGeometry.tabExtent(for: edge)
-    }
 
     var body: some View {
         let layout = axis == .horizontal
@@ -41,15 +41,10 @@ struct DockTabStrip: View {
                     item: item,
                     isActive: item.id == activeID,
                     edge: edge,
-                    extent: extent,
                     showsPlate: inPanel,
                     onPick: { onPick(item.id) }
                 )
             }
-            // The rail fills the panel's whole side, so without this its tabs
-            // sit halfway down it. Every reference groups them at the near end
-            // instead: a rail is a list, and a list starts at the top.
-            if inPanel { Spacer(minLength: 0) }
         }
         .padding(padding)
     }
@@ -73,7 +68,6 @@ private struct DockTab: View {
     let item: DockItem
     let isActive: Bool
     let edge: DockEdge
-    let extent: CGFloat
     let showsPlate: Bool
     let onPick: () -> Void
 
@@ -89,8 +83,8 @@ private struct DockTab: View {
                 // would leave the glass empty beside it.
                 .frame(
                     maxWidth: edge == .top ? DockGeometry.tabSize : .infinity,
-                    minHeight: extent,
-                    maxHeight: extent
+                    minHeight: DockGeometry.tabExtent(for: edge),
+                    maxHeight: DockGeometry.tabExtent(for: edge)
                 )
                 .background(plate)
                 .contentShape(Rectangle())
@@ -111,13 +105,16 @@ private struct DockTab: View {
     /// in the strip that has to be readable at a glance.
     ///
     /// Only in the panel: the peek strip shows a tab per resident and none of
-    /// them is open yet, so there is nothing there for it to mark.
+    /// them is open yet, so there is nothing there for it to mark. Inset well
+    /// inside the tab so it reads as a mark on the icon rather than as the tab
+    /// growing a background when it opens.
     @ViewBuilder
     private var plate: some View {
         if showsPlate, isActive {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(FlowTheme.accentSoft)
-                .padding(2)
+                .padding(.vertical, (DockGeometry.tabExtent(for: edge) - 30) / 2)
+                .padding(.horizontal, 4)
         }
     }
 
