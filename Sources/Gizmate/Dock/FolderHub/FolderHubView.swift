@@ -26,6 +26,10 @@ struct FolderHubView: View {
     /// The chip a double-click armed for removal, by path. At most one: arming
     /// a second disarms the first for free, since one string can only hold one.
     @State private var armedChip: String?
+    /// The chip under the pointer, by path — the only thing that gives an
+    /// unselected chip a background. Shared by chips and crumbs; a path
+    /// identifies either one, and only one of the two rows is ever on screen.
+    @State private var hoveredChip: String?
     /// The cards lit for a drag, by row id. Cleared whenever the listing
     /// changes: an id that is no longer on screen would keep contributing a
     /// file to every drag from a folder it isn't even in.
@@ -203,9 +207,26 @@ struct FolderHubView: View {
             .foregroundStyle(isCurrent ? FlowTheme.ink : FlowTheme.inkSecondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(isCurrent ? FlowTheme.raised : FlowTheme.subtleFill))
+            .background(Capsule().fill(fill(here: isCurrent, folder: folder)))
         }
         .buttonStyle(.plain)
+        .onHover { inside in
+            if inside {
+                hoveredChip = folder.path
+            } else if hoveredChip == folder.path {
+                hoveredChip = nil
+            }
+        }
+    }
+
+    /// What a chip or crumb is painted with. Bare is the resting state: a row
+    /// of filled capsules is six painted pills saying nothing, and the label
+    /// already carries the meaning. A fill has to earn itself — you are
+    /// pointing at it, it is where you are, or it is armed to be deleted.
+    private func fill(here: Bool, folder: URL) -> Color {
+        if armedChip == folder.path { return FlowTheme.danger.opacity(0.18) }
+        if here { return FlowTheme.raised }
+        return hoveredChip == folder.path ? FlowTheme.subtleFill : .clear
     }
 
     /// A root folder, and the only place one can be taken off the shelf.
@@ -247,13 +268,7 @@ struct FolderHubView: View {
         .foregroundStyle(isArmed ? FlowTheme.danger : (isSelected ? FlowTheme.ink : FlowTheme.inkSecondary))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(
-            Capsule().fill(
-                isArmed
-                    ? FlowTheme.danger.opacity(0.18)
-                    : (isSelected ? FlowTheme.raised : FlowTheme.subtleFill)
-            )
-        )
+        .background(Capsule().fill(fill(here: isSelected, folder: folder)))
         .contentShape(Capsule())
         // Declared before the single tap, which is what lets SwiftUI hand a
         // double click to this one instead of firing the single twice.
@@ -265,7 +280,12 @@ struct FolderHubView: View {
         // Leaving the chip disarms it: an armed chip left behind is a red
         // capsule sitting in the row with no way back except deleting it.
         .onHover { inside in
-            if !inside, isArmed { armedChip = nil }
+            if inside {
+                hoveredChip = folder.path
+            } else {
+                if hoveredChip == folder.path { hoveredChip = nil }
+                if isArmed { armedChip = nil }
+            }
         }
     }
 

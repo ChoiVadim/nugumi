@@ -199,6 +199,14 @@ share of users regardless of what looks right.
   fights the shape it sits in and has to be clipped against the panel's corners.
   Show state with the icon's tint (`ink` active, `inkSecondary` resting), as
   `HoverIconButton` does.
+- **A background is a state, not a shape.** A control rests bare and takes a
+  fill only when it has something to say: the pointer is on it, it is the one
+  selected, or it is armed to destroy something. A row of chips each in its own
+  painted capsule is six pills competing with the content while saying nothing
+  the labels don't — and the same disc drawn filled whether or not it is
+  hovered is a permanent grey circle. `ResetDiscButton` and the folder hub's
+  chips and crumbs all follow this; `FolderHubView.fill(here:folder:)` is the
+  whole rule in four lines.
 
 ## 10. Panels that touch the bezel
 

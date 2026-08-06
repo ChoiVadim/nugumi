@@ -127,8 +127,12 @@ struct ResetDiscButton: View {
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkSecondary)
                 .frame(width: 30, height: 30)
-                .background(Circle().fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill))
-                .overlay(Circle().stroke(FlowTheme.hairline, lineWidth: 1))
+                // Bare at rest. A disc painted whether or not the pointer is
+                // near it is a permanent grey circle competing with the
+                // content it sits beside; the glyph alone already says what it
+                // does, and the fill's job is to say "you are pointing at me."
+                .background(Circle().fill(hovering ? FlowTheme.raised : Color.clear))
+                .overlay(Circle().stroke(hovering ? FlowTheme.hairline : Color.clear, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .onHover { inside in
