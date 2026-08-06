@@ -406,6 +406,14 @@ share of users regardless of what looks right.
   Leaving the chip disarms it, so an armed capsule can't be stranded red with
   no way out but deletion. This replaced the context menu as well — two routes
   to an irreversible action is one more than it deserves.
+- **The control answers on the click; the content answers when it can.** A
+  folder switch used to list the folder and rebuild the grid inside the same
+  SwiftUI update, so the chip lit up only once the cards were built and the
+  click read as ignored for as long as that took. The chip row now gets a
+  frame to itself, the listing runs off the main thread, and the cards land
+  after — with the result dropped if the user has clicked past that folder
+  meanwhile. This is the general shape for anything a click loads: repaint the
+  thing that was pressed first, always.
 - **One chip row shows the roots or the trail, never both.** Standing three
   folders deep, "which folders did I add" is not a question you have; "where
   am I" is. So browsing swaps the roots for `Downloads › sub › sub`, each

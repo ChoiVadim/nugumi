@@ -343,8 +343,26 @@ struct FolderHubView: View {
             .map { URL(fileURLWithPath: $0) }
     }
 
+    /// Repainting the chips is not allowed to wait for the files.
+    ///
+    /// A switch used to list the folder and rebuild the grid inside the same
+    /// SwiftUI update, so the chip you clicked lit up only once every card had
+    /// been built — for as long as that took, the click read as ignored. Now
+    /// the chip row gets a frame to itself, the listing happens off the main
+    /// thread, and the cards land after. Files arriving a beat late is what
+    /// anyone expects from a folder; a button that doesn't answer is not.
     private func refresh(in folder: URL?) {
-        rows = folder.map { FolderHubRows.rows(in: $0, limit: FolderHubRows.defaultLimit) } ?? []
         selectedFiles = []
+        rows = []
+        guard let folder else { return }
+        Task { @MainActor in
+            let fresh = await Task.detached(priority: .userInitiated) {
+                FolderHubRows.rows(in: folder, limit: FolderHubRows.defaultLimit)
+            }.value
+            // The user may have clicked past this folder while the disk was
+            // answering. Only the folder still being shown gets to fill it.
+            guard current?.path == folder.path else { return }
+            rows = fresh
+        }
     }
 }
