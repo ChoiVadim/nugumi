@@ -115,9 +115,17 @@ final class EdgeDockController {
     /// still comes and goes with the pointer, and the notch keeps its old
     /// hover-in, hover-out behaviour: it is a peek, not a window.
     private var staysOpen: Bool {
-        guard edge != .top else { return false }
+        guard isPinned else { return false }
         if case .expanded = state { return true }
         return false
+    }
+
+    /// The user's choice for this edge. Separate from `staysOpen` because the
+    /// drag handle is installed while the panel is still being built, before
+    /// there is an `.expanded` state for `staysOpen` to see — and because the
+    /// tab strip is a peek whatever this says.
+    private var isPinned: Bool {
+        store.dismissal(on: edge) == .pinned
     }
 
     /// Placement changed. An edge with nothing left on it must not reveal.
@@ -229,7 +237,7 @@ final class EdgeDockController {
         transientResult = view
         pointerLeftTimer?.invalidate()
         pointerLeftTimer = nil
-        install(view: view, showsDragHandle: edge != .top)
+        install(view: view, showsDragHandle: isPinned)
         let size = NSSize(
             width: edge == .top ? 620 : 380,
             height: edge == .top ? 300 : 520
@@ -368,7 +376,7 @@ final class EdgeDockController {
             guard let item = items.first(where: { $0.id == itemID }) ?? items.first else { return }
             install(
                 view: expandedView(items: items, active: item),
-                showsDragHandle: edge != .top
+                showsDragHandle: isPinned
             )
             // The notch's height is added to the panel rather than taken out
             // of it, so a top dock still gets its full 300pt of content.
@@ -405,7 +413,8 @@ final class EdgeDockController {
             DockTabStrip(
                 items: items,
                 activeID: active.id,
-                edge: edge
+                edge: edge,
+                inPanel: true
             ) { [weak self] id in
                 self?.transition(to: .expanded(itemID: id))
             }
@@ -422,6 +431,22 @@ final class EdgeDockController {
         strip.setContentHuggingPriority(.required, for: axis)
         strip.setContentCompressionResistancePriority(.required, for: axis)
         content.setContentHuggingPriority(.defaultLow, for: axis)
+
+        // Fill the cross axis. `NSStackView` centres its arranged views at
+        // their intrinsic size there by default, and an `NSHostingView`'s
+        // intrinsic size is whatever its SwiftUI content would ideally be — so
+        // a dock with more than one resident stopped giving its content the
+        // panel's height and started giving it its own. That is the whole of
+        // why the folder hub's chips sat in the middle of an empty panel with
+        // the files cut off below, and why a long Ask transcript ran off the
+        // bottom. A single resident never showed it: with one item there is no
+        // stack, and `install` pins the view to all four edges.
+        for arranged in ordered {
+            let fill = edge == .top
+                ? arranged.widthAnchor.constraint(equalTo: stack.widthAnchor)
+                : arranged.heightAnchor.constraint(equalTo: stack.heightAnchor)
+            fill.isActive = true
+        }
         return stack
     }
 
@@ -506,11 +531,22 @@ final class EdgeDockController {
         // notch as well.
         let insets = DockGeometry.contentInsets(for: edge)
         let topInset = insets.top + topContentInset
+        // The handle owns a column, and the content starts after it. It used to
+        // be an overlay pinned on top of the content, which meant its hit area
+        // ate clicks aimed at the panel underneath and its tooltip appeared in
+        // the middle of the text.
+        let gutter = showsDragHandle ? DockDragHandle.width : 0
         view.translatesAutoresizingMaskIntoConstraints = false
         host.contentView.addSubview(view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor, constant: insets.left),
-            view.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor, constant: -insets.right),
+            view.leadingAnchor.constraint(
+                equalTo: host.contentView.leadingAnchor,
+                constant: insets.left + (edge == .right ? gutter : 0)
+            ),
+            view.trailingAnchor.constraint(
+                equalTo: host.contentView.trailingAnchor,
+                constant: -insets.right - (edge == .left ? gutter : 0)
+            ),
             view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: topInset),
             view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
         ])
@@ -530,7 +566,8 @@ final class EdgeDockController {
             : handle.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor)
         NSLayoutConstraint.activate([
             innerAnchor,
-            handle.centerYAnchor.constraint(equalTo: host.contentView.centerYAnchor),
+            handle.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: topInset),
+            handle.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
         ])
     }
 

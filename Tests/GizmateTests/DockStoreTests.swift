@@ -243,4 +243,77 @@ final class DockStoreTests: XCTestCase {
         store.move("b", to: .top, at: 0)
         XCTAssertEqual(DockStore(defaults: defaults).items(on: .top), ["b", "a"])
     }
+    // MARK: - How an edge closes
+
+    /// The defaults are the whole compatibility story: before this setting
+    /// existed the notch was a peek and a side dock stayed open, and an update
+    /// that adds a choice must not change what anyone's dock already does.
+    @MainActor
+    func testEachEdgeDefaultsToWhatItDidBeforeTheChoiceExisted() {
+        let store = DockStore(defaults: scratchDefaults())
+        XCTAssertEqual(store.dismissal(on: .top), .autoHide)
+        XCTAssertEqual(store.dismissal(on: .left), .pinned)
+        XCTAssertEqual(store.dismissal(on: .right), .pinned)
+    }
+
+    @MainActor
+    func testAChangedEdgeSurvivesARelaunch() {
+        let suite = "DockStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        DockStore(defaults: defaults).setDismissal(.pinned, on: .top)
+
+        XCTAssertEqual(DockStore(defaults: defaults).dismissal(on: .top), .pinned)
+    }
+
+    /// Absent means default, the same rule `placement` follows. Setting an edge
+    /// back to its default has to clear the entry rather than write it, or the
+    /// stored value freezes today's default in place and a future change to it
+    /// would silently miss everyone who had ever touched the control.
+    @MainActor
+    func testSettingAnEdgeBackToItsDefaultStoresNothing() {
+        let suite = "DockStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = DockStore(defaults: defaults)
+
+        store.setDismissal(.pinned, on: .top)
+        store.setDismissal(.autoHide, on: .top)
+
+        let raw = defaults.dictionary(forKey: DockStore.dismissalsDefaultsKey) as? [String: String]
+        XCTAssertEqual(raw ?? [:], [:])
+        XCTAssertEqual(store.dismissal(on: .top), .autoHide)
+    }
+
+    /// Lenient loading, the same reason `placement` is: one key this version
+    /// doesn't know must not take the rest of the setting with it.
+    @MainActor
+    func testAnUnknownEdgeOrModeIsSkippedRatherThanThrowingTheRestAway() {
+        let suite = "DockStoreTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(
+            ["bottom": "pinned", "left": "sideways", "top": "pinned"],
+            forKey: DockStore.dismissalsDefaultsKey
+        )
+
+        let store = DockStore(defaults: defaults)
+
+        XCTAssertEqual(store.dismissal(on: .top), .pinned)
+        XCTAssertEqual(store.dismissal(on: .left), .pinned, "unreadable value falls back to default")
+    }
+
+    @MainActor
+    func testChangingHowAnEdgeClosesNotifiesTheControllers() {
+        let store = DockStore(defaults: scratchDefaults())
+        var calls = 0
+        store.onChange = { calls += 1 }
+
+        store.setDismissal(.pinned, on: .top)
+        store.setDismissal(.pinned, on: .top)
+
+        XCTAssertEqual(calls, 1, "a write that changes nothing must not rebuild every dock")
+    }
+
 }

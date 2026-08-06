@@ -244,8 +244,39 @@ share of users regardless of what looks right.
   side tab strips come and go with the pointer. An expanded side dock stays until
   dismissed on purpose — dragged shut by its handle, or Escape. Clicking into
   another app is how you _use_ what is on the edge, so it must not dismiss it.
+- **How a dock closes is the user's call, per edge.** It used to be decided by
+  which edge it was, and that was never a fact about the edge: reaching across
+  the screen past a pinned side dock is annoying, and a notch that vanishes
+  while you are reading it is worse. `DockStore.dismissal(on:)` holds the
+  choice, `EdgeDockController.isPinned` is the one place that reads it, and the
+  three behaviours that used to test the edge — the pointer-left timer, the
+  outside-click monitor, and the drag handle — all now ask that instead. The
+  defaults are what each edge already did, so the update that adds the choice
+  changes nobody's dock. The tab strip stays a peek whatever this says: it is
+  the thing you aim at to open a dock, not the dock.
 - **Every way out has a visible affordance.** A dock that stays open carries
   `DockDragHandle` on its inner edge. An exit nobody can see is not an exit.
+  The handle follows the setting above rather than the edge — which was two
+  expressions saying one thing by coincidence, and is now one rule: the thing
+  that stays open is the thing that carries a way out.
+- **An affordance owns its space; it does not float over the content.**
+  `DockDragHandle` was pinned on top of the panel's content, so its 16pt hit
+  area swallowed clicks aimed at what was underneath and its tooltip appeared in
+  the middle of the text. It is a full-height column now, and `install` insets
+  the content past it, so the two cannot disagree about who owns those points.
+  The ink stays 4pt — a thick bar down the edge of every dock is a border — but
+  the grab target is the panel's whole length rather than 38pt of it you have to
+  find first.
+- **A dock with two residents must lay out like a dock with one.**
+  `EdgeDockController.expandedView` puts the content and the tab rail in an
+  `NSStackView`, and a stack centres its arranged views at their intrinsic size
+  on the cross axis. An `NSHostingView`'s intrinsic size is whatever its SwiftUI
+  content would ideally be, so the moment an edge held two residents the content
+  stopped getting the panel's height and started getting its own: the folder
+  hub's chips sat halfway down an empty panel with its files cut off, and a long
+  Ask transcript ran off both ends. One resident never showed it, because there
+  is no stack then and `install` pins the view to all four edges. Any arranged
+  view is now pinned to the stack's cross axis explicitly.
 - **A top dock keeps the notch's height clear, and grows to pay for it.** The
   panel starts at `screenFrame.maxY` on purpose, so it reads as the notch
   growing rather than as a window appearing beneath it — which puts its first
@@ -261,8 +292,22 @@ share of users regardless of what looks right.
   away what was typed.
 - **Horizontal distance decides a side dock, never vertical.** How far down the
   screen the pointer is says nothing about whether it is heading for an edge.
-- **Draw thin, but hit big.** `DockDragHandle` is 4pt of ink inside a 16pt
-  target. A 4pt target is a miss waiting to happen.
+- **Draw thin, but hit big.** `DockDragHandle` is 4pt of ink inside a 14pt
+  column that runs the panel's full length. A 4pt target is a miss waiting to
+  happen.
+- **Say which one is open with a shape, not a shade.** `DockTabStrip` marked
+  the active tab by tint alone — `ink` against `inkSecondary` — on the argument
+  that the glass is already the surface being pressed and a plate fights the
+  flare it sits in. That argument is right about a hover treatment and wrong
+  here: two greys 0.25 of alpha apart, at 15pt, on translucent glass, over an
+  arbitrary desktop, tell nobody which tool they are looking at. The rail's
+  active tab carries a filled plate now. The peek strip does not, and not for
+  consistency's sake: nothing is open yet there, so it has nothing to mark.
+  The two also size differently on purpose. A peek tab is tall because it is a
+  target you aim at from across the screen and reads as something to pull out of
+  the bezel; a rail tab is square and tight because the panel is already open,
+  and at the peek's 51pt three icons stood 57pt apart, reading as three
+  unrelated things rather than one control.
 - **A gizmo can be a dock's resident, not just something it summons.** Every
   other result exists only after a run finishes, so a tab for one is either
   empty or a false promise until then. A `.surface` gizmo is the exception:

@@ -7,6 +7,12 @@ import Foundation
 enum RingIconKind: Equatable {
     case phosphor(String)
     case symbol(String)
+    /// Gizmate's own mark. `BrandMark.templateImage` already builds the one
+    /// thing this needs — a silhouette with the two eye slots punched back out,
+    /// so a plain alpha silhouette doesn't fill the face in — and caches it per
+    /// height for the menu bar. Same artwork, same treatment, tinted like every
+    /// other icon here.
+    case brand
 }
 
 /// Stable identity of every built-in ring action.
@@ -57,7 +63,7 @@ enum RingActionID: String, Codable, CaseIterable {
         case .rewrite:   return .phosphor("pencil-line")
         case .genZ:      return .symbol("flame")
         case .reply:     return .phosphor("arrow-bend-up-left")
-        case .ask:       return .phosphor("question")
+        case .ask:       return .brand
         case .capture:   return .phosphor("scan")
         case .summarize: return .symbol("list.bullet.rectangle")
         case .dictate:   return .symbol("mic")
@@ -152,6 +158,8 @@ extension RingIconKind {
                 .withSymbolConfiguration(
                     NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
                 ) ?? NSImage()
+        case .brand:
+            return BrandMark.templateImage(height: pointSize) ?? NSImage()
         }
     }
 }

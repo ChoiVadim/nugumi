@@ -204,6 +204,12 @@ struct EdgesDiagram: View {
             } else if drag != nil {
                 slotOutline.frame(width: Self.tileWidth, height: Self.tileHeight)
             }
+            if occupant != nil {
+                HStack {
+                    Spacer(minLength: 0)
+                    pinToggle(.top)
+                }
+            }
         }
         .padding(.horizontal, Self.railPadding)
         .frame(height: Self.topRailHeight)
@@ -224,6 +230,7 @@ struct EdgesDiagram: View {
                 slotOutline.frame(height: Self.tileHeight)
             }
             Spacer(minLength: 0)
+            if !items.isEmpty { pinToggle(edge) }
         }
         .padding(.horizontal, Self.railPadding)
         .padding(.vertical, 12)
@@ -251,6 +258,29 @@ struct EdgesDiagram: View {
                         - Self.tileSpacing / 2
                 )
         }
+    }
+
+    /// How this edge's dock leaves the screen, on the edge it is about.
+    ///
+    /// Only for a rail with something on it: a rail with nothing parked on it
+    /// has no dock to close, so a control there would configure nothing. That
+    /// is also what keeps the figure clear — it carries as many of these as
+    /// there are docks, which is usually one or two, not three.
+    private func pinToggle(_ edge: DockEdge) -> some View {
+        let pinned = dock.dismissal(on: edge) == .pinned
+        return Button {
+            dock.setDismissal(pinned ? .autoHide : .pinned, on: edge)
+        } label: {
+            Image(systemName: pinned ? "pin.fill" : "pin.slash")
+                .font(.system(size: 10))
+                .foregroundStyle(pinned ? FlowTheme.ink : FlowTheme.inkTertiary.opacity(0.7))
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(pinned
+            ? "Pinned. Stays open until you drag it shut or press Escape."
+            : "Auto-hide. Closes when the pointer leaves.")
     }
 
     /// Where a tile would go, shown only while one is in flight. It used to be

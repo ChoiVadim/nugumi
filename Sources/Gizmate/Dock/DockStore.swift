@@ -19,7 +19,36 @@ enum DockEdge: String, Codable, CaseIterable {
     }
 }
 
-/// Which items sit on which edge, and in what order.
+/// How a dock leaves the screen.
+///
+/// This used to be decided by which edge it was: the notch was a peek and a
+/// side dock stayed until dismissed. That is still what each edge does by
+/// default, but it was never really a fact about the edge — it is a fact about
+/// how someone works. Reaching across the screen past a pinned side dock is
+/// annoying; a notch that vanishes while you read it is worse.
+enum DockDismissal: String, Codable, CaseIterable {
+    /// Closes when the pointer leaves, or on a click elsewhere.
+    case autoHide
+    /// Stays until dismissed on purpose: dragged shut by its handle, or Escape.
+    case pinned
+
+    var displayName: String {
+        switch self {
+        case .autoHide: return "Auto-hide"
+        case .pinned: return "Pinned"
+        }
+    }
+}
+
+extension DockEdge {
+    /// What this edge did before the choice existed. Kept as the default so
+    /// nobody's dock changes behaviour under them on the update that adds it.
+    var defaultDismissal: DockDismissal {
+        self == .top ? .autoHide : .pinned
+    }
+}
+
+/// Which items sit on which edge, in what order, and how each edge closes.
 ///
 /// Same `@Published` + `onChange` contract as `NotesStore` and `SnippetsStore`,
 /// so the settings UI binds the same way and the dock controllers get one
@@ -32,9 +61,14 @@ final class DockStore: ObservableObject {
     /// Edge to the ids docked there, in tab order. An edge with nothing on it
     /// is absent rather than present-and-empty, so `save` never writes noise.
     @Published private(set) var placement: [DockEdge: [String]] = [:]
+    /// Absent means "whatever this edge does by default" — the same
+    /// absent-rather-than-present-and-default rule `placement` follows, so a
+    /// user who never touched this writes nothing.
+    @Published private(set) var dismissals: [DockEdge: DockDismissal] = [:]
     var onChange: (() -> Void)?
 
     static let defaultsKey = "com.nugumi.app.dock.v1"
+    static let dismissalsDefaultsKey = "com.nugumi.app.dock.dismissal.v1"
 
     private let defaults: UserDefaults
 
@@ -43,10 +77,29 @@ final class DockStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         load()
+        // Its own call, not a line at the end of `load()`: that function
+        // returns early when no placement has ever been saved, which would
+        // silently drop this setting for anyone whose dock is empty.
+        loadDismissals()
     }
 
     func items(on edge: DockEdge) -> [String] {
         placement[edge] ?? []
+    }
+
+    func dismissal(on edge: DockEdge) -> DockDismissal {
+        dismissals[edge] ?? edge.defaultDismissal
+    }
+
+    /// `onChange` fires like every other write here. The controllers read this
+    /// live, but the drag handle is installed with the panel, so an edge whose
+    /// setting changed while its dock was open would otherwise carry the wrong
+    /// affordance until the next time it opened.
+    func setDismissal(_ value: DockDismissal, on edge: DockEdge) {
+        guard dismissal(on: edge) != value else { return }
+        dismissals[edge] = value == edge.defaultDismissal ? nil : value
+        save()
+        onChange?()
     }
 
     /// An item lives on at most one edge, so this is a lookup, not a list.
@@ -138,11 +191,33 @@ final class DockStore: ObservableObject {
         if migrated { save() }
     }
 
+    /// Lenient in both directions, the same reason `load` above is: an edge or
+    /// a mode this version doesn't know is skipped rather than throwing, so one
+    /// unknown key cannot take the rest of the dock with it.
+    private func loadDismissals() {
+        guard let raw = defaults.dictionary(forKey: Self.dismissalsDefaultsKey) as? [String: String]
+        else { return }
+        var loaded: [DockEdge: DockDismissal] = [:]
+        for (key, value) in raw {
+            guard let edge = DockEdge(rawValue: key),
+                  let mode = DockDismissal(rawValue: value)
+            else { continue }
+            loaded[edge] = mode
+        }
+        dismissals = loaded
+    }
+
     private func save() {
         var raw: [String: [String]] = [:]
         for (edge, ids) in placement where !ids.isEmpty {
             raw[edge.rawValue] = ids
         }
         defaults.set(raw, forKey: Self.defaultsKey)
+
+        var modes: [String: String] = [:]
+        for (edge, mode) in dismissals where mode != edge.defaultDismissal {
+            modes[edge.rawValue] = mode.rawValue
+        }
+        defaults.set(modes, forKey: Self.dismissalsDefaultsKey)
     }
 }

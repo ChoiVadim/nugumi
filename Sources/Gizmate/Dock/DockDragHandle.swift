@@ -11,7 +11,19 @@ import SwiftUI
 /// than from the gesture's own translation: the controller moves the window
 /// while the drag is in flight, and a translation measured inside a window that
 /// is itself moving feeds back on itself.
+///
+/// It is a full-height gutter rather than a nub floating over the content, and
+/// the difference is not cosmetic. As an overlay it sat on top of whatever the
+/// dock was showing: its 16pt hit area swallowed clicks meant for the panel
+/// underneath, and its tooltip popped up in the middle of the text. Owning a
+/// column means the content is laid out beside it instead of under it, and it
+/// means the grab target is the whole length of the panel rather than 38pt of
+/// it that you have to find first.
 struct DockDragHandle: View {
+    /// The column this occupies. `EdgeDockController` insets the content by it,
+    /// so the two cannot disagree about who owns those points.
+    static let width: CGFloat = 14
+
     let onDragChanged: () -> Void
     let onDragBegan: () -> Void
     let onDragEnded: () -> Void
@@ -23,8 +35,11 @@ struct DockDragHandle: View {
         Capsule()
             .fill(FlowTheme.ink.opacity(hovering || dragging ? 0.55 : 0.25))
             .frame(width: 4, height: 38)
-            // Wider than it looks: a 4pt target is a miss waiting to happen.
-            .frame(width: 16)
+            // Draw thin, hit big — DESIGN.md §11. The ink stays 4pt because a
+            // thick bar down the edge of every dock is a border; the target is
+            // the whole column, top to bottom.
+            .frame(width: Self.width)
+            .frame(maxHeight: .infinity)
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             .gesture(
