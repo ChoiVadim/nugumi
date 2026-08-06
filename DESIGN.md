@@ -262,8 +262,14 @@ share of users regardless of what looks right.
 - **An affordance owns its space; it does not float over the content.**
   `DockDragHandle` was pinned on top of the panel's content, so its 16pt hit
   area swallowed clicks aimed at what was underneath and its tooltip appeared in
-  the middle of the text. It is a full-height column now, and `install` insets
-  the content past it, so the two cannot disagree about who owns those points.
+  the middle of the text. It is a gutter now — a column down the inner edge of a
+  side dock, a bar across the bottom of the notch — and `install` insets the
+  content past it, so the two cannot disagree about who owns those points.
+  The notch got one when closing became a choice. It never had a handle before
+  because it could not stay open, so `bezelwardOffset` measured `x` alone and
+  returned zero for `.top` — correct then, and a pinned notch with no way out
+  the moment that changed. A capsule lying flat is also what says the panel
+  leaves upward; the same vertical bar on all three edges would not.
   The ink stays 4pt — a thick bar down the edge of every dock is a border — but
   the grab target is the panel's whole length rather than 38pt of it you have to
   find first.

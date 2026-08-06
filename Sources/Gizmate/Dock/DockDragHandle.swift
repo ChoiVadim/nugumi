@@ -20,10 +20,18 @@ import SwiftUI
 /// means the grab target is the whole length of the panel rather than 38pt of
 /// it that you have to find first.
 struct DockDragHandle: View {
-    /// The column this occupies. `EdgeDockController` insets the content by it,
-    /// so the two cannot disagree about who owns those points.
+    /// How thick the gutter is, across the panel. `EdgeDockController` insets
+    /// the content by it, so the two cannot disagree about who owns those
+    /// points.
     static let width: CGFloat = 14
+    /// How long the visible bar is, along the panel.
+    private static let barLength: CGFloat = 38
 
+    /// Which side of the panel the handle lives on, which is the side away from
+    /// the bezel: a column down the inner edge of a side dock, a bar across the
+    /// bottom of the notch. It has to be told rather than assume vertical,
+    /// because a notch closes upward and a horizontal capsule is what says so.
+    let edge: DockEdge
     let onDragChanged: () -> Void
     let onDragBegan: () -> Void
     let onDragEnded: () -> Void
@@ -32,14 +40,22 @@ struct DockDragHandle: View {
     @State private var dragging = false
 
     var body: some View {
-        Capsule()
+        let bar = Capsule()
             .fill(FlowTheme.ink.opacity(hovering || dragging ? 0.55 : 0.25))
-            .frame(width: 4, height: 38)
-            // Draw thin, hit big — DESIGN.md §11. The ink stays 4pt because a
-            // thick bar down the edge of every dock is a border; the target is
-            // the whole column, top to bottom.
-            .frame(width: Self.width)
-            .frame(maxHeight: .infinity)
+            .frame(
+                width: edge == .top ? Self.barLength : 4,
+                height: edge == .top ? 4 : Self.barLength
+            )
+        // Draw thin, hit big — DESIGN.md §11. The ink stays 4pt because a thick
+        // bar along the edge of every dock is a border; the target is the whole
+        // gutter, end to end.
+        return Group {
+            if edge == .top {
+                bar.frame(maxWidth: .infinity).frame(height: Self.width)
+            } else {
+                bar.frame(width: Self.width).frame(maxHeight: .infinity)
+            }
+        }
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             .gesture(
@@ -56,6 +72,6 @@ struct DockDragHandle: View {
                         onDragEnded()
                     }
             )
-            .help("Drag toward the edge to close")
+            .help(edge == .top ? "Drag up to close" : "Drag toward the edge to close")
     }
 }

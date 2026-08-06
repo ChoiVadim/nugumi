@@ -62,7 +62,7 @@ final class EdgeDockController {
     private var pointerLeftTimer: Timer?
     private var dismissMonitors: [Any] = []
     /// Where the pointer and the panel were when a drag on the handle started.
-    private var dragStartX: CGFloat?
+    private var dragStart: NSPoint?
     private var dragStartFrame: NSRect = .zero
 
     /// How long the pointer must be away before the dock closes. Long enough to
@@ -289,7 +289,7 @@ final class EdgeDockController {
     private static let dragCloseThreshold: CGFloat = 64
 
     func dragBegan() {
-        dragStartX = NSEvent.mouseLocation.x
+        dragStart = NSEvent.mouseLocation
         dragStartFrame = panel.frame
     }
 
@@ -297,17 +297,17 @@ final class EdgeDockController {
     /// translation: this moves the window the gesture lives in, and a
     /// translation read inside a moving window compounds with itself.
     func dragChanged() {
-        guard let dragStartX else { return }
-        panel.setFrame(
-            dragStartFrame.offsetBy(dx: bezelwardOffset(from: dragStartX), dy: 0),
-            display: true
-        )
+        guard let dragStart else { return }
+        let offset = bezelwardOffset(from: dragStart)
+        panel.setFrame(dragStartFrame.offsetBy(dx: offset.x, dy: offset.y), display: true)
     }
 
     func dragEnded() {
-        guard let start = dragStartX else { return }
-        let offset = abs(bezelwardOffset(from: start))
-        dragStartX = nil
+        guard let start = dragStart else { return }
+        let travel = bezelwardOffset(from: start)
+        // Only one axis is ever non-zero, so this is that axis's distance.
+        let offset = abs(travel.x) + abs(travel.y)
+        dragStart = nil
         guard offset < Self.dragCloseThreshold else {
             transition(to: .hidden)
             return
@@ -322,12 +322,18 @@ final class EdgeDockController {
 
     /// Drag only counts toward the bezel. Pulling a right-hand dock further left
     /// would tear it off its edge, which is not a thing this dock does.
-    private func bezelwardOffset(from startX: CGFloat) -> CGFloat {
-        let delta = NSEvent.mouseLocation.x - startX
+    ///
+    /// A point rather than a scalar because the notch closes upward: this used
+    /// to measure `x` alone and return zero for `.top`, which was fine while a
+    /// top dock could not stay open and so never carried a handle. Now that how
+    /// a dock closes is the user's choice, a pinned notch needs the same way out
+    /// as a pinned side dock.
+    private func bezelwardOffset(from start: NSPoint) -> NSPoint {
+        let now = NSEvent.mouseLocation
         switch edge {
-        case .right: return max(delta, 0)
-        case .left: return min(delta, 0)
-        case .top: return 0
+        case .right: return NSPoint(x: max(now.x - start.x, 0), y: 0)
+        case .left: return NSPoint(x: min(now.x - start.x, 0), y: 0)
+        case .top: return NSPoint(x: 0, y: max(now.y - start.y, 0))
         }
     }
 
@@ -631,11 +637,15 @@ final class EdgeDockController {
                 constant: -insets.right - (edge == .left ? gutter : 0)
             ),
             view.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: topInset),
-            view.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
+            view.bottomAnchor.constraint(
+                equalTo: host.contentView.bottomAnchor,
+                constant: -insets.bottom - (edge == .top ? gutter : 0)
+            ),
         ])
 
         guard showsDragHandle else { return }
         let handle = NSHostingView(rootView: DockDragHandle(
+            edge: edge,
             onDragChanged: { [weak self] in self?.dragChanged() },
             onDragBegan: { [weak self] in self?.dragBegan() },
             onDragEnded: { [weak self] in self?.dragEnded() }
@@ -643,15 +653,27 @@ final class EdgeDockController {
         handle.translatesAutoresizingMaskIntoConstraints = false
         host.contentView.addSubview(handle)
         // On the inner edge — the side away from the bezel, which is the only
-        // direction there is anywhere to drag to.
-        let innerAnchor = edge == .left
-            ? handle.trailingAnchor.constraint(equalTo: host.contentView.trailingAnchor)
-            : handle.leadingAnchor.constraint(equalTo: host.contentView.leadingAnchor)
-        NSLayoutConstraint.activate([
-            innerAnchor,
-            handle.topAnchor.constraint(equalTo: host.contentView.topAnchor, constant: topInset),
-            handle.bottomAnchor.constraint(equalTo: host.contentView.bottomAnchor, constant: -insets.bottom),
-        ])
+        // direction there is anywhere to drag to. For the notch that is the
+        // bottom, so the gutter runs across rather than down.
+        let content = host.contentView
+        let rules: [NSLayoutConstraint]
+        switch edge {
+        case .top:
+            rules = [
+                handle.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+                handle.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: insets.left),
+                handle.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -insets.right),
+            ]
+        case .left, .right:
+            rules = [
+                edge == .left
+                    ? handle.trailingAnchor.constraint(equalTo: content.trailingAnchor)
+                    : handle.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                handle.topAnchor.constraint(equalTo: content.topAnchor, constant: topInset),
+                handle.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -insets.bottom),
+            ]
+        }
+        NSLayoutConstraint.activate(rules)
     }
 
     // MARK: - Dismiss
