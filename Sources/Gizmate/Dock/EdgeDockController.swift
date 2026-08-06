@@ -646,6 +646,7 @@ final class EdgeDockController {
         guard showsDragHandle else { return }
         let handle = NSHostingView(rootView: DockDragHandle(
             edge: edge,
+            onTap: { [weak self] in self?.transition(to: .hidden) },
             onDragChanged: { [weak self] in self?.dragChanged() },
             onDragBegan: { [weak self] in self?.dragBegan() },
             onDragEnded: { [weak self] in self?.dragEnded() }

@@ -32,6 +32,10 @@ struct DockDragHandle: View {
     /// bottom of the notch. It has to be told rather than assume vertical,
     /// because a notch closes upward and a horizontal capsule is what says so.
     let edge: DockEdge
+    /// A click, with no drag. The gutter reads as a control, and a control you
+    /// press should do the thing it is for — dragging a panel a hundred points
+    /// to dismiss it is the deliberate way, not the only way.
+    let onTap: () -> Void
     let onDragChanged: () -> Void
     let onDragBegan: () -> Void
     let onDragEnded: () -> Void
@@ -58,6 +62,10 @@ struct DockDragHandle: View {
         }
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
+            // A still press resolves as the tap and a moved one as the drag,
+            // which `minimumDistance: 1` is what decides. The two cannot both
+            // fire for one press.
+            .onTapGesture(perform: onTap)
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { _ in
@@ -72,6 +80,6 @@ struct DockDragHandle: View {
                         onDragEnded()
                     }
             )
-            .help(edge == .top ? "Drag up to close" : "Drag toward the edge to close")
+            .help(edge == .top ? "Click, or drag up, to close" : "Click, or drag toward the edge, to close")
     }
 }
