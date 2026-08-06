@@ -58,6 +58,12 @@ struct FolderHubView: View {
         empty: "Nothing here yet."
     )
 
+    /// Rounded, not a capsule: fully round ends read as a tag — something the
+    /// content is labelled with — and these are buttons you press. Continuous
+    /// curvature and 8pt keeps them the same family as the 10pt cards below,
+    /// a notch tighter for a control two-thirds their height.
+    private static let chipShape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+
     /// Seeded synchronously, the same reasoning `SurfaceHostView` gives for
     /// seeding `rows` from its cache in `init`: a folder listing costs
     /// milliseconds, so there is no reason to show an empty grid for even one
@@ -76,7 +82,6 @@ struct FolderHubView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            Divider().background(FlowTheme.hairline)
             // A folder listing never fails to refresh — it's a synchronous
             // `FileManager` read, not a script that can be unapproved, throw,
             // or exit non-zero — so there is no failure caption to show.
@@ -207,7 +212,7 @@ struct FolderHubView: View {
             .foregroundStyle(isCurrent ? FlowTheme.ink : FlowTheme.inkSecondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule().fill(fill(here: isCurrent, folder: folder)))
+            .background(Self.chipShape.fill(fill(here: isCurrent, folder: folder)))
         }
         .buttonStyle(.plain)
         .onHover { inside in
@@ -268,8 +273,8 @@ struct FolderHubView: View {
         .foregroundStyle(isArmed ? FlowTheme.danger : (isSelected ? FlowTheme.ink : FlowTheme.inkSecondary))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .background(Capsule().fill(fill(here: isSelected, folder: folder)))
-        .contentShape(Capsule())
+        .background(Self.chipShape.fill(fill(here: isSelected, folder: folder)))
+        .contentShape(Self.chipShape)
         // Declared before the single tap, which is what lets SwiftUI hand a
         // double click to this one instead of firing the single twice.
         .onTapGesture(count: 2) { armedChip = folder.path }
