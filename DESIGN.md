@@ -112,6 +112,26 @@ All spacing maps to the 4px grid.
 
 ## 6. Motion & Interaction
 
+### A press lands on the frame it happened
+
+The control's own state — the selected chip, the opened panel, the pressed tab
+— changes on the same frame as the click. Whatever the press *loads* arrives
+after, into a container that has already switched.
+
+Never gate a selection on the work it triggers, and watch for the version of
+this that hides inside a chain of `.onChange`. The folder hub's chips set
+`selected`, one `onChange` set `current`, and a second cleared the rows — so the
+first frame after a click carried the new highlight *and* the previous folder's
+eighty cards, and the highlight waited on a grid that was about to be thrown
+away. `FolderHubView.show(_:asRoot:)` now does the whole switch in the tap:
+select, clear, then load.
+
+The failure mode is not "it feels slow", it is "the button is broken". A person
+who sees no change assumes the click missed and clicks again, which is also what
+a developer watching them concludes.
+
+
+
 ### Timing
 
 | Type     | Duration  | Easing      | Usage                                                |

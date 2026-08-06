@@ -45,6 +45,11 @@ struct FolderHubView: View {
     /// rather than `.onKeyPress`, which needs focus, and a grid of cards that
     /// takes focus is a grid whose clicks start fighting the focus ring.
     @State private var trashKeyMonitor: KeyMonitorBox = KeyMonitorBox()
+    /// Notices what the folder does on its own. A dock rebuilds this view every
+    /// time it opens, so an unpinned hub was always current by accident; a
+    /// pinned one sat there showing a download that had finished ten minutes
+    /// ago.
+    @State private var watch: FolderWatch = FolderWatch()
 
     /// The one layout this hub ever draws — declared once rather than built
     /// per render, the same way a gizmo's candidate layout is decoded once
@@ -145,15 +150,17 @@ struct FolderHubView: View {
         }
         .padding(14)
         .foregroundStyle(FlowTheme.ink)
-        // Picking a chip is picking a root: it lands you at the top of that
-        // folder, never inside wherever the previous chip was browsed to.
-        .onChange(of: selected) { _, folder in
-            current = folder
-        }
         .onChange(of: current) { _, folder in
-            refresh(in: folder)
+            watch.start(folder) { if let folder { reload(folder) } }
         }
-        .onAppear { trashKeyMonitor.start(trashSelection) }
+        .onDisappear { watch.stop() }
+        .onAppear {
+            trashKeyMonitor.start(trashSelection)
+            // `.onChange(of: current)` only fires on a change, and the folder a
+            // hub opens on is set in `init`. Without this the very folder you
+            // are looking at is the one nobody is watching.
+            watch.start(current) { if let folder = current { reload(folder) } }
+        }
         .onDisappear { trashKeyMonitor.stop() }
         .onChange(of: store.folders) { _, folders in
             // The selected folder itself may have just been removed by its own
@@ -369,8 +376,8 @@ struct FolderHubView: View {
         // double click to this one instead of firing the single twice.
         .onTapGesture(count: 2) { armedChip = folder.path }
         .onTapGesture {
-            selected = folder
             armedChip = nil
+            show(folder, asRoot: true)
         }
         // Leaving the chip disarms it: an armed chip left behind is a red
         // capsule sitting in the row with no way back except deleting it.
@@ -410,10 +417,33 @@ struct FolderHubView: View {
         guard let path = SurfaceCard.path(for: "path", in: row) else { return }
         let url = URL(fileURLWithPath: path)
         if FolderHubRows.isBrowsable(url) {
-            current = url
+            show(url, asRoot: false)
         } else {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    /// Switches to `folder` on the frame the press happened, and loads it after.
+    ///
+    /// Everything a press changes is set here, in one action, and that is the
+    /// whole point. It used to be a chain — `selected` set by the tap, `current`
+    /// by one `.onChange`, the old rows cleared by a second — so the first frame
+    /// after a click still carried the previous folder's eighty cards and merely
+    /// moved the highlight. The highlight then waited on a grid that was about
+    /// to be thrown away, and a press that does not visibly land reads as a
+    /// press that did not register.
+    ///
+    /// `asRoot` is what a chip picks: it lands you at the top of that folder,
+    /// never inside wherever the previous chip was browsed to. Walking into a
+    /// subfolder moves `current` alone, which is what keeps the crumb trail.
+    private func show(_ folder: URL, asRoot: Bool) {
+        if asRoot { selected = folder }
+        current = folder
+        // Synchronously, so the frame that moves the highlight is drawing an
+        // empty grid rather than the old one.
+        rows = []
+        selectedFiles = []
+        load(folder, keepingSelection: false)
     }
 
     /// What a drag off this card carries. Dragging a card that isn't in the
@@ -442,9 +472,22 @@ struct FolderHubView: View {
     /// thread, and the cards land after. Files arriving a beat late is what
     /// anyone expects from a folder; a button that doesn't answer is not.
     private func refresh(in folder: URL?) {
-        selectedFiles = []
-        rows = []
-        guard let folder else { return }
+        guard let folder else {
+            rows = []
+            selectedFiles = []
+            return
+        }
+        show(folder, asRoot: false)
+    }
+
+    /// The folder changed underneath us — a download finished, something was
+    /// trashed from Finder, a drop landed. Reloads in place: no clearing, so
+    /// nothing blinks, and the selection survives whatever is still there.
+    private func reload(_ folder: URL) {
+        load(folder, keepingSelection: true)
+    }
+
+    private func load(_ folder: URL, keepingSelection: Bool) {
         Task { @MainActor in
             let fresh = await Task.detached(priority: .userInitiated) {
                 FolderHubRows.rows(in: folder, limit: FolderHubRows.defaultLimit)
@@ -453,6 +496,11 @@ struct FolderHubView: View {
             // answering. Only the folder still being shown gets to fill it.
             guard current?.path == folder.path else { return }
             rows = fresh
+            guard keepingSelection else { return }
+            // A file that went away takes its selection with it; the rest keep
+            // theirs, because a reload nobody asked for must not undo a
+            // selection somebody did.
+            selectedFiles.formIntersection(Set(fresh.map(\.id)))
         }
     }
 }
