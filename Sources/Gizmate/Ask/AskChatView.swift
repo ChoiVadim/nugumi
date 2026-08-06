@@ -73,14 +73,31 @@ struct AskChatView: View {
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
                 }
                 .padding(.horizontal, 14)
-                .padding(.top, 14)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
             }
             .scrollIndicators(.never)
+            .mask(Self.topFade)
             // Both, not just the turn count: an answer streaming in grows the
             // transcript continuously, and following only completed turns would
             // pin the view a screen above the words being written.
             .onChange(of: conversation.turns.count) { _, _ in scroll(proxy) }
             .onChange(of: conversation.pending) { _, _ in scroll(proxy) }
+        }
+    }
+
+    /// Scrolled text has to stop at the panel's top edge somehow, and padding
+    /// is not it: padding inside a `ScrollView` travels with the content, so
+    /// the first line ends up sliced in half by the bezel the moment anything
+    /// scrolls past. This dissolves it instead. A mask rather than a gradient
+    /// laid over the top, because the dock is translucent glass — an opaque
+    /// band matching "the background" would be a stripe of the wrong colour
+    /// over whatever is behind the panel.
+    private static var topFade: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: 20)
+            Rectangle().fill(.black)
         }
     }
 
