@@ -137,17 +137,16 @@ final class EdgeDockController {
     /// still comes and goes with the pointer, and the notch keeps its old
     /// hover-in, hover-out behaviour: it is a peek, not a window.
     private var staysOpen: Bool {
-        guard isPinned else { return false }
-        if case .expanded = state { return true }
-        return false
+        guard case .expanded(let itemID) = state else { return false }
+        return isPinned(itemID)
     }
 
-    /// The user's choice for this edge. Separate from `staysOpen` because the
-    /// drag handle is installed while the panel is still being built, before
-    /// there is an `.expanded` state for `staysOpen` to see — and because the
-    /// tab strip is a peek whatever this says.
-    private var isPinned: Bool {
-        store.dismissal(on: edge) == .pinned
+    /// The user's choice for the tool currently open. Separate from
+    /// `staysOpen` because the drag handle is installed while the panel is
+    /// still being built, before there is an `.expanded` state for `staysOpen`
+    /// to read — and because the tab strip is a peek whatever this says.
+    private func isPinned(_ itemID: String) -> Bool {
+        store.dismissal(of: itemID) == .pinned
     }
 
     /// Placement changed. An edge with nothing left on it must not reveal.
@@ -259,7 +258,11 @@ final class EdgeDockController {
         transientResult = view
         pointerLeftTimer?.invalidate()
         pointerLeftTimer = nil
-        install(view: view, showsDragHandle: isPinned)
+        // A result owns the edge until it closes itself (`pointerMoved` refuses
+        // to touch a dock while one is up), so it always carries a way out —
+        // it is a panel that stays open by definition, whatever the tool that
+        // produced it does the rest of the time.
+        install(view: view, showsDragHandle: true)
         let size = NSSize(
             width: edge == .top ? 620 : 380,
             height: edge == .top ? 300 : 520
@@ -432,7 +435,7 @@ final class EdgeDockController {
             guard let item = items.first(where: { $0.id == itemID }) ?? items.first else { return }
             install(
                 view: expandedView(items: items, active: item),
-                showsDragHandle: isPinned
+                showsDragHandle: isPinned(item.id)
             )
             // The notch's height is added to the panel rather than taken out
             // of it, so a top dock still gets its full 300pt of content.

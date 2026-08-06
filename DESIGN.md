@@ -275,16 +275,24 @@ share of users regardless of what looks right.
   side tab strips come and go with the pointer. An expanded side dock stays until
   dismissed on purpose — dragged shut by its handle, or Escape. Clicking into
   another app is how you _use_ what is on the edge, so it must not dismiss it.
-- **How a dock closes is the user's call, per edge.** It used to be decided by
-  which edge it was, and that was never a fact about the edge: reaching across
-  the screen past a pinned side dock is annoying, and a notch that vanishes
-  while you are reading it is worse. `DockStore.dismissal(on:)` holds the
-  choice, `EdgeDockController.isPinned` is the one place that reads it, and the
+- **How a dock closes is the user's call, per tool.** It was decided by which
+  edge it was, then made a per-edge choice, and both were wrong in the same
+  direction: an edge holds several tools, and a chat you type into and a file
+  shelf you glance at want opposite answers while sitting an inch apart on the
+  same bezel. Per-edge forced them to agree about something they disagree
+  about. `DockStore.dismissal(of:)` is keyed by tool now, and the control lives
+  in the tool's own tile on the figure — on the thing it is about, the same rule
+  every other decision on that screen follows.
+  The edge still supplies the *default*, because that part really is about the
+  edge's shape: the notch is a glance, the sides are somewhere you work. Absent
+  means "whatever this edge does", so a tool dragged to another edge picks up
+  that edge's habit rather than carrying a choice it never made.
+  `EdgeDockController.staysOpen` reads the tool currently expanded, which is the
   three behaviours that used to test the edge — the pointer-left timer, the
-  outside-click monitor, and the drag handle — all now ask that instead. The
-  defaults are what each edge already did, so the update that adds the choice
-  changes nobody's dock. The tab strip stays a peek whatever this says: it is
-  the thing you aim at to open a dock, not the dock.
+  outside-click monitor and the drag handle — all asking one question. The tab
+  strip stays a peek whatever any of them says: it is the thing you aim at to
+  open a dock, not the dock. A result panel always carries a handle, because it
+  owns the edge until it closes itself by definition.
 - **Every way out has a visible affordance.** A dock that stays open carries
   `DockDragHandle` on its inner edge. An exit nobody can see is not an exit.
   The handle follows the setting above rather than the edge — which was two

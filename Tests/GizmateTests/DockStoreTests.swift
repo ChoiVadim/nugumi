@@ -243,77 +243,105 @@ final class DockStoreTests: XCTestCase {
         store.move("b", to: .top, at: 0)
         XCTAssertEqual(DockStore(defaults: defaults).items(on: .top), ["b", "a"])
     }
-    // MARK: - How an edge closes
+    // MARK: - How a tool's dock closes
 
-    /// The defaults are the whole compatibility story: before this setting
-    /// existed the notch was a peek and a side dock stayed open, and an update
-    /// that adds a choice must not change what anyone's dock already does.
+    /// Defaults come from the edge, because that is a fact about the shape of
+    /// the thing: the notch is a glance, the sides are somewhere you work. Only
+    /// an explicit choice overrides it, so nobody's dock changes under them.
     @MainActor
-    func testEachEdgeDefaultsToWhatItDidBeforeTheChoiceExisted() {
+    func testAToolInheritsItsEdgesHabitUntilToldOtherwise() {
         let store = DockStore(defaults: scratchDefaults())
-        XCTAssertEqual(store.dismissal(on: .top), .autoHide)
-        XCTAssertEqual(store.dismissal(on: .left), .pinned)
-        XCTAssertEqual(store.dismissal(on: .right), .pinned)
+        store.dock("gizmo.feed", to: .top)
+        store.dock("gizmo.notes", to: .left)
+
+        XCTAssertEqual(store.dismissal(of: "gizmo.feed"), .autoHide)
+        XCTAssertEqual(store.dismissal(of: "gizmo.notes"), .pinned)
+    }
+
+    /// The whole reason this moved off the edge: an edge holds several tools
+    /// and they do not all want the same thing.
+    @MainActor
+    func testTwoToolsOnOneEdgeCanDisagree() {
+        let store = DockStore(defaults: scratchDefaults())
+        store.dock("builtin.ask", to: .left)
+        store.dock("builtin.saveNote", to: .left)
+
+        store.setDismissal(.autoHide, of: "builtin.saveNote")
+
+        XCTAssertEqual(store.dismissal(of: "builtin.ask"), .pinned)
+        XCTAssertEqual(store.dismissal(of: "builtin.saveNote"), .autoHide)
     }
 
     @MainActor
-    func testAChangedEdgeSurvivesARelaunch() {
+    func testAnExplicitChoiceSurvivesARelaunch() {
         let suite = "DockStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        DockStore(defaults: defaults).setDismissal(.pinned, on: .top)
+        let store = DockStore(defaults: defaults)
+        store.dock("builtin.ask", to: .top)
+        store.setDismissal(.pinned, of: "builtin.ask")
 
-        XCTAssertEqual(DockStore(defaults: defaults).dismissal(on: .top), .pinned)
+        XCTAssertEqual(DockStore(defaults: defaults).dismissal(of: "builtin.ask"), .pinned)
     }
 
-    /// Absent means default, the same rule `placement` follows. Setting an edge
-    /// back to its default has to clear the entry rather than write it, or the
-    /// stored value freezes today's default in place and a future change to it
-    /// would silently miss everyone who had ever touched the control.
+    /// Absent means "whatever this edge does", so choosing that explicitly has
+    /// to clear the entry rather than freeze today's default in place — and a
+    /// tool dragged to another edge then picks up that edge's habit instead of
+    /// carrying a choice it never made.
     @MainActor
-    func testSettingAnEdgeBackToItsDefaultStoresNothing() {
+    func testChoosingTheEdgesOwnHabitStoresNothing() {
         let suite = "DockStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = DockStore(defaults: defaults)
+        store.dock("builtin.ask", to: .left)
 
-        store.setDismissal(.pinned, on: .top)
-        store.setDismissal(.autoHide, on: .top)
+        store.setDismissal(.autoHide, of: "builtin.ask")
+        store.setDismissal(.pinned, of: "builtin.ask")
 
         let raw = defaults.dictionary(forKey: DockStore.dismissalsDefaultsKey) as? [String: String]
         XCTAssertEqual(raw ?? [:], [:])
-        XCTAssertEqual(store.dismissal(on: .top), .autoHide)
+        XCTAssertEqual(store.dismissal(of: "builtin.ask"), .pinned)
     }
 
-    /// Lenient loading, the same reason `placement` is: one key this version
-    /// doesn't know must not take the rest of the setting with it.
+    /// A tool that sits nowhere still has to answer, because `staysOpen` asks
+    /// before checking anything else. Pinned is the safe half: a panel that
+    /// waits can always be closed, one that vanishes cannot be brought back.
     @MainActor
-    func testAnUnknownEdgeOrModeIsSkippedRatherThanThrowingTheRestAway() {
+    func testAToolOnNoEdgeAnswersPinned() {
+        XCTAssertEqual(
+            DockStore(defaults: scratchDefaults()).dismissal(of: "gizmo.nowhere"), .pinned
+        )
+    }
+
+    @MainActor
+    func testAnUnreadableModeFallsBackRatherThanThrowingTheRestAway() {
         let suite = "DockStoreTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(
-            ["bottom": "pinned", "left": "sideways", "top": "pinned"],
+            ["builtin.ask": "sideways", "builtin.saveNote": "autoHide"],
             forKey: DockStore.dismissalsDefaultsKey
         )
-
         let store = DockStore(defaults: defaults)
+        store.dock("builtin.ask", to: .left)
 
-        XCTAssertEqual(store.dismissal(on: .top), .pinned)
-        XCTAssertEqual(store.dismissal(on: .left), .pinned, "unreadable value falls back to default")
+        XCTAssertEqual(store.dismissal(of: "builtin.ask"), .pinned, "unreadable falls back")
+        XCTAssertEqual(store.dismissal(of: "builtin.saveNote"), .autoHide)
     }
 
     @MainActor
-    func testChangingHowAnEdgeClosesNotifiesTheControllers() {
+    func testAWriteThatChangesNothingDoesNotRebuildEveryDock() {
         let store = DockStore(defaults: scratchDefaults())
+        store.dock("builtin.ask", to: .left)
         var calls = 0
         store.onChange = { calls += 1 }
 
-        store.setDismissal(.pinned, on: .top)
-        store.setDismissal(.pinned, on: .top)
+        store.setDismissal(.autoHide, of: "builtin.ask")
+        store.setDismissal(.autoHide, of: "builtin.ask")
 
-        XCTAssertEqual(calls, 1, "a write that changes nothing must not rebuild every dock")
+        XCTAssertEqual(calls, 1)
     }
 
 }

@@ -204,12 +204,6 @@ struct EdgesDiagram: View {
             } else if drag != nil {
                 slotOutline.frame(width: Self.tileWidth, height: Self.tileHeight)
             }
-            if occupant != nil {
-                HStack {
-                    Spacer(minLength: 0)
-                    pinToggle(.top)
-                }
-            }
         }
         .padding(.horizontal, Self.railPadding)
         .frame(height: Self.topRailHeight)
@@ -230,7 +224,6 @@ struct EdgesDiagram: View {
                 slotOutline.frame(height: Self.tileHeight)
             }
             Spacer(minLength: 0)
-            if !items.isEmpty { pinToggle(edge) }
         }
         .padding(.horizontal, Self.railPadding)
         .padding(.vertical, 12)
@@ -258,29 +251,6 @@ struct EdgesDiagram: View {
                         - Self.tileSpacing / 2
                 )
         }
-    }
-
-    /// How this edge's dock leaves the screen, on the edge it is about.
-    ///
-    /// Only for a rail with something on it: a rail with nothing parked on it
-    /// has no dock to close, so a control there would configure nothing. That
-    /// is also what keeps the figure clear — it carries as many of these as
-    /// there are docks, which is usually one or two, not three.
-    private func pinToggle(_ edge: DockEdge) -> some View {
-        let pinned = dock.dismissal(on: edge) == .pinned
-        return Button {
-            dock.setDismissal(pinned ? .autoHide : .pinned, on: edge)
-        } label: {
-            Image(systemName: pinned ? "pin.fill" : "pin.slash")
-                .font(.system(size: 10))
-                .foregroundStyle(pinned ? FlowTheme.ink : FlowTheme.inkTertiary.opacity(0.7))
-                .frame(width: 20, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(pinned
-            ? "Pinned. Stays open until you drag it shut or press Escape."
-            : "Auto-hide. Closes when the pointer leaves.")
     }
 
     /// Where a tile would go, shown only while one is in flight. It used to be
@@ -343,7 +313,19 @@ struct EdgesDiagram: View {
     // MARK: - Dragging
 
     private func tile(_ item: DockItem, size: CGSize) -> some View {
-        EdgeToolTile(item: item)
+        // The pin belongs to the tool, and only where the tool has a dock to
+        // close: a tile in the middle sits on no edge, so there is nothing for
+        // it to configure.
+        EdgeToolTile(
+            item: item,
+            pinned: dock.edge(of: item.id) == nil ? nil : dock.dismissal(of: item.id) == .pinned,
+            onTogglePin: {
+                dock.setDismissal(
+                    dock.dismissal(of: item.id) == .pinned ? .autoHide : .pinned,
+                    of: item.id
+                )
+            }
+        )
             .opacity(drag?.id == item.id ? 0.25 : 1)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
@@ -438,6 +420,10 @@ extension EdgesDiagram {
 /// rail than on a side one, as though it were a different kind of thing.
 private struct EdgeToolTile: View {
     let item: DockItem
+    /// Whether this tool's dock stays open, or `nil` when it has no dock —
+    /// a tile in the middle of the figure sits on no edge and closes nothing.
+    var pinned: Bool?
+    var onTogglePin: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 6) {
@@ -463,7 +449,33 @@ private struct EdgeToolTile: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
+        .overlay(alignment: .topTrailing) { pin }
         .contentShape(Rectangle())
         .help(item.title)
+    }
+}
+
+extension EdgeToolTile {
+    /// Whether this tool's dock waits for you or gets out of the way, on the
+    /// tool it is about.
+    ///
+    /// It lived on the rail for a version, which said the wrong thing: an edge
+    /// holds several tools, and a chat you type into and a shelf you glance at
+    /// want opposite answers while sitting an inch apart on the same bezel.
+    @ViewBuilder
+    var pin: some View {
+        if let pinned {
+            Button(action: onTogglePin) {
+                Image(systemName: pinned ? "pin.fill" : "pin.slash")
+                    .font(.system(size: 9))
+                    .foregroundStyle(pinned ? FlowTheme.ink : FlowTheme.inkTertiary.opacity(0.6))
+                    .frame(width: 18, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(pinned
+                ? "Stays open until you close it."
+                : "Closes when the pointer leaves.")
+        }
     }
 }

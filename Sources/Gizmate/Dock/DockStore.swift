@@ -19,13 +19,14 @@ enum DockEdge: String, Codable, CaseIterable {
     }
 }
 
-/// How a dock leaves the screen.
+/// How a dock leaves the screen once one of its tools is open.
 ///
-/// This used to be decided by which edge it was: the notch was a peek and a
-/// side dock stayed until dismissed. That is still what each edge does by
-/// default, but it was never really a fact about the edge — it is a fact about
-/// how someone works. Reaching across the screen past a pinned side dock is
-/// annoying; a notch that vanishes while you read it is worse.
+/// A property of the tool, not of the edge. It began as one per edge, which is
+/// where the *defaults* still come from, but an edge holds several tools and
+/// they are not all the same kind of thing: a chat you type into wants to stay
+/// put, and a file shelf you glance at wants to get out of the way, even when
+/// they sit on the same bezel an inch apart. Deciding this per edge forced the
+/// two to agree about something they disagree about.
 enum DockDismissal: String, Codable, CaseIterable {
     /// Closes when the pointer leaves, or on a click elsewhere.
     case autoHide
@@ -41,8 +42,9 @@ enum DockDismissal: String, Codable, CaseIterable {
 }
 
 extension DockEdge {
-    /// What this edge did before the choice existed. Kept as the default so
-    /// nobody's dock changes behaviour under them on the update that adds it.
+    /// What a tool on this edge does until it is told otherwise. Still an edge
+    /// question, because it is about the shape of the thing: the notch is a
+    /// glance and the sides are somewhere you work.
     var defaultDismissal: DockDismissal {
         self == .top ? .autoHide : .pinned
     }
@@ -61,14 +63,19 @@ final class DockStore: ObservableObject {
     /// Edge to the ids docked there, in tab order. An edge with nothing on it
     /// is absent rather than present-and-empty, so `save` never writes noise.
     @Published private(set) var placement: [DockEdge: [String]] = [:]
-    /// Absent means "whatever this edge does by default" — the same
-    /// absent-rather-than-present-and-default rule `placement` follows, so a
-    /// user who never touched this writes nothing.
-    @Published private(set) var dismissals: [DockEdge: DockDismissal] = [:]
+    /// By tool id. Absent means "whatever this tool's edge does by default" —
+    /// the same absent-rather-than-present-and-default rule `placement`
+    /// follows, so a user who never touched this writes nothing, and a tool
+    /// dragged to another edge picks up that edge's habit rather than carrying
+    /// a stale explicit choice it never made.
+    @Published private(set) var dismissals: [String: DockDismissal] = [:]
     var onChange: (() -> Void)?
 
     static let defaultsKey = "com.nugumi.app.dock.v1"
-    static let dismissalsDefaultsKey = "com.nugumi.app.dock.dismissal.v1"
+    /// `.v2` because `.v1` was keyed by edge. An old file would read as three
+    /// tools called "top", "left" and "right", which match nothing and would
+    /// sit there forever being ignored.
+    static let dismissalsDefaultsKey = "com.nugumi.app.dock.pinned.v2"
 
     private let defaults: UserDefaults
 
@@ -87,17 +94,18 @@ final class DockStore: ObservableObject {
         placement[edge] ?? []
     }
 
-    func dismissal(on edge: DockEdge) -> DockDismissal {
-        dismissals[edge] ?? edge.defaultDismissal
+    func dismissal(of id: String) -> DockDismissal {
+        dismissals[id] ?? edge(of: id)?.defaultDismissal ?? .pinned
     }
 
     /// `onChange` fires like every other write here. The controllers read this
-    /// live, but the drag handle is installed with the panel, so an edge whose
+    /// live, but the drag handle is installed with the panel, so a tool whose
     /// setting changed while its dock was open would otherwise carry the wrong
     /// affordance until the next time it opened.
-    func setDismissal(_ value: DockDismissal, on edge: DockEdge) {
-        guard dismissal(on: edge) != value else { return }
-        dismissals[edge] = value == edge.defaultDismissal ? nil : value
+    func setDismissal(_ value: DockDismissal, of id: String) {
+        guard dismissal(of: id) != value else { return }
+        let fallback = edge(of: id)?.defaultDismissal ?? .pinned
+        dismissals[id] = value == fallback ? nil : value
         save()
         onChange?()
     }
@@ -197,12 +205,10 @@ final class DockStore: ObservableObject {
     private func loadDismissals() {
         guard let raw = defaults.dictionary(forKey: Self.dismissalsDefaultsKey) as? [String: String]
         else { return }
-        var loaded: [DockEdge: DockDismissal] = [:]
+        var loaded: [String: DockDismissal] = [:]
         for (key, value) in raw {
-            guard let edge = DockEdge(rawValue: key),
-                  let mode = DockDismissal(rawValue: value)
-            else { continue }
-            loaded[edge] = mode
+            guard let mode = DockDismissal(rawValue: value) else { continue }
+            loaded[key] = mode
         }
         dismissals = loaded
     }
@@ -215,8 +221,8 @@ final class DockStore: ObservableObject {
         defaults.set(raw, forKey: Self.defaultsKey)
 
         var modes: [String: String] = [:]
-        for (edge, mode) in dismissals where mode != edge.defaultDismissal {
-            modes[edge.rawValue] = mode.rawValue
+        for (id, mode) in dismissals {
+            modes[id] = mode.rawValue
         }
         defaults.set(modes, forKey: Self.dismissalsDefaultsKey)
     }
