@@ -53,8 +53,9 @@ struct VoiceSection: View {
     private var accessory: AnyView? {
         switch bridge.voiceTab {
         case 3, 4:
+            let label = snippetKind == .snippet ? "Add snippet" : "Add word"
             return AnyView(
-                SecondaryButton(title: snippetKind == .snippet ? "Add snippet" : "Add word") {
+                ResetDiscButton(symbol: "plus", label: label, accessibilityTitle: label) {
                     isAddingNew = true
                 }
             )
