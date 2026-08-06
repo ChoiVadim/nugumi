@@ -469,6 +469,24 @@ share of users regardless of what looks right.
   and the rule is what let it go: the sentence now lives on one gizmo's editor,
   where there is no neighbour to be confused with. The hub has no editor and
   needs none — nothing anywhere claims it runs.
+- **Dropping files in follows Finder, because the hub shows Finder's folders.**
+  The folder hub is a view onto real directories, so a drop onto it is the same
+  act as a drop onto a Finder window and gets the same rule: within a volume it
+  moves, across volumes it copies, Option always copies. The same gesture doing
+  two different things depending on which window caught it is the thing to
+  avoid, not the extra branch. A drop back into the folder something already
+  lives in is Finder's no-op too, except under Option, where it is a deliberate
+  duplicate.
+  Nothing is ever overwritten. A drop has no undo and is aimed by hand, so a
+  name already in use takes Finder's suffix — `a.txt` becomes `a 2.txt`, and
+  `a.tar.gz` becomes `a.tar 2.gz` because the last extension is the extension.
+  `FolderHubDrop` keeps the two decisions that matter — which operation, which
+  name — as pure functions, so both are pinned by tests rather than by a
+  careful read.
+  The chips take drops as well as the body: a file bound for Documents should
+  not need you to switch to Documents first. And the work runs off the main
+  actor, because copying a folder is unbounded and the panel that accepted the
+  drop is the one that would freeze.
 - **One tool never configures itself in the main window.** The folder hub's
   folder list once lived two places at once: `FolderHubView`'s own chips, for
   use once it's docked, and a second, independent view onto the same

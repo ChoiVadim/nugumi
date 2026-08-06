@@ -34,6 +34,10 @@ struct FolderHubView: View {
     /// changes: an id that is no longer on screen would keep contributing a
     /// file to every drag from a folder it isn't even in.
     @State private var selectedFiles: Set<String> = []
+    /// Why the last drop did not land. Cleared by the next one that does, so a
+    /// stale complaint never outlives the thing it was about.
+    @State private var dropProblem: String?
+    @State private var isDropTargeted = false
 
     /// The one layout this hub ever draws — declared once rather than built
     /// per render, the same way a gizmo's candidate layout is decoded once
@@ -82,6 +86,12 @@ struct FolderHubView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            if let dropProblem {
+                Text(dropProblem)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color(red: 1, green: 0.55, blue: 0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             // A folder listing never fails to refresh — it's a synchronous
             // `FileManager` read, not a script that can be unapproved, throw,
             // or exit non-zero — so there is no failure caption to show.
@@ -106,6 +116,21 @@ struct FolderHubView: View {
                     },
                     dragURLs: dragURLs
                 ))
+                // The listing fills the panel, so this is the whole body: a
+                // drop anywhere below the chips lands where you are standing,
+                // which is `current` rather than `selected` — having walked
+                // into a subfolder, that is the folder you are looking at.
+                .dropTarget(isTargeted: $isDropTargeted) { accept($0, into: current) }
+                // Says where it will land, which a grid that already fills the
+                // panel cannot say by highlighting a row: there is no row yet.
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                        .foregroundStyle(isDropTargeted ? FlowTheme.ink.opacity(0.5) : .clear)
+                        .padding(-4)
+                        .allowsHitTesting(false)
+                )
+                .animation(.easeOut(duration: 0.12), value: isDropTargeted)
         }
         .padding(14)
         .foregroundStyle(FlowTheme.ink)
@@ -161,6 +186,10 @@ struct FolderHubView: View {
                 } else {
                     ForEach(store.folders, id: \.path) { folder in
                         chip(for: folder)
+                            // Straight into that folder, without switching to
+                            // it first. Two steps for one intention is what a
+                            // shelf exists to remove.
+                            .dropTarget { accept($0, into: folder) }
                     }
                 }
             }
@@ -170,6 +199,33 @@ struct FolderHubView: View {
     }
 
     private var isBrowsingDeeper: Bool { current?.path != selected?.path }
+
+    // MARK: - Dropping in
+
+    /// Takes files dropped from anywhere and reports what went wrong if it did.
+    ///
+    /// Off the main actor because copying a folder is unbounded work, and this
+    /// panel is what the drop landed on: a dropped 5GB directory must not
+    /// freeze the thing that accepted it. `Option` is read here rather than
+    /// passed in — SwiftUI's drop callback carries no modifiers, and the flag
+    /// is live for as long as the drag is.
+    private func accept(_ urls: [URL], into folder: URL?) {
+        guard let folder, !urls.isEmpty else { return }
+        let optionHeld = NSEvent.modifierFlags.contains(.option)
+        Task {
+            do {
+                _ = try await Task.detached(priority: .userInitiated) {
+                    try FolderHubDrop.perform(urls, into: folder, optionHeld: optionHeld)
+                }.value
+                dropProblem = nil
+            } catch {
+                dropProblem = error.localizedDescription
+            }
+            // Whatever happened, the folder on screen may no longer match the
+            // folder on disk — a partial batch lands some of its files.
+            refresh(in: current)
+        }
+    }
 
     /// The root chip, then every folder walked into on the way here.
     ///
@@ -363,6 +419,29 @@ struct FolderHubView: View {
             // answering. Only the folder still being shown gets to fill it.
             guard current?.path == folder.path else { return }
             rows = fresh
+        }
+    }
+}
+
+/// A file-drop target that lights up while something is over it.
+///
+/// `URL` rather than a bespoke `Transferable`: Finder puts `public.file-url` on
+/// the pasteboard and the system knows that type. A custom `UTType(exportedAs:)`
+/// would not be registered anywhere — it has to be declared in an `Info.plist`,
+/// and under `swift run` there is no bundle to declare it in, which is exactly
+/// how the Edges figure's drag came to pick up and never drop.
+private extension View {
+    func dropTarget(
+        isTargeted: Binding<Bool>? = nil,
+        _ handle: @escaping ([URL]) -> Void
+    ) -> some View {
+        dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard !files.isEmpty else { return false }
+            handle(files)
+            return true
+        } isTargeted: { targeted in
+            isTargeted?.wrappedValue = targeted
         }
     }
 }
