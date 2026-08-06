@@ -49,6 +49,11 @@ final class AskConversationStore: ObservableObject {
     /// model streams into it; `failure` replaces it when the request dies.
     struct Pending: Equatable {
         let question: String
+        /// Whether this turn is sending a picture. The composer says which of
+        /// the two waits is happening rather than showing one spinner for both:
+        /// a named step buys far more patience than an animation, and "reading
+        /// your screen" is a different wait from "thinking".
+        let usesScreen: Bool
         var answer: String = ""
         var failure: String?
     }
@@ -131,12 +136,12 @@ final class AskConversationStore: ObservableObject {
         let wantsImage = armedFrame != nil || attachesScreen
 
         if let problem = engine.setupError(wantsImage) {
-            pending = Pending(question: clean, failure: problem)
+            pending = Pending(question: clean, usesScreen: wantsImage, failure: problem)
             return
         }
 
         engine.clearAnnotations()
-        pending = Pending(question: clean)
+        pending = Pending(question: clean, usesScreen: wantsImage)
         turn += 1
         let token = turn
         let history = turns
