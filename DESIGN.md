@@ -130,6 +130,17 @@ The failure mode is not "it feels slow", it is "the button is broken". A person
 who sees no change assumes the click missed and clicks again, which is also what
 a developer watching them concludes.
 
+**Selection state does not belong in the environment.** An environment value
+invalidates every view that reads it, so `SurfaceSelection` carrying the lit ids
+meant one click rebuilt all eighty cards — and each card owns an
+`NSViewRepresentable` with an AppKit view under the pointer, so the second press
+of a double-click landed on a mouse view the first press had just torn down and
+rebuilt. "Clicking a folder does nothing the first time" and "switching feels
+slow" were one bug wearing two faces. What goes in the environment is how to
+*act* (closures that read the host's live state, so they never count as
+changed); which rows are *lit* is a plain value handed down the tree, so only
+the cards whose state actually changed re-render.
+
 
 
 ### Timing
@@ -346,6 +357,12 @@ share of users regardless of what looks right.
 - **Draw thin, but hit big.** `DockDragHandle` is 4pt of ink inside a 14pt
   column that runs the panel's full length. A 4pt target is a miss waiting to
   happen.
+- **Say which file is selected with a shape, not a shade.** A selected card and
+  an unselected one were two whites a tenth of an alpha apart, on a translucent
+  panel, over an arbitrary desktop. Gizmate has no colour accent to reach for
+  (§2), so the shape carries it: a selected card takes an outline, which is
+  present or absent and cannot be washed halfway out by a wallpaper. Same
+  mistake and same fix as the tab strip below.
 - **Say which one is open with a shape, not a shade.** `DockTabStrip` marked
   the active tab by tint alone — `ink` against `inkSecondary` — on the argument
   that the glass is already the surface being pressed and a plate fights the

@@ -13,20 +13,31 @@ import SwiftUI
 /// select, activate and drag together — rather than keep half of it in
 /// SwiftUI gestures the overlay would swallow anyway.
 struct SurfaceSelection: Equatable {
-    /// Compared by the selection alone. The closures are rebuilt on every
-    /// render of the host and can never compare equal, so without this an
-    /// environment value carrying them counts as changed whenever *anything*
-    /// in the host changes — a chip hovering, a chip arming — and every card
-    /// on the shelf re-evaluates for it. Ignoring them is safe because they
-    /// hold no captured state of their own: each one reads the host's
-    /// `@State` through its storage box, so a "stale" closure still sees the
-    /// current selection and the current rows.
-    static func == (lhs: SurfaceSelection, rhs: SurfaceSelection) -> Bool {
-        lhs.ids == rhs.ids
-    }
+    /// Always equal, and that is the point.
+    ///
+    /// This used to carry `ids` and compare on them, which made every click
+    /// change the environment value — and an environment value changing
+    /// invalidates *every* view that reads it. One file selected therefore
+    /// rebuilt all eighty cards, each of which owns an `NSViewRepresentable`
+    /// with an AppKit view under the pointer. That is what made a folder feel
+    /// slow to click, and what ate the first of a double-click: the second
+    /// press landed on a mouse view that had just been torn down and rebuilt
+    /// by the first.
+    ///
+    /// Nothing here holds state of its own. Every closure reads the host's
+    /// `@State` through its storage box, so a "stale" one still sees the
+    /// current selection and the current rows — which is exactly why it is
+    /// safe for this never to count as changed. Which cards are *lit* is a
+    /// separate question, answered by a plain `Bool` handed down the view tree
+    /// (`SurfaceView.selectedIDs`), so only the two cards that actually
+    /// changed re-render.
+    static func == (lhs: SurfaceSelection, rhs: SurfaceSelection) -> Bool { true }
 
-    /// The row ids lit right now — a snapshot, re-handed on every render.
-    var ids: Set<String>
+    /// Whether this row is lit right now, read live rather than captured, for
+    /// `SurfaceCardMouse`'s press handling — Finder's rule that a press on an
+    /// already-selected card must not collapse the selection needs the answer
+    /// at press time, not at render time.
+    var isSelected: (SurfaceRow) -> Bool
     /// A click landed on this row. `command` is held for a toggle; what a
     /// plain click means is the host's to decide, since the host owns both the
     /// selection and the order the rows are in.
@@ -36,7 +47,7 @@ struct SurfaceSelection: Equatable {
     var onTrashed: ((Error?) -> Void)?
     /// The files a drag starting on this row should carry, in the order shown.
     /// Empty means no drag at all — a row with nothing to hand over must not
-    /// start a session that drops nothing.
+    /// start a session that hands over nothing.
     var dragURLs: (SurfaceRow) -> [URL]
 }
 
@@ -72,7 +83,7 @@ struct SurfaceCardMouse: NSViewRepresentable {
     /// handlers were frozen at first layout would drag whatever was selected
     /// the moment the panel opened.
     private func update(_ view: SurfaceCardMouseView) {
-        view.isSelected = { selection.ids.contains(row.id) }
+        view.isSelected = { selection.isSelected(row) }
         view.onClick = { command in selection.click(row, command) }
         view.onActivate = { activate?(row) }
         view.urls = { selection.dragURLs(row) }

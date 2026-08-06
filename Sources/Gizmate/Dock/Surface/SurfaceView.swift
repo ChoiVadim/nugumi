@@ -33,6 +33,11 @@ struct SurfaceView: View {
     /// view only ever draws whatever string it's handed rather than
     /// deciding "stale" for itself and losing the real reason underneath.
     let stale: String?
+    /// Which rows are lit. A value handed down the tree rather than read from
+    /// the environment, so a click re-renders the two cards whose state changed
+    /// instead of all eighty — see `SurfaceSelection`'s own comment for what
+    /// that cost. Empty for every gizmo surface, which has no selection.
+    var selectedIDs: Set<String> = []
 
     var body: some View {
         // `GeometryReader` here, not inside `OverlayScrollHost`: its document
@@ -52,7 +57,10 @@ struct SurfaceView: View {
         GeometryReader { geo in
             OverlayScrollHost {
                 VStack(alignment: .leading, spacing: 8) {
-                    SurfaceTreeView(node: layout, rows: rows, availableWidth: geo.size.width)
+                    SurfaceTreeView(
+                        node: layout, rows: rows, availableWidth: geo.size.width,
+                        selectedIDs: selectedIDs
+                    )
                     if let stale {
                         Text(stale)
                             .font(.system(size: 12))
@@ -81,6 +89,7 @@ private struct SurfaceTreeView: View {
     /// column count from inside it. Unused by `.list`, which was already
     /// eager and never had this problem.
     let availableWidth: CGFloat
+    var selectedIDs: Set<String> = []
 
     var body: some View {
         switch node {
@@ -88,7 +97,10 @@ private struct SurfaceTreeView: View {
             if rows.isEmpty {
                 SurfaceEmptyLabel(text: empty)
             } else {
-                SurfaceGrid(cell: cell, rows: rows, minimumWidth: CGFloat(minimumWidth), availableWidth: availableWidth)
+                SurfaceGrid(
+                    cell: cell, rows: rows, minimumWidth: CGFloat(minimumWidth),
+                    availableWidth: availableWidth, selectedIDs: selectedIDs
+                )
             }
 
         case let .list(rowNode, empty):
@@ -97,7 +109,7 @@ private struct SurfaceTreeView: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(rows, id: \.id) { row in
-                        SurfaceLeafView(node: rowNode, row: row)
+                        SurfaceLeafView(node: rowNode, row: row, isSelected: selectedIDs.contains(row.id))
                     }
                 }
             }
@@ -109,7 +121,7 @@ private struct SurfaceTreeView: View {
             // Render it once against the first row rather than an empty
             // panel, so the bug is visible instead of silent.
             if let first = rows.first {
-                SurfaceLeafView(node: node, row: first)
+                SurfaceLeafView(node: node, row: first, isSelected: selectedIDs.contains(first.id))
             }
         }
     }
@@ -131,6 +143,7 @@ private struct SurfaceGrid: View {
     let rows: [SurfaceRow]
     let minimumWidth: CGFloat
     let availableWidth: CGFloat
+    var selectedIDs: Set<String> = []
 
     private static let spacing: CGFloat = 8
 
@@ -167,7 +180,10 @@ private struct SurfaceGrid: View {
                         // already given. Every card in the grid is then the
                         // same size whatever its name wraps to, which is the
                         // one thing a grid of files has to look like.
-                        SurfaceLeafView(node: cell, row: row, height: columnWidth)
+                        SurfaceLeafView(
+                            node: cell, row: row, height: columnWidth,
+                            isSelected: selectedIDs.contains(row.id)
+                        )
                             .frame(width: columnWidth, alignment: .topLeading)
                     }
                 }
@@ -190,11 +206,15 @@ private struct SurfaceLeafView: View {
     /// Passed straight to `SurfaceCard` — a grid fixes it so its cells match,
     /// a list leaves it `nil`. See that property's own comment.
     var height: CGFloat? = nil
+    var isSelected: Bool = false
 
     var body: some View {
         switch node {
         case let .card(title, subtitle, icon, drag, tap):
-            SurfaceCard(title: title, subtitle: subtitle, icon: icon, drag: drag, tap: tap, row: row, height: height)
+            SurfaceCard(
+                title: title, subtitle: subtitle, icon: icon, drag: drag, tap: tap,
+                row: row, height: height, isSelected: isSelected
+            )
 
         case let .text(binding):
             Text(SurfaceBinding.resolve(binding, in: row))

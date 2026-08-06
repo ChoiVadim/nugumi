@@ -107,10 +107,10 @@ struct FolderHubView: View {
             // A folder listing never fails to refresh — it's a synchronous
             // `FileManager` read, not a script that can be unapproved, throw,
             // or exit non-zero — so there is no failure caption to show.
-            SurfaceView(layout: Self.layout, rows: rows, stale: nil)
+            SurfaceView(layout: Self.layout, rows: rows, stale: nil, selectedIDs: selectedFiles)
                 .environment(\.surfaceActivate, activate)
                 .environment(\.surfaceSelection, SurfaceSelection(
-                    ids: selectedFiles,
+                    isSelected: { selectedFiles.contains($0.id) },
                     click: { row, command in
                         if command {
                             // The only way back to nothing selected — there is

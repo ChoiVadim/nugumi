@@ -21,13 +21,11 @@ struct SurfaceCard: View {
     /// column width here, which is what makes a cell square. `nil` in a list,
     /// where a row is as tall as its own content and always was.
     var height: CGFloat? = nil
-
-    /// Only a host that installed a `SurfaceSelection` has selected cards to
-    /// draw; for every gizmo surface this stays `nil` and the card looks and
-    /// behaves exactly as it did before selection existed.
-    @Environment(\.surfaceSelection) private var selection
-
-    private var isSelected: Bool { selection?.ids.contains(row.id) == true }
+    /// Handed down rather than read from the environment. An environment value
+    /// invalidates every view that reads it, so selection living there meant
+    /// one click rebuilt all eighty cards — see `SurfaceSelection`'s comment.
+    /// Always false for a gizmo surface, which has no selection.
+    var isSelected: Bool = false
 
     private var resolvedTitle: String { SurfaceBinding.resolve(title, in: row) }
 
@@ -97,6 +95,17 @@ struct SurfaceCard: View {
                 // that already sits on a hairline-free glass panel reads as a
                 // second card edge, and at 110pt there is no room for both.
                 .fill(isSelected ? FlowTheme.accentSoft : FlowTheme.subtleFill)
+        )
+        // A border, not just a brighter fill. Selected and unselected were two
+        // whites a tenth of an alpha apart, on a translucent panel, over an
+        // arbitrary desktop — the same "shade, not shape" mistake the dock's
+        // tab strip made, and unreadable for the same reason. Gizmate has no
+        // colour accent to reach for (DESIGN.md §2), so the shape does the
+        // work: an outline is present or absent, which no wallpaper can wash
+        // out halfway.
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(FlowTheme.ink.opacity(isSelected ? 0.75 : 0), lineWidth: 1.5)
         )
         .contentShape(Rectangle())
         .modifier(SurfaceCardInteractionModifier(drag: drag, tap: tap, row: row))
