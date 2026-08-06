@@ -90,6 +90,24 @@ final class EdgeDockController {
         panel.hasShadow = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        observeMenuTracking()
+    }
+
+    /// A context menu is its own window, so the pointer moving onto the menu a
+    /// card just opened reads as the pointer leaving the panel — and a peek
+    /// would close underneath the menu the user is still choosing from. Any
+    /// menu counts, not just a card's: while one is tracking, the pointer is
+    /// not saying anything about this dock.
+    private func observeMenuTracking() {
+        let center = NotificationCenter.default
+        for (name, tracking) in [
+            (NSMenu.didBeginTrackingNotification, true),
+            (NSMenu.didEndTrackingNotification, false),
+        ] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in self?.menuIsTracking = tracking }
+            }
+        }
     }
 
     /// An open side dock is a window the user asked for, so it stays until they
@@ -114,6 +132,8 @@ final class EdgeDockController {
         guard let screen else { return }
         // A result is showing: it owns the edge until it closes itself.
         guard transientResult == nil else { return }
+        // A menu is open somewhere — see `observeMenuTracking`.
+        guard !menuIsTracking else { return }
         let items = dockItems()
         guard !items.isEmpty else { return }
 
@@ -189,6 +209,9 @@ final class EdgeDockController {
     /// A result panel routed here instead of floating. It takes the edge over
     /// while it is up, and the edge's own surface comes back when it closes.
     private var transientResult: NSView?
+
+    /// Whether any menu is on screen right now — see `observeMenuTracking`.
+    private var menuIsTracking = false
 
     /// The seam `TranslationPanelController` uses. Weak on the way in, so a dock
     /// that goes away cannot keep a result alive.

@@ -96,9 +96,24 @@ final class SurfaceCardMouseView: NSView, NSDraggingSource {
     /// collapse to that one card is waiting to see whether a drag happens.
     private var collapseOnMouseUp = false
 
+    /// The menu currently on screen, held strongly: an `NSMenuItem` targets
+    /// its object weakly, so nothing else would keep the actions alive long
+    /// enough to be clicked.
+    private var menuTarget: FileActionMenu?
+
     /// The panel is non-activating, so without this the click that reaches a
     /// card from another app is spent activating Gizmate instead.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Right-click. `urls()` applies Finder's own rule on the way — a card
+    /// outside the selection becomes the selection — so the menu is always
+    /// about what the user is looking at, never about a selection they left
+    /// behind in another folder.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let target = FileActionMenu(urls: urls())
+        menuTarget = target
+        return target.makeMenu()
+    }
 
     override func mouseDown(with event: NSEvent) {
         pressed = event

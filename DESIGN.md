@@ -497,6 +497,21 @@ Inside that fixed cell:
   it is not a shelf's call to make. Dragging a card outside the selection
   drags it alone and makes it the selection, Finder's rule, so a selection
   made three folders ago can't ride along with the file under the pointer.
+- **The right-click menu is Finder's subset, not Finder's menu.** No API hands
+  over Finder's own menu, so a card builds its own: Open, Open With (from
+  `NSWorkspace.urlsForApplications(toOpen:)`, the list Finder's submenu is
+  built from), Get Info, Show in Finder, Copy. No Move to Trash — a shelf whose
+  job is handing files to other apps must not be one stray click from deleting
+  them, and the Finder it can already reveal into has the real thing. Get Info
+  is the one item with no framework behind it: it is an Apple event to Finder,
+  which is why the filename is escaped on the way into the script rather than
+  interpolated. A right-click inside the selection acts on all of it, and the
+  item says so ("Open 9 Items") rather than let the user find out after.
+- **A menu on screen suspends a peek's hover logic.** A context menu is its own
+  window, so the pointer moving onto it reads as the pointer leaving the panel,
+  and the top dock would close underneath the menu the user is still choosing
+  from. `EdgeDockController` watches `NSMenu.didBeginTracking` and ignores
+  pointer moves until it ends.
 - **A plain press collapses a selection on mouse-_up_, not mouse-down.** This
   is the difference between multi-drag working and not: a drag reads the
   selection as it stands, so collapsing to one card the moment the button goes
