@@ -552,9 +552,24 @@ final class EdgeDockController {
             style: .regular,
             cornerPath: { DockGeometry.panelPath(for: dockEdge, in: $0) }
         )
-        host.autoresizingMask = [.width, .height]
         root.addSubview(host)
         glass = host
+        // Constraints, not an autoresizing mask, and `GlassHostView` says why
+        // three lines below its own initialiser: interrupting an in-flight
+        // `animator().frame` animation drops autoresizing deltas, so a
+        // full-bleed subview drifts smaller with every interrupted cycle. That
+        // class heals its own subviews on resize; nothing was healing the host
+        // itself, and a dock's frame is animated on every single reveal. Open
+        // and close one enough times and the glass ends up a fraction of the
+        // window it lives in, with the content laid out inside that fraction.
+        // Constraints re-solve every layout pass and cannot drop anything.
+        host.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            host.topAnchor.constraint(equalTo: root.topAnchor),
+            host.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
 
         // Keep the content off the flare — the shape pulls in by
         // `inverseCornerRadius` on the bezel side — and, at the top, off the
