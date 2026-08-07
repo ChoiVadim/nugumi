@@ -115,13 +115,13 @@ All spacing maps to the 4px grid.
 ### A press lands on the frame it happened
 
 The control's own state — the selected chip, the opened panel, the pressed tab
-— changes on the same frame as the click. Whatever the press *loads* arrives
+— changes on the same frame as the click. Whatever the press _loads_ arrives
 after, into a container that has already switched.
 
 Never gate a selection on the work it triggers, and watch for the version of
 this that hides inside a chain of `.onChange`. The folder hub's chips set
 `selected`, one `onChange` set `current`, and a second cleared the rows — so the
-first frame after a click carried the new highlight *and* the previous folder's
+first frame after a click carried the new highlight _and_ the previous folder's
 eighty cards, and the highlight waited on a grid that was about to be thrown
 away. `FolderHubView.show(_:asRoot:)` now does the whole switch in the tap:
 select, clear, then load.
@@ -137,11 +137,9 @@ meant one click rebuilt all eighty cards — and each card owns an
 of a double-click landed on a mouse view the first press had just torn down and
 rebuilt. "Clicking a folder does nothing the first time" and "switching feels
 slow" were one bug wearing two faces. What goes in the environment is how to
-*act* (closures that read the host's live state, so they never count as
-changed); which rows are *lit* is a plain value handed down the tree, so only
+_act_ (closures that read the host's live state, so they never count as
+changed); which rows are _lit_ is a plain value handed down the tree, so only
 the cards whose state actually changed re-render.
-
-
 
 ### Timing
 
@@ -283,7 +281,7 @@ share of users regardless of what looks right.
   about. `DockStore.dismissal(of:)` is keyed by tool now, and the control lives
   in the tool's own tile on the figure — on the thing it is about, the same rule
   every other decision on that screen follows.
-  The edge still supplies the *default*, because that part really is about the
+  The edge still supplies the _default_, because that part really is about the
   edge's shape: the notch is a glance, the sides are somewhere you work. Absent
   means "whatever this edge does", so a tool dragged to another edge picks up
   that edge's habit rather than carrying a choice it never made.
@@ -520,7 +518,7 @@ share of users regardless of what looks right.
   the function three of them called. The fourth set `current` directly, so
   walking back up the crumb trail moved the crumbs and left the grid showing the
   folder you had just left. Loading now hangs off `current` changing, which no
-  caller can forget to do, and the callers only decide *what* to show. The one
+  caller can forget to do, and the callers only decide _what_ to show. The one
   thing they still do themselves is clear the old rows, in the same action as
   the switch, because §6 needs the press to land on its own frame.
 - **Dropping files in follows Finder, because the hub shows Finder's folders.**
@@ -772,3 +770,56 @@ are structural. Neither is reachable by adjusting spacing.
 
 Never write "translate", "translation" or "translator" in anything the user
 reads. Prefer results, replies, output. Code identifiers are exempt.
+
+## 16. A directory says what a thing is, not only where it is
+
+Home is the worked example, and every rule below was paid for there. It listed
+ten built-ins and every gizmo as `icon · name · where it lives`, which sounds
+complete and answered none of the question the sidebar says this screen exists
+for ("what can Gizmate do").
+
+- **Show the thing, not the pointer to it.** `RingActionID.summary` and
+  `GizmateTool.brief` already held a plain sentence for every tool, and both
+  were drawn only inside the ring's slot picker — a modal you reach by already
+  knowing what you want. A directory that omits the one field describing its
+  contents is a table of contents over itself, the same failure §14 names for a
+  settings page that lists field names instead of field values.
+- **A repeated default drowns its exception.** With almost every built-in on the
+  ring, the trailing column printed "In the ring." eight times, and the two rows
+  that differed had to be found inside that repetition. Trailing metadata is a
+  **value** — `Ring`, `Ring › More`, `⌃⌥Z`, `Right edge`, `Nowhere` — never a
+  sentence. The eye reads the shape of a short token; it has to parse prose.
+- **A per-item marker that turns out to be the majority belongs on the group.**
+  `.nowhere` earned a capsule by §11's "shape, not a shade" rule, and the first
+  build tinted it as well, on the assumption the state was rare. A real library
+  is mostly unplaced gizmos: nine lit capsules down one column mark nothing.
+  The capsule stayed (present-or-absent is the part that works), the tint went,
+  and the count moved to the group heading — "9 of 11 live nowhere", said once.
+  Emphasis is relative, so any treatment for an exceptional state has to survive
+  the case where the exception is the majority.
+- **An empty state carries the action, not directions to it.** Home's read "Use
+  “New gizmo” above to build one" while that button was a bare `+` whose label
+  only drew on hover — copy naming a string that was not on screen. The empty
+  state holds a real button now, and the header's is labelled. A glyph-only
+  control is right for a reset nobody is hunting for (`ResetDiscButton`) and
+  wrong for the one action a screen exists to offer.
+- **A list of things you own is a grid of tiles.** Ring and Edges each draw a
+  figure; Home drawing a flat two-column table read as a spreadsheet beside
+  them, with a name at the left edge, one short value at the right and two
+  thirds of the line empty. Tiles spend that width, and they are what gives the
+  glyphs weight — at 15pt in `inkSecondary` an icon is decoration, at 17pt on a
+  tinted disc it is how you find a tool without reading. No `SubCard` around
+  them: a tile is already a card and §4 forbids the nesting.
+- **Let the grid row set tile height; do not pin a constant.** `LazyVGrid`
+  already gives every tile in a row the tallest one's height, so
+  `maxHeight: .infinity` above a `Spacer` lines the footers up while a row of
+  one-liners stays short. A fixed height bought that same alignment and charged
+  every short tile a hole beneath its text. §13's fixed cell is the other case
+  and stays: a square grid of files inherits height from the column width, and
+  uniform cells there are the whole point.
+- **Home is not a third figure.** The tempting next step is to draw the ring and
+  the screen edges here with every tool on them. It is the wrong step: §11 makes
+  `EdgesDiagram` and the Ring tab the only writers of placement, and a picture of
+  where things live that cannot move them is a control that lies. Home names each
+  tool's home in words and links to the editor; deciding the home stays where the
+  one writer for it already is.

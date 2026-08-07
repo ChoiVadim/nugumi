@@ -46,7 +46,9 @@ Rules that fall out of this, all of them paid for:
 - **Nothing may live nowhere without saying so.** A tool is usable only if it
   has a ring slot or an edge. Creating one no longer requires picking a slot
   first, so "created" and "reachable" became independent; `HomeSection` states
-  a tool's home on its row, including "Lives nowhere yet."
+  a tool's home on its tile, including "Nowhere", and counts them once at the
+  group heading ("9 of 11 live nowhere") rather than nine times down a column.
+  See DESIGN.md §16 for why that screen is a grid of tiles rather than a list.
 - **Every "what can be placed" set needs a parity test.** Five now exist in
   `Tests/GizmateTests/ToolProtocolEnumParityTests.swift`. This defect class —
   a thing reaching every layer and missing the one UI control that made it

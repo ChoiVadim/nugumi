@@ -403,8 +403,13 @@ final class DockPlacementParityTests: XCTestCase {
             return XCTFail("a tool on no ring slot and no edge must read back as `.nowhere`")
         }
         XCTAssertEqual(
-            location(for: stranded).label, "Lives nowhere yet.",
+            location(for: stranded).label, "Nowhere",
             "the row's own copy for this state changed without this test noticing"
+        )
+        XCTAssertTrue(
+            location(for: stranded).needsAttention,
+            "an unplaced tool is the one state on Home worth noticing, so it must "
+                + "keep the treatment that separates it from nine identical values"
         )
     }
 
@@ -471,7 +476,15 @@ final class DockPlacementParityTests: XCTestCase {
             shortcut, GlobalShortcutAction.explainSelection.defaultShortcut,
             "an untouched suite should resolve to the action's default binding"
         )
-        XCTAssertEqual(location.label, "Runs with \(shortcut.displayString).")
+        // The binding itself, not a sentence about it. See DESIGN.md §16: with
+        // nearly every built-in on the ring, a column of full sentences printed
+        // "In the ring." eight times and buried the two rows that differed.
+        XCTAssertEqual(location.label, shortcut.displayString)
+        XCTAssertFalse(
+            location.needsAttention,
+            "a built-in its shortcut still runs is reachable, so it must not take "
+                + "the treatment Home uses to mark a tool nothing points at"
+        )
     }
 
     /// I3: `RingLayoutStore.assign` and `DockStore.dock` never call each
