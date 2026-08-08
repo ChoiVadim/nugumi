@@ -27,7 +27,7 @@ The sidebar has one place per question a person actually has:
 
 | Section   | The question it answers                      |
 | --------- | -------------------------------------------- |
-| **Home**  | What can Gizmate do — and build me a new one |
+| **Home**  | Talk to Gizmate, and build or change a gizmo |
 | **Ring**  | What is under my cursor                      |
 | **Edges** | What is on my screen borders                 |
 

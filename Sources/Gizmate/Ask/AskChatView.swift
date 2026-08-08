@@ -124,40 +124,9 @@ struct AskChatView: View {
         .padding(.top, 8)
     }
 
-    /// Sized to its own text and pushed right, with a hard gap on its left so a
-    /// long question never becomes a full-width slab indistinguishable from the
-    /// answer under it.
-    private func question(_ text: String) -> some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 28)
-            Text(text)
-                .font(.system(size: 12.5))
-                .foregroundStyle(FlowTheme.ink)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 11)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(FlowTheme.subtleFill)
-                )
-        }
-    }
+    private func question(_ text: String) -> some View { ChatQuestionBubble(text: text) }
 
-    /// Markdown through `TranslationContentView.renderedMarkdownText`, the same
-    /// renderer the floating answer panel uses rather than a second one that
-    /// would drift from it (DESIGN.md §12), and shown in AppKit so its work
-    /// survives — see `MarkdownLabel`.
-    private func answer(_ text: String) -> some View {
-        MarkdownLabel(
-            text: TranslationContentView.renderedMarkdownText(
-                text,
-                font: .systemFont(ofSize: 12.5),
-                color: NSColor(calibratedWhite: 1, alpha: 0.9)
-            )
-        )
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    private func answer(_ text: String) -> some View { ChatAnswerText(markdown: text) }
 
     /// Names the wait instead of spinning at it. The two waits are genuinely
     /// different lengths, and saying which one you are in is what buys patience.
@@ -167,13 +136,7 @@ struct AskChatView: View {
             .foregroundStyle(FlowTheme.inkTertiary)
     }
 
-    private func problem(_ message: String) -> some View {
-        Text(message)
-            .font(.system(size: 12))
-            .foregroundStyle(Color(red: 1, green: 0.55, blue: 0.55))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    private func problem(_ message: String) -> some View { ChatProblemText(message: message) }
 
     // MARK: - Composer
 
@@ -292,49 +255,5 @@ struct AskChatView: View {
         draft = ""
         conversation.send(text)
         composerFocused = true
-    }
-}
-
-/// An answer, drawn by AppKit.
-///
-/// SwiftUI's `Text(AttributedString(nsAttributed))` drops paragraph styles, and
-/// paragraph styles are most of what `renderedMarkdownText` produces: the space
-/// between blocks, and the hanging indent that keeps a wrapped bullet aligned
-/// under its own text instead of back at the margin. Both were silently
-/// missing, so a list arrived as a bullet, a wide tab from an unhandled tab
-/// stop, and every following line flush left — the renderer was working and
-/// SwiftUI was throwing half of it away.
-///
-/// `NSTextField` rather than the `NSTextView` the floating panel uses: this one
-/// never scrolls or edits, and a label reports its own height, which is what a
-/// stack of them in a transcript needs.
-private struct MarkdownLabel: NSViewRepresentable {
-    let text: NSAttributedString
-
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(labelWithAttributedString: text)
-        field.isSelectable = true
-        field.allowsEditingTextAttributes = false
-        field.lineBreakMode = .byWordWrapping
-        field.maximumNumberOfLines = 0
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return field
-    }
-
-    func updateNSView(_ field: NSTextField, context: Context) {
-        field.attributedStringValue = text
-    }
-
-    /// Height comes from the width SwiftUI is offering. Without this the field
-    /// measures itself as one very long line and the answer is clipped to its
-    /// first row.
-    func sizeThatFits(
-        _ proposal: ProposedViewSize,
-        nsView: NSTextField,
-        context: Context
-    ) -> CGSize? {
-        guard let width = proposal.width, width > 0 else { return nil }
-        nsView.preferredMaxLayoutWidth = width
-        return CGSize(width: width, height: nsView.intrinsicContentSize.height)
     }
 }

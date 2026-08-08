@@ -65,6 +65,8 @@ private final class StubSettingsHost: SettingsHost {
     var dock: DockStore { fatalError("unused by DockCatalogSurfaceTests") }
     var folderHub: FolderHubStore { fatalError("unused by DockCatalogSurfaceTests") }
     var askConversation: AskConversationStore { fatalError("unused by DockCatalogSurfaceTests") }
+    var homeChat: ToolChatConversation { fatalError("unused by DockCatalogSurfaceTests") }
+    func routeHomeChat(_ message: String, tools: [GizmateTool]) async -> ToolChatIntent { .talk }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockCatalogSurfaceTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockCatalogSurfaceTests")

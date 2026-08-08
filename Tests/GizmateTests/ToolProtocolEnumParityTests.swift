@@ -572,6 +572,8 @@ private final class StubBuiltInResidentsHost: SettingsHost {
     var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
     var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
     var askConversation: AskConversationStore { fatalError("unused by DockPlacementParityTests") }
+    var homeChat: ToolChatConversation { fatalError("unused by DockPlacementParityTests") }
+    func routeHomeChat(_ message: String, tools: [GizmateTool]) async -> ToolChatIntent { .talk }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockPlacementParityTests")
@@ -666,6 +668,8 @@ private final class StubEdgesUnplacedHost: SettingsHost {
     var dock: DockStore { fatalError("unused by DockPlacementParityTests") }
     var folderHub: FolderHubStore { fatalError("unused by DockPlacementParityTests") }
     var askConversation: AskConversationStore { fatalError("unused by DockPlacementParityTests") }
+    var homeChat: ToolChatConversation { fatalError("unused by DockPlacementParityTests") }
+    func routeHomeChat(_ message: String, tools: [GizmateTool]) async -> ToolChatIntent { .talk }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockPlacementParityTests")

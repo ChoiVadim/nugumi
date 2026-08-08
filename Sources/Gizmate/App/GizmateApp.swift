@@ -71,6 +71,38 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// runs its own submit path. `askHistory` reads through it so neither can
     /// answer with the other's context missing.
     lazy var askConversation = AskConversationStore(engine: makeAskEngine())
+    /// Home's plain conversation. Same backend as Ask, different transcript and
+    /// different system prompt — see `ToolChatConversation` for why they are not
+    /// one conversation.
+    lazy var homeChat = ToolChatConversation { [weak self] history, question, onPartial in
+        guard let self else { throw CancellationError() }
+        let transcript = history
+            .map { "User: \($0.question)\nGizmate: \($0.answer)" }
+            .joined(separator: "\n\n")
+        let prompt = transcript.isEmpty ? question : "\(transcript)\n\nUser: \(question)"
+        return try await self.askBackend.complete(
+            systemPrompt: Self.homeChatSystemPrompt,
+            userPrompt: prompt,
+            images: [],
+            thinkingLevel: self.askGizmateThinkingLevel,
+            onPartial: onPartial
+        )
+    }
+
+    /// Deliberately not Ask's persona. Ask answers about the screen; this
+    /// answers about Gizmate and about whatever else was asked, and it must not
+    /// claim to see anything, because nothing here sends a picture.
+    static let homeChatSystemPrompt = """
+        You are Gizmate, a macOS assistant. Answer the user's question directly and concisely. \
+        Markdown is welcome where structure helps.
+
+        You cannot see the user's screen in this conversation and must never claim to. \
+        If they ask about something on screen, tell them Ask does that.
+
+        The user can also have you build small tools, called gizmos, by describing what they want. \
+        If they seem to be asking for one, say so in a sentence and let them ask again \
+        rather than describing how to build it yourself.
+        """
     var askHistory: [AskGizmateTurn] { askConversation.turns }
     /// Screen capture taken the moment Ask Gizmate is summoned, before the
     /// prompt steals focus. Activating Gizmate deactivates the frontmost app,

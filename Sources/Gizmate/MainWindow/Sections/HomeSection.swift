@@ -103,20 +103,109 @@ struct HomeSectionContent: View {
     /// leads instead, which is where the second "New gizmo" button lives: the
     /// old copy pointed at a control ("Use “New gizmo” above") whose label is
     /// only drawn on hover, so it named a string that was not on screen.
+    /// What the chat is about, held here so the rail can set it by being
+    /// clicked without knowing what the pane does with it.
+    @State private var subject: HomeChatPane.Subject = .none
+
     var body: some View {
-        DetailContainer(
-            "Home",
-            subtitle: "Everything Gizmate can do, and where each one lives.",
-            accessory: AnyView(newGizmoButton)
-        ) {
-            group(
-                title: "Your gizmos",
-                note: unplacedNote,
-                rows: gizmoRows,
-                empty: AnyView(noGizmosYet)
-            )
-            group(title: "Built-in actions", note: nil, rows: builtInRows, empty: nil)
+        DetailCard {
+            HStack(spacing: 0) {
+                HomeChatPane(tools: tools, subject: $subject)
+                Divider().background(FlowTheme.hairline)
+                rail
+            }
         }
+    }
+
+    /// Everything Gizmate can do, beside the chat rather than instead of it.
+    ///
+    /// The tile grid this replaces answered Home's half of the sidebar contract
+    /// — what can Gizmate do, and where does each one live — and it still has
+    /// to, which is why every row keeps its `location` line and the group keeps
+    /// its count. What it stops being is the way you *reach* a gizmo: clicking
+    /// one used to open a modal, and now it just tells the chat what you are
+    /// talking about.
+    private var rail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                cardHeading("Your gizmos")
+                Spacer(minLength: 8)
+                SecondaryButton(title: "New") { subject = .newTool }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if gizmoRows.isEmpty {
+                        Text("Nothing built yet. Describe what you want in the chat.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 10)
+                    }
+                    ForEach(gizmoRows) { row in
+                        railRow(row, isActive: isActive(row))
+                    }
+                    if let unplacedNote {
+                        Text(unplacedNote)
+                            .font(.system(size: 11))
+                            .foregroundStyle(FlowTheme.inkTertiary)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                    }
+                    cardHeading("Built-in actions")
+                        .padding(.horizontal, 16)
+                        .padding(.top, 22)
+                        .padding(.bottom, 8)
+                    ForEach(builtInRows) { row in
+                        railRow(row, isActive: false)
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+            .scrollIndicators(.never)
+        }
+        .frame(width: 268)
+    }
+
+    /// Lit when the chat is about this gizmo, so the pane and the rail never
+    /// disagree about what you are looking at.
+    private func isActive(_ row: HomeRow) -> Bool {
+        guard case .tool(let tool) = row.identity else { return false }
+        return subject == .tool(tool.id)
+    }
+
+    private func railRow(_ row: HomeRow, isActive: Bool) -> some View {
+        Button { select(row) } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(nsImage: row.icon.image(pointSize: 14))
+                    .renderingMode(.template)
+                    .foregroundStyle(FlowTheme.ink)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title)
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(FlowTheme.ink)
+                        .lineLimit(1)
+                    HomeRowLocationLabel(location: row.location)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isActive ? FlowTheme.accentSoft : .clear)
+                    .padding(.horizontal, 8)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(row.detail ?? row.title)
     }
 
     /// The count said once, at the group, instead of once per tile. A library
@@ -130,82 +219,7 @@ struct HomeSectionContent: View {
         return "\(unplaced) of \(gizmoRows.count) live nowhere"
     }
 
-    /// The front door itself: opens the builder chat with no slot to land in.
-    /// The tool comes back unplaced, findable in the "Your gizmos" list below
-    /// marked "Nowhere"; giving it somewhere to live is a ring slot or an Edges
-    /// pick away, same as for any other unplaced tool today.
-    ///
-    /// A labelled button rather than the `ResetDiscButton` this used to be. That
-    /// control is right for a reset — a bare glyph whose label appears on hover,
-    /// so a destructive-ish affordance nobody is looking for stays quiet — and
-    /// wrong for the one action this whole screen exists to offer. "Build me a
-    /// new one" is half of Home's job per the sidebar's own contract, and a
-    /// naked `+` states none of it until the pointer happens to land on it.
-    private var newGizmoButton: some View {
-        SecondaryButton(title: "New gizmo") {
-            bridge.ringSheet = .toolEditor(id: nil)
-        }
-    }
-
-    /// An empty state that *is* the action, rather than a sentence describing
-    /// where to find it.
-    private var noGizmosYet: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Nothing built yet. Describe what you want and Gizmate writes it.")
-                .font(.system(size: 13))
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            SecondaryButton(title: "New gizmo") {
-                bridge.ringSheet = .toolEditor(id: nil)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     // MARK: - Groups
-
-    /// Tiles, not rows in a `SubCard`. Home was the only section drawing a flat
-    /// list while Ring and Edges each draw a figure, and a two-column table of
-    /// name-and-place read as a spreadsheet next to them. The grid also spends
-    /// width this page had going spare — the old row put a name at the left edge
-    /// and one short value at the right with two thirds of the line empty — and
-    /// it is what finally gives the icons weight: at 15pt in `inkSecondary` they
-    /// were decoration, at 17pt on a tinted disc they are how you find a tool
-    /// without reading.
-    ///
-    /// No `SubCard` around them: a tile is already a card, and DESIGN.md §4
-    /// forbids the nesting. The empty state keeps its `SubCard`, because that
-    /// one really is a single panel rather than a grid of them.
-    private func group(title: String, note: String?, rows: [HomeRow], empty: AnyView?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                cardHeading(title)
-                Spacer(minLength: 8)
-                if let note {
-                    Text(note)
-                        .font(.system(size: 11))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                }
-            }
-            if rows.isEmpty {
-                SubCard { empty ?? AnyView(EmptyView()) }
-            } else {
-                // Same idiom and same 14pt rhythm as `NotesSection`'s grid, and
-                // lazy for the same reason it is safe there: `DetailContainer`
-                // is a plain `ScrollView` with a bounded viewport, not the
-                // `OverlayScrollHost` that DESIGN.md §8 bans lazy containers in.
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 232), spacing: 14)],
-                    alignment: .leading,
-                    spacing: 14
-                ) {
-                    ForEach(rows) { row in
-                        HomeToolTile(row: row, onSelect: { select(row) })
-                    }
-                }
-            }
-        }
-    }
 
     private func cardHeading(_ text: String) -> some View {
         Text(text)
@@ -224,7 +238,9 @@ struct HomeSectionContent: View {
         case .builtIn(let action):
             bridge.ringSheet = .builtInEditor(action)
         case .tool(let tool):
-            bridge.ringSheet = .toolEditor(id: tool.id)
+            // Not a sheet any more. The whole point of the pane beside this rail
+            // is that changing a gizmo does not cost an open and a close.
+            subject = .tool(tool.id)
         }
     }
 
@@ -361,71 +377,16 @@ enum HomeLocation {
 
 // MARK: - Row
 
-/// One tile: glyph on a tinted disc, name, what it does, and where it lives
-/// along the bottom.
+/// Where a tool lives, said the same way wherever it is said.
 ///
-/// Height comes from the row, not from a constant. `LazyVGrid` already gives
-/// every tile in a row the tallest one's height, so `maxHeight: .infinity` plus
-/// a `Spacer` above the footer is all it takes to line the footers up — while a
-/// row whose tiles are all one-liners stays short. Pinning a constant instead
-/// bought that same alignment and charged every short tile a hole beneath its
-/// text: "Sends the selected text to Telegram." sat above 47pt of nothing.
-/// DESIGN.md §13's fixed cell is a different case — a square grid of files
-/// inherits its height from the column width, and uniform cells there are the
-/// point because a two-line filename must not outgrow its neighbours.
-private struct HomeToolTile: View {
-    let row: HomeRow
-    let onSelect: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Image(nsImage: row.icon.image(pointSize: 17))
-                .renderingMode(.template)
-                .foregroundStyle(FlowTheme.ink)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(Color.white.opacity(0.08)))
-            Text(row.title)
-                .font(.system(size: 13.5, weight: .semibold))
-                .foregroundStyle(FlowTheme.ink)
-                .lineLimit(2)
-                .padding(.top, 12)
-            if let detail = row.detail {
-                Text(detail)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-                    .lineLimit(2)
-                    .padding(.top, 4)
-            }
-            Spacer(minLength: 10)
-            location
-        }
-        .multilineTextAlignment(.leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
-        // A fill that says "you are pointing at me" and nothing else — the tile
-        // rests on `subtleFill` like every other panel on this page, and lifts
-        // to `raised` under the pointer. No shadow: DESIGN.md §7 builds depth
-        // from tonal fills and hairlines, not from drop shadows.
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(hovering ? FlowTheme.edge : FlowTheme.hairline, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onTapGesture(perform: onSelect)
-        .onHover { inside in
-            withAnimation(.easeOut(duration: 0.13)) { hovering = inside }
-        }
-    }
+/// DESIGN.md §11: nothing may live nowhere without saying so, and that outlives
+/// whichever view happens to be drawing the list this week.
+struct HomeRowLocationLabel: View {
+    let location: HomeLocation
 
     @ViewBuilder
-    private var location: some View {
-        if row.location.needsAttention {
+    var body: some View {
+        if location.needsAttention {
             // Quiet tag, not the accent one. The capsule alone already does the
             // whole job — it is present or absent, which is what a tertiary grey
             // sentence among nine other tertiary grey values could never be —
@@ -434,9 +395,9 @@ private struct HomeToolTile: View {
             // lit capsules down one column mark nothing. Emphasis is relative,
             // so the treatment has to survive the case where the exception is
             // the majority.
-            RingTag(text: row.location.label)
+            RingTag(text: location.label)
         } else {
-            Text(row.location.label)
+            Text(location.label)
                 .font(.system(size: 11))
                 .foregroundStyle(FlowTheme.inkTertiary)
                 .lineLimit(1)

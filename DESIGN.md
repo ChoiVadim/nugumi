@@ -612,6 +612,19 @@ share of users regardless of what looks right.
   disagree the first time anything else moves the current folder. Each crumb's
   name is capped at 140pt — a folder a browser saved is named after a page
   title, and an uncapped one pushed every other chip off the row.
+- **Reaching a gizmo is not the same as opening it.** Home's tile grid was
+  both: clicking a tile opened the editor as a modal, so changing one gizmo cost
+  an open and a close, and changing two cost four. The editor now runs inline
+  beside a rail (`ToolEditorPanel.Chrome.inline`), and clicking a row only says
+  what the chat is about. What the rail did not give up is the answer Home owes:
+  every row still carries its `location`, and the group still counts the ones
+  that live nowhere.
+  Which of the three a typed message means — talk, build, change — is
+  `ToolChatRouter`'s, and a mention is decided without the model: `@Prices`
+  names a tool outright, and a classifier confirming it would add latency to the
+  one case that has none. Everything ambiguous resolves to talk, because reading
+  a build request as a question costs a sentence and reading a question as a
+  build request starts writing software nobody asked for.
 - **A tool with no edge is not necessarily a tool with a home, and only Home
   says which one it has.** Everything above is about `DockCatalog`'s
   residents — how a resident earns an edge, and who writes it. A tool doesn't

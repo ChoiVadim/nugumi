@@ -143,6 +143,30 @@ extension GizmateApp {
     }
 }
 
+extension GizmateApp {
+    /// One model call, one job, three possible answers.
+    ///
+    /// Any failure is `.talk`, and so is anything unreadable: the classifier
+    /// being unreachable must not stop a person talking, and it certainly must
+    /// not start building something on a guess. `ToolChatRouter` states the
+    /// same asymmetry in the prompt it hands over.
+    @MainActor
+    func routeHomeChat(_ message: String, tools: [GizmateTool]) async -> ToolChatIntent {
+        do {
+            let reply = try await askBackend.complete(
+                systemPrompt: ToolChatRouter.systemPrompt,
+                userPrompt: ToolChatRouter.userPrompt(message: message, tools: tools),
+                images: [],
+                thinkingLevel: .low,
+                onPartial: { _ in }
+            )
+            return ToolChatRouter.intent(from: reply, tools: tools)
+        } catch {
+            return .talk
+        }
+    }
+}
+
 extension GizmateApp: SettingsHost {
     var usageStats: UsageStatsStore { usageStatsStore }
     var dock: DockStore { dockStore }
