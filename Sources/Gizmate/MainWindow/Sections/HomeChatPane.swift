@@ -267,13 +267,20 @@ struct HomeChatPane: View {
     /// accepts three different kinds of message. The corpus is blunt about
     /// empty states: they are the case where more is unambiguously better,
     /// because context is what makes them usable.
-    /// Three jobs, not three features.
+    /// Three gizmos somebody could have, not three chores somebody has.
     ///
     /// The chips used to name what the pane is for: ask about Gizmate, build
     /// one, change one. Somebody who has never seen a gizmo learns nothing from
     /// that — "Build me a gizmo" is the same sentence as the title above it and
-    /// the placeholder below it, said a third time. A real request teaches the
-    /// shape of one by being one.
+    /// the placeholder below it, said a third time. An example teaches the shape
+    /// of a request by being one.
+    ///
+    /// Named as things you would own, and phrased as builds. Written as jobs
+    /// ("Fix my grammar") they read as errands for the assistant to run once,
+    /// which is what this chat is *not* for, and `ToolChatRouter` reads them the
+    /// same way a person does: an errand is answered, not built. A noun is a
+    /// tool you keep, and "Make a gizmo that…" leaves the router nothing to
+    /// weigh.
     ///
     /// One per kind of thing a gizmo can work on, which is the actual breadth:
     /// the text you have selected, what is on your screen, the files you picked
@@ -284,22 +291,25 @@ struct HomeChatPane: View {
     ///
     /// They send rather than fill the field: a chip that quietly types for you
     /// and then waits reads as broken, and the answer to "what can this do" is
-    /// watching it do one.
+    /// watching it build one.
     private var starters: some View {
         HStack(spacing: 8) {
-            starter("Fix my grammar") {
-                draft = "Fix the grammar in text I select, in place."
-                send()
+            starter("Grammar fixer") {
+                build("fixes the grammar in the text I select, in place")
             }
-            starter("Explain an error") {
-                draft = "Explain the error message that is on my screen."
-                send()
+            starter("Error explainer") {
+                build("explains the error message that is on my screen")
             }
-            starter("Rename photos by date") {
-                draft = "Rename the photos I select in Finder by the date they were taken."
-                send()
+            starter("Photo renamer") {
+                build("renames the photos I select in Finder by the date they were taken")
             }
         }
+    }
+
+    /// Sends an example as what it is: a request to build something.
+    private func build(_ job: String) {
+        draft = "Make a gizmo that \(job)."
+        send()
     }
 
     private func starter(_ title: String, action: @escaping () -> Void) -> some View {
