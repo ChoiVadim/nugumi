@@ -70,6 +70,12 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// through `send`, the floating capsule through `record` while it still
     /// runs its own submit path. `askHistory` reads through it so neither can
     /// answer with the other's context missing.
+    /// Outlives the main window on purpose: a build takes minutes, and its
+    /// result exists nowhere else until it is saved.
+    lazy var gizmoBuilder = GizmoBuilder(tools: toolsStore) { [weak self] tool, script, onOutput in
+        guard let self else { return .failed("Not available.") }
+        return await self.testScriptTool(tool, script: script, onOutput: onOutput)
+    }
     lazy var askConversation = AskConversationStore(engine: makeAskEngine())
     /// Home's plain conversation. Same backend as Ask, different transcript and
     /// different system prompt — see `ToolChatConversation` for why they are not

@@ -95,6 +95,10 @@ protocol SettingsHost: AnyObject {
     var builtInOverrides: BuiltInOverridesStore { get }
     var dock: DockStore { get }
     var folderHub: FolderHubStore { get }
+    /// Every gizmo being edited or built. On the host rather than the bridge
+    /// because the bridge dies with the main window, and a build outliving that
+    /// window is the point of moving it off a view in the first place.
+    var gizmoBuilder: GizmoBuilder { get }
     /// The plain half of Home's chat. Owned here rather than by the section so
     /// leaving Home and coming back does not wipe what was said.
     var homeChat: ToolChatConversation { get }

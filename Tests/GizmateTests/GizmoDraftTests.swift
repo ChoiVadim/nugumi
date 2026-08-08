@@ -187,3 +187,45 @@ final class GizmoDraftTests: XCTestCase {
         XCTAssertTrue(gizmo.canSave)
     }
 }
+
+/// One gizmo, one draft, however many surfaces are looking at it.
+@MainActor
+final class GizmoBuilderTests: XCTestCase {
+    private func makeBuilder() -> GizmoBuilder {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("GizmoBuilderTests.\(UUID().uuidString)")
+        return GizmoBuilder(
+            tools: ToolsStore(directoryURL: dir, migrateLegacy: false),
+            runner: { _, _, _ in .idle }
+        )
+    }
+
+    /// The bug this prevents is silent: the chat changing a gizmo while its
+    /// Details modal is open, each with its own copy, and the second save
+    /// overwriting the first without either surface noticing.
+    func testTwoAsksForTheSameGizmoGetTheSameDraft() {
+        let builder = makeBuilder()
+        let id = UUID()
+
+        let first = builder.draft(for: .existing(id))
+        let second = builder.draft(for: .existing(id))
+
+        XCTAssertTrue(first === second)
+    }
+
+    func testDifferentGizmosGetDifferentDrafts() {
+        let builder = makeBuilder()
+        XCTAssertFalse(builder.draft(for: .existing(UUID())) === builder.draft(for: .new))
+    }
+
+    /// After saving or abandoning, the next open has to show what is on disk
+    /// rather than what was typed before it.
+    func testDiscardingMeansTheNextAskHydratesAfresh() {
+        let builder = makeBuilder()
+        let first = builder.draft(for: .new)
+
+        builder.discard(.new)
+
+        XCTAssertFalse(builder.draft(for: .new) === first)
+    }
+}
