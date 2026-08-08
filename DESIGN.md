@@ -127,6 +127,12 @@ eighty cards, and the highlight waited on a grid that was about to be thrown
 away. `FolderHubView.show(_:asRoot:)` now does the whole switch in the tap:
 select, clear, then load.
 
+This includes work that decides *where* a message goes. Home's chat sent a
+typed message to a classifier before showing it, so between pressing send and
+the model answering there was a second or two with the message gone from the
+composer and nowhere else — and the router decides where it goes, never whether
+it existed. It appears immediately and is routed underneath.
+
 The failure mode is not "it feels slow", it is "the button is broken". A person
 who sees no change assumes the click missed and clicks again, which is also what
 a developer watching them concludes.
@@ -645,12 +651,16 @@ share of users regardless of what looks right.
   lines: one of three neighbours taller than the others for a reason about that
   gizmo rather than about the action. The chip says "Change a gizmo" and inserts
   an `@`, which is also the thing it is teaching.
-- **A conversation is a column, not a window.** A line of prose running the
-  full width of a maximised window is a line nobody finishes: the eye loses the
-  start of the next one on the way back. Home's transcript, its composer and its
-  empty state all sit inside one 640pt column and share the number, which is
-  also what makes the empty state and the conversation read as one object
-  growing rather than two layouts swapping.
+- **A conversation is a column, measured for reading.** Home's transcript, its
+  composer and its empty state share one 520pt cap, which is also what makes the
+  empty state and the conversation read as one object growing rather than two
+  layouts swapping. The number is a reading measure, not a window fraction: at
+  640 a line ran past a hundred characters, roughly twice what the eye tracks
+  back from comfortably, and a full-width line is one nobody finishes because
+  the start of the next one is lost on the way there.
+  Cap it once, around everything. Capping the transcript and the composer
+  separately with the same number still misaligned them, because the composer
+  carries its padding inside the cap while the transcript's sits outside.
 - **Gizmate has a voice, and it is written down in one place.**
   `GizmateApp.homeChatSystemPrompt` is it. The character is the point rather
   than decoration: someone opens that window to make their Mac do something, and

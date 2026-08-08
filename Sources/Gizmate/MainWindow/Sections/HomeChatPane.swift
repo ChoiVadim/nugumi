@@ -32,7 +32,14 @@ struct HomeChatPane: View {
     }
 
     @State private var draft = ""
-    @State private var routing = false
+    /// The message on screen while the router decides what to do with it.
+    ///
+    /// Classification is a model call, so between pressing send and knowing
+    /// whether this is a question or a build there is a second or two with
+    /// nothing to show — and the message has already left the composer. It has
+    /// to appear immediately: what the router decides is *where* it goes, not
+    /// whether it existed. DESIGN.md §6.
+    @State private var routingQuestion: String?
     @FocusState private var composerFocused: Bool
 
     private static let bottomAnchor = "home.chat.bottom"
@@ -43,7 +50,10 @@ struct HomeChatPane: View {
     /// back. Every chat caps this, and the cap is also what makes the empty
     /// state and the transcript the same object growing rather than two
     /// layouts — they share the number.
-    static let column: CGFloat = 640
+    /// Measured for reading, not for the window. At 640 a line ran past a
+    /// hundred characters, which is roughly twice what the eye tracks back
+    /// from comfortably; this is about seventy-five at 13pt.
+    static let column: CGFloat = 520
 
     private var conversation: ToolChatConversation? { bridge.host?.homeChat }
 
@@ -115,7 +125,10 @@ struct HomeChatPane: View {
                             turnView(turn)
                         }
                         if let pending = conversation.pending {
-                            turnView(pending, streaming: true)
+                            turnView(pending)
+                        }
+                        if let routingQuestion {
+                            turnView(.init(question: routingQuestion, answer: ""))
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
@@ -123,6 +136,11 @@ struct HomeChatPane: View {
                     .padding(.vertical, 20)
                 }
                 .scrollIndicators(.never)
+                .onChange(of: routingQuestion) { _, _ in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                    }
+                }
                 .onChange(of: conversation.turns.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
@@ -132,7 +150,7 @@ struct HomeChatPane: View {
         }
     }
 
-    private func turnView(_ turn: ToolChatConversation.Turn, streaming: Bool = false) -> some View {
+    private func turnView(_ turn: ToolChatConversation.Turn) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             ChatQuestionBubble(text: turn.question)
             // The mark beside every answer, which is what makes a transcript
@@ -142,7 +160,7 @@ struct HomeChatPane: View {
                 if let failure = turn.failure {
                     ChatProblemText(message: failure)
                 } else if turn.answer.isEmpty {
-                    ChatThinkingText(text: routing ? "Reading that" : "Thinking")
+                    ChatThinkingText(text: routingQuestion == nil ? "Thinking" : "Reading that")
                 } else {
                     ChatAnswerText(markdown: turn.answer)
                 }
@@ -151,6 +169,7 @@ struct HomeChatPane: View {
     }
 
     private var isEmpty: Bool {
+        guard routingQuestion == nil else { return false }
         guard let conversation else { return true }
         return conversation.turns.isEmpty && conversation.pending == nil
     }
@@ -293,7 +312,7 @@ struct HomeChatPane: View {
                 .background(Circle().fill(idle ? FlowTheme.ink.opacity(0.22) : FlowTheme.ink))
         }
         .buttonStyle(.plain)
-        .disabled(idle || routing)
+        .disabled(idle || routingQuestion != nil)
         .help("Send")
     }
 
@@ -301,21 +320,21 @@ struct HomeChatPane: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !routing else { return }
+        guard !text.isEmpty, routingQuestion == nil else { return }
         let usable = tools.usableTools()
+        draft = ""
 
         // A mention is certain, so it never waits on the network.
         if let mentioned = ToolChatRouter.mentioned(in: text, among: usable) {
-            draft = ""
             subject = .tool(mentioned)
             return
         }
 
-        draft = ""
-        routing = true
+        // On screen first, routed second.
+        routingQuestion = text
         Task { @MainActor in
             let intent = await bridge.host?.routeHomeChat(text, tools: usable) ?? .talk
-            routing = false
+            routingQuestion = nil
             switch intent {
             case .talk:
                 conversation?.send(text)
