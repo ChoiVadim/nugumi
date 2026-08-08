@@ -110,7 +110,9 @@ struct HomeSectionContent: View {
     var body: some View {
         DetailCard {
             HStack(spacing: 0) {
-                HomeChatPane(tools: tools, subject: $subject)
+                if let conversation = bridge.host?.homeChat {
+                    HomeChatPane(tools: tools, conversation: conversation, subject: $subject)
+                }
                 if bridge.showsGizmoRail {
                     Divider().background(FlowTheme.hairline)
                     rail

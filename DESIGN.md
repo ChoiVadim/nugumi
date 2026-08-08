@@ -136,6 +136,16 @@ The speculative answer stays hidden until the router lands, because showing a
 half-written reply that is about to be thrown away for the builder is worse than
 the second it saves.
 
+**An `ObservableObject` read through a computed property is observed by
+nobody.** Home's chat pane reached its conversation as
+`bridge.host?.homeChat`, which compiles, reads correctly, and subscribes to
+nothing: every `@Published` change fired `objectWillChange` into an empty room,
+so an answer appeared only when something unrelated forced a redraw — a click,
+or leaving the section and coming back. The state was right the whole time.
+Hold it as `@ObservedObject`, which means passing it in, which means the view
+that has the host does the reaching. The tell is a symptom that sounds like
+performance and is not: "it updates when I click something else".
+
 **State that describes one row must not be reachable from the code drawing the
 others.** Home's transcript drew every turn through one function that asked
 `routing || turn.answer.isEmpty` — and `routing` belongs to the pane, not to a

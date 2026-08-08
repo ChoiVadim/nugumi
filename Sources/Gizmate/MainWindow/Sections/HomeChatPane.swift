@@ -17,6 +17,15 @@ import SwiftUI
 struct HomeChatPane: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
     @ObservedObject var tools: ToolsStore
+    /// Held, not fetched.
+    ///
+    /// This was `bridge.host?.homeChat`, read through a computed property — and
+    /// reading an `ObservableObject` that way subscribes to nothing. Every
+    /// `@Published` change fired `objectWillChange` into a room with nobody in
+    /// it, so an answer only appeared when something unrelated forced a redraw:
+    /// a click, or leaving the section and coming back. The state was right the
+    /// whole time; nothing was telling SwiftUI so.
+    @ObservedObject var conversation: ToolChatConversation
     /// Set from outside when a tool is clicked in the rail, so the rail does
     /// not need to know what the pane does with it.
     @Binding var subject: Subject
@@ -53,8 +62,6 @@ struct HomeChatPane: View {
     /// hundred characters, which is roughly twice what the eye tracks back
     /// from comfortably; this is about seventy-five at 13pt.
     static let column: CGFloat = 520
-
-    private var conversation: ToolChatConversation? { bridge.host?.homeChat }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -114,10 +121,8 @@ struct HomeChatPane: View {
 
     // MARK: - Talking
 
-    @ViewBuilder
     private var transcript: some View {
-        if let conversation {
-            ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
                         ForEach(conversation.turns) { turn in
@@ -148,7 +153,6 @@ struct HomeChatPane: View {
                 .onChange(of: conversation.pending) { _, _ in
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
-            }
         }
     }
 
@@ -201,8 +205,7 @@ struct HomeChatPane: View {
     }
 
     private var isEmpty: Bool {
-        guard let conversation else { return true }
-        return conversation.turns.isEmpty && conversation.pending == nil
+        conversation.turns.isEmpty && conversation.pending == nil
     }
 
     /// The invitation, sized like a title because on an empty screen it is one.
@@ -351,7 +354,7 @@ struct HomeChatPane: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !routing, conversation?.isRunning != true else { return }
+        guard !text.isEmpty, !routing, !conversation.isRunning else { return }
         let usable = tools.usableTools()
         draft = ""
 
@@ -366,7 +369,7 @@ struct HomeChatPane: View {
         // spends one answer nobody sees, which is the rarer case paying for the
         // common one.
         routing = true
-        conversation?.send(text)
+        conversation.send(text)
         Task { @MainActor in
             let intent = await bridge.host?.routeHomeChat(text, tools: usable) ?? .talk
             routing = false
@@ -374,10 +377,10 @@ struct HomeChatPane: View {
             case .talk:
                 break
             case .build:
-                conversation?.cancel()
+                conversation.cancel()
                 subject = .newTool
             case .edit(let id):
-                conversation?.cancel()
+                conversation.cancel()
                 subject = .tool(id)
             }
         }
