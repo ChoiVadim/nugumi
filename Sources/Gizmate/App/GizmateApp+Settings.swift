@@ -155,7 +155,9 @@ extension GizmateApp {
         do {
             let reply = try await askBackend.complete(
                 systemPrompt: ToolChatRouter.systemPrompt,
-                userPrompt: ToolChatRouter.userPrompt(message: message, tools: tools),
+                userPrompt: ToolChatRouter.userPrompt(
+                    message: message, tools: tools, recent: homeChat.turns
+                ),
                 images: [],
                 thinkingLevel: .low,
                 onPartial: { _ in }

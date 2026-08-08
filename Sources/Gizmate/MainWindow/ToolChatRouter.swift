@@ -51,18 +51,38 @@ enum ToolChatRouter {
         You sort one message into exactly one of three kinds. Reply with the kind and nothing else.
 
         TALK — a question, a request for information, or conversation. Anything the user wants an answer to rather than a tool for.
-        BUILD — the user wants a new tool made for them.
+        BUILD — the user wants a new tool made for them. This includes agreeing to one that was just offered: "yes", "do it", "go on", "sounds good" right after a tool was suggested is a BUILD.
         EDIT: <name> — the user wants one of their existing tools changed. Use the tool's exact name from the list.
+
+        You may be shown the last exchange or two. Use it: a short reply like "yes" or "that one" means whatever the line before it was about, and asking the user to restate a request they already made is the failure to avoid.
 
         When it is not clear, answer TALK. Answering TALK for a build request costs the user one more sentence; answering BUILD for a question makes the app start writing software nobody asked for.
         """
 
-    static func userPrompt(message: String, tools: [GizmateTool]) -> String {
+    /// How much of the conversation the router is shown.
+    ///
+    /// Two exchanges, because intent is often not in the message. "Yes, do
+    /// that", "go on then", "build it" mean nothing alone and everything after
+    /// the line before them — and a router that only ever sees one sentence
+    /// makes the user restate a request they already made.
+    static let recallTurns = 2
+
+    static func userPrompt(
+        message: String,
+        tools: [GizmateTool],
+        recent: [ToolChatConversation.Turn] = []
+    ) -> String {
         let names = tools.map(\.name).filter { !$0.isEmpty }
         let list = names.isEmpty
             ? "The user has no tools yet, so EDIT is not possible."
             : "The user's tools: " + names.joined(separator: ", ")
-        return "\(list)\n\nMessage:\n\(message)"
+        let history = recent.suffix(recallTurns).map {
+            "User: \($0.question)\nGizmate: \($0.answer)"
+        }.joined(separator: "\n\n")
+        guard !history.isEmpty else {
+            return "\(list)\n\nMessage:\n\(message)"
+        }
+        return "\(list)\n\nWhat was said just before:\n\(history)\n\nMessage to sort:\n\(message)"
     }
 
     /// Reads the model's answer back.

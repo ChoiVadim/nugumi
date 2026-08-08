@@ -111,3 +111,54 @@ final class ToolChatRouterTests: XCTestCase {
         }
     }
 }
+
+/// What the router is shown, which is not only the message.
+///
+/// Intent is often in the exchange rather than in the sentence: "yes", "go on",
+/// "that one" mean nothing alone and everything after the line before them. A
+/// router shown one sentence makes the user restate a request they already
+/// made, which is the failure this guards.
+final class ToolChatRouterRecallTests: XCTestCase {
+    private func tool(_ name: String) -> GizmateTool {
+        GizmateTool(name: name, kind: .python, input: .selection, output: .panel)
+    }
+
+    @MainActor
+    private func turn(_ q: String, _ a: String) -> ToolChatConversation.Turn {
+        .init(question: q, answer: a)
+    }
+
+    @MainActor
+    func testTheLastExchangesAreIncludedSoAShortReplyMeansSomething() {
+        let prompt = ToolChatRouter.userPrompt(
+            message: "yes please",
+            tools: [],
+            recent: [turn("I rename files every week", "I can build you a gizmo for that.")]
+        )
+        XCTAssertTrue(prompt.contains("I rename files every week"))
+        XCTAssertTrue(prompt.contains("I can build you a gizmo for that."))
+        XCTAssertTrue(prompt.contains("yes please"))
+    }
+
+    /// Only the last couple. A whole transcript would bury the message being
+    /// sorted under everything that came before it, and cost tokens per turn
+    /// forever.
+    @MainActor
+    func testOnlyTheMostRecentExchangesAreShown() {
+        let many = (1...6).map { turn("question \($0)", "answer \($0)") }
+        let prompt = ToolChatRouter.userPrompt(message: "yes", tools: [], recent: many)
+
+        XCTAssertFalse(prompt.contains("question 1"))
+        XCTAssertTrue(prompt.contains("question 6"))
+        XCTAssertEqual(ToolChatRouter.recallTurns, 2)
+    }
+
+    /// A first message has no history, and must not arrive wrapped in headings
+    /// describing an exchange that never happened.
+    @MainActor
+    func testAFirstMessageCarriesNoHistorySection() {
+        let prompt = ToolChatRouter.userPrompt(message: "hello", tools: [], recent: [])
+        XCTAssertFalse(prompt.contains("What was said just before"))
+        XCTAssertTrue(prompt.contains("hello"))
+    }
+}
