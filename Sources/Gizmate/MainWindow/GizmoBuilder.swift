@@ -77,7 +77,9 @@ final class GizmoBuilder: ObservableObject {
         self.tools = tools
         self.runner = runner
         self.agent = agent
-        self.chat = chat ?? ToolBuilderChatSession()
+        // No greeting: Home's chat opens on its own invitation, and a line
+        // sitting here from launch would mean that screen is never empty.
+        self.chat = chat ?? ToolBuilderChatSession(greeting: nil)
     }
 
     /// The draft for this gizmo, made once and kept.

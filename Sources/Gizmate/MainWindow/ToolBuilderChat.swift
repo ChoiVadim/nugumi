@@ -50,24 +50,30 @@ final class ToolBuilderChatSession: ObservableObject {
     private var answerGeneration: ToolBuilderAnswerBroker.Generation?
     private var secretContinuation: CheckedContinuation<Bool, Never>?
 
-    init(activityLimit: Int = 8, beforeAnswerWaitRegistration:
-         @escaping @Sendable () async -> Void = {}) {
+    /// The line this opens with, or `nil` to open with nothing.
+    ///
+    /// A panel that exists only to build something has to say so the moment it
+    /// appears. Home's chat is not that: it opens on its own invitation, and a
+    /// second greeting sitting in the transcript from launch would mean the
+    /// screen is never empty and the invitation is never shown.
+    static let defaultGreeting = """
+        Hey! 👋 Tell me what you want to happen, in your own words. \
+        Something like "open Terminal and run my deploy command".
+
+        I'll ask if anything's unclear, build it, and you can try it \
+        right here. Nothing is saved until you press Save.
+        """
+
+    init(
+        activityLimit: Int = 8,
+        greeting: String? = ToolBuilderChatSession.defaultGreeting,
+        beforeAnswerWaitRegistration: @escaping @Sendable () async -> Void = {}
+    ) {
         answers = ToolBuilderAnswerBroker(
             beforeWaitRegistration: beforeAnswerWaitRegistration
         )
         self.activityLimit = max(1, activityLimit)
-        messages = [
-            ToolBuilderChatMessage(
-                role: .assistant,
-                text: """
-                Hey! 👋 Tell me what you want to happen, in your own words. \
-                Something like "open Terminal and run my deploy command".
-
-                I'll ask if anything's unclear, build it, and you can try it \
-                right here. Nothing is saved until you press Save.
-                """
-            )
-        ]
+        messages = greeting.map { [ToolBuilderChatMessage(role: .assistant, text: $0)] } ?? []
     }
 
     var currentActivity: String? { activity.last }

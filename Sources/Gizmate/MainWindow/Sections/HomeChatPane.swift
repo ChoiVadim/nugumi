@@ -264,6 +264,9 @@ struct HomeChatPane: View {
         HStack(spacing: 8) {
             starter("What can Gizmate do?") { draft = "What can Gizmate do?"; send() }
             starter("Build me a gizmo") { draft = "Build me a gizmo that "; composerFocused = true }
+            if !tools.usableTools().isEmpty {
+                starter("Change a gizmo") { draft = "@"; composerFocused = true }
+            }
             // Not the gizmo's own name. A long one wrapped its chip to two
             // lines, which made one of three neighbours taller than the others
             // for a reason that was about that gizmo rather than about the
