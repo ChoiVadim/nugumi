@@ -8,38 +8,18 @@ struct MainWindowRootView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            if bridge.showsSidebar {
-                SidebarView()
-                    .frame(width: 256)
-                    .frame(maxHeight: .infinity)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
+            // Narrower than it was, and it does not collapse. Six short labels
+            // never filled 256pt, and a sidebar this small buys the content
+            // more by simply being smaller than a toggle could buy it by going
+            // away — a control to hide six rows costs a decision every time you
+            // look at it, to reclaim less width than trimming did for free.
+            SidebarView()
+                .frame(width: 212)
+                .frame(maxHeight: .infinity)
             DetailRouter(section: bridge.section)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Beside the traffic lights, where every Mac app puts this and where
-        // ChatGPT puts it too. It lives here rather than in the sidebar for the
-        // obvious reason: a control inside the thing it hides has nowhere to be
-        // once it works.
-        .overlay(alignment: .topLeading) {
-            PanelToggleButton(
-                isOpen: bridge.showsSidebar,
-                edge: .leading,
-                help: bridge.showsSidebar ? "Hide sidebar" : "Show sidebar"
-            ) {
-                withAnimation(.easeOut(duration: 0.18)) { bridge.showsSidebar.toggle() }
-            }
-            .padding(.leading, bridge.showsSidebar ? 220 : 84)
-            .padding(.top, 4)
-        }
-        // The header is the whole window's drag handle now, so the content below
-        // it is free to use presses for its own purposes. It goes on before the
-        // panels, which cover the window while they are up and take the top
-        // band with it.
-        .overlay(alignment: .top) {
-            WindowDragStrip().frame(height: WindowDragStrip.height)
-        }
         .overlay {
             if let scope = bridge.modelPickerScope {
                 ModelPickerOverlay(

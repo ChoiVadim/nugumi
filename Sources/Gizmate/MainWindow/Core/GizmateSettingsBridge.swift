@@ -35,11 +35,11 @@ final class GizmateSettingsBridge: ObservableObject {
     /// Same reason as `modelPickerScope`: the scrim belongs at the window root.
     /// Closed through `closeRingSheet()`, never by assigning `nil` directly.
     @Published var ringSheet: RingSheet?
-    /// Whether the navigation sidebar is showing. On the bridge rather than in
-    /// the root view because a person who collapsed it meant it, and a view's
-    /// `@State` would bring it back on the next thing that rebuilds the tree.
-    @Published var showsSidebar = true
-    /// Whether Home's gizmo rail is showing. Closed to begin with: the chat is
+    /// Whether Home's gizmo rail is showing. On the bridge rather than in a
+    /// view because someone who closed it meant it, and `@State` would bring it
+    /// back on the next rebuild of the tree.
+    ///
+    /// Closed to begin with: the chat is
     /// what Home is for, and a list of everything you own beside it on first
     /// open is a second thing competing for the same glance.
     @Published var showsGizmoRail = false

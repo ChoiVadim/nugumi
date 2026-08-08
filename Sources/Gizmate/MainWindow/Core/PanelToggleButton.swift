@@ -2,11 +2,13 @@ import SwiftUI
 
 /// Shows or hides a panel that flanks the content.
 ///
-/// One control for both sides, because they are the same gesture and a person
-/// who learns the left one should not have to learn the right. The glyph turns
-/// to face the panel it acts on: `sidebar.leading` for the one on the left,
-/// `sidebar.trailing` for the one on the right, which is the pair macOS itself
-/// uses and the one ChatGPT's own window puts in both corners.
+/// Home's gizmo rail is the only one today, and the navigation sidebar
+/// deliberately is not: six short labels were trimmed to 212pt instead, which
+/// buys the content more than hiding them would, without costing a decision
+/// every time you look at the window. `edge` stays because the glyph has to
+/// face the panel it acts on — `sidebar.leading` or `sidebar.trailing`, the
+/// pair macOS itself uses — and a second collapsible panel on the left would
+/// otherwise arrive with a right-facing icon.
 ///
 /// Quiet until hovered. It sits in the window's chrome, next to the traffic
 /// lights, and chrome that is as loud as content competes with it for the eye

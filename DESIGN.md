@@ -620,14 +620,16 @@ share of users regardless of what looks right.
   `emphasised` flag: off in a list, on in isolation. The words stay on every row
   either way, because the rule is that nothing lives nowhere *without saying
   so*, and the words are what say it. Only the shouting goes.
-- **A panel that flanks the content can be put away, and the control is never
-  inside it.** Both of the main window's side panels collapse — the navigation
-  sidebar and Home's gizmo rail — through one `PanelToggleButton`, because they
-  are the same gesture and a person who learns the left one should not have to
-  learn the right. Each toggle sits in the window chrome beside what it hides,
-  not within it: a control inside the thing it hides has nowhere to be once it
-  works. The state lives on `GizmateSettingsBridge` rather than in a view,
-  because someone who collapsed a panel meant it, and `@State` brings it back on
+- **A panel earns a toggle by being big enough to be worth hiding.** Home's
+  gizmo rail collapses; the navigation sidebar was given one and had it taken
+  away again. Six short labels never filled 256pt, and trimming it to 212
+  reclaims most of what hiding it would — for free, and without asking anyone to
+  decide anything. A control to put away six rows costs a glance every time you
+  look at the window, to buy less than the trim already did.
+  Where a toggle is warranted it sits in the chrome beside what it hides, never
+  within it: a control inside the thing it hides has nowhere to be once it
+  works. Its state lives on `GizmateSettingsBridge` rather than in a view,
+  because someone who closed a panel meant it, and `@State` brings it back on
   the next rebuild of the tree.
   The rail starts closed. Home is the chat, and a list of everything you own
   sitting beside it on first open is a second thing competing for the same
