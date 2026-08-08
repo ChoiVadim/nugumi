@@ -337,6 +337,16 @@ share of users regardless of what looks right.
   The handle follows the setting above rather than the edge — which was two
   expressions saying one thing by coincidence, and is now one rule: the thing
   that stays open is the thing that carries a way out.
+- **The panel holds its contents off the glass; a resident never pads itself.**
+  Notes and the folder hub each carried their own `.padding(14)`, and that was
+  invisible as a rule for exactly as long as every resident was written by hand.
+  The first generated gizmo to dock had no way to know the number, so its cards
+  sat flush against the panel edge while the two hand-written tools sat inside a
+  margin. `DockGeometry.contentMargin` is that margin, applied once by
+  `EdgeDockController` around whatever the active item draws, and the two tools
+  that used to pad themselves no longer do. It wraps the resident alone: the tab
+  rail hugs the bezel on purpose and the drag handle owns a gutter of its own, so
+  neither may inherit it.
 - **An affordance owns its space; it does not float over the content.**
   `DockDragHandle` was pinned on top of the panel's content, so its 16pt hit
   area swallowed clicks aimed at what was underneath and its tooltip appeared in

@@ -483,7 +483,7 @@ final class EdgeDockController {
     /// the bezel side, the content takes the rest, and both run the panel's
     /// full length. Nothing here negotiates.
     private func expandedView(items: [DockItem], active: DockItem) -> NSView {
-        let content = active.makeView()
+        let content = margined(active.makeView())
         guard items.count > 1 else { return content }
 
         let strip = hostingView(
@@ -537,6 +537,25 @@ final class EdgeDockController {
         }
         NSLayoutConstraint.activate(rules)
         return container
+    }
+
+    /// The resident's view, held off the glass on every side.
+    ///
+    /// Here rather than inside each tool, and only around the tool: the tab rail
+    /// hugs the bezel by design and the drag handle owns a gutter of its own, so
+    /// neither may inherit this. See `DockGeometry.contentMargin`.
+    private func margined(_ view: NSView) -> NSView {
+        let box = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(view)
+        let margin = DockGeometry.contentMargin
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: margin),
+            view.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -margin),
+            view.topAnchor.constraint(equalTo: box.topAnchor, constant: margin),
+            view.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -margin),
+        ])
+        return box
     }
 
     private func hostingView(_ view: some View) -> NSView {

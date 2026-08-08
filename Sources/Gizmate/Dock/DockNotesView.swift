@@ -31,7 +31,8 @@ struct DockNotesView: View {
             Divider().background(FlowTheme.hairline)
             noteList
         }
-        .padding(14)
+        // No padding of its own: the panel holds every resident off the glass
+        // by `DockGeometry.contentMargin`, so one here would be doubled.
         .foregroundStyle(FlowTheme.ink)
     }
 

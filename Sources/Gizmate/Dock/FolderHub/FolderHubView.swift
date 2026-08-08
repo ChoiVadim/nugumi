@@ -148,7 +148,8 @@ struct FolderHubView: View {
                 )
                 .animation(.easeOut(duration: 0.12), value: isDropTargeted)
         }
-        .padding(14)
+        // No padding of its own: the panel holds every resident off the glass
+        // by `DockGeometry.contentMargin`, so one here would be doubled.
         .foregroundStyle(FlowTheme.ink)
         // Moving `current` is what loads and re-watches, rather than each
         // caller remembering to. The crumb trail is why: it set `current`

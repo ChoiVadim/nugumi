@@ -237,6 +237,18 @@ enum DockGeometry {
         return path
     }
 
+    /// The margin a resident's own view sits inside, on every side.
+    ///
+    /// The panel owns it, not the tool. Notes and the folder hub each carried
+    /// their own `.padding(14)`, which worked exactly as long as every resident
+    /// was written by hand: the first generated gizmo to dock had no reason to
+    /// know the number and drew its cards flush against the glass. A margin that
+    /// each tool has to remember is a margin the next tool will not have.
+    ///
+    /// It is 14 because that is what the two hand-written residents already
+    /// used, so nothing anyone is looking at moves.
+    static let contentMargin: CGFloat = 14
+
     /// How far a dock's content must stay clear of the bezel side, so it never
     /// lands under a flare.
     static func contentInsets(for edge: DockEdge) -> NSEdgeInsets {
