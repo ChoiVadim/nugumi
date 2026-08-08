@@ -2,6 +2,62 @@
 
 This file is loaded as project context by Claude Code. It contains operational instructions that apply to every session working on Gizmate, not user-facing documentation.
 
+## What Gizmate is
+
+**Gizmate makes the thing you asked for, out of a conversation.** You describe
+what you want and you get it: a one-shot action, a script, something that lives
+on a screen edge, or an agent that works out its own steps. No editor to learn,
+no runtime to pick, no project to set up. Talking is the whole interface.
+
+Two products locate it. **Lovable** builds you software from a chat, but only
+ever a web app. **Pi** is someone to talk to, and the conversation is all you
+leave with. Gizmate is the chat that hands you things you keep, and they are not
+limited to one shape.
+
+That statement is not marketing here. It settles arguments, and these are the
+ones it settles:
+
+- **The chat is the product, not a feature inside it.** Home's chat is the front
+  door: it answers, it builds, and it edits, and `ToolChatRouter` decides which
+  from the message rather than from a mode the user had to pick first. Anything
+  a person can only reach by finding the right form is something most people
+  will never reach. When you add a capability, the first question is what
+  sentence turns it on.
+- **Four kinds of made thing, one model.** `ToolKind` is `prompt` (a system
+  prompt over text), `native` (a parameterized macOS action from a closed
+  catalog), `python` (a PEP 723 script through `uv`), and `agent` (an
+  instruction carried out by something that writes and runs Python until it has
+  an answer). `ToolInput` says how a gizmo starts, `ToolOutput` says where the
+  result goes, and `.surface` is the case where there is no run at all. New
+  power is a case in these enums plus the places that enumerate them. It is
+  almost never a new bespoke feature beside them.
+- **Every limit is a product decision, and it is allowed to be one.** Lovable
+  does not ask which database you want; it gives you Supabase, and that is why
+  the making stays a conversation. Gizmate makes the same call in its own
+  places: one Python runtime, one credential store, one sandboxed worker, a
+  closed catalog of native actions, and two places a gizmo can live (the ring
+  and the edges). Each of those is a choice taken away from the user on
+  purpose. Adding a knob needs a reason better than "it is possible", and the
+  bar is whether its absence is making somebody's request fail.
+- **Breadth that produces a broken thing is worse than a refusal.** The native
+  catalog is closed, so a `.native` gizmo needs no new permission and cannot run
+  anything arbitrary. A generated Python tool is validated and test-run before
+  it is offered. Half a gizmo delivered confidently costs more trust than "I
+  cannot do that yet".
+- **The measure is whether a stranger's request builds.** That is what
+  `Scripts/tool-eval.sh` is for, and why the standing rule below is that the
+  suite must never be made to pass by teaching the system prompt a specific
+  answer. Unit tests grade the protocol; only the eval grades the promise.
+
+Everything Gizmate makes runs on this Mac, for the person who asked for it.
+There is no hosting, no publishing, and no shared runtime, and none of that is
+an oversight to be corrected.
+
+Gizmate began as a language assistant, and that lineage is still visible in the
+source: `TranslationMode`, `translationHistory`, the selection and reply flows.
+Those are shipped gizmos now, not the product. Do not extend the app by adding a
+sibling to them. Add a gizmo, or add a capability every gizmo can use.
+
 ## Project at a glance
 
 - macOS menu bar app, Swift Package Manager, deployment target macOS 14.
@@ -13,6 +69,10 @@ This file is loaded as project context by Claude Code. It contains operational i
 - Renamed twice: "Yaku" → "Nugumi" at v0.6.0, then "Nugumi" → "Gizmate". Existing v0.5.0 (Yaku) installs never auto-migrated via Sparkle and must download the new bundle manually. The Gizmate rename deliberately kept the bundle ID, feed URL, and EdDSA key untouched, so it updates in place like any other release — see "Identity that must not change" below.
 
 ## Two kinds of tool, three places
+
+A different axis from the four `ToolKind` cases above. That one is how a gizmo
+is made; this one is how it behaves once it exists, and the two do not line up:
+a Python gizmo can summon or reside, and so can an agent.
 
 Gizmate used to have one kind of tool: something you **summon**. Select text,
 invoke it, get an answer, done. The ring was the app, and `case .home:
