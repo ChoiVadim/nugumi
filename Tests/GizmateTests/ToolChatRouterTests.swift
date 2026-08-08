@@ -4,8 +4,8 @@ import XCTest
 /// Which of three things a message typed into Home's chat is asking for.
 ///
 /// Worth pinning because the two ways it can be wrong cost very different
-/// amounts. Reading a question as a build request makes the app start writing
-/// software nobody asked for; reading a build request as a question costs one
+/// amounts. Reading an answer as a build request makes the app start writing
+/// software nobody asked for; reading a build request as an answer costs one
 /// more sentence. Every ambiguous case here resolves to the cheap side.
 final class ToolChatRouterTests: XCTestCase {
     private func tool(_ name: String) -> GizmateTool {
@@ -70,95 +70,117 @@ final class ToolChatRouterTests: XCTestCase {
         XCTAssertNil(ToolChatRouter.mentioned(in: "@ anything", among: [tool("")]))
     }
 
-    // MARK: - Reading the model back
+    // MARK: - Reading Gizmate's own reply
 
-    func testBuildIsRecognised() {
-        XCTAssertEqual(ToolChatRouter.intent(from: "BUILD", tools: []), .build)
+    func testABareBuildStartsABuildWithNoBriefOfItsOwn() {
+        XCTAssertEqual(
+            ToolChatRouter.directive(in: "BUILD", tools: []), .build(brief: nil)
+        )
     }
 
-    func testTalkIsRecognised() {
-        XCTAssertEqual(ToolChatRouter.intent(from: "TALK", tools: []), .talk)
+    /// The brief is the reason one agent beats two. "Yes, do that" describes
+    /// nothing on its own, and only the agent holding the conversation can say
+    /// what "that" was.
+    func testTheBriefTravelsWithTheDirective() {
+        XCTAssertEqual(
+            ToolChatRouter.directive(in: "BUILD: renames screenshots by date", tools: []),
+            .build(brief: "renames screenshots by date")
+        )
+    }
+
+    func testAnEmptyBriefIsNoBrief() {
+        XCTAssertEqual(
+            ToolChatRouter.directive(in: "BUILD:   ", tools: []), .build(brief: nil)
+        )
     }
 
     func testEditNamesItsTool() {
         let prices = tool("Prices")
         XCTAssertEqual(
-            ToolChatRouter.intent(from: "EDIT: Prices", tools: [prices]), .edit(prices.id)
+            ToolChatRouter.directive(in: "EDIT: Prices", tools: [prices]), .edit(id: prices.id)
         )
     }
 
     func testEditIsCaseInsensitiveAboutTheName() {
         let prices = tool("Prices")
         XCTAssertEqual(
-            ToolChatRouter.intent(from: "edit: prices", tools: [prices]), .edit(prices.id)
+            ToolChatRouter.directive(in: "edit: prices", tools: [prices]), .edit(id: prices.id)
         )
     }
 
     /// The model naming a tool that does not exist is a hallucination, and the
     /// answer to one is the cheap side, not the closest guess.
-    func testEditNamingNothingFallsBackToTalk() {
-        XCTAssertEqual(
-            ToolChatRouter.intent(from: "EDIT: Weather", tools: [tool("Prices")]), .talk
+    func testEditNamingNothingIsProse() {
+        XCTAssertNil(
+            ToolChatRouter.directive(in: "EDIT: Weather", tools: [tool("Prices")])
         )
     }
 
-    func testAnythingUnrecognisedFallsBackToTalk() {
-        for reply in ["", "sure!", "I think the user wants a tool", "EDIT", "MAYBE"] {
-            XCTAssertEqual(
-                ToolChatRouter.intent(from: reply, tools: [tool("Prices")]), .talk,
+    /// The failure this guards is a directive quoted inside a real answer. A
+    /// reply explaining what BUILD means must not build anything.
+    func testADirectiveMustOwnTheFirstLine() {
+        for reply in [
+            "",
+            "sure!",
+            "I think you want a tool. BUILD: something",
+            "Here is what I would do:\nBUILD: a thing",
+            "EDIT",
+            "BUILDINGS are expensive",
+        ] {
+            XCTAssertNil(
+                ToolChatRouter.directive(in: reply, tools: [tool("Prices")]),
                 "reply: \(reply)"
             )
         }
     }
-}
 
-/// What the router is shown, which is not only the message.
-///
-/// Intent is often in the exchange rather than in the sentence: "yes", "go on",
-/// "that one" mean nothing alone and everything after the line before them. A
-/// router shown one sentence makes the user restate a request they already
-/// made, which is the failure this guards.
-final class ToolChatRouterRecallTests: XCTestCase {
-    private func tool(_ name: String) -> GizmateTool {
-        GizmateTool(name: name, kind: .python, input: .selection, output: .panel)
-    }
-
-    @MainActor
-    private func turn(_ q: String, _ a: String) -> ToolChatConversation.Turn {
-        .init(question: q, answer: a)
-    }
-
-    @MainActor
-    func testTheLastExchangesAreIncludedSoAShortReplyMeansSomething() {
-        let prompt = ToolChatRouter.userPrompt(
-            message: "yes please",
-            tools: [],
-            recent: [turn("I rename files every week", "I can build you a gizmo for that.")]
+    /// Everything after the first line is the model padding a command it was
+    /// told not to explain. The command still stands.
+    func testATrailingExplanationDoesNotVoidTheDirective() {
+        XCTAssertEqual(
+            ToolChatRouter.directive(in: "BUILD: a grammar fixer\nOn it!", tools: []),
+            .build(brief: "a grammar fixer")
         )
-        XCTAssertTrue(prompt.contains("I rename files every week"))
-        XCTAssertTrue(prompt.contains("I can build you a gizmo for that."))
-        XCTAssertTrue(prompt.contains("yes please"))
     }
 
-    /// Only the last couple. A whole transcript would bury the message being
-    /// sorted under everything that came before it, and cost tokens per turn
-    /// forever.
-    @MainActor
-    func testOnlyTheMostRecentExchangesAreShown() {
-        let many = (1...6).map { turn("question \($0)", "answer \($0)") }
-        let prompt = ToolChatRouter.userPrompt(message: "yes", tools: [], recent: many)
+    // MARK: - Holding the stream back
 
-        XCTAssertFalse(prompt.contains("question 1"))
-        XCTAssertTrue(prompt.contains("question 6"))
-        XCTAssertEqual(ToolChatRouter.recallTurns, 2)
+    /// Nothing is shown until the reply proves it is prose, because a directive
+    /// typing itself out in front of the user is the machinery showing through.
+    func testAPartialThatCouldStillBecomeADirectiveIsHeld() {
+        for partial in ["", " ", "B", "BUI", "BUILD", "BUILD:", "BUILD: a gizmo that", "ED"] {
+            XCTAssertTrue(
+                ToolChatRouter.mayBeDirective(partial), "partial: \(partial)"
+            )
+        }
     }
 
-    /// A first message has no history, and must not arrive wrapped in headings
-    /// describing an exchange that never happened.
-    @MainActor
-    func testAFirstMessageCarriesNoHistorySection() {
-        let prompt = ToolChatRouter.userPrompt(message: "hello", tools: [], recent: [])
-        XCTAssertFalse(prompt.contains("What was said just before"))
-        XCTAssertTrue(prompt.contains("hello"))
+    /// And the moment it cannot be one, it shows. A held answer is a stalled
+    /// answer, so this must be decided in a few characters and never wait for
+    /// the reply to finish.
+    func testAPartialThatCannotBeADirectiveIsShownAtOnce() {
+        for partial in ["I can", "Buildings", "BUILDING", "Sure", "That depends"] {
+            XCTAssertFalse(
+                ToolChatRouter.mayBeDirective(partial), "partial: \(partial)"
+            )
+        }
+    }
+
+    // MARK: - What the agent is told it has
+
+    func testTheGizmoNamesAreListedSoEditCanNameOne() {
+        let listing = ToolChatRouter.knownTools([tool("Prices"), tool("Notes")])
+        XCTAssertTrue(listing.contains("Prices"))
+        XCTAssertTrue(listing.contains("Notes"))
+    }
+
+    func testWithNoGizmosTheAgentIsToldEditIsImpossible() {
+        XCTAssertTrue(ToolChatRouter.knownTools([]).contains("no gizmos"))
+    }
+
+    /// A gizmo with no name cannot be named, so listing it invites an EDIT that
+    /// resolves to nothing.
+    func testAnUnnamedGizmoIsNotOffered() {
+        XCTAssertTrue(ToolChatRouter.knownTools([tool("")]).contains("no gizmos"))
     }
 }

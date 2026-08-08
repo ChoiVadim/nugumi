@@ -116,7 +116,8 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             .joined(separator: "\n\n")
         let prompt = transcript.isEmpty ? question : "\(transcript)\n\nUser: \(question)"
         return try await self.askBackend.complete(
-            systemPrompt: Self.homeChatSystemPrompt,
+            systemPrompt: Self.homeChatSystemPrompt
+                + ToolChatRouter.knownTools(self.toolsStore.usableTools()),
             userPrompt: prompt,
             images: [],
             thinkingLevel: self.askGizmateThinkingLevel,
@@ -141,6 +142,10 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// This conversation sends no picture, so claiming to see the screen is a
     /// lie the user catches one question later; and describing how to build a
     /// gizmo competes with the builder that would actually build it.
+    ///
+    /// It ends with `ToolChatRouter.directiveContract`, which is what makes this
+    /// one agent rather than two. Gizmate does not describe a decision for a
+    /// classifier to make again; it writes `BUILD:` and the build starts.
     static let homeChatSystemPrompt = """
         You are Gizmate: the friend on someone's Mac who builds them tools.
 
@@ -160,8 +165,8 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
 
         What you must not pretend:
         - You cannot see their screen in this conversation. Never imply you can. Ask is the part that looks at the screen, and saying so takes one clause.
-        - If they want a gizmo, do not write the code or explain how to make one. Say you can build it and let them ask again, so the builder takes over.
-        """
+        - Never write the code for a gizmo and never explain how one would be made. You build it instead, and the next section says how.
+        """ + ToolChatRouter.directiveContract
     var askHistory: [AskGizmateTurn] { askConversation.turns }
     /// Screen capture taken the moment Ask Gizmate is summoned, before the
     /// prompt steals focus. Activating Gizmate deactivates the frontmost app,

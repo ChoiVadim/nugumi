@@ -1,25 +1,34 @@
 import Foundation
 
-/// What one message typed into Home's chat is asking for.
-enum ToolChatIntent: Equatable {
-    /// A question, answered in the transcript. Nothing is built.
-    case talk
-    /// A new gizmo.
-    case build
+/// What Gizmate decided to do about a message, when it decided to do something
+/// other than answer it.
+enum ToolChatDirective: Equatable {
+    /// A new gizmo. The brief is Gizmate's own wording of the request, which is
+    /// the whole reason it travels: "yes, do that" is a build request whose
+    /// description exists only in the line before it.
+    case build(brief: String?)
     /// A change to one that exists.
-    case edit(UUID)
+    case edit(id: UUID)
 }
 
-/// Decides which of the three a message is.
+/// Reads Gizmate's own reply for an instruction to the builder.
 ///
-/// Two stages, and the order is the whole design. A mention answers the
-/// question outright — `@Prices` names a tool, and nothing a model could say
-/// would make that mean something else — so a mentioned message never costs a
-/// classification call, never waits on the network, and never gets it wrong.
-/// Only an unmentioned message is handed to the model, and the model gets one
-/// job with three answers rather than a conversation.
+/// There used to be two agents here. One answered the message and one, in
+/// parallel, sorted it into talk / build / edit — and because neither could see
+/// what the other decided, a message could be answered *and* built. That is not
+/// a race that can be tuned out: two models given the same sentence will
+/// sometimes disagree, and the user watched Gizmate ask "what shortcut should
+/// this use?" while a finished gizmo appeared underneath the question.
+///
+/// One agent now. Gizmate answers, and when the answer would have been "yes, I
+/// can build that", it writes a directive instead of prose. A directive is
+/// therefore never in doubt: it is not a guess about what the answer meant, it
+/// *is* the answer.
 enum ToolChatRouter {
     /// The tool a message names, if it names one.
+    ///
+    /// Still ahead of the model, and still free. `@Prices` names a tool
+    /// outright, so there is nothing to decide and nothing to wait for.
     ///
     /// Longest name first, so a tool called "Price watcher" wins over one
     /// called "Price" for the same `@Price watcher` — matching the shorter one
@@ -41,66 +50,89 @@ enum ToolChatRouter {
         return nil
     }
 
-    /// What the model is asked, when nothing was mentioned.
+    // MARK: - The directive
+
+    private static let build = "BUILD"
+    private static let edit = "EDIT"
+
+    /// The two lines that are not prose, and the rules that keep them rare.
     ///
-    /// The tool names go in so `EDIT` can name one: a person who writes "make
-    /// the price one check twice a day" has named a gizmo without typing an
-    /// `@`, and refusing to understand that would make mentions mandatory
-    /// rather than a shortcut.
-    static let systemPrompt = """
-        You sort one message into exactly one of three kinds. Reply with the kind and nothing else.
+    /// Appended to Gizmate's own voice rather than written into it: this is a
+    /// protocol between the chat and the builder, and it has to survive every
+    /// future rewrite of how Gizmate talks.
+    static let directiveContract = """
 
-        TALK — a question, a request for information, or conversation. Anything the user wants an answer to rather than a tool for.
-        BUILD — the user wants a new tool made for them. This includes agreeing to one that was just offered: "yes", "do it", "go on", "sounds good" right after a tool was suggested is a BUILD.
-        EDIT: <name> — the user wants one of their existing tools changed. Use the tool's exact name from the list.
+        When they want a gizmo built or changed, do not answer in words at all. \
+        Reply with exactly one of these lines and nothing else:
 
-        You may be shown the last exchange or two. Use it: a short reply like "yes" or "that one" means whatever the line before it was about, and asking the user to restate a request they already made is the failure to avoid.
+        BUILD: <one sentence describing the gizmo, in your own words>
+        EDIT: <the exact name of one of their gizmos>
 
-        When it is not clear, answer TALK. Answering TALK for a build request costs the user one more sentence; answering BUILD for a question makes the app start writing software nobody asked for.
+        Rules about those two lines, all of which matter:
+        - Never ask them anything about the gizmo first. The builder asks its own questions while it works, and anything you ask here they answer twice.
+        - Never say you are about to build it. The line is the whole reply; the build starts the moment you write it and they watch it happen.
+        - Write the description from everything they have told you, not only from the last message. "Yes, do that" is a build request whose description is in the line before it.
+        - Never write these lines inside a sentence, never explain them, and never use the words for anything else.
         """
 
-    /// How much of the conversation the router is shown.
-    ///
-    /// Two exchanges, because intent is often not in the message. "Yes, do
-    /// that", "go on then", "build it" mean nothing alone and everything after
-    /// the line before them — and a router that only ever sees one sentence
-    /// makes the user restate a request they already made.
-    static let recallTurns = 2
-
-    static func userPrompt(
-        message: String,
-        tools: [GizmateTool],
-        recent: [ToolChatConversation.Turn] = []
-    ) -> String {
+    /// The gizmos this person has, so `EDIT` can name one.
+    static func knownTools(_ tools: [GizmateTool]) -> String {
         let names = tools.map(\.name).filter { !$0.isEmpty }
-        let list = names.isEmpty
-            ? "The user has no tools yet, so EDIT is not possible."
-            : "The user's tools: " + names.joined(separator: ", ")
-        let history = recent.suffix(recallTurns).map {
-            "User: \($0.question)\nGizmate: \($0.answer)"
-        }.joined(separator: "\n\n")
-        guard !history.isEmpty else {
-            return "\(list)\n\nMessage:\n\(message)"
+        guard !names.isEmpty else {
+            return "\n\nThey have no gizmos yet, so EDIT is not possible."
         }
-        return "\(list)\n\nWhat was said just before:\n\(history)\n\nMessage to sort:\n\(message)"
+        return "\n\nTheir gizmos: " + names.joined(separator: ", ")
     }
 
-    /// Reads the model's answer back.
+    /// The directive in a finished reply, or `nil` when the reply is an answer.
     ///
-    /// Anything unrecognised is `.talk`, and so is an `EDIT` naming a tool that
-    /// does not exist. The asymmetry is deliberate and stated in the prompt as
-    /// well: a wrong `TALK` costs the user one more sentence, a wrong `BUILD`
-    /// starts generating software nobody asked for.
-    static func intent(from reply: String, tools: [GizmateTool]) -> ToolChatIntent {
-        let clean = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-        let upper = clean.uppercased()
-        if upper.hasPrefix("BUILD") { return .build }
-        guard upper.hasPrefix("EDIT") else { return .talk }
-        guard let colon = clean.firstIndex(of: ":") else { return .talk }
-        let named = clean[clean.index(after: colon)...]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    /// A directive owns the first line or it is not one. Anything else is prose,
+    /// including an `EDIT` naming a tool that does not exist: the asymmetry is
+    /// deliberate, because a missed directive costs the user one more sentence
+    /// and an invented one starts writing software nobody asked for.
+    static func directive(in reply: String, tools: [GizmateTool]) -> ToolChatDirective? {
+        let line = firstLine(of: reply)
+        let upper = line.uppercased()
+        if upper == build { return .build(brief: nil) }
+        if upper.hasPrefix("\(build):") {
+            let brief = String(line.dropFirst(build.count + 1))
+                .trimmingCharacters(in: .whitespaces)
+            return .build(brief: brief.isEmpty ? nil : brief)
+        }
+        guard upper.hasPrefix("\(edit):") else { return nil }
+        let named = String(line.dropFirst(edit.count + 1))
+            .trimmingCharacters(in: .whitespaces)
             .lowercased()
-        guard let hit = tools.first(where: { $0.name.lowercased() == named }) else { return .talk }
-        return .edit(hit.id)
+        guard let hit = tools.first(where: { $0.name.lowercased() == named }) else { return nil }
+        return .edit(id: hit.id)
+    }
+
+    /// Whether a reply this far in could still turn out to be a directive.
+    ///
+    /// The reply streams into the transcript as it arrives, and a directive must
+    /// never be seen: watching "BUILD: a gizmo that…" type itself out is the
+    /// machinery showing through. Six characters settle it, so the answer is
+    /// hidden for a few chunks at most and never for a whole reply.
+    static func mayBeDirective(_ partial: String) -> Bool {
+        let line = firstLine(of: partial).uppercased()
+        guard !line.isEmpty else { return true }
+        return couldBecome(line, build) || couldBecome(line, edit)
+    }
+
+    /// True while `line` is a prefix of the keyword, or the keyword followed by
+    /// the colon that makes it one. `BUILDINGS are expensive` is neither, and
+    /// must start showing itself the moment the `I` arrives.
+    private static func couldBecome(_ line: String, _ keyword: String) -> Bool {
+        if line.count < keyword.count { return keyword.hasPrefix(line) }
+        guard line.hasPrefix(keyword) else { return false }
+        let rest = line.dropFirst(keyword.count)
+        return rest.isEmpty || rest.hasPrefix(":")
+    }
+
+    private static func firstLine(of text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .newlines)
+            .first?
+            .trimmingCharacters(in: .whitespaces) ?? ""
     }
 }

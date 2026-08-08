@@ -72,4 +72,33 @@ final class ToolChatConversationTests: XCTestCase {
         XCTAssertEqual(calls, 1)
         XCTAssertEqual(store.turns.map(\.question), ["real"])
     }
+
+    /// A reply that was an instruction to the builder is not history. Recording
+    /// it would put `BUILD: …` in the transcript, send it back as context on
+    /// every later message, and leave the question sitting above an answer the
+    /// user was never shown.
+    func testAnInterceptedReplyLeavesNoTurnBehind() async {
+        let store = ToolChatConversation { _, _, _ in "BUILD: a grammar fixer" }
+        var handed: String?
+
+        store.send("make me a grammar fixer") { reply in
+            handed = reply
+            return true
+        }
+        await settle(store)
+
+        XCTAssertEqual(handed, "BUILD: a grammar fixer")
+        XCTAssertTrue(store.turns.isEmpty)
+        XCTAssertNil(store.pending)
+    }
+
+    /// And the common case is untouched: a reply nobody intercepts is an answer.
+    func testAReplyNobodyClaimsIsRecordedAsUsual() async {
+        let store = ToolChatConversation { _, _, _ in "Ollama runs models locally." }
+
+        store.send("what is ollama") { _ in false }
+        await settle(store)
+
+        XCTAssertEqual(store.turns.map(\.answer), ["Ollama runs models locally."])
+    }
 }

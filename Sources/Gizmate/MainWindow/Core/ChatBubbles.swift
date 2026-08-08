@@ -51,12 +51,16 @@ struct ChatAnswerText: View {
     }
 }
 
-/// An answer, with Gizmate's mark beside it.
+/// An answer, held clear of the right edge.
 ///
-/// The mark is what makes a transcript read as two people rather than as
-/// alternating paragraphs, and it is the thing the builder's chat has always
-/// had. Extracted here when Home grew a chat too — the third place this pattern
-/// came up is where copying it stops being cheaper than sharing it.
+/// It used to carry Gizmate's mark down the left, on the argument that a mark is
+/// what makes a transcript read as two people. It is not: the question is a
+/// filled pill pushed to the right edge and the answer is bare text on the left,
+/// which separates them at a glance and keeps doing so with the mark gone. What
+/// the mark did instead was indent every answer by 29pt while Home's own turns
+/// stayed flush left, so one transcript had two left margins — and it repeated
+/// the same logo down the page for a conversation with one participant on each
+/// side. Decoration paying no rent.
 struct ChatAssistantTurn<Content: View>: View {
     /// How much room is kept clear on the right. The builder's chat is a narrow
     /// panel and wants a wide gutter so an answer never runs to its own edge;
@@ -65,26 +69,12 @@ struct ChatAssistantTurn<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(nsImage: ChatAvatar.image)
-                .renderingMode(.template)
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .frame(width: 20, alignment: .center)
-                .padding(.top, 1)
+        HStack(alignment: .top, spacing: 0) {
             content()
             Spacer(minLength: trailingGutter)
         }
         .frame(maxWidth: .infinity)
     }
-
-}
-
-/// The tinted silhouette, not the artwork: the mark is a black body and would
-/// disappear into these panels. Same treatment as the menu bar, and outside
-/// `ChatAssistantTurn` because a generic type cannot hold a stored static.
-enum ChatAvatar {
-    static let image: NSImage =
-        BrandMark.templateImage(height: 17) ?? NSApp.applicationIconImage
 }
 
 /// One line that breathes while work is in flight.

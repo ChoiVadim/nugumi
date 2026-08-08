@@ -102,11 +102,6 @@ protocol SettingsHost: AnyObject {
     /// The plain half of Home's chat. Owned here rather than by the section so
     /// leaving Home and coming back does not wipe what was said.
     var homeChat: ToolChatConversation { get }
-    /// Which of the three things a Home message is asking for, when it named no
-    /// tool. A mention is answered without this — `ToolChatRouter.mentioned` is
-    /// pure and certain, and spending a model call to confirm what a user typed
-    /// outright would add latency to the one case that has none.
-    func routeHomeChat(_ message: String, tools: [GizmateTool]) async -> ToolChatIntent
     /// The one Ask conversation, shared by the capsule at the cursor and the
     /// docked chat. On `SettingsHost` rather than reached for through
     /// `GizmateSettingsBridge` for the reason every store here is: a dock

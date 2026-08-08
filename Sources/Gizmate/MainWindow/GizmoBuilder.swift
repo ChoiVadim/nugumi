@@ -114,7 +114,13 @@ final class GizmoBuilder: ObservableObject {
     var isBuilding: Bool { generating }
 
     /// Builds a new gizmo from a plain description.
-    func startNew(_ request: String) {
+    ///
+    /// - Parameter question: what the user typed, when they typed it somewhere
+    ///   else. `request` is Gizmate's own wording of the job and is what the
+    ///   agent is given; this is what the transcript shows, because a person
+    ///   should see their own sentence above the work it started.
+    func startNew(_ request: String, asking question: String? = nil) {
+        if let question { chat.record(request: question) }
         let draft = self.draft(for: .new)
         draft.brief = request
         live = draft
@@ -124,7 +130,8 @@ final class GizmoBuilder: ObservableObject {
     }
 
     /// Changes one that exists.
-    func startEdit(_ id: UUID, instruction: String) {
+    func startEdit(_ id: UUID, instruction: String, asking question: String? = nil) {
+        if let question { chat.record(request: question) }
         let draft = self.draft(for: .existing(id))
         live = draft
         let tool = draft.draft

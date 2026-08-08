@@ -46,7 +46,12 @@ final class ToolChatConversation: ObservableObject {
         self.answer = answer
     }
 
-    func send(_ question: String) {
+    /// - Parameter intercept: shown the finished reply before it is recorded.
+    ///   Returning true means the reply was an instruction to another part of
+    ///   the app rather than an answer, so nothing lands here: the question
+    ///   belongs to the transcript that acted on it, and a turn whose answer is
+    ///   `BUILD: …` would otherwise be carried as history forever.
+    func send(_ question: String, intercept: @escaping (String) -> Bool = { _ in false }) {
         let clean = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty, !isRunning else { return }
         pending = Turn(question: clean, answer: "")
@@ -68,8 +73,9 @@ final class ToolChatConversation: ObservableObject {
                 }
                 try Task.checkCancellation()
                 guard let self, self.turn == token else { return }
-                self.turns.append(Turn(question: clean, answer: reply))
                 self.pending = nil
+                guard !intercept(reply) else { return }
+                self.turns.append(Turn(question: clean, answer: reply))
             } catch is CancellationError {
                 self?.pending = nil
             } catch {

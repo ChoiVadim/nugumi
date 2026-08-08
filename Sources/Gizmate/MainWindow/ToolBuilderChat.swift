@@ -99,10 +99,23 @@ final class ToolBuilderChatSession: ObservableObject {
         )
     }
 
+    /// Puts what the user asked into this transcript, for a request that reached
+    /// the builder from somewhere other than its own composer.
+    ///
+    /// Home's chat is that somewhere: it hands the build over the moment
+    /// Gizmate writes a directive, and drops its own turn because the answer was
+    /// never prose. Without this the question would vanish with it, and the
+    /// build would appear to have started on its own.
+    func record(request text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        messages.append(.init(role: .user, text: value))
+    }
+
     func submit(_ text: String) async -> ToolBuilderSubmission? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
-        messages.append(.init(role: .user, text: value))
+        record(request: value)
         guard isAwaitingAnswer, let answerGeneration else {
             return .buildRequest(value)
         }

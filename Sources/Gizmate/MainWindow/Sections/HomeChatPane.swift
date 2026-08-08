@@ -15,7 +15,6 @@ import SwiftUI
 /// names a tool outright and asking a classifier to confirm it would add
 /// latency to the one case that has none.
 struct HomeChatPane: View {
-    @EnvironmentObject var bridge: GizmateSettingsBridge
     @ObservedObject var tools: ToolsStore
     /// Held, not fetched.
     ///
@@ -32,13 +31,6 @@ struct HomeChatPane: View {
     @ObservedObject var builder: GizmoBuilder
 
     @State private var draft = ""
-    /// True while the router is still deciding what the message in flight was.
-    ///
-    /// The answer to it is already being written by then. Classifying first and
-    /// answering second cost two model calls back to back on the commonest
-    /// thing anyone does here, which is ask a question — so both start at once,
-    /// and the router only has to arrive before the answer is shown.
-    @State private var routing = false
     @FocusState private var composerFocused: Bool
 
     private static let bottomAnchor = "home.chat.bottom"
@@ -97,11 +89,6 @@ struct HomeChatPane: View {
                     .padding(.vertical, 20)
                 }
                 .scrollIndicators(.never)
-                .onChange(of: routing) { _, _ in
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
-                    }
-                }
                 .onChange(of: conversation.turns.count) { _, _ in
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
@@ -117,8 +104,8 @@ struct HomeChatPane: View {
     }
 
     /// A turn that is over. Two functions rather than one with flags, because
-    /// the one with flags read `routing || turn.answer.isEmpty` — and `routing`
-    /// belongs to the pane, not to a turn, so every finished exchange in the
+    /// the one with flags read pane state alongside the turn's own — and pane
+    /// state belongs to no single row, so every finished exchange in the
     /// transcript turned back into "Thinking" the moment a new message was
     /// sent. State that describes one row cannot be reachable from the code
     /// drawing the others.
@@ -132,16 +119,16 @@ struct HomeChatPane: View {
         }
     }
 
-    /// The turn being answered right now, and the only one `routing` can reach.
+    /// The turn being answered right now.
     private func pendingTurn(_ turn: ToolChatConversation.Turn) -> some View {
         exchange(question: turn.question) {
             if let failure = turn.failure {
                 ChatProblemText(message: failure)
-            } else if routing || turn.answer.isEmpty {
-                // The answer is already streaming underneath while the router
-                // decides. It stays hidden until then, because a build request
-                // would have this half-written reply on screen for a second
-                // before it was thrown away for the builder.
+            } else if turn.answer.isEmpty || ToolChatRouter.mayBeDirective(turn.answer) {
+                // A reply that turns out to be a directive is machinery, and
+                // machinery must never be seen typing itself out. Six
+                // characters settle which this is, so an ordinary answer is
+                // held back for a chunk or two and never for a whole reply.
                 ChatThinkingText(text: "Thinking")
             } else {
                 ChatAnswerText(markdown: turn.answer)
@@ -411,21 +398,35 @@ struct HomeChatPane: View {
                 .background(Circle().fill(idle ? FlowTheme.ink.opacity(0.22) : FlowTheme.ink))
         }
         .buttonStyle(.plain)
-        .disabled(idle || routing)
+        .disabled(idle)
         .help("Send")
     }
 
     // MARK: - Routing
 
+    /// One message, one agent, one decision.
+    ///
+    /// This used to send the message twice: once to be answered and once to be
+    /// classified, in parallel, on the theory that answering is what a message
+    /// usually wants and the classifier only had to arrive first. Two models
+    /// reading the same sentence do not have to agree, and when they disagreed
+    /// both outcomes happened — Gizmate asked which shortcut the gizmo should
+    /// use while the builder, told the same message was a build, finished one
+    /// underneath the question. Worse, a build already running was cancelled and
+    /// restarted by the second verdict, which is what put a bare "cancelled" in
+    /// the transcript.
+    ///
+    /// Now Gizmate decides by replying. A directive is not a reading of the
+    /// answer, it *is* the answer, so there is nothing left to disagree with.
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !routing, !conversation.isRunning else { return }
+        guard !text.isEmpty, !conversation.isRunning else { return }
         let usable = tools.usableTools()
         draft = ""
 
-        // A build already open owns the composer. Routing a message that is an
-        // answer to the agent's own question would strand the continuation it
-        // is waiting on, and start a second build besides.
+        // A build already open owns the composer. Sending a message that is an
+        // answer to the agent's own question anywhere else would strand the
+        // continuation it is waiting on, and start a second build besides.
         if builder.chat.isAwaitingAnswer || builder.isBuilding {
             Task { await builder.send(text) }
             return
@@ -433,29 +434,21 @@ struct HomeChatPane: View {
 
         // A mention is certain, so it costs no call at all.
         if let mentioned = ToolChatRouter.mentioned(in: text, among: usable) {
-            builder.startEdit(mentioned, instruction: text)
+            builder.startEdit(mentioned, instruction: text, asking: text)
             return
         }
 
-        // Both at once. Answering is what the message almost always wanted, so
-        // it starts immediately and the router runs beside it; a build request
-        // spends one answer nobody sees, which is the rarer case paying for the
-        // common one.
-        routing = true
-        conversation.send(text)
-        Task { @MainActor in
-            let intent = await bridge.host?.routeHomeChat(text, tools: usable) ?? .talk
-            routing = false
-            switch intent {
-            case .talk:
-                break
-            case .build:
-                conversation.cancel()
-                builder.startNew(text)
-            case .edit(let id):
-                conversation.cancel()
-                builder.startEdit(id, instruction: text)
+        conversation.send(text) { reply in
+            guard let directive = ToolChatRouter.directive(in: reply, tools: usable) else {
+                return false
             }
+            switch directive {
+            case .build(let brief):
+                builder.startNew(brief ?? text, asking: text)
+            case .edit(let id):
+                builder.startEdit(id, instruction: text, asking: text)
+            }
+            return true
         }
     }
 }

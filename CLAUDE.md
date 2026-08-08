@@ -23,6 +23,17 @@ ones it settles:
   a person can only reach by finding the right form is something most people
   will never reach. When you add a capability, the first question is what
   sentence turns it on.
+- **One agent, and it decides by answering.** Home's chat ran two models on
+  every message for a while: one wrote the reply, one classified the message as
+  talk / build / edit, in parallel. Two models reading the same sentence do not
+  have to agree, and when they disagreed both outcomes happened. Gizmate asked
+  which shortcut the gizmo should use while the builder, told the same message
+  was a build, finished one underneath the question; a build already running was
+  cancelled and restarted by the late verdict, which is where a bare "cancelled"
+  in the transcript came from. There is one agent now, and its verdict is not a
+  reading of its answer, it _is_ its answer: a reply of `BUILD: <brief>` starts
+  the build (`ToolChatRouter.directiveContract`). Never add a second model whose
+  job is to decide what the first one meant.
 - **Four kinds of made thing, one model.** `ToolKind` is `prompt` (a system
   prompt over text), `native` (a parameterized macOS action from a closed
   catalog), `python` (a PEP 723 script through `uv`), and `agent` (an
