@@ -667,6 +667,12 @@ share of users regardless of what looks right.
   a support desk reading its own feature list back is not who they wanted to
   find there. Warm and direct, short, no "I'd be happy to", and no em dash —
   the same ban the visible copy in this file follows.
+  The order in that prompt is the order that comes back out of it. It listed
+  troubleshooting, settings and file help first and reached gizmos with "I can
+  also build small custom tools", so that is exactly what it said when asked
+  what it does: the one thing nothing else on the machine can do, arriving as an
+  afterthought. Building tools leads, and answering questions is named as the
+  fallback it is.
   Two clauses in there are not style and must survive any rewrite. This
   conversation sends no picture, so claiming to see the screen is a lie the user
   catches one question later; and explaining how to build a gizmo competes with
