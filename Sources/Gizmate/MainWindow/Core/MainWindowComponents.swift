@@ -29,6 +29,15 @@ extension View {
 
 /// The floating rounded card (dark menu material) that every section sits in.
 /// No scroll of its own — sections decide what scrolls.
+/// `DetailCard` is generic, so a constant on it can't be named without a type
+/// argument. This holds the one measurement another view has to know.
+enum DetailCardMetrics {
+    /// The gap between the sidebar's frame and the card's edge. Shared,
+    /// because the sidebar subtracts it: a row's right margin is read against
+    /// this card's edge, not against the sidebar's invisible frame.
+    static let leadingInset: CGFloat = 10
+}
+
 struct DetailCard<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -44,7 +53,7 @@ struct DetailCard<Content: View>: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(FlowTheme.hairline, lineWidth: 1)
             )
-            .padding(EdgeInsets(top: 28, leading: 10, bottom: 16, trailing: 16))
+            .padding(EdgeInsets(top: 28, leading: DetailCardMetrics.leadingInset, bottom: 16, trailing: 16))
     }
 }
 

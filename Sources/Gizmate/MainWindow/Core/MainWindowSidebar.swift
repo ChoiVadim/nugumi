@@ -24,7 +24,13 @@ struct SidebarView: View {
             Divider().background(FlowTheme.hairline).padding(.vertical, 6)
             ForEach(MainWindowSection.secondary) { NavItem(section: $0) }
         }
-        .padding(.horizontal, 12)
+        // A row's margin is measured against what the eye can see, and on the
+        // right that is the detail card's edge, not this view's frame. Padding
+        // both sides by 12 put the row 12 from the window and 22 from the card,
+        // because the card's own leading inset lands in the same gap. Subtract
+        // it and both margins read as 12.
+        .padding(.leading, 12)
+        .padding(.trailing, 12 - DetailCardMetrics.leadingInset)
         .padding(.top, 30)   // clear the traffic lights
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

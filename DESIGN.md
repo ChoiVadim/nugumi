@@ -8,19 +8,19 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 
 ### Palette
 
-| Role            | Token                                        | Light                  | Dark                   | Usage                                               |
-| --------------- | -------------------------------------------- | ---------------------- | ---------------------- | --------------------------------------------------- |
-| Surface/glass   | `FlowTheme.glass`                            | transparent            | transparent            | Visual-effect-backed window background              |
-| Surface/card    | `FlowTheme.card`                             | rgba(255,255,255,0.06) | rgba(255,255,255,0.06) | Settings panels and setup cards                     |
-| Surface/subtle  | `FlowTheme.subtleFill`                       | rgba(255,255,255,0.08) | rgba(255,255,255,0.08) | Secondary fills and inactive controls               |
-| Text/primary    | `FlowTheme.ink`                              | #FFFFFF                | #FFFFFF                | Headings, body, active controls                     |
-| Text/secondary  | `FlowTheme.inkSecondary`                     | #BDBDBD                | #BDBDBD                | Supporting copy and secondary labels                |
-| Text/tertiary   | `FlowTheme.inkTertiary`                      | #8C8C8C                | #8C8C8C                | Disabled, metadata, inactive icons                  |
-| Border/hairline | `FlowTheme.hairline`                         | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines                         |
-| Accent/primary  | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9                | #C9C9C9                | Success, selected state, primary setup progress     |
-| Surface/selected | `FlowTheme.selected`                        | rgba(255,255,255,0.055) | rgba(255,255,255,0.055) | The sidebar's current row                       |
-| Accent/soft     | `FlowTheme.accentSoft`                       | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds                           |
-| Status/error    | `FlowTheme.danger`                           | #FF8C8C                | #FF8C8C                | Failed setup status, and armed destructive controls |
+| Role             | Token                                        | Light                   | Dark                    | Usage                                               |
+| ---------------- | -------------------------------------------- | ----------------------- | ----------------------- | --------------------------------------------------- |
+| Surface/glass    | `FlowTheme.glass`                            | transparent             | transparent             | Visual-effect-backed window background              |
+| Surface/card     | `FlowTheme.card`                             | rgba(255,255,255,0.06)  | rgba(255,255,255,0.06)  | Settings panels and setup cards                     |
+| Surface/subtle   | `FlowTheme.subtleFill`                       | rgba(255,255,255,0.08)  | rgba(255,255,255,0.08)  | Secondary fills and inactive controls               |
+| Text/primary     | `FlowTheme.ink`                              | #FFFFFF                 | #FFFFFF                 | Headings, body, active controls                     |
+| Text/secondary   | `FlowTheme.inkSecondary`                     | #BDBDBD                 | #BDBDBD                 | Supporting copy and secondary labels                |
+| Text/tertiary    | `FlowTheme.inkTertiary`                      | #8C8C8C                 | #8C8C8C                 | Disabled, metadata, inactive icons                  |
+| Border/hairline  | `FlowTheme.hairline`                         | rgba(255,255,255,0.10)  | rgba(255,255,255,0.10)  | Dividers and quiet outlines                         |
+| Accent/primary   | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9                 | #C9C9C9                 | Success, selected state, primary setup progress     |
+| Surface/selected | `FlowTheme.selected`                         | rgba(255,255,255,0.055) | rgba(255,255,255,0.055) | The sidebar's current row                           |
+| Accent/soft      | `FlowTheme.accentSoft`                       | rgba(255,255,255,0.18)  | rgba(255,255,255,0.18)  | Soft selected backgrounds                           |
+| Status/error     | `FlowTheme.danger`                           | #FF8C8C                 | #FF8C8C                 | Failed setup status, and armed destructive controls |
 
 ### Rules
 
@@ -78,6 +78,12 @@ All spacing maps to the 4px grid.
 
 ### Rules
 
+- **A margin is measured against what can be seen, not against a frame.** The
+  sidebar's right edge is invisible; the detail card's edge is not, so a nav
+  row padded 12 on both sides read as 12 from the window and 22 from the card,
+  because `DetailCardMetrics.leadingInset` landed inside the same gap. The
+  sidebar subtracts it (`.padding(.trailing, 12 - leadingInset)`). Any view
+  that ends where another view's inset begins owes the same subtraction.
 - Do not add a card inside another card unless the existing component already owns the frame.
 - Preserve arbitrary-window resizing; no text may clip at narrow widths.
 - Setup and provider rows should not shift layout when status text changes.
@@ -127,7 +133,7 @@ eighty cards, and the highlight waited on a grid that was about to be thrown
 away. `FolderHubView.show(_:asRoot:)` now does the whole switch in the tap:
 select, clear, then load.
 
-Work that only decides *where* something goes runs beside the work itself,
+Work that only decides _where_ something goes runs beside the work itself,
 not in front of it. Home's chat classified a message and then answered it, two
 model calls back to back on the commonest thing anyone does here. Both start at
 once now: the answer streams while the router decides, and a build request
@@ -155,7 +161,7 @@ two functions now, and the pane's state is only in scope inside the second. The
 shape is the fix, not the condition: a flag that can be read from the wrong row
 eventually is.
 
-This includes work that decides *where* a message goes. Home's chat sent a
+This includes work that decides _where_ a message goes. Home's chat sent a
 typed message to a classifier before showing it, so between pressing send and
 the model answering there was a second or two with the message gone from the
 composer and nowhere else — and the router decides where it goes, never whether
@@ -653,8 +659,8 @@ share of users regardless of what looks right.
   tile grid this replaced, and the rail reintroduced anyway. When most of a list
   shares a value, that value is the background. `HomeRowLocationLabel` takes an
   `emphasised` flag: off in a list, on in isolation. The words stay on every row
-  either way, because the rule is that nothing lives nowhere *without saying
-  so*, and the words are what say it. Only the shouting goes.
+  either way, because the rule is that nothing lives nowhere _without saying
+  so_, and the words are what say it. Only the shouting goes.
 - **A panel earns a toggle by being big enough to be worth hiding.** Home's
   gizmo rail collapses; the navigation sidebar was given one and had it taken
   away again. Six short labels never filled 256pt, and trimming it to 212
