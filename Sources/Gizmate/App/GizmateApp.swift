@@ -72,10 +72,39 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// answer with the other's context missing.
     /// Outlives the main window on purpose: a build takes minutes, and its
     /// result exists nowhere else until it is saved.
-    lazy var gizmoBuilder = GizmoBuilder(tools: toolsStore) { [weak self] tool, script, onOutput in
-        guard let self else { return .failed("Not available.") }
-        return await self.testScriptTool(tool, script: script, onOutput: onOutput)
-    }
+    lazy var gizmoBuilder = GizmoBuilder(
+        tools: toolsStore,
+        runner: { [weak self] tool, script, onOutput in
+            guard let self else { return .failed("Not available.") }
+            return await self.testScriptTool(tool, script: script, onOutput: onOutput)
+        },
+        agent: GizmoBuilder.Agent(
+            generate: { [weak self] description, onPartial, clarification, cancelled, secret in
+                guard let self else { return .failure(ToolGeneratorError.emptyDescription) }
+                return await self.generateScriptTool(
+                    description: description, onPartial: onPartial,
+                    clarification: clarification, clarificationCancellation: cancelled,
+                    secretRequest: secret
+                )
+            },
+            revise: { [weak self] tool, script, instruction, onPartial, clarification, cancelled, secret in
+                guard let self else { return .failure(ToolGeneratorError.emptyDescription) }
+                return await self.reviseScriptTool(
+                    tool: tool, script: script, instruction: instruction, onPartial: onPartial,
+                    clarification: clarification, clarificationCancellation: cancelled,
+                    secretRequest: secret
+                )
+            },
+            repair: { [weak self] tool, script, failure, onPartial, clarification, cancelled, secret in
+                guard let self else { return .failure(ToolGeneratorError.emptyDescription) }
+                return await self.repairScriptTool(
+                    tool: tool, script: script, failure: failure, onPartial: onPartial,
+                    clarification: clarification, clarificationCancellation: cancelled,
+                    secretRequest: secret
+                )
+            }
+        )
+    )
     lazy var askConversation = AskConversationStore(engine: makeAskEngine())
     /// Home's plain conversation. Same backend as Ask, different transcript and
     /// different system prompt — see `ToolChatConversation` for why they are not
