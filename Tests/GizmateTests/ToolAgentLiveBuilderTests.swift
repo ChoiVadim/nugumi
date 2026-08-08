@@ -462,6 +462,130 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertFalse(ToolAgentModelActionValidator.isValid(oversizedPythonDirectory))
     }
 
+    // MARK: - Saying why
+
+    /// The validator's `false` is correct and useless on its own. Every case
+    /// here is one a model actually has no way to see: the decoder defaults a
+    /// missing key while the encoder demands it back, and the encoder writes
+    /// only the keys of the candidate's own kind. Left undiagnosed, each of
+    /// them burns a build and reaches the user as "the model returned an
+    /// invalid agent action".
+    func testTheDiagnosisNamesAMissingCandidateKey() {
+        let missingHosts = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: missingHosts)
+
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(missingHosts))
+        XCTAssertEqual(problem?.contains("\"hosts\""), true, problem ?? "no diagnosis")
+        XCTAssertEqual(problem?.contains("missing"), true, problem ?? "no diagnosis")
+    }
+
+    func testTheDiagnosisNamesAKeyThatBelongsToAnotherKind() {
+        let promptOnPython = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"prompt":"Uppercase this","source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: promptOnPython)
+
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(promptOnPython))
+        XCTAssertEqual(problem?.contains("\"prompt\""), true, problem ?? "no diagnosis")
+        XCTAssertEqual(problem?.contains("python"), true, problem ?? "no diagnosis")
+    }
+
+    /// An explicit null is the same shape of mistake and the most tempting one:
+    /// the model has a key it decided not to use, and writing `null` looks more
+    /// complete than leaving it out. The encoder drops it, so the bytes differ.
+    func testTheDiagnosisTellsTheModelToOmitRatherThanNull() {
+        let nullDirectory = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"outputDirectory":null,"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: nullDirectory)
+
+        XCTAssertEqual(problem?.contains("\"outputDirectory\""), true, problem ?? "no diagnosis")
+        XCTAssertEqual(problem?.contains("null"), true, problem ?? "no diagnosis")
+    }
+
+    /// A value the enum does not have. The decoder's own message names it, so
+    /// the diagnosis carries that rather than paraphrasing it.
+    func testTheDiagnosisCarriesTheDecodersOwnComplaint() {
+        let unknownOutput = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"hologram","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: unknownOutput)
+
+        XCTAssertEqual(problem?.contains("hologram"), true, problem ?? "no diagnosis")
+    }
+
+    /// The rules `validate` enforces all throw the same bare error, so the one
+    /// field that broke one is found by taking keys away until the candidate
+    /// decodes. This one is a real python key with a value the rules refuse.
+    func testTheDiagnosisNamesTheFieldARuleRefused() {
+        let tooLong = String(
+            repeating: "x", count: ToolAgentProtocolLimitsV1.maximumBriefBytes + 1
+        )
+        let oversizedBrief = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"\#(tooLong)","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","hosts":[],"extensions":[],"source":"print('OK')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: oversizedBrief)
+
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(oversizedBrief))
+        XCTAssertEqual(problem?.contains("\"brief\""), true, problem ?? "no diagnosis")
+        XCTAssertEqual(problem?.contains("length"), true, problem ?? "no diagnosis")
+    }
+
+    func testTheDiagnosisListsTheRealToolsWhenOneIsInvented() {
+        let problem = ToolAgentModelActionDiagnosis.problem(
+            with: #"{"version":1,"action":"toolCall","name":"save_candidate","arguments":{}}"#
+        )
+
+        XCTAssertEqual(problem?.contains("save_candidate"), true, problem ?? "no diagnosis")
+        XCTAssertEqual(problem?.contains("write_candidate"), true, problem ?? "no diagnosis")
+    }
+
+    /// A reasoning field beside the action is the other thing models do here,
+    /// and the wire format has no room for it.
+    func testTheDiagnosisNamesTheOnlyKeysAToolCallMayCarry() {
+        let problem = ToolAgentModelActionDiagnosis.problem(
+            with: #"{"version":1,"action":"toolCall","name":"read_build_context","arguments":{},"reasoning":"I should read the context first"}"#
+        )
+
+        XCTAssertEqual(problem?.contains("\"arguments\""), true, problem ?? "no diagnosis")
+    }
+
+    func testProseIsDiagnosedAsProseRatherThanAsASchemaProblem() {
+        let problem = ToolAgentModelActionDiagnosis.problem(with: "Sure, I'll build that!")
+
+        XCTAssertEqual(problem?.contains("JSON object"), true, problem ?? "no diagnosis")
+    }
+
+    /// The diagnosis runs only on the failure path, so a valid action must
+    /// produce nothing at all rather than a sentence nobody needs.
+    func testAValidActionHasNoProblem() {
+        XCTAssertNil(
+            ToolAgentModelActionDiagnosis.problem(
+                with: #"{"version":1,"action":"toolCall","name":"read_build_context","arguments":{}}"#
+            )
+        )
+    }
+
+    /// A fenced action is valid, so its fenced *invalid* twin has to be read
+    /// through the fence too. Diagnosing it as "not JSON" would send the model
+    /// after the wrapper instead of the field it got wrong.
+    func testAFencedResponseIsDiagnosedThroughItsFence() {
+        let missingHosts = #"""
+            {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","extensions":[],"source":"print('OK')","fixtures":[],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: "```json\n\(missingHosts)\n```")
+
+        XCTAssertEqual(problem?.contains("\"hosts\""), true, problem ?? "no diagnosis")
+    }
+
     func testUnsupportedFinalTextIsExtractedWithoutRelaxingOtherFinalText() {
         XCTAssertEqual(
             ToolAgentModelActionInspector.unsupportedMessage(
