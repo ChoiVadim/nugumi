@@ -51,6 +51,66 @@ struct ChatAnswerText: View {
     }
 }
 
+/// An answer, with Gizmate's mark beside it.
+///
+/// The mark is what makes a transcript read as two people rather than as
+/// alternating paragraphs, and it is the thing the builder's chat has always
+/// had. Extracted here when Home grew a chat too — the third place this pattern
+/// came up is where copying it stops being cheaper than sharing it.
+struct ChatAssistantTurn<Content: View>: View {
+    /// How much room is kept clear on the right. The builder's chat is a narrow
+    /// panel and wants a wide gutter so an answer never runs to its own edge;
+    /// a capped column has that already.
+    var trailingGutter: CGFloat = 60
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(nsImage: ChatAvatar.image)
+                .renderingMode(.template)
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .frame(width: 20, alignment: .center)
+                .padding(.top, 1)
+            content()
+            Spacer(minLength: trailingGutter)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+}
+
+/// The tinted silhouette, not the artwork: the mark is a black body and would
+/// disappear into these panels. Same treatment as the menu bar, and outside
+/// `ChatAssistantTurn` because a generic type cannot hold a stored static.
+enum ChatAvatar {
+    static let image: NSImage =
+        BrandMark.templateImage(height: 17) ?? NSApp.applicationIconImage
+}
+
+/// One line that breathes while work is in flight.
+///
+/// Scoped to the opacity with `value:` rather than driven by `withAnimation` at
+/// `onAppear`: a `repeatForever` curve opened as a transaction also catches the
+/// layout settling in that same pass, and then the row's height oscillates
+/// forever and the scroller breathes with it.
+struct ChatThinkingText: View {
+    let text: String
+
+    @State private var pulse = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12.5))
+            .foregroundStyle(FlowTheme.inkSecondary)
+            .opacity(pulse ? 0.45 : 1)
+            .animation(
+                .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
+                value: pulse
+            )
+            .onAppear { pulse = true }
+    }
+}
+
 struct ChatProblemText: View {
     let message: String
 

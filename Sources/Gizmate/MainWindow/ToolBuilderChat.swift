@@ -552,24 +552,10 @@ struct ToolBuilderChat: View {
     /// finished tool — hangs off the same mark at the same left edge. Putting
     /// the avatar only on messages would step the other two out of the column.
     private func assistantTurn<Content: View>(
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(nsImage: Self.avatar)
-                .renderingMode(.template)
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .frame(width: 20, alignment: .center)
-                .padding(.top, 1)
-            content()
-            Spacer(minLength: 60)
-        }
-        .frame(maxWidth: .infinity)
+        ChatAssistantTurn(content: content)
     }
-
-    /// The tinted silhouette, not the artwork: the mark is a black body and
-    /// would disappear into this panel. Same treatment as the menu bar.
-    private static let avatar: NSImage =
-        BrandMark.templateImage(height: 17) ?? NSApp.applicationIconImage
 
     /// The work in progress takes the slot the answer will land in, as one line
     /// of text, so the reply redraws over it instead of appearing underneath a
@@ -585,19 +571,7 @@ struct ToolBuilderChat: View {
             assistantTurn {
             VStack(alignment: .leading, spacing: 5) {
                 Button { activityExpanded.toggle() } label: {
-                    Text(session.currentActivity ?? "Thinking")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(FlowTheme.inkSecondary)
-                        .opacity(pulse ? 0.45 : 1)
-                        // Scoped to the opacity with `value:` rather than driven
-                        // by `withAnimation` at onAppear: a repeatForever curve
-                        // opened as a transaction also catches the layout
-                        // settling in that same pass, and then the row's height
-                        // oscillates forever and the scroller breathes with it.
-                        .animation(
-                            .easeInOut(duration: 0.9).repeatForever(autoreverses: true),
-                            value: pulse
-                        )
+                    ChatThinkingText(text: session.currentActivity ?? "Thinking")
                 }
                 .buttonStyle(.plain)
                 .help(activityExpanded ? "Hide the steps so far" : "Show the steps so far")

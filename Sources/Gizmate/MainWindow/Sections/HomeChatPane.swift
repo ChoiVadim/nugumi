@@ -67,10 +67,16 @@ struct HomeChatPane: View {
                     .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
                 } else {
-                    transcript
-                    composer
-                        .frame(maxWidth: Self.column)
-                        .frame(maxWidth: .infinity)
+                    // Capped once, around both. Capping them separately put the
+                    // composer's rounded box further left than the text above
+                    // it, because the box carries its own padding inside the
+                    // cap and the transcript's padding sits outside it.
+                    VStack(spacing: 0) {
+                        transcript
+                        composer
+                    }
+                    .frame(maxWidth: Self.column)
+                    .frame(maxWidth: .infinity)
                 }
             case .newTool:
                 editor(toolID: nil)
@@ -113,8 +119,6 @@ struct HomeChatPane: View {
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
-                    .frame(maxWidth: Self.column, alignment: .leading)
-                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
                 }
@@ -131,14 +135,17 @@ struct HomeChatPane: View {
     private func turnView(_ turn: ToolChatConversation.Turn, streaming: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             ChatQuestionBubble(text: turn.question)
-            if let failure = turn.failure {
-                ChatProblemText(message: failure)
-            } else if turn.answer.isEmpty {
-                Text(routing ? "Reading that…" : "Thinking…")
-                    .font(.system(size: 12))
-                    .foregroundStyle(FlowTheme.inkTertiary)
-            } else {
-                ChatAnswerText(markdown: turn.answer)
+            // The mark beside every answer, which is what makes a transcript
+            // read as two people rather than alternating paragraphs. No gutter:
+            // the column is already the gutter here.
+            ChatAssistantTurn(trailingGutter: 0) {
+                if let failure = turn.failure {
+                    ChatProblemText(message: failure)
+                } else if turn.answer.isEmpty {
+                    ChatThinkingText(text: routing ? "Reading that" : "Thinking")
+                } else {
+                    ChatAnswerText(markdown: turn.answer)
+                }
             }
         }
     }
