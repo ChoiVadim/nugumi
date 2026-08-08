@@ -155,10 +155,12 @@ final class AskConversationStore: ObservableObject {
                     armed: armedFrame, strokes: strokes, wantsImage: wantsImage, engine: engine
                 )
                 try Task.checkCancellation()
-                let response = try await engine.ask(history, asked, capture?.image) { partial in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.turn == token, self.pending != nil else { return }
-                        self.pending?.answer = AskGizmateResponse.streamingMessage(partial)
+                let response = try await UserActivity.run("Answering an Ask question") {
+                    try await engine.ask(history, asked, capture?.image) { partial in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.turn == token, self.pending != nil else { return }
+                            self.pending?.answer = AskGizmateResponse.streamingMessage(partial)
+                        }
                     }
                 }
                 try Task.checkCancellation()

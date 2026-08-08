@@ -58,10 +58,12 @@ final class ToolChatConversation: ObservableObject {
         task?.cancel()
         task = Task { [weak self] in
             do {
-                let reply = try await answer(history, clean) { partial in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.turn == token, self.pending != nil else { return }
-                        self.pending?.answer = partial
+                let reply = try await UserActivity.run("Answering a chat message") {
+                    try await answer(history, clean) { partial in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.turn == token, self.pending != nil else { return }
+                            self.pending?.answer = partial
+                        }
                     }
                 }
                 try Task.checkCancellation()
