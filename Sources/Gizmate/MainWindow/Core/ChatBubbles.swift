@@ -9,30 +9,27 @@ import SwiftUI
 /// would hurt, because it carries a real fix (see `MarkdownLabel`) that a copy
 /// would not have.
 
-/// The column's width, not its own text's.
-///
-/// It used to size to the text and push right, which made every question a
-/// different width and the transcript a ragged right edge that moved as you
-/// read down it. Worse, the width was live: selecting the text re-measured the
-/// pill and it grew under the pointer. One width for every question is a still
-/// column, and the fill alone is enough to tell a question from the answer
-/// under it.
+/// Sized to its own text and pushed right, with a hard gap on its left so a
+/// long question never becomes a full-width slab indistinguishable from the
+/// answer under it.
 struct ChatQuestionBubble: View {
     let text: String
 
     var body: some View {
-        Text(text)
-            .font(.system(size: 12.5))
-            .foregroundStyle(FlowTheme.ink)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, 7)
-            .padding(.horizontal, 11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(FlowTheme.subtleFill)
-            )
+        HStack(spacing: 0) {
+            Spacer(minLength: 28)
+            Text(text)
+                .font(.system(size: 12.5))
+                .foregroundStyle(FlowTheme.ink)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 11)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(FlowTheme.subtleFill)
+                )
+        }
     }
 }
 
@@ -142,6 +139,23 @@ struct ChatProblemText: View {
 struct MarkdownLabel: NSViewRepresentable {
     let text: NSAttributedString
 
+    /// The width the column last offered.
+    ///
+    /// An answer is one width — the column's — and it stays that width when
+    /// you click it. It did not: clicking a selectable `NSTextField` makes it
+    /// first responder, which drops `preferredMaxLayoutWidth` and invalidates
+    /// the intrinsic size, and the re-measure that follows arrives with no
+    /// width proposed. Answering that with `nil` handed the layout back to the
+    /// intrinsic size, which for wrapped text with no maximum is the whole
+    /// answer on one line — so the reply visibly widened under the pointer and
+    /// ran out past the column. Remembering the width means an unspecified
+    /// proposal is answered with the same number as the last specified one.
+    final class Coordinator {
+        var width: CGFloat = 0
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField(labelWithAttributedString: text)
         field.isSelectable = true
@@ -154,6 +168,9 @@ struct MarkdownLabel: NSViewRepresentable {
 
     func updateNSView(_ field: NSTextField, context: Context) {
         field.attributedStringValue = text
+        // Setting the string clears the wrap width, and a streamed answer sets
+        // it on every chunk.
+        field.preferredMaxLayoutWidth = context.coordinator.width
     }
 
     /// Height comes from the width SwiftUI is offering. Without this the field
@@ -164,7 +181,10 @@ struct MarkdownLabel: NSViewRepresentable {
         nsView: NSTextField,
         context: Context
     ) -> CGSize? {
-        guard let width = proposal.width, width > 0 else { return nil }
+        let offered = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let width = offered ?? context.coordinator.width
+        guard width > 0 else { return nil }
+        context.coordinator.width = width
         nsView.preferredMaxLayoutWidth = width
         return CGSize(width: width, height: nsView.intrinsicContentSize.height)
     }
