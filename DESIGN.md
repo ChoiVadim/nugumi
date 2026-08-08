@@ -18,6 +18,7 @@ Gizmate should feel like a quiet Mac-native command surface: compact, glassy, an
 | Text/tertiary   | `FlowTheme.inkTertiary`                      | #8C8C8C                | #8C8C8C                | Disabled, metadata, inactive icons                  |
 | Border/hairline | `FlowTheme.hairline`                         | rgba(255,255,255,0.10) | rgba(255,255,255,0.10) | Dividers and quiet outlines                         |
 | Accent/primary  | `FlowTheme.accent` / `NSColor.gizmateAccent` | #C9C9C9                | #C9C9C9                | Success, selected state, primary setup progress     |
+| Surface/selected | `FlowTheme.selected`                        | rgba(255,255,255,0.055) | rgba(255,255,255,0.055) | The sidebar's current row                       |
 | Accent/soft     | `FlowTheme.accentSoft`                       | rgba(255,255,255,0.18) | rgba(255,255,255,0.18) | Soft selected backgrounds                           |
 | Status/error    | `FlowTheme.danger`                           | #FF8C8C                | #FF8C8C                | Failed setup status, and armed destructive controls |
 
@@ -644,6 +645,18 @@ share of users regardless of what looks right.
   lines: one of three neighbours taller than the others for a reason about that
   gizmo rather than about the action. The chip says "Change a gizmo" and inserts
   an `@`, which is also the thing it is teaching.
+- **Ask about the work, not about the person.** Home opened with "What do you
+  want to do?", which asks someone to describe their own afternoon. What the box
+  needs is a job for a gizmo, so the question names the gizmo as the thing doing
+  it: "What should a gizmo do for you?". The same swap runs through the
+  subtitle — "describe the tool you want" before "ask a question", because the
+  tool is what this screen is for and the question is the fallback.
+- **A selected row is said by its label first.** The sidebar's current section
+  carried a well of black punched into the panel with a hairline around it,
+  which read as a pressed button on a screen where nothing else is pressed. The
+  label already carries the selection in weight and in ink, so the fill only has
+  to group them — 5.5% white, no border. Lighter rather than darker, because a
+  dark fill on a dark panel is a hole and a light one is a highlight.
 - **An empty chat opens where it is used.** The greeting sat top-left and the
   composer sat pinned to the bottom of an empty column: two halves of one thing
   with the whole pane between them, and neither reading as the place to start.

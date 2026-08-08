@@ -57,7 +57,12 @@ enum FlowTheme {
     /// What "this one is selected" looks like: a well sunk *below* the surface,
     /// not a chip lifted above it. Deeper than `recess` because it has to read
     /// against the sidebar's own material rather than against a lit track.
-    static let selected = Color.black.opacity(0.28)
+    /// The sidebar's current row. Deliberately faint, and lighter rather than
+    /// darker: the label already carries the selection in weight and in ink, so
+    /// the fill only has to say "this group", not shout it. A well of black
+    /// punched into the panel, plus a hairline around it, was reading as a
+    /// pressed button on a screen where nothing else is pressed.
+    static let selected = Color.white.opacity(0.055)
     /// One step above the surface: the selected chip in a track, a hovered row.
     static let raised = Color.white.opacity(0.14)
     /// Top of the ladder: the primary action in a section.

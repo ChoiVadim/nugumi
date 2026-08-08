@@ -55,7 +55,6 @@ struct HomeChatPane: View {
                         composer
                         starters
                         Spacer(minLength: 0)
-                        Spacer(minLength: 0)
                     }
                     .frame(maxWidth: 560)
                     .frame(maxWidth: .infinity)
@@ -140,10 +139,14 @@ struct HomeChatPane: View {
     /// The invitation, sized like a title because on an empty screen it is one.
     private var opening: some View {
         VStack(spacing: 6) {
-            Text("What do you want to do?")
+            // About the tool, not about the person. "What do you want to do?"
+            // asks someone to describe their own afternoon; what this box needs
+            // is a job for a gizmo to do, and the question that gets one names
+            // the gizmo as the thing doing it.
+            Text("What should a gizmo do for you?")
                 .font(FlowTheme.serif(26))
                 .foregroundStyle(FlowTheme.ink)
-            Text("Ask a question, describe a gizmo to build, or type @ to change one.")
+            Text("Describe the tool you want. Or ask a question, or type @ to change one you have.")
                 .font(.system(size: 12.5))
                 .foregroundStyle(FlowTheme.inkTertiary)
                 .multilineTextAlignment(.center)

@@ -9,7 +9,12 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             brandHeader
-                .padding(.horizontal, 6)
+                // The same inset a row's own content sits at (the row adds 10
+                // inside its capsule), so the wordmark and the section icons
+                // stand on one line. At 6 the logo sat four points left of
+                // every icon under it, which is the kind of misalignment you
+                // see without being able to name.
+                .padding(.horizontal, 10)
                 .padding(.bottom, 20)
 
             ForEach(MainWindowSection.primary) { NavItem(section: $0) }
@@ -83,10 +88,6 @@ struct NavItem: View {
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(isSelected ? FlowTheme.selected : Color.clear)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(isSelected ? FlowTheme.hairline : Color.clear, lineWidth: 1)
-                    )
             )
             .contentShape(Rectangle())
         }
