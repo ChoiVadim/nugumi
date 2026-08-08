@@ -141,6 +141,23 @@ final class GizmoBuilder: ObservableObject {
         }
     }
 
+    /// Fixes a gizmo whose last run failed, from the error it produced.
+    ///
+    /// The failure is the instruction, so there is nothing for the user to type
+    /// and nothing for them to retype: the agent is handed the diagnostics it
+    /// needs. Started from the Details modal's "Fix it", which used to run its
+    /// own agent call against its own chat session, and therefore had nowhere to
+    /// put a question the repair stopped to ask.
+    func startRepair(_ draft: GizmoDraft, failure: String) {
+        live = draft
+        let tool = draft.draft
+        let script = draft.script
+        chat.markCandidateStale()
+        run { agent, partial, clarify, cancelled, secret in
+            await agent.repair(tool, script, failure, partial, clarify, cancelled, secret)
+        }
+    }
+
     /// A message typed while a build is open: either an answer to a question
     /// the agent asked, or the next instruction.
     func send(_ text: String) async {

@@ -4,20 +4,19 @@ import XCTest
 
 @MainActor
 final class ToolBuilderChatTests: XCTestCase {
-    func testSessionStartsWithAssistantSaveBoundary() {
-        let session = ToolBuilderChatSession()
+    /// A session opens with the line it was given, and with nothing when it was
+    /// given nothing. The default used to be a greeting, which meant Home's
+    /// chat could never show an empty screen.
+    func testASessionOpensWithWhateverItWasGiven() {
+        XCTAssertTrue(ToolBuilderChatSession().messages.isEmpty)
 
-        XCTAssertEqual(session.messages.count, 1)
-        XCTAssertEqual(session.messages[0].role, .assistant)
-        XCTAssertFalse(session.messages[0].text.isEmpty)
-        // The one promise this greeting has to keep, and what the test is named
-        // for: nothing reaches the user's Ring until they press Save. The rest
-        // of the wording is copy — asserting on a particular verb only breaks
-        // the suite every time someone rewrites the sentence, which is what it
-        // just did.
-        XCTAssertTrue(session.messages[0].text.contains("Save"))
-        XCTAssertFalse(session.isAwaitingAnswer)
-        XCTAssertNil(session.readyMessage)
+        let greeted = ToolBuilderChatSession(greeting: "Nothing is saved until you press Save.")
+
+        XCTAssertEqual(greeted.messages.count, 1)
+        XCTAssertEqual(greeted.messages[0].role, .assistant)
+        XCTAssertTrue(greeted.messages[0].text.contains("Save"))
+        XCTAssertFalse(greeted.isAwaitingAnswer)
+        XCTAssertNil(greeted.readyMessage)
     }
 
     func testCandidateReadyProducesInlineSaveMessageUntilRevisionStarts() {

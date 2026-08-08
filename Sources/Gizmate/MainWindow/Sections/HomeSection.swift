@@ -142,19 +142,14 @@ struct HomeSectionContent: View {
     /// talking about.
     private var rail: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // No `+`. It opened a second builder in a modal, with a second
+            // chat inside it saying "tell me what you want to happen" beside a
+            // chat already asking exactly that. Two ways to start one thing is
+            // two things to keep working, and the one this rail sits next to is
+            // the one that is the product.
             HStack(alignment: .firstTextBaseline) {
                 cardHeading("Your gizmos")
                 Spacer(minLength: 8)
-                // The same disc Notes and the folder hub use to add one.
-                // CLAUDE.md argued for a labelled button here, and was right
-                // while this was the page's one action and a bare `+` named
-                // none of it. The chat is that action now — its own empty state
-                // offers "Build me a gizmo" in words — so this is the second
-                // way in, and a second way in should not shout as loudly as the
-                // first.
-                ResetDiscButton(symbol: "plus", label: "", accessibilityTitle: "New gizmo") {
-                    bridge.ringSheet = .toolEditor(id: nil)
-                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)

@@ -3,97 +3,32 @@ import CryptoKit
 import GizmateToolAgentCore
 import SwiftUI
 
-/// Draft-based tool editor: nothing reaches the store until Save, so Cancel and
-/// Escape are always safe. Three modes behind one panel — a prompt the model
-/// runs, a macOS action from a fixed catalog, or a Python script uv runs.
+/// What a gizmo *is*, as a modal: its name, icon, kind, trigger, script and
+/// the fields each kind needs. Draft-based, so nothing reaches the store until
+/// Save and both Cancel and Escape are always safe.
+///
+/// What a gizmo *does* is not here. This panel used to carry a builder chat of
+/// its own on a "Chat" tab, opened by a `+` in Home's rail, and it said "tell me
+/// what you want to happen" beside a chat that was already asking exactly that.
+/// Two builders meant two transcripts, two clarification paths and two places a
+/// half-built gizmo could be lost. There is one, and it is Home's.
 struct ToolEditorPanel: View {
-    /// Where this panel is being shown.
-    ///
-    /// It was a modal and nothing else, which is why building or changing a
-    /// gizmo meant opening a sheet, doing one thing, and closing it again. The
-    /// panel itself was never the problem: it holds the whole build-and-test
-    /// loop and works. What made it a sheet was fifteen points of chrome — a
-    /// fixed 640×620, its own card fill, a shadow — so that is all this
-    /// switches. Nothing inside changes, and the sheet path is byte-for-byte
-    /// what it was.
-    enum Chrome {
-        /// A modal over the window: fixed size, its own card, a shadow.
-        case sheet
-        /// A pane inside a page: fills what it is given, and lets the page
-        /// underneath supply the surface.
-        case inline
-    }
-
-    private enum EditorStage {
-        case new
-        case ready
-    }
-
-    private enum EditorPage: CaseIterable, Hashable {
-        case overview
-        case details
-
-        var title: String {
-            switch self {
-            case .overview: return "Chat"
-            case .details: return "Details"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .overview: return "bubble.left.and.bubble.right"
-            case .details: return "slider.horizontal.3"
-            }
-        }
-    }
-
     @EnvironmentObject var bridge: GizmateSettingsBridge
     /// The gizmo this panel is editing, owned by `GizmoBuilder` rather than by
     /// this view. Handed in for the reason every store here is: a view's own
     /// state dies with the view, and this one has to survive the panel closing
     /// and be the same object the chat is editing.
     @ObservedObject var gizmo: GizmoDraft
+    /// Observed, not reached for through `bridge`: "Fix it" hands the repair to
+    /// the one builder, and this panel has to redraw while that build runs.
+    @ObservedObject var builder: GizmoBuilder
 
     private var toolID: UUID? {
         if case .existing(let id) = gizmo.subject { return id }
         return nil
     }
-    var chrome: Chrome = .sheet
-    /// Opens on the fields and shows no chat tab.
-    ///
-    /// What clicking a gizmo does. A saved gizmo has a name, an icon, a kind
-    /// and a trigger to look at, and that is the same thing a built-in's editor
-    /// shows — so the two behave alike. Changing what a gizmo *does* is a
-    /// conversation, and conversations belong in the one chat rather than in a
-    /// second one that opens per gizmo.
-    var opensOnDetails = false
-    /// What closing means here. `nil` closes the ring sheet, which is the only
-    /// answer a modal has; a page hosting this inline passes its own, because
-    /// there is no sheet to close and "back to no tool" is the page's state.
-    var onClose: (() -> Void)?
 
-    /// Output arriving while the test is still running.
-    /// Cancelling this kills the tool's whole process tree — see `ToolRunner`.
-    /// The plain-language request the model turns into a tool. Kept around after
-    /// generation so a repair knows what the tool was supposed to do.
-    @State private var generating = false
-    /// Set only for a generated Python tool, where "did Gizmate actually run
-    /// this?" has more than one possible answer.
-    /// A draft Gizmate itself executed while building it. Carries exactly the
-    /// standing a passed Install & test does: this precise code has already run
-    /// once, with the user watching the build, so the first-run gate has nothing
-    /// left to ask them. Compared against the current fingerprint at save time,
-    /// so editing the draft afterwards silently drops it.
-    @State private var generateTask: Task<Void, Never>?
-    @State private var chatComposer = ""
-    @StateObject private var chat = ToolBuilderChatSession()
     @FocusState private var nameFocused: Bool
-    @State private var stage: EditorStage = .new
-    @State private var page: EditorPage = .overview
-    /// Set once, from `opensOnDetails`, because `page` is `@State` and cannot
-    /// be initialised from another property at declaration.
-    @State private var didChoosePage = false
     /// Which detail row is expanded, keyed by its title. One at a time: the
     /// closed rows are the only thing that keeps the whole configuration on one
     /// screen, so opening a second by closing the first is the point, not a
@@ -102,7 +37,6 @@ struct ToolEditorPanel: View {
     /// Mirrors `draft.options` with stable per-row identity for `optionsEditor`.
     /// See `OptionRow` for why an array index can't serve as that identity.
     @State private var optionRows: [OptionRow] = []
-    @State private var greeted = false
 
     // The draft's fields under the names the form already uses, so six hundred
     // lines of controls below did not have to move to follow it.
@@ -134,48 +68,32 @@ struct ToolEditorPanel: View {
         Binding(get: { gizmo.script }, set: { gizmo.script = $0 })
     }
 
-    private var isNew: Bool { toolID == nil }
+    /// Whether the one builder is working on *this* gizmo. A build on another
+    /// one must not grey this panel's fields out.
+    private var generating: Bool { builder.isBuilding && builder.live === gizmo }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            if !isNew, !opensOnDetails {
-                editorTabs
+            Divider().background(FlowTheme.hairline)
+            ScrollView {
+                detailsContent
+                    .disabled(generating)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 28)
             }
             Divider().background(FlowTheme.hairline)
-            if page == .overview {
-                ToolBuilderChat(
-                    session: chat,
-                    composer: $chatComposer,
-                    isBuilding: generating || test.isRunning,
-                    preview: hasTool ? AnyView(summaryCard) : nil,
-                    onSend: sendChatMessage,
-                    onStop: stopBuilding,
-                    onSave: save,
-                    onTry: runTest,
-                    onFix: repairScript
-                )
-            } else {
-                ScrollView {
-                    detailsContent
-                        .disabled(generating)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 18)
-                        .padding(.bottom, 28)
-                }
-                Divider().background(FlowTheme.hairline)
-                footer
-            }
+            footer
         }
-        .modifier(ToolEditorChrome(chrome: chrome))
-        .onAppear {
-            loadOnce()
-            if opensOnDetails, !didChoosePage {
-                didChoosePage = true
-                page = .details
-            }
-        }
-        .onDisappear(perform: cancelInFlightWork)
+        .frame(width: 640, height: 620)
+        .background(Color(white: 0.11))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(FlowTheme.hairline, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
         // Closer to the focused field than the overlay's own handler, so this
         // one gets Escape first.
         .onExitCommand(perform: escapePressed)
@@ -184,24 +102,19 @@ struct ToolEditorPanel: View {
         }
     }
 
-    /// The one way out of this panel. Kills anything still in flight — a running
-    /// test (which also kills its process tree), a generation, and the
-    /// elapsed-time ticker, which would otherwise loop for the rest of the
-    /// session — then closes through the bridge like every other Ring panel.
+    /// The one way out of this panel, which no longer stops anything.
+    ///
+    /// A repair belongs to the builder and a test belongs to the draft, and both
+    /// outlive this view on purpose: closing the fields to go and read the chat
+    /// must not throw away work that takes minutes.
     private func dismiss() {
         nameFocused = false
-        cancelInFlightWork()
-        if let onClose {
-            onClose()
-        } else {
-            bridge.closeRingSheet()
-        }
+        bridge.closeRingSheet()
     }
 
-    /// Escape stops the work first and closes second. A build runs for minutes
-    /// and the panel is the only place its result exists, so spending the same
-    /// key on both means one reflex press throws the whole thing away. Nothing
-    /// is in flight — the press closes, as it always did.
+    /// Escape stops the work first and closes second. A repair runs for minutes,
+    /// so spending the same key on both means one reflex press throws it away.
+    /// Nothing in flight, and the press closes, as it always did.
     private func escapePressed() {
         guard generating || test.isRunning else {
             dismiss()
@@ -210,32 +123,13 @@ struct ToolEditorPanel: View {
         stopBuilding()
     }
 
-    /// Both cancellations reach real work: the generation unwinds through the
-    /// agent supervisor, the test kills the tool's process tree. Each task
-    /// reports its own stop into the chat when it lands, so nothing is said here
-    /// that the outcome might contradict.
+    /// Both cancellations reach real work: the repair unwinds through the agent
+    /// supervisor, the test kills the tool's process tree. Each reports its own
+    /// stop into the chat when it lands, so nothing is said here that the
+    /// outcome might contradict.
     private func stopBuilding() {
-        generateTask?.cancel()
+        builder.stop()
         gizmo.cancelRun()
-    }
-
-    /// Escape and click-outside dismiss the overlay without calling `dismiss()`.
-    /// Keep cleanup in the view lifecycle as well, and make it safe to call twice.
-    private func cancelInFlightWork() {
-        // The draft owns the ticker and the run, and it outlives this panel, so
-        // closing the panel no longer stops either. Only Stop, Escape and
-        // discarding do — which is what lets a build begun in the chat survive
-        // someone opening and closing Details to look at a field.
-        generateTask?.cancel()
-        generateTask = nil
-    }
-
-    /// Only the greeting is left here. What the draft *is* was hydrated by
-    /// `GizmoDraft.init` from the store, so this no longer reads anything.
-    private func loadOnce() {
-        guard !greeted else { return }
-        greeted = true
-        if gizmo.hasTool { chat.greetForEditing(draft.name) }
     }
 
     // MARK: - Chrome
@@ -281,38 +175,6 @@ struct ToolEditorPanel: View {
         .padding(.bottom, 12)
     }
 
-    private var editorTabs: some View {
-        HStack(spacing: 4) {
-            ForEach(EditorPage.allCases, id: \.self) { item in
-                Button {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        page = item
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 11, weight: .medium))
-                        Text(item.title)
-                            .font(.system(size: 12, weight: page == item ? .semibold : .medium))
-                    }
-                    .foregroundStyle(page == item ? FlowTheme.ink : FlowTheme.inkTertiary)
-                    .padding(.horizontal, 12)
-                    .frame(height: 34)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(page == item ? FlowTheme.subtleFill : Color.clear)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(generating && item == .details)
-                .accessibilityAddTraits(page == item ? .isSelected : [])
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
-    }
-
     private var footer: some View {
         HStack(spacing: 10) {
             if let toolID {
@@ -324,12 +186,7 @@ struct ToolEditorPanel: View {
                 }
             }
             Spacer(minLength: 0)
-            // Only as a sheet. A modal's Cancel is the way out that is not
-            // Save; inline, the ✕ above already is that, and two controls for
-            // one action makes a person read both to find the difference.
-            if chrome == .sheet {
-                SecondaryButton(title: "Cancel") { dismiss() }
-            }
+            SecondaryButton(title: "Cancel") { dismiss() }
             Button(action: save) {
                 Text("Save")
                     .font(.system(size: 13, weight: .semibold))
@@ -354,64 +211,21 @@ struct ToolEditorPanel: View {
         .padding(.bottom, 16)
     }
 
-    /// True once there is something to show: a generated tool, or an existing one
-    /// opened for editing.
-    private var hasTool: Bool { stage == .ready }
+    private var hasTool: Bool { gizmo.hasTool }
 
-    /// Whether the header names the gizmo rather than the job.
-    ///
-    /// Details is the only page with nothing else that says what this thing is:
-    /// the chat page already carries `summaryCard` inline in its transcript, and
-    /// a header restating the same name and the same behaviour line 40pt above it
-    /// is where this panel's "everything is said three times" reading came from.
-    private var showsIdentity: Bool { page == .details && hasTool }
+    /// The header names the gizmo, always. It used to say "Edit gizmo" while a
+    /// chat tab existed to be edited *in*; this panel only ever opens on one
+    /// that exists, so the name and what it does are the two things worth the
+    /// space.
+    private var showsIdentity: Bool { hasTool }
 
     private var headerTitle: String {
-        guard showsIdentity else { return isNew ? "New gizmo" : "Edit gizmo" }
+        guard hasTool else { return "Gizmo" }
         return draft.name.isEmpty ? "Untitled gizmo" : draft.name
     }
 
     private var headerSubtitle: String {
-        guard showsIdentity else {
-            return isNew ? "Build it with Gizmate" : "Edit it with Gizmate"
-        }
-        return behaviourLine
-    }
-
-    /// What the model decided, in one readable block. This is the only thing the
-    /// user has to look at before saving.
-    private var summaryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: draft.resolvedSymbolName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.white.opacity(0.08)))
-                Text(draft.name.isEmpty ? "Untitled gizmo" : draft.name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(FlowTheme.ink)
-                RingTag(text: draft.kind.displayName, accent: true)
-                if let generatedAssurance {
-                    RingTag(text: generatedAssurance.badge, accent: false)
-                }
-                Spacer(minLength: 0)
-            }
-            if let generatedSummary, !generatedSummary.isEmpty {
-                Text(generatedSummary)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(FlowTheme.inkSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text(behaviourLine)
-                .font(.system(size: 11.5))
-                .foregroundStyle(FlowTheme.inkTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(FlowTheme.subtleFill))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(FlowTheme.hairline, lineWidth: 1))
+        hasTool ? behaviourLine : "Nothing to edit yet."
     }
 
     /// Trigger · input · result, spelled out rather than shown as three pickers.
@@ -908,7 +722,7 @@ struct ToolEditorPanel: View {
     /// `GizmoDraft.invalidate`, where an edit cannot route around it.
     private func draftDidChange(to fingerprint: String) {
         guard !gizmo.candidateIsFresh else { return }
-        chat.markCandidateStale()
+        builder.chat.markCandidateStale()
     }
 
     private func save() {
@@ -1186,157 +1000,20 @@ struct ToolEditorPanel: View {
 
     // MARK: - Script mode
 
-    /// Applies one change to the tool that's already in the draft.
-    private func revise(_ instruction: String) {
-        let tool = draft
-        let code = script
-        generating = true
-        generateTask = Task { @MainActor in
-            let outcome = await bridge.reviseScriptTool(
-                tool: tool,
-                script: code,
-                instruction: instruction
-            ) { partial in
-                Task { @MainActor in
-                    chat.recordActivity(partial)
-                }
-            } clarification: { request in
-                await MainActor.run { page = .overview }
-                return try await chat.ask(request)
-            } clarificationCancellation: {
-                await chat.cancel()
-            } secretRequest: { name in
-                await MainActor.run { page = .overview }
-                return await chat.requestSecret(name)
-            }
-            generating = false
-            generateTask = nil
-            switch outcome {
-            case .success(let revised):
-                apply(revised)
-                candidateReady(revised.tool.name)
-            case .failure(let error):
-                page = .overview
-                chat.appendError(error.localizedDescription)
-            }
-        }
-    }
-
-    /// Shared landing for a generated or revised tool.
-    private func apply(_ generated: GeneratedTool) {
-        gizmo.apply(
-            tool: generated.tool,
-            script: generated.script,
-            brief: generated.brief,
-            summary: generated.summary,
-            assurance: generated.tool.kind == .python ? generated.assurance : nil,
-            // "unverified" is the one build outcome where nothing ran: a tool
-            // whose real effects Gizmate refused to cause during a build is
-            // exactly the one the user should still be asked about.
-            ranAlready: generated.assurance != .unverified
-        )
-        stage = .ready
-        page = .overview
-    }
-
-    private func candidateReady(_ name: String) {
-        gizmo.markCandidateReady()
-        chat.candidateReady(
-            name,
-            note: generatedAssurance?.explanation,
-            // Only `.verified` means Gizmate saw the right answer come out.
-            // `.smoke` proves the tool survives, `.unverified` proves it starts
-            // — for both, the one check left is the user running it.
-            trial: generatedAssurance == nil || generatedAssurance == .verified
-                ? .notNeeded
-                : .untried
-        )
-    }
-
-    private func generate(_ requestedTool: String? = nil) {
-        let request = requestedTool ?? brief
-        generating = true
-        generateTask = Task { @MainActor in
-            let outcome = await bridge.generateScriptTool(description: request) { partial in
-                Task { @MainActor in
-                    chat.recordActivity(partial)
-                }
-            } clarification: { clarification in
-                await MainActor.run { page = .overview }
-                return try await chat.ask(clarification)
-            } clarificationCancellation: {
-                await chat.cancel()
-            } secretRequest: { name in
-                await MainActor.run { page = .overview }
-                return await chat.requestSecret(name)
-            }
-            generating = false
-            generateTask = nil
-            switch outcome {
-            case .success(let generated):
-                apply(generated)
-                candidateReady(generated.tool.name)
-            case .failure(let error):
-                page = .overview
-                chat.appendError(error.localizedDescription)
-            }
-        }
-    }
-
+    /// "Fix it" hands the failure to the one builder.
+    ///
+    /// This panel used to run its own repair, with its own agent call, its own
+    /// generation task and its own chat session to narrate into. That session
+    /// was the second transcript, and it was the one nobody could answer: a
+    /// repair that stopped to ask a question posted it into a chat this panel
+    /// no longer draws, and waited forever.
+    ///
+    /// Through the builder, the same question lands in Home's chat, where there
+    /// is a composer to answer it, and the result applies to this very draft
+    /// because the builder is the one that made it.
     private func repairScript() {
         guard case .failed(let failure) = test else { return }
-        let tool = draft
-        let current = script
-        chat.markCandidateStale()
-        generating = true
-        generateTask = Task { @MainActor in
-            let outcome = await bridge.repairScriptTool(
-                tool: tool,
-                script: current,
-                failure: failure
-            ) { partial in
-                Task { @MainActor in chat.recordActivity(partial) }
-            } clarification: { clarification in
-                await MainActor.run { page = .overview }
-                return try await chat.ask(clarification)
-            } clarificationCancellation: {
-                await chat.cancel()
-            } secretRequest: { name in
-                await MainActor.run { page = .overview }
-                return await chat.requestSecret(name)
-            }
-            generating = false
-            generateTask = nil
-            switch outcome {
-            case .success(let fixed):
-                apply(fixed)
-                candidateReady(fixed.tool.name)
-            case .failure(let error):
-                script = current
-                page = .overview
-                chat.appendError(error.localizedDescription)
-            }
-        }
-    }
-
-    private func sendChatMessage() {
-        let text = chatComposer
-        chatComposer = ""
-        Task { @MainActor in
-            guard let submission = await chat.submit(text) else { return }
-            switch submission {
-            case .answeredClarification:
-                return
-            case .buildRequest(let request):
-                chat.markCandidateStale()
-                if hasTool {
-                    revise(request)
-                } else {
-                    brief = request
-                    generate(request)
-                }
-            }
-        }
+        builder.startRepair(gizmo, failure: failure)
     }
 
     private var scriptField: some View {
@@ -1571,6 +1248,7 @@ struct ToolEditorPanel: View {
     /// draft's, including the guard that discards a verdict about code that has
     /// since changed; what is left here is the half that speaks.
     private func runTest() {
+        let chat = builder.chat
         // The ready card hides while this runs, so without a line here the chat
         // shows a spinner over whatever internal step happened to run last.
         chat.recordActivity("Running it once, for real…")
@@ -1744,31 +1422,3 @@ struct IconGrid: View {
     }
 }
 
-/// The frame and surface that make this panel a modal, or let it be a pane.
-///
-/// Its own modifier so the switch is one place rather than five ternaries
-/// threaded through the body — and so the sheet's appearance stays literally
-/// the lines it always was, which is what makes un-sheeting a change to where
-/// the panel is shown rather than to how it looks.
-private struct ToolEditorChrome: ViewModifier {
-    let chrome: ToolEditorPanel.Chrome
-
-    func body(content: Content) -> some View {
-        switch chrome {
-        case .sheet:
-            content
-                .frame(width: 640, height: 620)
-                .background(Color(white: 0.11))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(FlowTheme.hairline, lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
-        case .inline:
-            // No fill, no shadow: the page underneath already is a surface, and
-            // a card inside a card is DESIGN.md §4's one layout rule.
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-}

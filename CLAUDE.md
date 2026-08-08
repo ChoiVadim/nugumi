@@ -23,6 +23,15 @@ ones it settles:
   a person can only reach by finding the right form is something most people
   will never reach. When you add a capability, the first question is what
   sentence turns it on.
+- **One builder, one transcript, one way in.** The gizmo editor used to carry a
+  builder chat of its own on a "Chat" tab, reached by a `+` in Home's rail, and
+  it opened saying "tell me what you want to happen" beside a chat already
+  asking exactly that. Two builders meant two transcripts, two clarification
+  paths (one of which nobody could answer once the tab was hidden) and two
+  places a half-built gizmo could be lost. `RingSheet.toolEditor(id:)` takes a
+  non-optional id now: the panel is what a gizmo _is_, the chat is what it
+  _does_, and "Fix it" hands its repair to `GizmoBuilder.startRepair` so the
+  question lands where there is a composer to answer it.
 - **One agent, and it decides by answering.** Home's chat ran two models on
   every message for a while: one wrote the reply, one classified the message as
   talk / build / edit, in parallel. Two models reading the same sentence do not

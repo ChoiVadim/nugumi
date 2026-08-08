@@ -8,9 +8,13 @@ import SwiftUI
 enum RingSheet: Equatable {
     /// Choosing what goes in one slot.
     case slot(RingSlotAddress)
-    /// Writing a prompt tool. `id` is nil for a new one. Building a gizmo never
-    /// places it: that is Home's job, and where it lives is Ring's or Edges'.
-    case toolEditor(id: UUID?)
+    /// What a gizmo *is*: its name, icon, kind, trigger and script.
+    ///
+    /// Never nil, and that is the point. A nil id used to mean "a new one", and
+    /// opened this same panel on a second builder chat. Gizmos are built by
+    /// talking to Home, so there is nothing for a second builder to do, and an
+    /// editor that can only edit something that exists needs no empty state.
+    case toolEditor(id: UUID)
     /// Naming a sub-ring. `id` is nil for a new folder, in which case
     /// `assignTo` is the slot it lands in; a non-nil `id` is a rename.
     case folderEditor(id: UUID?, assignTo: RingSlotAddress?)
@@ -34,17 +38,11 @@ struct RingSheetOverlay: View {
             case .slot(let address):
                 RingSlotPickerPanel(toolsStore: bridge.tools, address: address)
             case .toolEditor(let id):
-                // An existing gizmo opens on its fields; a new one has no
-                // fields yet and opens on the builder, which is the only thing
-                // that can give it any.
                 // The draft comes from the builder, not from the id, so this
                 // modal and the chat are editing one object rather than two
                 // copies that would overwrite each other on save.
                 if let builder = bridge.host?.gizmoBuilder {
-                    ToolEditorPanel(
-                        gizmo: builder.draft(for: id.map { .existing($0) } ?? .new),
-                        opensOnDetails: id != nil
-                    )
+                    ToolEditorPanel(gizmo: builder.draft(for: .existing(id)), builder: builder)
                 }
             case .folderEditor(let id, let assignTo):
                 RingFolderEditorPanel(folderID: id, assignTo: assignTo)
