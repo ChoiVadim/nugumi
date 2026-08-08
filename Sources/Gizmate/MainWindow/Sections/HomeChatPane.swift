@@ -267,20 +267,37 @@ struct HomeChatPane: View {
     /// accepts three different kinds of message. The corpus is blunt about
     /// empty states: they are the case where more is unambiguously better,
     /// because context is what makes them usable.
+    /// Three jobs, not three features.
+    ///
+    /// The chips used to name what the pane is for: ask about Gizmate, build
+    /// one, change one. Somebody who has never seen a gizmo learns nothing from
+    /// that — "Build me a gizmo" is the same sentence as the title above it and
+    /// the placeholder below it, said a third time. A real request teaches the
+    /// shape of one by being one.
+    ///
+    /// One per kind of thing a gizmo can work on, which is the actual breadth:
+    /// the text you have selected, what is on your screen, the files you picked
+    /// in Finder. Three chips cannot list the whole surface, so they should at
+    /// least not all point at the same corner of it. All three are drawn from
+    /// `ToolEvalSuite.all`, so a first click lands on something the builder is
+    /// known to finish.
+    ///
+    /// They send rather than fill the field: a chip that quietly types for you
+    /// and then waits reads as broken, and the answer to "what can this do" is
+    /// watching it do one.
     private var starters: some View {
         HStack(spacing: 8) {
-            starter("What can Gizmate do?") { draft = "What can Gizmate do?"; send() }
-            starter("Build me a gizmo") { draft = "Build me a gizmo that "; composerFocused = true }
-            if !tools.usableTools().isEmpty {
-                starter("Change a gizmo") { draft = "@"; composerFocused = true }
+            starter("Fix my grammar") {
+                draft = "Fix the grammar in text I select, in place."
+                send()
             }
-            // Not the gizmo's own name. A long one wrapped its chip to two
-            // lines, which made one of three neighbours taller than the others
-            // for a reason that was about that gizmo rather than about the
-            // action — and the whole point of a row of chips is that they read
-            // as one set of choices.
-            if !tools.usableTools().isEmpty {
-                starter("Change a gizmo") { draft = "@"; composerFocused = true }
+            starter("Explain an error") {
+                draft = "Explain the error message that is on my screen."
+                send()
+            }
+            starter("Rename photos by date") {
+                draft = "Rename the photos I select in Finder by the date they were taken."
+                send()
             }
         }
     }
