@@ -136,6 +136,15 @@ The speculative answer stays hidden until the router lands, because showing a
 half-written reply that is about to be thrown away for the builder is worse than
 the second it saves.
 
+**State that describes one row must not be reachable from the code drawing the
+others.** Home's transcript drew every turn through one function that asked
+`routing || turn.answer.isEmpty` — and `routing` belongs to the pane, not to a
+turn, so the moment a new message was sent every finished exchange in the
+history turned back into "Thinking". A finished turn and the one in flight are
+two functions now, and the pane's state is only in scope inside the second. The
+shape is the fix, not the condition: a flag that can be read from the wrong row
+eventually is.
+
 This includes work that decides *where* a message goes. Home's chat sent a
 typed message to a classifier before showing it, so between pressing send and
 the model answering there was a second or two with the message gone from the

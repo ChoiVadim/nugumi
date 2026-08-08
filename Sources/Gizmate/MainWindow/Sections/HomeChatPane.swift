@@ -121,10 +121,10 @@ struct HomeChatPane: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
                         ForEach(conversation.turns) { turn in
-                            turnView(turn)
+                            finishedTurn(turn)
                         }
                         if let pending = conversation.pending {
-                            turnView(pending)
+                            pendingTurn(pending)
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
@@ -152,26 +152,50 @@ struct HomeChatPane: View {
         }
     }
 
-    private func turnView(_ turn: ToolChatConversation.Turn) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ChatQuestionBubble(text: turn.question)
-            // The mark beside every answer, which is what makes a transcript
-            // read as two people rather than alternating paragraphs. No gutter:
-            // the column is already the gutter here.
-            ChatAssistantTurn(trailingGutter: 0) {
-                if let failure = turn.failure {
-                    ChatProblemText(message: failure)
-                } else if routing || turn.answer.isEmpty {
-                    // The answer is already streaming underneath while the
-                    // router decides. It stays hidden until then, because a
-                    // build request would have this half-written reply on
-                    // screen for a second before being thrown away for the
-                    // builder — the speed is worth having, the flicker is not.
-                    ChatThinkingText(text: "Thinking")
-                } else {
-                    ChatAnswerText(markdown: turn.answer)
-                }
+    /// A turn that is over. Two functions rather than one with flags, because
+    /// the one with flags read `routing || turn.answer.isEmpty` — and `routing`
+    /// belongs to the pane, not to a turn, so every finished exchange in the
+    /// transcript turned back into "Thinking" the moment a new message was
+    /// sent. State that describes one row cannot be reachable from the code
+    /// drawing the others.
+    private func finishedTurn(_ turn: ToolChatConversation.Turn) -> some View {
+        exchange(question: turn.question) {
+            if let failure = turn.failure {
+                ChatProblemText(message: failure)
+            } else {
+                ChatAnswerText(markdown: turn.answer)
             }
+        }
+    }
+
+    /// The turn being answered right now, and the only one `routing` can reach.
+    private func pendingTurn(_ turn: ToolChatConversation.Turn) -> some View {
+        exchange(question: turn.question) {
+            if let failure = turn.failure {
+                ChatProblemText(message: failure)
+            } else if routing || turn.answer.isEmpty {
+                // The answer is already streaming underneath while the router
+                // decides. It stays hidden until then, because a build request
+                // would have this half-written reply on screen for a second
+                // before it was thrown away for the builder.
+                ChatThinkingText(text: "Thinking")
+            } else {
+                ChatAnswerText(markdown: turn.answer)
+            }
+        }
+    }
+
+    /// One question and whatever stands in for its answer. The mark beside the
+    /// answer is what makes a transcript read as two people rather than
+    /// alternating paragraphs; no trailing gutter, because the column is
+    /// already the gutter.
+    private func exchange<Answer: View>(
+        question: String,
+        @ViewBuilder answer: @escaping () -> Answer
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ChatQuestionBubble(text: question)
+            ChatAssistantTurn(trailingGutter: 0, content: answer)
         }
     }
 
