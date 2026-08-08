@@ -228,6 +228,13 @@ final class GizmoDraft: ObservableObject {
         builtAndRanFingerprint = ranAlready ? fingerprint : nil
     }
 
+    /// The builder declaring this draft finished. Separate from `apply` because
+    /// a candidate can be re-declared ready after a repair without the fields
+    /// being rewritten.
+    func markCandidateReady() {
+        readyFingerprint = fingerprint
+    }
+
     /// Whether the ready card still describes this draft.
     var candidateIsFresh: Bool { readyFingerprint == fingerprint }
 

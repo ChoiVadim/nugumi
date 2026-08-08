@@ -49,7 +49,16 @@ struct ToolEditorPanel: View {
     }
 
     @EnvironmentObject var bridge: GizmateSettingsBridge
-    let toolID: UUID?
+    /// The gizmo this panel is editing, owned by `GizmoBuilder` rather than by
+    /// this view. Handed in for the reason every store here is: a view's own
+    /// state dies with the view, and this one has to survive the panel closing
+    /// and be the same object the chat is editing.
+    @ObservedObject var gizmo: GizmoDraft
+
+    private var toolID: UUID? {
+        if case .existing(let id) = gizmo.subject { return id }
+        return nil
+    }
     var chrome: Chrome = .sheet
     /// Opens on the fields and shows no chat tab.
     ///
@@ -64,32 +73,18 @@ struct ToolEditorPanel: View {
     /// there is no sheet to close and "back to no tool" is the page's state.
     var onClose: (() -> Void)?
 
-    @State private var draft = GizmateTool()
-    @State private var script = ""
-    @State private var loaded = false
-    @State private var test: ToolTestState = .idle
     /// Output arriving while the test is still running.
-    @State private var liveOutput = ""
-    @State private var elapsed = 0
-    @State private var ticker: Task<Void, Never>?
     /// Cancelling this kills the tool's whole process tree — see `ToolRunner`.
-    @State private var runTask: Task<Void, Never>?
-    @State private var runningTestFingerprint: String?
-    @State private var passedTestFingerprint: String?
     /// The plain-language request the model turns into a tool. Kept around after
     /// generation so a repair knows what the tool was supposed to do.
-    @State private var brief = ""
     @State private var generating = false
-    @State private var generatedSummary: String?
     /// Set only for a generated Python tool, where "did Gizmate actually run
     /// this?" has more than one possible answer.
-    @State private var generatedAssurance: ToolAgentAssuranceV1?
     /// A draft Gizmate itself executed while building it. Carries exactly the
     /// standing a passed Install & test does: this precise code has already run
     /// once, with the user watching the build, so the first-run gate has nothing
     /// left to ask them. Compared against the current fingerprint at save time,
     /// so editing the draft afterwards silently drops it.
-    @State private var builtAndRanFingerprint: String?
     @State private var generateTask: Task<Void, Never>?
     @State private var chatComposer = ""
     @StateObject private var chat = ToolBuilderChatSession()
@@ -104,10 +99,40 @@ struct ToolEditorPanel: View {
     /// screen, so opening a second by closing the first is the point, not a
     /// restriction.
     @State private var openRow: String?
-    @State private var readyDraftFingerprint: String?
     /// Mirrors `draft.options` with stable per-row identity for `optionsEditor`.
     /// See `OptionRow` for why an array index can't serve as that identity.
     @State private var optionRows: [OptionRow] = []
+    @State private var greeted = false
+
+    // The draft's fields under the names the form already uses, so six hundred
+    // lines of controls below did not have to move to follow it.
+    private var draft: GizmateTool {
+        get { gizmo.draft }
+        nonmutating set { gizmo.draft = newValue }
+    }
+    private var script: String {
+        get { gizmo.script }
+        nonmutating set { gizmo.script = newValue }
+    }
+    private var brief: String {
+        get { gizmo.brief }
+        nonmutating set { gizmo.brief = newValue }
+    }
+    private var test: ToolTestState { gizmo.test }
+    private var liveOutput: String { gizmo.liveOutput }
+    private var elapsed: Int { gizmo.elapsed }
+    private var generatedSummary: String? { gizmo.summary }
+    private var generatedAssurance: ToolAgentAssuranceV1? { gizmo.assurance }
+
+    // A computed property has no `$`, so the fifteen bindings below name these
+    // instead. Dynamic member lookup gives `draftBinding.name` the same
+    // `Binding<String>` `draftBinding.name` did.
+    private var draftBinding: Binding<GizmateTool> {
+        Binding(get: { gizmo.draft }, set: { gizmo.draft = $0 })
+    }
+    private var scriptBinding: Binding<String> {
+        Binding(get: { gizmo.script }, set: { gizmo.script = $0 })
+    }
 
     private var isNew: Bool { toolID == nil }
 
@@ -191,37 +216,26 @@ struct ToolEditorPanel: View {
     /// that the outcome might contradict.
     private func stopBuilding() {
         generateTask?.cancel()
-        runTask?.cancel()
+        gizmo.cancelRun()
     }
 
     /// Escape and click-outside dismiss the overlay without calling `dismiss()`.
     /// Keep cleanup in the view lifecycle as well, and make it safe to call twice.
     private func cancelInFlightWork() {
-        ticker?.cancel()
-        ticker = nil
-        runTask?.cancel()
-        runTask = nil
-        runningTestFingerprint = nil
+        // The draft owns the ticker and the run, and it outlives this panel, so
+        // closing the panel no longer stops either. Only Stop, Escape and
+        // discarding do — which is what lets a build begun in the chat survive
+        // someone opening and closing Details to look at a field.
         generateTask?.cancel()
         generateTask = nil
-        let session = chat
-        Task { await session.cancel() }
     }
 
+    /// Only the greeting is left here. What the draft *is* was hydrated by
+    /// `GizmoDraft.init` from the store, so this no longer reads anything.
     private func loadOnce() {
-        guard !loaded else { return }
-        loaded = true
-        if let toolID, let existing = bridge.tools.tool(id: toolID) {
-            draft = existing
-            script = bridge.tools.script(for: toolID) ?? ""
-            brief = existing.brief
-            stage = .ready
-            // So the summary card explains the tool right away instead of waiting
-            // for a round-trip.
-            generatedSummary = existing.brief
-            page = .overview
-            chat.greetForEditing(existing.name)
-        }
+        guard !greeted else { return }
+        greeted = true
+        if gizmo.hasTool { chat.greetForEditing(draft.name) }
     }
 
     // MARK: - Chrome
@@ -444,7 +458,7 @@ struct ToolEditorPanel: View {
                     "Icon",
                     value: ToolIcons.displayName(for: draft.resolvedSymbolName)
                 ) {
-                    IconGrid(selection: $draft.symbolName, height: 108)
+                    IconGrid(selection: draftBinding.symbolName, height: 108)
                 }
                 rowDivider
                 // Out of "General", which called itself "how this gizmo appears
@@ -458,7 +472,7 @@ struct ToolEditorPanel: View {
                 ) {
                     PillPicker(
                         options: ToolKind.allCases,
-                        selection: $draft.kind,
+                        selection: draftBinding.kind,
                         label: { $0.displayName }
                     )
                 }
@@ -564,7 +578,7 @@ struct ToolEditorPanel: View {
                         hint: "Keys this script may read from its environment. "
                             + "It gets the ones ticked here and nothing else."
                     ) {
-                        ToolSecretsPicker(selection: $draft.secretNames)
+                        ToolSecretsPicker(selection: draftBinding.secretNames)
                     }
                     rowDivider
                     detailRow(
@@ -620,7 +634,7 @@ struct ToolEditorPanel: View {
                         hint: "Keys the agent's scripts may read from their environment. "
                             + "They get the ones ticked here and nothing else."
                     ) {
-                        ToolSecretsPicker(selection: $draft.secretNames)
+                        ToolSecretsPicker(selection: draftBinding.secretNames)
                     }
                 }
                 agentConsentNotice
@@ -885,69 +899,30 @@ struct ToolEditorPanel: View {
         }
     }
 
-    private var canSave: Bool {
-        guard draft.isUsable else { return false }
-        guard draft.kind == .python else { return true }
-        return !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
+    private var canSave: Bool { gizmo.canSave }
 
-    private var currentDraftFingerprint: String {
-        ToolEditorDraftVerification.fingerprint(tool: draft, script: script, brief: brief)
-    }
+    private var currentDraftFingerprint: String { gizmo.fingerprint }
 
+    /// The chat's half of invalidation. Everything about the draft itself —
+    /// a passed test, a run in flight, the standing a build earned — is
+    /// `GizmoDraft.invalidate`, where an edit cannot route around it.
     private func draftDidChange(to fingerprint: String) {
-        if let readyDraftFingerprint, fingerprint != readyDraftFingerprint {
-            self.readyDraftFingerprint = nil
-            chat.markCandidateStale()
-        }
-
-        if let passedTestFingerprint, fingerprint != passedTestFingerprint {
-            self.passedTestFingerprint = nil
-            test = .idle
-            liveOutput = ""
-        }
-
-        if let runningTestFingerprint, fingerprint != runningTestFingerprint {
-            self.runningTestFingerprint = nil
-            runTask?.cancel()
-            runTask = nil
-            ticker?.cancel()
-            ticker = nil
-            test = .idle
-            liveOutput = ""
-        }
+        guard !gizmo.candidateIsFresh else { return }
+        chat.markCandidateStale()
     }
 
     private func save() {
-        guard canSave else { return }
-        var tool = draft
-        tool.name = tool.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        tool.prompt = tool.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        tool.brief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
-        tool.options = GizmateTool.sanitizedOptions(tool.options)
-        bridge.tools.save(tool, script: tool.kind == .python ? script : nil)
-        let ran: String? = {
-            if case .passed = test, let passedTestFingerprint { return passedTestFingerprint }
-            return builtAndRanFingerprint
-        }()
-        if ToolEditorDraftVerification.savingApproves(
-            kind: tool.kind,
-            ranFingerprint: ran,
-            current: currentDraftFingerprint
-        ) {
-            ToolApprovals.approve(tool.id, hash: bridge.tools.approvalHash(for: tool))
-        } else {
-            ToolApprovals.revoke(tool.id)
-        }
-        // Saving never places the tool: a gizmo is built on Home and given a
-        // home from the Ring or Edges section afterwards.
+        guard gizmo.save() != nil else { return }
+        // The saved gizmo reopens from the store rather than from what was
+        // typed before it, which is what discarding buys.
+        bridge.host?.gizmoBuilder.discard(gizmo.subject)
         dismiss()
     }
 
     // MARK: - Shared fields
 
     private var nameField: some View {
-        TextField(draft.kind == .prompt ? "To JSON" : "Download video", text: $draft.name)
+        TextField(draft.kind == .prompt ? "To JSON" : "Download video", text: draftBinding.name)
             .textFieldStyle(.plain)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(FlowTheme.ink)
@@ -966,7 +941,7 @@ struct ToolEditorPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             choiceGrid(
                 options: resultOptions,
-                selection: $draft.output,
+                selection: draftBinding.output,
                 label: { $0.displayName }
             )
             // Folded in here rather than added to each of the three sections
@@ -1147,7 +1122,7 @@ struct ToolEditorPanel: View {
     private var actionPicker: some View {
         choiceGrid(
             options: NativeAction.allCases,
-            selection: $draft.nativeAction,
+            selection: draftBinding.nativeAction,
             label: { $0.displayName }
         )
     }
@@ -1155,7 +1130,7 @@ struct ToolEditorPanel: View {
     private var targetField: some View {
         VStack(alignment: .leading, spacing: 8) {
             fieldLabel(draft.nativeAction.targetLabel ?? "Target")
-            TextField(draft.nativeAction.targetPlaceholder, text: $draft.target)
+            TextField(draft.nativeAction.targetPlaceholder, text: draftBinding.target)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, design: draft.nativeAction == .openURL ? .monospaced : .default))
                 .foregroundStyle(FlowTheme.ink)
@@ -1169,7 +1144,7 @@ struct ToolEditorPanel: View {
     // MARK: - Prompt mode
 
     private var promptField: some View {
-        codeEditor(text: $draft.prompt, lines: 7, monospaced: false)
+        codeEditor(text: draftBinding.prompt, lines: 7, monospaced: false)
     }
 
     private var languageToggle: some View {
@@ -1177,7 +1152,7 @@ struct ToolEditorPanel: View {
             "Write the answer in the target language",
             subtitle: "Leave this off for gizmos that transform text rather than translate it."
         ) {
-            Toggle("", isOn: $draft.appliesTargetLanguage)
+            Toggle("", isOn: draftBinding.appliesTargetLanguage)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(FlowTheme.accent)
@@ -1192,7 +1167,7 @@ struct ToolEditorPanel: View {
                 "Use my Voice",
                 subtitle: "Writes in your register, with your dictionary and snippets."
             ) {
-                Toggle("", isOn: $draft.usesVoice)
+                Toggle("", isOn: draftBinding.usesVoice)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(FlowTheme.accent)
@@ -1201,7 +1176,7 @@ struct ToolEditorPanel: View {
                 "Use my notes",
                 subtitle: "Hands it the notes you ticked in the Notes tab as background."
             ) {
-                Toggle("", isOn: $draft.usesNotes)
+                Toggle("", isOn: draftBinding.usesNotes)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(FlowTheme.accent)
@@ -1249,29 +1224,23 @@ struct ToolEditorPanel: View {
 
     /// Shared landing for a generated or revised tool.
     private func apply(_ generated: GeneratedTool) {
-        draft = generated.tool
-        script = generated.script
-        brief = generated.brief.isEmpty ? brief : generated.brief
-        generatedSummary = generated.summary
-        generatedAssurance = generated.tool.kind == .python
-            ? generated.assurance
-            : nil
-        // "unverified" is the one build outcome where nothing ran — a tool whose
-        // real effects Gizmate refused to cause during a build is exactly the
-        // one the user should still be asked about.
-        builtAndRanFingerprint = generated.assurance == .unverified
-            ? nil
-            : currentDraftFingerprint
+        gizmo.apply(
+            tool: generated.tool,
+            script: generated.script,
+            brief: generated.brief,
+            summary: generated.summary,
+            assurance: generated.tool.kind == .python ? generated.assurance : nil,
+            // "unverified" is the one build outcome where nothing ran: a tool
+            // whose real effects Gizmate refused to cause during a build is
+            // exactly the one the user should still be asked about.
+            ranAlready: generated.assurance != .unverified
+        )
         stage = .ready
         page = .overview
-        test = .idle
-        passedTestFingerprint = nil
-        runningTestFingerprint = nil
-        liveOutput = ""
     }
 
     private func candidateReady(_ name: String) {
-        readyDraftFingerprint = currentDraftFingerprint
+        gizmo.markCandidateReady()
         chat.candidateReady(
             name,
             note: generatedAssurance?.explanation,
@@ -1287,7 +1256,6 @@ struct ToolEditorPanel: View {
     private func generate(_ requestedTool: String? = nil) {
         let request = requestedTool ?? brief
         generating = true
-        generatedSummary = nil
         generateTask = Task { @MainActor in
             let outcome = await bridge.generateScriptTool(description: request) { partial in
                 Task { @MainActor in
@@ -1373,7 +1341,7 @@ struct ToolEditorPanel: View {
 
     private var scriptField: some View {
         VStack(alignment: .leading, spacing: 10) {
-            codeEditor(text: $script, lines: 14, monospaced: true)
+            codeEditor(text: scriptBinding, lines: 14, monospaced: true)
             // Always available, not just on an empty field: a correct starting
             // point should be one click away even after a bad paste. Nothing is
             // saved until Save, so replacing a draft is harmless.
@@ -1406,7 +1374,7 @@ struct ToolEditorPanel: View {
     private var inputPicker: some View {
         choiceGrid(
             options: ToolInput.allCases,
-            selection: $draft.input,
+            selection: draftBinding.input,
             label: { $0.displayName }
         )
     }
@@ -1462,7 +1430,7 @@ struct ToolEditorPanel: View {
                 .fixedSize()
             }
             SettingRow("Uses the network", subtitle: "Recorded so it shows up in the run prompt.") {
-                Toggle("", isOn: $draft.declaresNetwork)
+                Toggle("", isOn: draftBinding.declaresNetwork)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(FlowTheme.accent)
@@ -1553,7 +1521,7 @@ struct ToolEditorPanel: View {
             HStack(spacing: 10) {
                 if test.isRunning {
                     SecondaryButton(title: "Stop (\(elapsed)s)", destructive: true) {
-                        runTask?.cancel()
+                        gizmo.cancelRun()
                     }
                 } else {
                     SecondaryButton(title: "Install & test") { runTest() }
@@ -1588,14 +1556,7 @@ struct ToolEditorPanel: View {
 
     /// While running, show what the tool is actually printing; afterwards, the
     /// finished report.
-    private var reportText: String? {
-        if test.isRunning {
-            return liveOutput.isEmpty
-                ? "Waiting for the first output… dependencies download on the first run."
-                : liveOutput
-        }
-        return test.report
-    }
+    private var reportText: String? { gizmo.reportText }
 
     private var runHint: String {
         if test.isRunning {
@@ -1606,48 +1567,18 @@ struct ToolEditorPanel: View {
             : "First run also downloads the uv runtime (about 35 MB)."
     }
 
+    /// Runs the draft and tells the chat what happened. The run itself is the
+    /// draft's, including the guard that discards a verdict about code that has
+    /// since changed; what is left here is the half that speaks.
     private func runTest() {
-        let tool = draft
-        let code = script
-        let fingerprint = currentDraftFingerprint
-        liveOutput = ""
-        elapsed = 0
-        test = .running
         // The ready card hides while this runs, so without a line here the chat
         // shows a spinner over whatever internal step happened to run last.
         chat.recordActivity("Running it once, for real…")
-        passedTestFingerprint = nil
-        runningTestFingerprint = fingerprint
-        // A visible clock, because "Running…" on its own can't tell a 3-second
-        // script from a stalled one.
-        ticker = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard !Task.isCancelled else { return }
-                elapsed += 1
-            }
-        }
-        runTask = Task { @MainActor in
-            let outcome = await bridge.testScriptTool(tool, script: code) { chunk in
-                Task { @MainActor in
-                    // Keep the tail: uv's progress bars redraw with \r and would
-                    // otherwise grow the buffer without bound.
-                    liveOutput = String((liveOutput + chunk).suffix(4000))
-                }
-            }
-            ticker?.cancel()
-            ticker = nil
-            runTask = nil
-            guard runningTestFingerprint == fingerprint,
-                  currentDraftFingerprint == fingerprint else {
-                return
-            }
-            runningTestFingerprint = nil
-            test = outcome
+        Task { @MainActor in
+            guard let outcome = await gizmo.runTest() else { return }
             let trialing = chat.trial != .notNeeded
             switch outcome {
             case .passed:
-                passedTestFingerprint = fingerprint
                 if trialing { chat.trialFinished(passed: true) }
             case .failed(let report) where trialing:
                 // Keep the card up: a failed trial is where "Fix it" belongs,
@@ -1655,7 +1586,6 @@ struct ToolEditorPanel: View {
                 // the user retype them.
                 chat.trialFinished(passed: false, report: report)
             default:
-                readyDraftFingerprint = nil
                 chat.markCandidateStale()
             }
         }

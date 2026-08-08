@@ -37,7 +37,15 @@ struct RingSheetOverlay: View {
                 // An existing gizmo opens on its fields; a new one has no
                 // fields yet and opens on the builder, which is the only thing
                 // that can give it any.
-                ToolEditorPanel(toolID: id, opensOnDetails: id != nil)
+                // The draft comes from the builder, not from the id, so this
+                // modal and the chat are editing one object rather than two
+                // copies that would overwrite each other on save.
+                if let builder = bridge.host?.gizmoBuilder {
+                    ToolEditorPanel(
+                        gizmo: builder.draft(for: id.map { .existing($0) } ?? .new),
+                        opensOnDetails: id != nil
+                    )
+                }
             case .folderEditor(let id, let assignTo):
                 RingFolderEditorPanel(folderID: id, assignTo: assignTo)
             case .builtInEditor(let id):

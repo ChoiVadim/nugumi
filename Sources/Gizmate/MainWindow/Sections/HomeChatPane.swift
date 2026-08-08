@@ -111,11 +111,15 @@ struct HomeChatPane: View {
     /// conversation inside it is per gizmo, which is the right answer anyway —
     /// a conversation about one tool is about that tool.
     private func editor(toolID: UUID?) -> some View {
-        ToolEditorPanel(
-            toolID: toolID,
-            chrome: .inline,
-            onClose: { subject = .none }
-        )
+        Group {
+            if let builder = bridge.host?.gizmoBuilder {
+                ToolEditorPanel(
+                    gizmo: builder.draft(for: toolID.map { .existing($0) } ?? .new),
+                    chrome: .inline,
+                    onClose: { subject = .none }
+                )
+            }
+        }
         .id(toolID)
     }
 
