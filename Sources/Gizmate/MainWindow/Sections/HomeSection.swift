@@ -111,8 +111,21 @@ struct HomeSectionContent: View {
         DetailCard {
             HStack(spacing: 0) {
                 HomeChatPane(tools: tools, subject: $subject)
-                Divider().background(FlowTheme.hairline)
-                rail
+                if bridge.showsGizmoRail {
+                    Divider().background(FlowTheme.hairline)
+                    rail
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                PanelToggleButton(
+                    isOpen: bridge.showsGizmoRail,
+                    edge: .trailing,
+                    help: bridge.showsGizmoRail ? "Hide your gizmos" : "Show your gizmos"
+                ) {
+                    withAnimation(.easeOut(duration: 0.18)) { bridge.showsGizmoRail.toggle() }
+                }
+                .padding(10)
             }
         }
     }
@@ -130,7 +143,16 @@ struct HomeSectionContent: View {
             HStack(alignment: .firstTextBaseline) {
                 cardHeading("Your gizmos")
                 Spacer(minLength: 8)
-                SecondaryButton(title: "New") { subject = .newTool }
+                // The same disc Notes and the folder hub use to add one.
+                // CLAUDE.md argued for a labelled button here, and was right
+                // while this was the page's one action and a bare `+` named
+                // none of it. The chat is that action now — its own empty state
+                // offers "Build me a gizmo" in words — so this is the second
+                // way in, and a second way in should not shout as loudly as the
+                // first.
+                ResetDiscButton(symbol: "plus", label: "", accessibilityTitle: "New gizmo") {
+                    subject = .newTool
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -169,6 +191,7 @@ struct HomeSectionContent: View {
             .scrollIndicators(.never)
         }
         .frame(width: 268)
+        .padding(.top, 24)
     }
 
     /// Lit when the chat is about this gizmo, so the pane and the rail never

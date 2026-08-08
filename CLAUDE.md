@@ -43,6 +43,13 @@ Rules that fall out of this, all of them paid for:
   file hub shows belongs in the hub's own panel, beside the folders. A settings
   card whose whole content is "go to Edges" is a signpost, not a setting —
   both such cards existed and both were deleted.
+- **The rail's `+` is a disc again, and that reverses an earlier call here.**
+  This file argued for a labelled "New gizmo" button because a bare `+` states
+  none of what Home is for until the pointer lands on it. That was right while
+  the button was the page's one action. The chat is that action now — its empty
+  state offers "Build me a gizmo" in words — so the rail's is the second way in,
+  and a second way in should not shout as loudly as the first. It matches the
+  disc Notes and the folder hub already use.
 - **Nothing may live nowhere without saying so.** A tool is usable only if it
   has a ring slot or an edge. Creating one no longer requires picking a slot
   first, so "created" and "reachable" became independent; `HomeSection` states

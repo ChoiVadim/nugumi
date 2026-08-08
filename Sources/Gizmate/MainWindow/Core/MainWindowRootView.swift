@@ -8,13 +8,31 @@ struct MainWindowRootView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SidebarView()
-                .frame(width: 256)
-                .frame(maxHeight: .infinity)
+            if bridge.showsSidebar {
+                SidebarView()
+                    .frame(width: 256)
+                    .frame(maxHeight: .infinity)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             DetailRouter(section: bridge.section)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Beside the traffic lights, where every Mac app puts this and where
+        // ChatGPT puts it too. It lives here rather than in the sidebar for the
+        // obvious reason: a control inside the thing it hides has nowhere to be
+        // once it works.
+        .overlay(alignment: .topLeading) {
+            PanelToggleButton(
+                isOpen: bridge.showsSidebar,
+                edge: .leading,
+                help: bridge.showsSidebar ? "Hide sidebar" : "Show sidebar"
+            ) {
+                withAnimation(.easeOut(duration: 0.18)) { bridge.showsSidebar.toggle() }
+            }
+            .padding(.leading, bridge.showsSidebar ? 220 : 84)
+            .padding(.top, 4)
+        }
         // The header is the whole window's drag handle now, so the content below
         // it is free to use presses for its own purposes. It goes on before the
         // panels, which cover the window while they are up and take the top

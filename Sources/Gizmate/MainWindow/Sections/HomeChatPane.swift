@@ -161,8 +161,13 @@ struct HomeChatPane: View {
         HStack(spacing: 8) {
             starter("What can Gizmate do?") { draft = "What can Gizmate do?"; send() }
             starter("Build me a gizmo") { draft = "Build me a gizmo that "; composerFocused = true }
-            if let first = tools.usableTools().first {
-                starter("Change \(first.name)") { subject = .tool(first.id) }
+            // Not the gizmo's own name. A long one wrapped its chip to two
+            // lines, which made one of three neighbours taller than the others
+            // for a reason that was about that gizmo rather than about the
+            // action — and the whole point of a row of chips is that they read
+            // as one set of choices.
+            if !tools.usableTools().isEmpty {
+                starter("Change a gizmo") { draft = "@"; composerFocused = true }
             }
         }
     }
@@ -172,8 +177,10 @@ struct HomeChatPane: View {
             Text(title)
                 .font(.system(size: 11.5))
                 .foregroundStyle(FlowTheme.inkSecondary)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 11)
+                .lineLimit(1)
+                .fixedSize()
+                .frame(height: 30)
+                .padding(.horizontal, 13)
                 .background(
                     Capsule().fill(FlowTheme.subtleFill)
                 )
@@ -189,16 +196,26 @@ struct HomeChatPane: View {
             if let fragment = ToolMentionCompletion.activeFragment(in: draft) {
                 mentionList(for: fragment)
             }
-            HStack(alignment: .bottom, spacing: 8) {
+            // Text at the top and the send button on its own row underneath,
+            // which is the shape ChatGPT's own composer uses. A tall box whose
+            // one line of text is vertically centred reads as misaligned no
+            // matter where the centre is, because the box is sized for growth
+            // the text has not done yet — so the text starts where it will
+            // stay, and the box grows downward under it.
+            VStack(alignment: .leading, spacing: 8) {
                 TextField("Ask, or describe a gizmo", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 13))
                     .lineLimit(1...6)
                     .focused($composerFocused)
                     .onSubmit(send)
-                sendButton
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack {
+                    Spacer(minLength: 0)
+                    sendButton
+                }
             }
-            .padding(10)
+            .padding(12)
         }
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

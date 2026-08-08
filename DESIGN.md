@@ -620,6 +620,28 @@ share of users regardless of what looks right.
   `emphasised` flag: off in a list, on in isolation. The words stay on every row
   either way, because the rule is that nothing lives nowhere *without saying
   so*, and the words are what say it. Only the shouting goes.
+- **A panel that flanks the content can be put away, and the control is never
+  inside it.** Both of the main window's side panels collapse — the navigation
+  sidebar and Home's gizmo rail — through one `PanelToggleButton`, because they
+  are the same gesture and a person who learns the left one should not have to
+  learn the right. Each toggle sits in the window chrome beside what it hides,
+  not within it: a control inside the thing it hides has nowhere to be once it
+  works. The state lives on `GizmateSettingsBridge` rather than in a view,
+  because someone who collapsed a panel meant it, and `@State` brings it back on
+  the next rebuild of the tree.
+  The rail starts closed. Home is the chat, and a list of everything you own
+  sitting beside it on first open is a second thing competing for the same
+  glance.
+- **A composer's text starts at the top of its box.** A field sized for six
+  lines and holding one reads as misaligned wherever the single line is placed,
+  because the box is sized for growth the text has not done yet. Text at the
+  top, controls on their own row underneath, the box growing downward — which
+  is the shape ChatGPT's composer uses and the reason it never has this problem.
+- **A row of chips is one set of choices, so they are one height.** Home's
+  third starter carried a gizmo's own name, and a long one wrapped it to two
+  lines: one of three neighbours taller than the others for a reason about that
+  gizmo rather than about the action. The chip says "Change a gizmo" and inserts
+  an `@`, which is also the thing it is teaching.
 - **An empty chat opens where it is used.** The greeting sat top-left and the
   composer sat pinned to the bottom of an empty column: two halves of one thing
   with the whole pane between them, and neither reading as the place to start.
