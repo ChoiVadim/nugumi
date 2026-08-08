@@ -9,27 +9,30 @@ import SwiftUI
 /// would hurt, because it carries a real fix (see `MarkdownLabel`) that a copy
 /// would not have.
 
-/// Sized to its own text and pushed right, with a hard gap on its left so a
-/// long question never becomes a full-width slab indistinguishable from the
-/// answer under it.
+/// The column's width, not its own text's.
+///
+/// It used to size to the text and push right, which made every question a
+/// different width and the transcript a ragged right edge that moved as you
+/// read down it. Worse, the width was live: selecting the text re-measured the
+/// pill and it grew under the pointer. One width for every question is a still
+/// column, and the fill alone is enough to tell a question from the answer
+/// under it.
 struct ChatQuestionBubble: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 28)
-            Text(text)
-                .font(.system(size: 12.5))
-                .foregroundStyle(FlowTheme.ink)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 11)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(FlowTheme.subtleFill)
-                )
-        }
+        Text(text)
+            .font(.system(size: 12.5))
+            .foregroundStyle(FlowTheme.ink)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(FlowTheme.subtleFill)
+            )
     }
 }
 
