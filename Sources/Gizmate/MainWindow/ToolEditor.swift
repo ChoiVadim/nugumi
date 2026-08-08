@@ -3,40 +3,6 @@ import CryptoKit
 import GizmateToolAgentCore
 import SwiftUI
 
-enum ToolEditorDraftVerification {
-    static func fingerprint(tool: GizmateTool, script: String, brief: String) -> String {
-        var effectiveTool = tool
-        effectiveTool.brief = brief
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        var payload = (try? encoder.encode(effectiveTool)) ?? Data()
-        payload.append(0)
-        payload.append(contentsOf: script.utf8)
-        return SHA256.hash(data: payload)
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    /// Whether saving this draft also approves it for its first run.
-    ///
-    /// Code that has already run once in front of the user needs no second
-    /// consent, whoever pressed the button: Install & test, or the build itself,
-    /// which validates a candidate by running it. Anything else — saved without
-    /// testing, built without ever being run, or edited since — still meets the
-    /// run gate, because nobody has run *this* code yet.
-    ///
-    /// Only the two kinds that execute something have a gate to skip; a prompt
-    /// or a native action never had one.
-    static func savingApproves(
-        kind: ToolKind,
-        ranFingerprint: String?,
-        current: String
-    ) -> Bool {
-        guard kind == .python || kind == .agent else { return false }
-        return ranFingerprint == current
-    }
-}
-
 /// Draft-based tool editor: nothing reaches the store until Save, so Cancel and
 /// Escape are always safe. Three modes behind one panel — a prompt the model
 /// runs, a macOS action from a fixed catalog, or a Python script uv runs.
@@ -1753,25 +1719,6 @@ struct ToolEditorPanel: View {
 }
 
 /// Result of one Install & test run, as the editor shows it.
-enum ToolTestState {
-    case idle
-    case running
-    case passed(String)
-    case failed(String)
-
-    var isRunning: Bool { if case .running = self { return true }; return false }
-    var isFailure: Bool { if case .failed = self { return true }; return false }
-
-    var report: String? {
-        switch self {
-        case .idle: return nil
-        // The editor shows live output while running, so this is only a fallback.
-        case .running: return nil
-        case .passed(let text), .failed(let text): return text
-        }
-    }
-}
-
 /// Icon picker over every SF Symbol the OS ships. It opens on the curated
 /// shortlist because eight thousand glyphs at once is a search problem, not a
 /// choice — typing anything searches the whole catalog.
