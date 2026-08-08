@@ -191,7 +191,7 @@ struct HomeSectionContent: View {
                         .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(FlowTheme.ink)
                         .lineLimit(1)
-                    HomeRowLocationLabel(location: row.location)
+                    HomeRowLocationLabel(location: row.location, emphasised: false)
                 }
                 Spacer(minLength: 0)
             }
@@ -384,9 +384,20 @@ enum HomeLocation {
 struct HomeRowLocationLabel: View {
     let location: HomeLocation
 
+    /// Whether the capsule is drawn at all.
+    ///
+    /// Off in a list, on in isolation, and the reason is that emphasis is
+    /// relative. Nine rows of "Nowhere" capsules mark nothing — DESIGN.md §11
+    /// says exactly that about the tile grid this replaced, and the rail
+    /// reintroduced it — because when most of a list shares a value, the value
+    /// is the background. The words stay on every row either way, which is what
+    /// keeps "nothing lives nowhere without saying so" true; only the shouting
+    /// goes.
+    var emphasised: Bool = true
+
     @ViewBuilder
     var body: some View {
-        if location.needsAttention {
+        if location.needsAttention, emphasised {
             // Quiet tag, not the accent one. The capsule alone already does the
             // whole job — it is present or absent, which is what a tertiary grey
             // sentence among nine other tertiary grey values could never be —

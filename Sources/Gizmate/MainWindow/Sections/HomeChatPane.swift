@@ -43,8 +43,26 @@ struct HomeChatPane: View {
         VStack(spacing: 0) {
             switch subject {
             case .none:
-                transcript
-                composer
+                if isEmpty {
+                    // Greeting and composer together, centred, the way WRITER
+                    // and Otter open a chat. A one-line invitation in the top
+                    // corner and the field pinned to the bottom of an empty
+                    // column are two halves of one thing separated by the whole
+                    // pane, and neither reads as the place to start.
+                    VStack(spacing: 18) {
+                        Spacer(minLength: 0)
+                        opening
+                        composer
+                        starters
+                        Spacer(minLength: 0)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    transcript
+                    composer
+                }
             case .newTool:
                 editor(toolID: nil)
             case .tool(let id):
@@ -78,9 +96,6 @@ struct HomeChatPane: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
-                        if conversation.turns.isEmpty && conversation.pending == nil {
-                            emptyState
-                        }
                         ForEach(conversation.turns) { turn in
                             turnView(turn)
                         }
@@ -117,18 +132,54 @@ struct HomeChatPane: View {
         }
     }
 
-    /// Says what this box does, which is three things and not obviously any of
-    /// them from an empty field.
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Ask something, or describe a gizmo you want.")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(FlowTheme.inkSecondary)
-            Text("Type @ and a gizmo's name to change one, or click it on the right.")
-                .font(.system(size: 11.5))
+    private var isEmpty: Bool {
+        guard let conversation else { return true }
+        return conversation.turns.isEmpty && conversation.pending == nil
+    }
+
+    /// The invitation, sized like a title because on an empty screen it is one.
+    private var opening: some View {
+        VStack(spacing: 6) {
+            Text("What do you want to do?")
+                .font(FlowTheme.serif(26))
+                .foregroundStyle(FlowTheme.ink)
+            Text("Ask a question, describe a gizmo to build, or type @ to change one.")
+                .font(.system(size: 12.5))
                 .foregroundStyle(FlowTheme.inkTertiary)
+                .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Three things this box can do, as things you can press.
+    ///
+    /// An empty field asks a person to guess what it accepts, and this one
+    /// accepts three different kinds of message. The corpus is blunt about
+    /// empty states: they are the case where more is unambiguously better,
+    /// because context is what makes them usable.
+    private var starters: some View {
+        HStack(spacing: 8) {
+            starter("What can Gizmate do?") { draft = "What can Gizmate do?"; send() }
+            starter("Build me a gizmo") { draft = "Build me a gizmo that "; composerFocused = true }
+            if let first = tools.usableTools().first {
+                starter("Change \(first.name)") { subject = .tool(first.id) }
+            }
+        }
+    }
+
+    private func starter(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11.5))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 11)
+                .background(
+                    Capsule().fill(FlowTheme.subtleFill)
+                )
+                .overlay(Capsule().stroke(FlowTheme.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Composer

@@ -612,6 +612,24 @@ share of users regardless of what looks right.
   disagree the first time anything else moves the current folder. Each crumb's
   name is capped at 140pt — a folder a browser saved is named after a page
   title, and an uncapped one pushed every other chip off the row.
+- **Emphasis is relative, so a repeated value loses its capsule.** Home's rail
+  put a `RingTag` on every gizmo living nowhere, and nine identical capsules
+  down one column mark nothing — which §11's own text already said about the
+  tile grid this replaced, and the rail reintroduced anyway. When most of a list
+  shares a value, that value is the background. `HomeRowLocationLabel` takes an
+  `emphasised` flag: off in a list, on in isolation. The words stay on every row
+  either way, because the rule is that nothing lives nowhere *without saying
+  so*, and the words are what say it. Only the shouting goes.
+- **An empty chat opens where it is used.** The greeting sat top-left and the
+  composer sat pinned to the bottom of an empty column: two halves of one thing
+  with the whole pane between them, and neither reading as the place to start.
+  Both are centred together until there is a transcript, which is how WRITER and
+  Otter open one. Three starter chips come with them — an empty field asks a
+  person to guess what it accepts, and this one accepts three different kinds of
+  message. Empty states are the case where more is unambiguously better.
+- **Two controls for one action makes a person read both.** The inline gizmo
+  editor kept the modal's Cancel next to a ✕ that does exactly the same thing.
+  Cancel is now only drawn as a sheet, where it is the way out that is not Save.
 - **Reaching a gizmo is not the same as opening it.** Home's tile grid was
   both: clicking a tile opened the editor as a modal, so changing one gizmo cost
   an open and a close, and changing two cost four. The editor now runs inline

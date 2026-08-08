@@ -327,7 +327,12 @@ struct ToolEditorPanel: View {
                 }
             }
             Spacer(minLength: 0)
-            SecondaryButton(title: "Cancel") { dismiss() }
+            // Only as a sheet. A modal's Cancel is the way out that is not
+            // Save; inline, the ✕ above already is that, and two controls for
+            // one action makes a person read both to find the difference.
+            if chrome == .sheet {
+                SecondaryButton(title: "Cancel") { dismiss() }
+            }
             Button(action: save) {
                 Text("Save")
                     .font(.system(size: 13, weight: .semibold))
