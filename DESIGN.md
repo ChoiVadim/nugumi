@@ -127,6 +127,15 @@ eighty cards, and the highlight waited on a grid that was about to be thrown
 away. `FolderHubView.show(_:asRoot:)` now does the whole switch in the tap:
 select, clear, then load.
 
+Work that only decides *where* something goes runs beside the work itself,
+not in front of it. Home's chat classified a message and then answered it, two
+model calls back to back on the commonest thing anyone does here. Both start at
+once now: the answer streams while the router decides, and a build request
+spends one answer nobody sees, which is the rare case paying for the common one.
+The speculative answer stays hidden until the router lands, because showing a
+half-written reply that is about to be thrown away for the builder is worse than
+the second it saves.
+
 This includes work that decides *where* a message goes. Home's chat sent a
 typed message to a classifier before showing it, so between pressing send and
 the model answering there was a second or two with the message gone from the

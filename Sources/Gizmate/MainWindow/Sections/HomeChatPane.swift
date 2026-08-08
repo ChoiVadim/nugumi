@@ -32,14 +32,13 @@ struct HomeChatPane: View {
     }
 
     @State private var draft = ""
-    /// The message on screen while the router decides what to do with it.
+    /// True while the router is still deciding what the message in flight was.
     ///
-    /// Classification is a model call, so between pressing send and knowing
-    /// whether this is a question or a build there is a second or two with
-    /// nothing to show — and the message has already left the composer. It has
-    /// to appear immediately: what the router decides is *where* it goes, not
-    /// whether it existed. DESIGN.md §6.
-    @State private var routingQuestion: String?
+    /// The answer to it is already being written by then. Classifying first and
+    /// answering second cost two model calls back to back on the commonest
+    /// thing anyone does here, which is ask a question — so both start at once,
+    /// and the router only has to arrive before the answer is shown.
+    @State private var routing = false
     @FocusState private var composerFocused: Bool
 
     private static let bottomAnchor = "home.chat.bottom"
@@ -127,16 +126,13 @@ struct HomeChatPane: View {
                         if let pending = conversation.pending {
                             turnView(pending)
                         }
-                        if let routingQuestion {
-                            turnView(.init(question: routingQuestion, answer: ""))
-                        }
                         Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
                 }
                 .scrollIndicators(.never)
-                .onChange(of: routingQuestion) { _, _ in
+                .onChange(of: routing) { _, _ in
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                     }
@@ -145,6 +141,12 @@ struct HomeChatPane: View {
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                     }
+                }
+                // The streaming answer grows the transcript continuously, and
+                // following only finished turns pins the view a screen above
+                // the words being written.
+                .onChange(of: conversation.pending) { _, _ in
+                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
         }
@@ -159,8 +161,13 @@ struct HomeChatPane: View {
             ChatAssistantTurn(trailingGutter: 0) {
                 if let failure = turn.failure {
                     ChatProblemText(message: failure)
-                } else if turn.answer.isEmpty {
-                    ChatThinkingText(text: routingQuestion == nil ? "Thinking" : "Reading that")
+                } else if routing || turn.answer.isEmpty {
+                    // The answer is already streaming underneath while the
+                    // router decides. It stays hidden until then, because a
+                    // build request would have this half-written reply on
+                    // screen for a second before being thrown away for the
+                    // builder — the speed is worth having, the flicker is not.
+                    ChatThinkingText(text: "Thinking")
                 } else {
                     ChatAnswerText(markdown: turn.answer)
                 }
@@ -169,7 +176,6 @@ struct HomeChatPane: View {
     }
 
     private var isEmpty: Bool {
-        guard routingQuestion == nil else { return false }
         guard let conversation else { return true }
         return conversation.turns.isEmpty && conversation.pending == nil
     }
@@ -312,7 +318,7 @@ struct HomeChatPane: View {
                 .background(Circle().fill(idle ? FlowTheme.ink.opacity(0.22) : FlowTheme.ink))
         }
         .buttonStyle(.plain)
-        .disabled(idle || routingQuestion != nil)
+        .disabled(idle || routing)
         .help("Send")
     }
 
@@ -320,27 +326,33 @@ struct HomeChatPane: View {
 
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, routingQuestion == nil else { return }
+        guard !text.isEmpty, !routing, conversation?.isRunning != true else { return }
         let usable = tools.usableTools()
         draft = ""
 
-        // A mention is certain, so it never waits on the network.
+        // A mention is certain, so it costs no call at all.
         if let mentioned = ToolChatRouter.mentioned(in: text, among: usable) {
             subject = .tool(mentioned)
             return
         }
 
-        // On screen first, routed second.
-        routingQuestion = text
+        // Both at once. Answering is what the message almost always wanted, so
+        // it starts immediately and the router runs beside it; a build request
+        // spends one answer nobody sees, which is the rarer case paying for the
+        // common one.
+        routing = true
+        conversation?.send(text)
         Task { @MainActor in
             let intent = await bridge.host?.routeHomeChat(text, tools: usable) ?? .talk
-            routingQuestion = nil
+            routing = false
             switch intent {
             case .talk:
-                conversation?.send(text)
+                break
             case .build:
+                conversation?.cancel()
                 subject = .newTool
             case .edit(let id):
+                conversation?.cancel()
                 subject = .tool(id)
             }
         }
