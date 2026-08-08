@@ -185,17 +185,18 @@ struct HomeChatPane: View {
         }
     }
 
-    /// One question and whatever stands in for its answer. The mark beside the
-    /// answer is what makes a transcript read as two people rather than
-    /// alternating paragraphs; no trailing gutter, because the column is
-    /// already the gutter.
+    /// One question and whatever stands in for its answer. No mark beside the
+    /// answer here, unlike the builder's chat: the question is already a pill
+    /// pushed to the right edge, so the two sides read apart on their own and a
+    /// repeated logo down the left is decoration paying no rent.
     private func exchange<Answer: View>(
         question: String,
         @ViewBuilder answer: @escaping () -> Answer
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             ChatQuestionBubble(text: question)
-            ChatAssistantTurn(trailingGutter: 0, content: answer)
+            answer()
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
