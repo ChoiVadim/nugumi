@@ -41,6 +41,23 @@ enum ToolEditorDraftVerification {
 /// Escape are always safe. Three modes behind one panel — a prompt the model
 /// runs, a macOS action from a fixed catalog, or a Python script uv runs.
 struct ToolEditorPanel: View {
+    /// Where this panel is being shown.
+    ///
+    /// It was a modal and nothing else, which is why building or changing a
+    /// gizmo meant opening a sheet, doing one thing, and closing it again. The
+    /// panel itself was never the problem: it holds the whole build-and-test
+    /// loop and works. What made it a sheet was fifteen points of chrome — a
+    /// fixed 640×620, its own card fill, a shadow — so that is all this
+    /// switches. Nothing inside changes, and the sheet path is byte-for-byte
+    /// what it was.
+    enum Chrome {
+        /// A modal over the window: fixed size, its own card, a shadow.
+        case sheet
+        /// A pane inside a page: fills what it is given, and lets the page
+        /// underneath supply the surface.
+        case inline
+    }
+
     private enum EditorStage {
         case new
         case ready
@@ -67,6 +84,11 @@ struct ToolEditorPanel: View {
 
     @EnvironmentObject var bridge: GizmateSettingsBridge
     let toolID: UUID?
+    var chrome: Chrome = .sheet
+    /// What closing means here. `nil` closes the ring sheet, which is the only
+    /// answer a modal has; a page hosting this inline passes its own, because
+    /// there is no sheet to close and "back to no tool" is the page's state.
+    var onClose: (() -> Void)?
 
     @State private var draft = GizmateTool()
     @State private var script = ""
@@ -143,14 +165,7 @@ struct ToolEditorPanel: View {
                 footer
             }
         }
-        .frame(width: 640, height: 620)
-        .background(Color(white: 0.11))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(FlowTheme.hairline, lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
+        .modifier(ToolEditorChrome(chrome: chrome))
         .onAppear(perform: loadOnce)
         .onDisappear(perform: cancelInFlightWork)
         // Closer to the focused field than the overlay's own handler, so this
@@ -168,7 +183,11 @@ struct ToolEditorPanel: View {
     private func dismiss() {
         nameFocused = false
         cancelInFlightWork()
-        bridge.closeRingSheet()
+        if let onClose {
+            onClose()
+        } else {
+            bridge.closeRingSheet()
+        }
     }
 
     /// Escape stops the work first and closes second. A build runs for minutes
@@ -1822,6 +1841,35 @@ struct IconGrid: View {
         .onChange(of: query) { _, newValue in
             matches = ToolIcons.matching(newValue)
             limit = Self.pageSize
+        }
+    }
+}
+
+/// The frame and surface that make this panel a modal, or let it be a pane.
+///
+/// Its own modifier so the switch is one place rather than five ternaries
+/// threaded through the body — and so the sheet's appearance stays literally
+/// the lines it always was, which is what makes un-sheeting a change to where
+/// the panel is shown rather than to how it looks.
+private struct ToolEditorChrome: ViewModifier {
+    let chrome: ToolEditorPanel.Chrome
+
+    func body(content: Content) -> some View {
+        switch chrome {
+        case .sheet:
+            content
+                .frame(width: 640, height: 620)
+                .background(Color(white: 0.11))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(FlowTheme.hairline, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
+        case .inline:
+            // No fill, no shadow: the page underneath already is a surface, and
+            // a card inside a card is DESIGN.md §4's one layout rule.
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }
