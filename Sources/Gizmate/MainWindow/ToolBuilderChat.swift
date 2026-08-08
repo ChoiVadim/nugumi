@@ -47,6 +47,8 @@ final class ToolBuilderChatSession: ObservableObject {
 
     private let answers: ToolBuilderAnswerBroker
     private let activityLimit: Int
+    /// Kept so `reset` can open the way `init` did.
+    private let greeting: String?
     private var answerGeneration: ToolBuilderAnswerBroker.Generation?
     private var secretContinuation: CheckedContinuation<Bool, Never>?
 
@@ -73,6 +75,7 @@ final class ToolBuilderChatSession: ObservableObject {
             beforeWaitRegistration: beforeAnswerWaitRegistration
         )
         self.activityLimit = max(1, activityLimit)
+        self.greeting = greeting
         messages = greeting.map { [ToolBuilderChatMessage(role: .assistant, text: $0)] } ?? []
     }
 
@@ -209,6 +212,17 @@ final class ToolBuilderChatSession: ObservableObject {
         if let report, !report.isEmpty {
             messages.append(.init(role: .assistant, text: String(report.suffix(600))))
         }
+    }
+
+    /// Back to how this opened. `markCandidateStale` clears what is claimed
+    /// about a candidate; this clears the conversation that produced it, which
+    /// is what a finished piece of work needs — a transcript about a gizmo that
+    /// has been saved is describing something that is no longer in progress.
+    func reset() {
+        markCandidateStale()
+        messages = greeting.map { [ToolBuilderChatMessage(role: .assistant, text: $0)] } ?? []
+        activity = []
+        pendingSecret = nil
     }
 
     func markCandidateStale() {

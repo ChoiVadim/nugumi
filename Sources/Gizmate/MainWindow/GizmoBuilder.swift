@@ -170,7 +170,11 @@ final class GizmoBuilder: ObservableObject {
     @discardableResult
     func saveLive() -> GizmateTool? {
         guard let live, let saved = live.save() else { return nil }
-        chat.markCandidateStale()
+        // The whole transcript, not only the card. A saved gizmo is a finished
+        // piece of work, and leaving the conversation that built it on screen
+        // means the next thing you type lands underneath a wall of steps about
+        // something already done.
+        chat.reset()
         discard(live.subject)
         self.live = nil
         return saved

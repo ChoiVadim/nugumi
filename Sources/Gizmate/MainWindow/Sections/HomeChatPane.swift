@@ -225,7 +225,14 @@ struct HomeChatPane: View {
             VStack(alignment: .leading, spacing: 10) {
                 ChatAnswerText(markdown: text)
                 HStack(spacing: 8) {
-                    SecondaryButton(title: "Save") { builder.saveLive() }
+                    SecondaryButton(title: "Save") {
+                        guard builder.saveLive() != nil else { return }
+                        // Both halves, or the screen is left in neither state:
+                        // the build gone and an old question still sitting
+                        // above an empty composer. Saving finishes a piece of
+                        // work, so the chat opens again the way it opened.
+                        conversation.clear()
+                    }
                     if builder.live?.canSave == true, builder.live?.draft.kind == .python {
                         SecondaryButton(title: "Try it") {
                             Task { await builder.live?.runTest() }
