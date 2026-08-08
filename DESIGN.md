@@ -645,6 +645,22 @@ share of users regardless of what looks right.
   lines: one of three neighbours taller than the others for a reason about that
   gizmo rather than about the action. The chip says "Change a gizmo" and inserts
   an `@`, which is also the thing it is teaching.
+- **A conversation is a column, not a window.** A line of prose running the
+  full width of a maximised window is a line nobody finishes: the eye loses the
+  start of the next one on the way back. Home's transcript, its composer and its
+  empty state all sit inside one 640pt column and share the number, which is
+  also what makes the empty state and the conversation read as one object
+  growing rather than two layouts swapping.
+- **Gizmate has a voice, and it is written down in one place.**
+  `GizmateApp.homeChatSystemPrompt` is it. The character is the point rather
+  than decoration: someone opens that window to make their Mac do something, and
+  a support desk reading its own feature list back is not who they wanted to
+  find there. Warm and direct, short, no "I'd be happy to", and no em dash —
+  the same ban the visible copy in this file follows.
+  Two clauses in there are not style and must survive any rewrite. This
+  conversation sends no picture, so claiming to see the screen is a lie the user
+  catches one question later; and explaining how to build a gizmo competes with
+  the builder that would actually build it.
 - **Ask about the work, not about the person.** Home opened with "What do you
   want to do?", which asks someone to describe their own afternoon. What the box
   needs is a job for a gizmo, so the question names the gizmo as the thing doing

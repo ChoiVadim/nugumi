@@ -36,6 +36,14 @@ struct HomeChatPane: View {
     @FocusState private var composerFocused: Bool
 
     private static let bottomAnchor = "home.chat.bottom"
+    /// How wide a conversation is allowed to get.
+    ///
+    /// A line of prose running the full width of a maximised window is a line
+    /// nobody finishes: the eye loses the start of the next one on the way
+    /// back. Every chat caps this, and the cap is also what makes the empty
+    /// state and the transcript the same object growing rather than two
+    /// layouts — they share the number.
+    static let column: CGFloat = 640
 
     private var conversation: ToolChatConversation? { bridge.host?.homeChat }
 
@@ -56,11 +64,13 @@ struct HomeChatPane: View {
                         starters
                         Spacer(minLength: 0)
                     }
-                    .frame(maxWidth: 560)
+                    .frame(maxWidth: Self.column)
                     .frame(maxWidth: .infinity)
                 } else {
                     transcript
                     composer
+                        .frame(maxWidth: Self.column)
+                        .frame(maxWidth: .infinity)
                 }
             case .newTool:
                 editor(toolID: nil)
@@ -103,6 +113,8 @@ struct HomeChatPane: View {
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
+                    .frame(maxWidth: Self.column, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 20)
                 }
