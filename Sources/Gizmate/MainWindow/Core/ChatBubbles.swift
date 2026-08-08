@@ -133,59 +133,68 @@ struct ChatProblemText: View {
 /// stop, and every following line flush left — the renderer was working and
 /// SwiftUI was throwing half of it away.
 ///
-/// `NSTextField` rather than the `NSTextView` the floating panel uses: this one
-/// never scrolls or edits, and a label reports its own height, which is what a
-/// stack of them in a transcript needs.
+/// `NSTextView`, like the floating panel, and *not* the `NSTextField` label this
+/// used to be. A selectable label has no text of its own to click: the first
+/// click hands it to the window's shared field editor, which lays the answer out
+/// again with its own 2pt line fragment padding on each side. Four points
+/// narrower is a different set of line breaks and, often, one line more — so an
+/// answer visibly resized under the pointer the moment you tried to select it.
+/// Measured: 60pt tall before the click, 64pt after. A text view is its own
+/// editor, so there is no second layout to disagree with the first.
 struct MarkdownLabel: NSViewRepresentable {
     let text: NSAttributedString
 
-    /// The width the column last offered.
-    ///
-    /// An answer is one width — the column's — and it stays that width when
-    /// you click it. It did not: clicking a selectable `NSTextField` makes it
-    /// first responder, which drops `preferredMaxLayoutWidth` and invalidates
-    /// the intrinsic size, and the re-measure that follows arrives with no
-    /// width proposed. Answering that with `nil` handed the layout back to the
-    /// intrinsic size, which for wrapped text with no maximum is the whole
-    /// answer on one line — so the reply visibly widened under the pointer and
-    /// ran out past the column. Remembering the width means an unspecified
-    /// proposal is answered with the same number as the last specified one.
+    /// The width the column last offered, for the measuring passes that arrive
+    /// with no width proposed at all. Answering those with `nil` would hand the
+    /// layout to the view's intrinsic size, which for wrapped text is the whole
+    /// answer on one line.
     final class Coordinator {
         var width: CGFloat = 0
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(labelWithAttributedString: text)
-        field.isSelectable = true
-        field.allowsEditingTextAttributes = false
-        field.lineBreakMode = .byWordWrapping
-        field.maximumNumberOfLines = 0
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return field
+    func makeNSView(context: Context) -> NSTextView {
+        let view = NSTextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        // Both zeroed so the view lays the text out on exactly the geometry
+        // `boundingRect` measures below. Any inset here and the height is
+        // computed for a wider line than the one drawn.
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = true
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = false
+        view.textStorage?.setAttributedString(text)
+        return view
     }
 
-    func updateNSView(_ field: NSTextField, context: Context) {
-        field.attributedStringValue = text
-        // Setting the string clears the wrap width, and a streamed answer sets
-        // it on every chunk.
-        field.preferredMaxLayoutWidth = context.coordinator.width
+    /// Only when the answer really changed. A streamed reply changes on every
+    /// chunk and must be written through, but an unrelated redraw must not —
+    /// rewriting the storage drops whatever the reader had selected.
+    func updateNSView(_ view: NSTextView, context: Context) {
+        guard view.textStorage?.isEqual(to: text) != true else { return }
+        view.textStorage?.setAttributedString(text)
     }
 
-    /// Height comes from the width SwiftUI is offering. Without this the field
+    /// Height comes from the width SwiftUI is offering. Without this the view
     /// measures itself as one very long line and the answer is clipped to its
     /// first row.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
-        nsView: NSTextField,
+        nsView: NSTextView,
         context: Context
     ) -> CGSize? {
         let offered = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         let width = offered ?? context.coordinator.width
         guard width > 0 else { return nil }
         context.coordinator.width = width
-        nsView.preferredMaxLayoutWidth = width
-        return CGSize(width: width, height: nsView.intrinsicContentSize.height)
+        let height = text.boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        ).height
+        return CGSize(width: width, height: ceil(height))
     }
 }
