@@ -103,15 +103,15 @@ struct HomeSectionContent: View {
     /// leads instead, which is where the second "New gizmo" button lives: the
     /// old copy pointed at a control ("Use “New gizmo” above") whose label is
     /// only drawn on hover, so it named a string that was not on screen.
-    /// What the chat is about, held here so the rail can set it by being
-    /// clicked without knowing what the pane does with it.
-    @State private var subject: HomeChatPane.Subject = .none
-
     var body: some View {
         DetailCard {
             HStack(spacing: 0) {
-                if let conversation = bridge.host?.homeChat {
-                    HomeChatPane(tools: tools, conversation: conversation, subject: $subject)
+                if let host = bridge.host {
+                    HomeChatPane(
+                        tools: tools,
+                        conversation: host.homeChat,
+                        builder: host.gizmoBuilder
+                    )
                 }
                 if bridge.showsGizmoRail {
                     Divider().background(FlowTheme.hairline)
@@ -153,7 +153,7 @@ struct HomeSectionContent: View {
                 // way in, and a second way in should not shout as loudly as the
                 // first.
                 ResetDiscButton(symbol: "plus", label: "", accessibilityTitle: "New gizmo") {
-                    subject = .newTool
+                    bridge.ringSheet = .toolEditor(id: nil)
                 }
             }
             .padding(.horizontal, 16)
@@ -196,11 +196,13 @@ struct HomeSectionContent: View {
         .padding(.top, 24)
     }
 
-    /// Lit when the chat is about this gizmo, so the pane and the rail never
-    /// disagree about what you are looking at.
+    /// Lit when the build in flight is about this gizmo, so the rail and the
+    /// transcript never disagree about what is being worked on.
     private func isActive(_ row: HomeRow) -> Bool {
-        guard case .tool(let tool) = row.identity else { return false }
-        return subject == .tool(tool.id)
+        guard case .tool(let tool) = row.identity,
+              case .existing(let building)? = bridge.host?.gizmoBuilder.live?.subject
+        else { return false }
+        return building == tool.id
     }
 
     private func railRow(_ row: HomeRow, isActive: Bool) -> some View {

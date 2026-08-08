@@ -26,19 +26,10 @@ struct HomeChatPane: View {
     /// a click, or leaving the section and coming back. The state was right the
     /// whole time; nothing was telling SwiftUI so.
     @ObservedObject var conversation: ToolChatConversation
-    /// Set from outside when a tool is clicked in the rail, so the rail does
-    /// not need to know what the pane does with it.
-    @Binding var subject: Subject
-
-    /// What the pane is currently about.
-    enum Subject: Equatable {
-        /// Nothing. Messages are routed.
-        case none
-        /// A gizmo being built from scratch.
-        case newTool
-        /// One that exists.
-        case tool(UUID)
-    }
+    /// The build, in the same transcript. Home used to swap the whole pane for
+    /// the gizmo editor, which is what "being thrown into a window" was: one
+    /// chat that sometimes stopped being a chat.
+    @ObservedObject var builder: GizmoBuilder
 
     @State private var draft = ""
     /// True while the router is still deciding what the message in flight was.
@@ -65,62 +56,26 @@ struct HomeChatPane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            switch subject {
-            case .none:
-                if isEmpty {
-                    // Greeting and composer together, centred, the way WRITER
-                    // and Otter open a chat. A one-line invitation in the top
-                    // corner and the field pinned to the bottom of an empty
-                    // column are two halves of one thing separated by the whole
-                    // pane, and neither reads as the place to start.
-                    VStack(spacing: 18) {
-                        Spacer(minLength: 0)
-                        opening
-                        composer
-                        starters
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: Self.column)
-                    .frame(maxWidth: .infinity)
-                } else {
-                    // Capped once, around both. Capping them separately put the
-                    // composer's rounded box further left than the text above
-                    // it, because the box carries its own padding inside the
-                    // cap and the transcript's padding sits outside it.
-                    VStack(spacing: 0) {
-                        transcript
-                        composer
-                    }
-                    .frame(maxWidth: Self.column)
-                    .frame(maxWidth: .infinity)
+            if isEmpty {
+                VStack(spacing: 18) {
+                    Spacer(minLength: 0)
+                    opening
+                    composer
+                    starters
+                    Spacer(minLength: 0)
                 }
-            case .newTool:
-                editor(toolID: nil)
-            case .tool(let id):
-                editor(toolID: id)
+                .frame(maxWidth: Self.column)
+                .frame(maxWidth: .infinity)
+            } else {
+                VStack(spacing: 0) {
+                    transcript
+                    composer
+                }
+                .frame(maxWidth: Self.column)
+                .frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// The panel, keyed by what it is editing.
-    ///
-    /// `.id` is the whole switching mechanism: a different subject is a
-    /// different panel, so its draft, its script and its build state start
-    /// clean rather than being reset field by field. The cost is that the
-    /// conversation inside it is per gizmo, which is the right answer anyway —
-    /// a conversation about one tool is about that tool.
-    private func editor(toolID: UUID?) -> some View {
-        Group {
-            if let builder = bridge.host?.gizmoBuilder {
-                ToolEditorPanel(
-                    gizmo: builder.draft(for: toolID.map { .existing($0) } ?? .new),
-                    chrome: .inline,
-                    onClose: { subject = .none }
-                )
-            }
-        }
-        .id(toolID)
     }
 
     // MARK: - Talking
@@ -135,6 +90,7 @@ struct HomeChatPane: View {
                         if let pending = conversation.pending {
                             pendingTurn(pending)
                         }
+                        buildTranscript
                         Color.clear.frame(height: 1).id(Self.bottomAnchor)
                     }
                     .padding(.horizontal, 20)
@@ -209,7 +165,75 @@ struct HomeChatPane: View {
     }
 
     private var isEmpty: Bool {
-        conversation.turns.isEmpty && conversation.pending == nil
+        conversation.turns.isEmpty
+            && conversation.pending == nil
+            && builder.chat.messages.isEmpty
+    }
+
+    /// The build, rendered as the same kind of exchange as everything else.
+    ///
+    /// It is one transcript on purpose. A build used to happen in a second
+    /// conversation inside a panel that replaced this one, so asking a question
+    /// and building a tool looked like two different applications.
+    @ViewBuilder
+    private var buildTranscript: some View {
+        ForEach(builder.chat.messages) { message in
+            if message.role == .user {
+                ChatQuestionBubble(text: message.text)
+            } else {
+                ChatAssistantTurn(trailingGutter: 0) {
+                    ChatAnswerText(markdown: message.text)
+                }
+            }
+        }
+        if builder.isBuilding, !builder.chat.isAwaitingAnswer {
+            ChatAssistantTurn(trailingGutter: 0) {
+                ChatThinkingText(text: builder.chat.currentActivity ?? "Building")
+            }
+        }
+        if let secret = builder.chat.pendingSecret {
+            secretRow(secret)
+        }
+        if let ready = builder.chat.readyMessage, !builder.isBuilding {
+            readyCard(ready)
+        }
+    }
+
+    /// The build is blocked on a key. Answering it here is what keeps the
+    /// continuation from being stranded — a build waiting on a question nobody
+    /// can see waits forever.
+    private func secretRow(_ name: String) -> some View {
+        ChatAssistantTurn(trailingGutter: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("This needs \(name). Add it in Settings, then carry on.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    SecondaryButton(title: "I added it") { builder.chat.resolveSecret(true) }
+                    SecondaryButton(title: "Skip") { builder.chat.resolveSecret(false) }
+                }
+            }
+        }
+    }
+
+    /// Saving happens here, and nothing closes: the chat is where this
+    /// happened and the chat stays where it is. The rail updates from
+    /// `ToolsStore` on its own.
+    private func readyCard(_ text: String) -> some View {
+        ChatAssistantTurn(trailingGutter: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                ChatAnswerText(markdown: text)
+                HStack(spacing: 8) {
+                    SecondaryButton(title: "Save") { builder.saveLive() }
+                    if builder.live?.canSave == true, builder.live?.draft.kind == .python {
+                        SecondaryButton(title: "Try it") {
+                            Task { await builder.live?.runTest() }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// The invitation, sized like a title because on an empty screen it is one.
@@ -362,9 +386,17 @@ struct HomeChatPane: View {
         let usable = tools.usableTools()
         draft = ""
 
+        // A build already open owns the composer. Routing a message that is an
+        // answer to the agent's own question would strand the continuation it
+        // is waiting on, and start a second build besides.
+        if builder.chat.isAwaitingAnswer || builder.isBuilding {
+            Task { await builder.send(text) }
+            return
+        }
+
         // A mention is certain, so it costs no call at all.
         if let mentioned = ToolChatRouter.mentioned(in: text, among: usable) {
-            subject = .tool(mentioned)
+            builder.startEdit(mentioned, instruction: text)
             return
         }
 
@@ -382,10 +414,10 @@ struct HomeChatPane: View {
                 break
             case .build:
                 conversation.cancel()
-                subject = .newTool
+                builder.startNew(text)
             case .edit(let id):
                 conversation.cancel()
-                subject = .tool(id)
+                builder.startEdit(id, instruction: text)
             }
         }
     }

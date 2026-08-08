@@ -727,6 +727,19 @@ share of users regardless of what looks right.
 - **Two controls for one action makes a person read both.** The inline gizmo
   editor kept the modal's Cancel next to a ✕ that does exactly the same thing.
   Cancel is now only drawn as a sheet, where it is the way out that is not Save.
+- **One chat, and a build happens inside it.** Home used to swap the whole pane
+  for the gizmo editor when a message turned out to be a build request, so
+  asking a question and building a tool looked like two different applications
+  and every change to a gizmo cost an open and a close. The build renders as
+  ordinary exchanges in the same transcript now, ending in a card with Save,
+  and nothing closes when it does — the rail updates from `ToolsStore` on its
+  own, and Details is still one click away.
+  A build in flight owns the composer. Routing a message that is an answer to
+  the agent's own question would strand the continuation it is waiting on and
+  start a second build besides, so `builder.chat.isAwaitingAnswer` is checked
+  before the router is asked anything. The key request is answered in the
+  transcript for the same reason: a build blocked on a question nobody can see
+  waits forever.
 - **Reaching a gizmo is not the same as opening it.** Home's tile grid was
   both: clicking a tile opened the editor as a modal, so changing one gizmo cost
   an open and a close, and changing two cost four. The editor now runs inline
