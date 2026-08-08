@@ -34,7 +34,10 @@ struct RingSheetOverlay: View {
             case .slot(let address):
                 RingSlotPickerPanel(toolsStore: bridge.tools, address: address)
             case .toolEditor(let id):
-                ToolEditorPanel(toolID: id)
+                // An existing gizmo opens on its fields; a new one has no
+                // fields yet and opens on the builder, which is the only thing
+                // that can give it any.
+                ToolEditorPanel(toolID: id, opensOnDetails: id != nil)
             case .folderEditor(let id, let assignTo):
                 RingFolderEditorPanel(folderID: id, assignTo: assignTo)
             case .builtInEditor(let id):

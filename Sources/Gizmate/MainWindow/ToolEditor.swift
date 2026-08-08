@@ -85,6 +85,14 @@ struct ToolEditorPanel: View {
     @EnvironmentObject var bridge: GizmateSettingsBridge
     let toolID: UUID?
     var chrome: Chrome = .sheet
+    /// Opens on the fields and shows no chat tab.
+    ///
+    /// What clicking a gizmo does. A saved gizmo has a name, an icon, a kind
+    /// and a trigger to look at, and that is the same thing a built-in's editor
+    /// shows — so the two behave alike. Changing what a gizmo *does* is a
+    /// conversation, and conversations belong in the one chat rather than in a
+    /// second one that opens per gizmo.
+    var opensOnDetails = false
     /// What closing means here. `nil` closes the ring sheet, which is the only
     /// answer a modal has; a page hosting this inline passes its own, because
     /// there is no sheet to close and "back to no tool" is the page's state.
@@ -122,6 +130,9 @@ struct ToolEditorPanel: View {
     @FocusState private var nameFocused: Bool
     @State private var stage: EditorStage = .new
     @State private var page: EditorPage = .overview
+    /// Set once, from `opensOnDetails`, because `page` is `@State` and cannot
+    /// be initialised from another property at declaration.
+    @State private var didChoosePage = false
     /// Which detail row is expanded, keyed by its title. One at a time: the
     /// closed rows are the only thing that keeps the whole configuration on one
     /// screen, so opening a second by closing the first is the point, not a
@@ -137,7 +148,7 @@ struct ToolEditorPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            if !isNew {
+            if !isNew, !opensOnDetails {
                 editorTabs
             }
             Divider().background(FlowTheme.hairline)
@@ -166,7 +177,13 @@ struct ToolEditorPanel: View {
             }
         }
         .modifier(ToolEditorChrome(chrome: chrome))
-        .onAppear(perform: loadOnce)
+        .onAppear {
+            loadOnce()
+            if opensOnDetails, !didChoosePage {
+                didChoosePage = true
+                page = .details
+            }
+        }
         .onDisappear(perform: cancelInFlightWork)
         // Closer to the focused field than the overlay's own handler, so this
         // one gets Escape first.

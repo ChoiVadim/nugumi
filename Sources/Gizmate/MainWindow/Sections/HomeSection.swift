@@ -263,9 +263,11 @@ struct HomeSectionContent: View {
         case .builtIn(let action):
             bridge.ringSheet = .builtInEditor(action)
         case .tool(let tool):
-            // Not a sheet any more. The whole point of the pane beside this rail
-            // is that changing a gizmo does not cost an open and a close.
-            subject = .tool(tool.id)
+            // The same modal a built-in gets, on the same click, showing the
+            // same kind of thing: what this gizmo *is*. What it *does* is
+            // changed by talking to the chat, which is why this no longer
+            // opens a second conversation per gizmo.
+            bridge.ringSheet = .toolEditor(id: tool.id)
         }
     }
 
