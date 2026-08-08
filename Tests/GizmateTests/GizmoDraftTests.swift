@@ -236,4 +236,48 @@ final class GizmoBuilderTests: XCTestCase {
 
         XCTAssertFalse(builder.draft(for: .new) === first)
     }
+
+    /// A first message must carry no heading about a build that never happened.
+    func testAnIdleBuilderHasNoSituationToReport() {
+        XCTAssertNil(makeBuilder().situation())
+    }
+
+    /// The failure this closes: the user watches a build fail, types "try
+    /// again", and is asked what they meant. The agent is sent only its own
+    /// turns, so its own build was invisible to it.
+    func testTheSituationCarriesTheLastExchangeAndWhereItStands() {
+        let builder = makeBuilder()
+        builder.chat.record(request: "make me a grammar fixer")
+        builder.chat.appendError("The generated tool still failed its checks.")
+
+        let situation = builder.situation()
+
+        XCTAssertEqual(situation?.contains("make me a grammar fixer"), true)
+        XCTAssertEqual(situation?.contains("failed its checks"), true)
+        XCTAssertEqual(situation?.contains("stopped without finishing"), true)
+    }
+
+    /// A finished build says so, or "save it" is answered as if nothing were
+    /// waiting to be saved.
+    func testAFinishedBuildSaysItIsWaitingToBeSaved() {
+        let builder = makeBuilder()
+        builder.chat.record(request: "a grammar fixer")
+        builder.chat.candidateReady("Fix Grammar")
+
+        XCTAssertEqual(builder.situation()?.contains("press Save"), true)
+    }
+
+    /// The build's own commentary runs to dozens of status lines about work
+    /// that is over. Sending all of it would bury the message being answered.
+    func testOnlyTheLastFewMessagesTravel() {
+        let builder = makeBuilder()
+        for index in 1...8 {
+            builder.chat.record(request: "message \(index)")
+        }
+
+        let situation = builder.situation(lastMessages: 2)
+
+        XCTAssertEqual(situation?.contains("message 8"), true)
+        XCTAssertEqual(situation?.contains("message 1"), false)
+    }
 }

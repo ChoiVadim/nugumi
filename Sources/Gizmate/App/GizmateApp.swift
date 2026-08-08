@@ -114,7 +114,15 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         let transcript = history
             .map { "User: \($0.question)\nGizmate: \($0.answer)" }
             .joined(separator: "\n\n")
-        let prompt = transcript.isEmpty ? question : "\(transcript)\n\nUser: \(question)"
+        // The build goes in as context, not as history. It is the same agent's
+        // own work, and without it "try again" is a sentence about nothing.
+        let prompt = [
+            transcript.isEmpty ? nil : transcript,
+            self.gizmoBuilder.situation(),
+            "User: \(question)",
+        ]
+        .compactMap { $0 }
+        .joined(separator: "\n\n")
         return try await self.askBackend.complete(
             systemPrompt: Self.homeChatSystemPrompt
                 + ToolChatRouter.knownTools(self.toolsStore.usableTools()),

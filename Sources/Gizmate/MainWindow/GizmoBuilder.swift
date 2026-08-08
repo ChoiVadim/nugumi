@@ -187,6 +187,43 @@ final class GizmoBuilder: ObservableObject {
         return saved
     }
 
+    /// What the build has been doing, written for the agent that started it.
+    ///
+    /// One agent decides and one transcript is drawn, but the agent is only
+    /// ever sent its own turns — so a build it started is invisible to it. The
+    /// user watches a gizmo fail on screen, types "try again", and is asked what
+    /// they would like to try again. This is the missing half of the sentence.
+    ///
+    /// Deliberately a summary rather than the whole transcript: the build's own
+    /// running commentary is dozens of status lines about work that is over, and
+    /// what the next message needs is what happened and where it stands.
+    ///
+    /// - Returns: `nil` when no build has been started, so a first message
+    ///   carries no heading about a build that never happened.
+    func situation(lastMessages limit: Int = 4) -> String? {
+        let recent = chat.messages.suffix(limit).map {
+            ($0.role == .user ? "They said: " : "You said: ") + $0.text
+        }
+        guard !recent.isEmpty else { return nil }
+        let standing: String
+        if generating {
+            standing = "You are building it right now."
+        } else if chat.isAwaitingAnswer {
+            standing = "You are waiting for them to answer your question."
+        } else if chat.readyMessage != nil {
+            standing = "It is finished and waiting for them to press Save."
+        } else if chat.hasError {
+            standing = "It stopped without finishing. They can see the reason on screen."
+        } else {
+            standing = "Nothing is being built at the moment."
+        }
+        return """
+            What your builder has been doing (they can see all of this on screen):
+            \(recent.joined(separator: "\n"))
+            \(standing)
+            """
+    }
+
     /// The one shape all three calls share: mark busy, run, apply or report.
     /// The one shape all three calls share, including the four handlers that
     /// put the agent's own voice in the transcript: its running commentary, the

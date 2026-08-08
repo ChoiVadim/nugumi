@@ -73,6 +73,7 @@ enum ToolChatRouter {
         - Never say you are about to build it. The line is the whole reply; the build starts the moment you write it and they watch it happen.
         - Write the description from everything they have told you, not only from the last message. "Yes, do that" is a build request whose description is in the line before it.
         - Never write these lines inside a sentence, never explain them, and never use the words for anything else.
+        - The builder is you. When one of your builds stopped without finishing and they say "try again", that is a BUILD line with the same description, not an apology and not a question about what they meant.
         """
 
     /// The gizmos this person has, so `EDIT` can name one.
