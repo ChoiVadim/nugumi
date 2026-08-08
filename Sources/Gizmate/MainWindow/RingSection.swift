@@ -46,8 +46,7 @@ private struct RingSectionContent: View {
                 Text("Ring")
                     .font(FlowTheme.serif(30))
                     .foregroundStyle(FlowTheme.ink)
-                Text("Click a slot to change it. Drag a button to move it.\n"
-                    + "Rest it on a sub-ring to open that one.")
+                Text("Click a slot to change it. Drag a button to move it.")
                     .font(.system(size: 14))
                     .foregroundStyle(FlowTheme.inkSecondary)
             }
