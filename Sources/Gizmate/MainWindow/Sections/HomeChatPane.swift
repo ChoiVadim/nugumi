@@ -35,8 +35,9 @@ struct HomeChatPane: View {
     /// Pictures waiting to go with the next message.
     @State private var attachments: [ChatImage] = []
     @State private var isDropTarget = false
-    /// The ⌘V watcher, alive only while the composer has the keyboard.
-    @State private var pasteMonitor: Any?
+    /// The composer's key watcher, alive only while the composer has the
+    /// keyboard. Two keys reach it: ⌘V, and ⇧Return.
+    @State private var composerKeys: Any?
     @FocusState private var composerFocused: Bool
 
     private static let bottomAnchor = "home.chat.bottom"
@@ -388,9 +389,10 @@ struct HomeChatPane: View {
                 )
         )
         .padding(20)
-        // ⌘V has to be caught before the responder chain, because by the time
-        // it reaches the field editor the field editor has already decided a
-        // paste means text and swallowed the event.
+        // ⌘V and ⇧Return both have to be caught before the responder chain,
+        // because by the time either reaches the field editor it has already
+        // decided what the key means — a paste is text, and Return is submit —
+        // and swallowed the event.
         //
         // The monitor exists exactly while the composer holds the keyboard, and
         // reads no focus of its own. It used to be installed once and gated on
@@ -399,11 +401,11 @@ struct HomeChatPane: View {
         // false — what focus is now. The install itself is the gate instead,
         // and `onAppear` covers coming back to the pane still focused, which is
         // the one case an `onChange` alone would never see.
-        .onAppear { if composerFocused { startWatchingForPastedPictures() } }
+        .onAppear { if composerFocused { startWatchingComposerKeys() } }
         .onChange(of: composerFocused) { _, focused in
-            if focused { startWatchingForPastedPictures() } else { stopWatchingForPastedPictures() }
+            if focused { startWatchingComposerKeys() } else { stopWatchingComposerKeys() }
         }
-        .onDisappear(perform: stopWatchingForPastedPictures)
+        .onDisappear(perform: stopWatchingComposerKeys)
     }
 
     private var builderOwnsComposer: Bool {
@@ -443,31 +445,52 @@ struct HomeChatPane: View {
         .help("Show Gizmate a picture. Drag one in, or paste it.")
     }
 
-    private func startWatchingForPastedPictures() {
-        guard pasteMonitor == nil else { return }
-        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // The physical key, not the letter printed on it.
-            // `charactersIgnoringModifiers` ignores the modifiers and not the
-            // layout, so with a Russian layout active ⌘V arrives as "м" and
-            // with a Korean one as a jamo — and this watcher, keyed to "v",
-            // did nothing at all for anyone not typing in English.
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  Int(event.keyCode) == kVK_ANSI_V
-            else { return event }
-            let paste = ChatImage.pasted()
-            guard !paste.pictures.isEmpty else { return event }
-            attachments.append(contentsOf: paste.pictures)
-            // Words on the board as well as pixels: take the picture and let
-            // the field editor have the event, rather than choosing which half
-            // of somebody's paste they meant.
-            return paste.keepsText ? event : nil
+    private func startWatchingComposerKeys() {
+        guard composerKeys == nil else { return }
+        composerKeys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            switch HomeComposerKey.of(event) {
+            case .newline: return insertNewline() ? nil : event
+            case .pastePicture: return takePastedPictures() ? nil : event
+            case .passThrough: return event
+            }
         }
     }
 
-    private func stopWatchingForPastedPictures() {
-        guard let monitor = pasteMonitor else { return }
+    private func stopWatchingComposerKeys() {
+        guard let monitor = composerKeys else { return }
         NSEvent.removeMonitor(monitor)
-        pasteMonitor = nil
+        composerKeys = nil
+    }
+
+    /// A line break at the caret, which is what every chat composer means by
+    /// ⇧Return. SwiftUI's own vertical `TextField` binds that to ⌥Return and
+    /// leaves ⇧Return unbound, so this is not an override of anything — it is
+    /// the second, expected way in.
+    ///
+    /// Handed to the field editor rather than appended to `draft`: the caret
+    /// is not always at the end, and a string edit would also lose the undo
+    /// step. `insertNewlineIgnoringFieldEditor` is the same selector ⌥Return
+    /// already reaches, so both keys produce one identical edit.
+    ///
+    /// False when the responder isn't a text view after all — no window at
+    /// all, or focus moved between the install and the keystroke — and the
+    /// caller then lets the event continue rather than swallowing it.
+    private func insertNewline() -> Bool {
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return false }
+        editor.insertNewlineIgnoringFieldEditor(nil)
+        return true
+    }
+
+    /// Whether the composer took the whole paste, and the field editor should
+    /// therefore never see the event. False when the board held no pictures,
+    /// and also when it held words as well as pixels: that one is taking the
+    /// picture *and* letting the field editor have the event, rather than
+    /// choosing which half of somebody's paste they meant.
+    private func takePastedPictures() -> Bool {
+        let paste = ChatImage.pasted()
+        guard !paste.pictures.isEmpty else { return false }
+        attachments.append(contentsOf: paste.pictures)
+        return !paste.keepsText
     }
 
     /// The names an `@` is currently offering, above the field it completes.
@@ -574,6 +597,42 @@ struct HomeChatPane: View {
                 builder.startEdit(id, instruction: text, asking: text)
             }
             return true
+        }
+    }
+}
+
+/// What a keystroke means to the composer, decided from the modifiers and the
+/// physical key alone.
+///
+/// Separate from the monitor that acts on it because the acting half needs a
+/// key window, a first responder and a pasteboard, and the deciding half is
+/// where the mistakes live: an exact modifier match rather than `.contains`,
+/// so ⇧⌘Return keeps whatever it means elsewhere instead of quietly becoming
+/// a line break here.
+enum HomeComposerKey {
+    case newline
+    case pastePicture
+    case passThrough
+
+    static func of(_ event: NSEvent) -> Self {
+        of(modifiers: event.modifierFlags, keyCode: Int(event.keyCode))
+    }
+
+    /// The physical key, not the letter printed on it.
+    /// `charactersIgnoringModifiers` ignores the modifiers and not the layout,
+    /// so with a Russian layout active ⌘V arrives as "м" and with a Korean one
+    /// as a jamo — and this watcher, keyed to "v", did nothing at all for
+    /// anyone not typing in English.
+    static func of(modifiers: NSEvent.ModifierFlags, keyCode: Int) -> Self {
+        // The four keys a person presses on purpose, and not
+        // `deviceIndependentFlagsMask` — that mask also carries `capsLock`,
+        // `numericPad` and `function`, none of which anyone means as part of a
+        // chord. Comparing against the whole mask is why ⌘V quietly stopped
+        // taking pictures with caps lock left on.
+        switch modifiers.intersection([.command, .control, .option, .shift]) {
+        case .command where keyCode == kVK_ANSI_V: return .pastePicture
+        case .shift where keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter: return .newline
+        default: return .passThrough
         }
     }
 }
