@@ -31,6 +31,11 @@ struct HomeChatPane: View {
     @ObservedObject var builder: GizmoBuilder
 
     @State private var draft = ""
+    /// Pictures waiting to go with the next message.
+    @State private var attachments: [ChatImage] = []
+    @State private var isDropTarget = false
+    /// The ⌘V watcher, alive only while the composer has the keyboard.
+    @State private var pasteMonitor: Any?
     @FocusState private var composerFocused: Bool
 
     private static let bottomAnchor = "home.chat.bottom"
@@ -68,6 +73,21 @@ struct HomeChatPane: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // The whole conversation takes a dropped picture, not just the box at
+        // the bottom of it. Someone dragging a screenshot in aims at the chat,
+        // and a target the size of one control is a target you can miss; the
+        // composer is where the highlight shows up, so the aim is still told
+        // where the picture lands.
+        //
+        // `URL` is a system type, so this needs no exported UTI in an
+        // Info.plist the `swift run` build does not have — the trap that made
+        // the Edges figure carry its own drag (DESIGN.md, `EdgesDiagram`).
+        .dropDestination(for: URL.self) { urls, _ in
+            let pictures = urls.compactMap(ChatImage.init(contentsOf:))
+            guard !pictures.isEmpty else { return false }
+            attachments.append(contentsOf: pictures)
+            return true
+        } isTargeted: { isDropTarget = $0 }
     }
 
     // MARK: - Talking
@@ -110,7 +130,7 @@ struct HomeChatPane: View {
     /// sent. State that describes one row cannot be reachable from the code
     /// drawing the others.
     private func finishedTurn(_ turn: ToolChatConversation.Turn) -> some View {
-        exchange(question: turn.question) {
+        exchange(question: turn.question, images: turn.images) {
             if let failure = turn.failure {
                 ChatProblemText(message: failure)
             } else {
@@ -121,7 +141,7 @@ struct HomeChatPane: View {
 
     /// The turn being answered right now.
     private func pendingTurn(_ turn: ToolChatConversation.Turn) -> some View {
-        exchange(question: turn.question) {
+        exchange(question: turn.question, images: turn.images) {
             if let failure = turn.failure {
                 ChatProblemText(message: failure)
             } else if turn.answer.isEmpty || ToolChatRouter.mayBeDirective(turn.answer) {
@@ -142,10 +162,11 @@ struct HomeChatPane: View {
     /// repeated logo down the left is decoration paying no rent.
     private func exchange<Answer: View>(
         question: String,
+        images: [ChatImage] = [],
         @ViewBuilder answer: @escaping () -> Answer
     ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            ChatQuestionBubble(text: question)
+            ChatQuestionBubble(text: question, images: images)
             answer()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -330,6 +351,9 @@ struct HomeChatPane: View {
             // the text has not done yet — so the text starts where it will
             // stay, and the box grows downward under it.
             VStack(alignment: .leading, spacing: 8) {
+                if !attachments.isEmpty {
+                    attachmentStrip
+                }
                 TextField("Ask, or describe a gizmo", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
@@ -338,6 +362,13 @@ struct HomeChatPane: View {
                     .onSubmit(send)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack {
+                    // Hidden while a build owns the composer: the next message
+                    // is an answer to the builder's own question, and a picture
+                    // has nowhere to go from there. A clip that quietly drops
+                    // what it accepted is worse than no clip.
+                    if !builderOwnsComposer {
+                        attachButton
+                    }
                     Spacer(minLength: 0)
                     sendButton
                 }
@@ -350,9 +381,76 @@ struct HomeChatPane: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(FlowTheme.hairline, lineWidth: 1)
+                .stroke(
+                    isDropTarget ? FlowTheme.ink.opacity(0.5) : FlowTheme.hairline,
+                    lineWidth: 1
+                )
         )
         .padding(20)
+        // ⌘V has to be caught before the responder chain, because by the time
+        // it reaches the field editor the field editor has already decided a
+        // paste means text and swallowed the event.
+        //
+        // Installed for as long as the pane is on screen and gated on focus
+        // inside the handler, rather than added and removed as focus moves: a
+        // monitor keyed to an `onChange` is not reinstalled when the pane comes
+        // back with the focus it left with, and paste stops working for the rest
+        // of the session with nothing on screen to say so.
+        .onAppear(perform: startWatchingForPastedPictures)
+        .onDisappear(perform: stopWatchingForPastedPictures)
+    }
+
+    private var builderOwnsComposer: Bool {
+        builder.chat.isAwaitingAnswer || builder.isBuilding
+    }
+
+    /// What is going with the next message, and the way to change your mind.
+    private var attachmentStrip: some View {
+        HStack(spacing: 6) {
+            ForEach(attachments) { image in
+                ChatImageThumb(image: image, side: 56) {
+                    attachments.removeAll { $0.id == image.id }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var attachButton: some View {
+        Button {
+            attachments.append(contentsOf: ChatImage.pick())
+            composerFocused = true
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.system(size: 12.5))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .frame(width: 22, height: 22)
+        }
+        .buttonStyle(.plain)
+        .help("Show Gizmate a picture. Drag one in, or paste it.")
+    }
+
+    private func startWatchingForPastedPictures() {
+        guard pasteMonitor == nil else { return }
+        pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // Only the composer's own ⌘V. Everywhere else in the app it still
+            // means whatever it meant, including in the field editor two lines
+            // up when what is on the board is text.
+            guard composerFocused,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers?.lowercased() == "v"
+            else { return event }
+            let pictures = ChatImage.pasted()
+            guard !pictures.isEmpty else { return event }
+            attachments.append(contentsOf: pictures)
+            return nil
+        }
+    }
+
+    private func stopWatchingForPastedPictures() {
+        guard let monitor = pasteMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        pasteMonitor = nil
     }
 
     /// The names an `@` is currently offering, above the field it completes.
@@ -389,7 +487,10 @@ struct HomeChatPane: View {
     }
 
     private var sendButton: some View {
+        // A picture on its own is a message: "look at this" is what dropping one
+        // in already said.
         let idle = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && attachments.isEmpty
         return Button(action: send) {
             Image(systemName: "arrow.up")
                 .font(.system(size: 10, weight: .bold))
@@ -420,9 +521,11 @@ struct HomeChatPane: View {
     /// answer, it *is* the answer, so there is nothing left to disagree with.
     private func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !conversation.isRunning else { return }
+        let pictures = attachments
+        guard !text.isEmpty || !pictures.isEmpty, !conversation.isRunning else { return }
         let usable = tools.usableTools()
         draft = ""
+        attachments = []
 
         // A build already open owns the composer. Sending a message that is an
         // answer to the agent's own question anywhere else would strand the
@@ -433,12 +536,17 @@ struct HomeChatPane: View {
         }
 
         // A mention is certain, so it costs no call at all.
+        //
+        // ponytail: a picture attached to an `@Prices` message is dropped here,
+        // because the builder takes an instruction and not a payload. Give the
+        // builder pictures when someone asks for it; naming a gizmo *and*
+        // showing one is not a sentence anyone has typed yet.
         if let mentioned = ToolChatRouter.mentioned(in: text, among: usable) {
             builder.startEdit(mentioned, instruction: text, asking: text)
             return
         }
 
-        conversation.send(text) { reply in
+        conversation.send(text, images: pictures) { reply in
             guard let directive = ToolChatRouter.directive(in: reply, tools: usable) else {
                 return false
             }

@@ -13,7 +13,7 @@ final class ToolChatConversationTests: XCTestCase {
     }
 
     func testAFinishedTurnJoinsTheHistory() async {
-        let store = ToolChatConversation { _, _, _ in "an answer" }
+        let store = ToolChatConversation { _, _, _, _ in "an answer" }
 
         store.send("hello")
         await settle(store)
@@ -28,7 +28,7 @@ final class ToolChatConversationTests: XCTestCase {
     /// sent with an empty answer above it.
     func testAnUnfinishedTurnIsNotCarriedAsHistory() async {
         var seen: [[ToolChatConversation.Turn]] = []
-        let store = ToolChatConversation { history, _, onPartial in
+        let store = ToolChatConversation { history, _, _, onPartial in
             seen.append(history)
             onPartial("half")
             await Task.yield()
@@ -47,7 +47,7 @@ final class ToolChatConversationTests: XCTestCase {
 
     func testAFailureIsShownOnItsOwnTurnRatherThanLost() async {
         struct Boom: LocalizedError { var errorDescription: String? { "no key" } }
-        let store = ToolChatConversation { _, _, _ in throw Boom() }
+        let store = ToolChatConversation { _, _, _, _ in throw Boom() }
 
         store.send("hello")
         await settle(store)
@@ -58,7 +58,7 @@ final class ToolChatConversationTests: XCTestCase {
 
     func testBlankMessagesAndReentryAreIgnored() async {
         var calls = 0
-        let store = ToolChatConversation { _, _, _ in
+        let store = ToolChatConversation { _, _, _, _ in
             calls += 1
             try await Task.sleep(nanoseconds: 30_000_000)
             return "done"
@@ -78,7 +78,7 @@ final class ToolChatConversationTests: XCTestCase {
     /// every later message, and leave the question sitting above an answer the
     /// user was never shown.
     func testAnInterceptedReplyLeavesNoTurnBehind() async {
-        let store = ToolChatConversation { _, _, _ in "BUILD: a grammar fixer" }
+        let store = ToolChatConversation { _, _, _, _ in "BUILD: a grammar fixer" }
         var handed: String?
 
         store.send("make me a grammar fixer") { reply in
@@ -92,9 +92,56 @@ final class ToolChatConversationTests: XCTestCase {
         XCTAssertNil(store.pending)
     }
 
+    /// A picture goes to the model on the turn it was attached to, and stays on
+    /// that turn afterwards so the transcript can show what was shown.
+    func testAnAttachedPictureIsSentAndKeptOnItsTurn() async {
+        var sent: [ImageInput] = []
+        let store = ToolChatConversation { _, _, images, _ in
+            sent = images
+            return "that is a cat"
+        }
+
+        store.send("what is this", images: [.stub])
+        await settle(store)
+
+        XCTAssertEqual(sent.map(\.mediaType), ["image/jpeg"])
+        XCTAssertEqual(store.turns.first?.images.count, 1)
+    }
+
+    /// A picture with no words is a message. The composer enables send for it,
+    /// so the store must not throw it away for having an empty question.
+    func testAPictureWithNoWordsIsStillAMessage() async {
+        var asked: String?
+        let store = ToolChatConversation { _, question, _, _ in
+            asked = question
+            return "a cat, again"
+        }
+
+        store.send("", images: [.stub])
+        await settle(store)
+
+        XCTAssertEqual(asked, "")
+        XCTAssertEqual(store.turns.count, 1)
+    }
+
+    /// And the emptiest message of all is still nothing.
+    func testAMessageWithNeitherWordsNorPicturesIsIgnored() async {
+        var calls = 0
+        let store = ToolChatConversation { _, _, _, _ in
+            calls += 1
+            return "should not happen"
+        }
+
+        store.send("   ")
+        await settle(store)
+
+        XCTAssertEqual(calls, 0)
+        XCTAssertTrue(store.turns.isEmpty)
+    }
+
     /// And the common case is untouched: a reply nobody intercepts is an answer.
     func testAReplyNobodyClaimsIsRecordedAsUsual() async {
-        let store = ToolChatConversation { _, _, _ in "Ollama runs models locally." }
+        let store = ToolChatConversation { _, _, _, _ in "Ollama runs models locally." }
 
         store.send("what is ollama") { _ in false }
         await settle(store)

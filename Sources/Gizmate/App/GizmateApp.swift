@@ -109,10 +109,19 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// Home's plain conversation. Same backend as Ask, different transcript and
     /// different system prompt — see `ToolChatConversation` for why they are not
     /// one conversation.
-    lazy var homeChat = ToolChatConversation { [weak self] history, question, onPartial in
+    lazy var homeChat = ToolChatConversation { [weak self] history, question, images, onPartial in
         guard let self else { throw CancellationError() }
+        // A picture is sent on its turn and not again, so the history says one
+        // was there. Without the note, "make it wider" arrives above a question
+        // that reads as if it were about nothing.
         let transcript = history
-            .map { "User: \($0.question)\nGizmate: \($0.answer)" }
+            .map { turn in
+                let count = turn.images.count == 1 ? "a picture" : "\(turn.images.count) pictures"
+                let shown = turn.images.isEmpty
+                    ? turn.question
+                    : "\(turn.question) [they attached \(count) here]"
+                return "User: \(shown)\nGizmate: \(turn.answer)"
+            }
             .joined(separator: "\n\n")
         // The build goes in as context, not as history. It is the same agent's
         // own work, and without it "try again" is a sentence about nothing.
@@ -127,7 +136,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             systemPrompt: Self.homeChatSystemPrompt
                 + ToolChatRouter.knownTools(self.toolsStore.usableTools()),
             userPrompt: prompt,
-            images: [],
+            images: images,
             thinkingLevel: self.askGizmateThinkingLevel,
             onPartial: onPartial
         )
@@ -147,9 +156,12 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// answering questions is named as the fallback it is.
     ///
     /// Two clauses are not style and must survive any rewrite of the voice.
-    /// This conversation sends no picture, so claiming to see the screen is a
-    /// lie the user catches one question later; and describing how to build a
-    /// gizmo competes with the builder that would actually build it.
+    /// This conversation never takes a screenshot, so claiming to watch the
+    /// screen is a lie the user catches one question later — a picture they
+    /// attached themselves is the one thing it can see, and the clause has to
+    /// say both halves or the agent denies a picture that is right in front of
+    /// it. And describing how to build a gizmo competes with the builder that
+    /// would actually build it.
     ///
     /// It ends with `ToolChatRouter.directiveContract`, which is what makes this
     /// one agent rather than two. Gizmate does not describe a decision for a
@@ -172,7 +184,8 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         - You are on their side. If something about their Mac is genuinely annoying, say so before you help with it.
 
         What you must not pretend:
-        - You cannot see their screen in this conversation. Never imply you can. Ask is the part that looks at the screen, and saying so takes one clause.
+        - You cannot see their screen in this conversation, and you never take a look at it on your own. Never imply you can. Ask is the part that watches the screen, and saying so takes one clause.
+        - You can see a picture they attach to a message, and only that picture. When they show you one, look at it and answer about what is in it. Showing you something is how they say the thing words are slow at, so never ask them to describe a picture they already handed you.
         - Never write the code for a gizmo and never explain how one would be made. You build it instead, and the next section says how.
         """ + ToolChatRouter.directiveContract
     var askHistory: [AskGizmateTurn] { askConversation.turns }

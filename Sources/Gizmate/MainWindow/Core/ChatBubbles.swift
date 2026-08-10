@@ -14,21 +14,82 @@ import SwiftUI
 /// answer under it.
 struct ChatQuestionBubble: View {
     let text: String
+    /// What was shown along with the words, if anything was. Above the pill and
+    /// not inside it: a picture is already a shape on the page, and a fill
+    /// behind one only draws a second border around a border.
+    var images: [ChatImage] = []
 
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 28)
-            Text(text)
-                .font(.system(size: 12.5))
-                .foregroundStyle(FlowTheme.ink)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 11)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(FlowTheme.subtleFill)
+            VStack(alignment: .trailing, spacing: 6) {
+                if !images.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(images) { ChatImageThumb(image: $0, side: 92) }
+                    }
+                }
+                if !text.isEmpty {
+                    Text(text)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(FlowTheme.ink)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 7)
+                        .padding(.horizontal, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(FlowTheme.subtleFill)
+                        )
+                }
+            }
+        }
+    }
+}
+
+/// A picture in a chat, at the size the surface showing it can spare.
+///
+/// One view for the composer and the transcript, per DESIGN.md §12: the only
+/// real difference is that a picture waiting to be sent can be taken back and a
+/// picture already sent cannot, so removal is the parameter.
+struct ChatImageThumb: View {
+    let image: ChatImage
+    var side: CGFloat = 92
+    var onRemove: (() -> Void)?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            preview
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(FlowTheme.hairline, lineWidth: 1)
                 )
+            if let onRemove {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(FlowTheme.ink)
+                        .frame(width: 16, height: 16)
+                        .background(Circle().fill(Color.black.opacity(0.65)))
+                }
+                .buttonStyle(.plain)
+                .help("Remove")
+                .padding(3)
+            }
+        }
+    }
+
+    /// Decoded from the small encoding `ChatImage` keeps for exactly this, so a
+    /// row redrawn on every streamed chunk is not decoding a 2048px JPEG.
+    @ViewBuilder
+    private var preview: some View {
+        if let decoded = NSImage(data: image.thumbnail) {
+            Image(nsImage: decoded)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            Rectangle().fill(FlowTheme.subtleFill)
         }
     }
 }

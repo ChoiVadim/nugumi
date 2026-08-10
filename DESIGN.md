@@ -1000,3 +1000,39 @@ for ("what can Gizmate do").
   where things live that cannot move them is a control that lies. Home names each
   tool's home in words and links to the editor; deciding the home stays where the
   one writer for it already is.
+
+## 17. A chat takes a picture the three ways macOS offers
+
+Home's chat accepts an attached picture because describing a thing is slower
+than showing it, and every rule here was paid for by the same principle: the
+person aims at the conversation, not at a control.
+
+- **Drop, paste, clip, and in that order of forgiveness.** The drop target is
+  the whole pane rather than the composer, because a target the size of one
+  control is a target you can miss; the composer is what highlights, so the aim
+  still learns where the picture lands. The clip is last and smallest — it is
+  the discoverable one, not the fast one.
+- **⌘V is caught before the responder chain or it is not caught at all.** A
+  `NSEvent` local monitor, gated on the composer holding focus. By the time the
+  event reaches the field editor, the field editor has already decided a paste
+  means text and swallowed it, so `onPasteCommand` on a view under a focused
+  `TextField` never fires. The monitor is installed for as long as the pane is
+  on screen and checks focus inside the handler: keyed to an `onChange` instead,
+  it is not reinstalled when the pane returns with the focus it left with, and
+  paste dies for the session with nothing on screen to say so.
+- **Text on the pasteboard wins.** Plenty of apps put a rendered image beside
+  the text they copied, and someone pasting a sentence wants the sentence
+  (`ChatImage.pasted`).
+- **Encode at attach, twice.** One fitted to the 2048px edge vision models tile
+  at, which is what keeps a retina screenshot under the 5 MB every cloud backend
+  guards on; one thumbnail. The second is not a nicety: a streaming answer
+  re-evaluates every row above it, so a chip decoding the full-size JPEG on each
+  chunk stutters the whole transcript. Flatten alpha in the same pass — JPEG has
+  none, and a transparent PNG handed straight to the encoder comes back black.
+- **A picture is a message on its own.** Send is enabled with no words, and the
+  bubble drops the pill rather than drawing an empty one.
+- **A control that cannot deliver what it accepts is hidden, not silent.** The
+  clip disappears while a build owns the composer, because the next message
+  there is an answer to the builder's own question and a picture has nowhere to
+  go. The builder never receives pictures at all: the one agent sees it and
+  writes the `BUILD:` line, so what the picture *showed* travels as words.
