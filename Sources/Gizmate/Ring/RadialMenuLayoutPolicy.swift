@@ -86,6 +86,48 @@ enum RadialMenuLayoutPolicy {
         }
     }
 
+    /// Which live button the cursor points at, from its offset to the panel
+    /// center. `layers` lists the rings that can be picked right now, innermost
+    /// first, each as its buttons' offsets — so it is one entry while only the
+    /// ring is up, and grows as orbits open.
+    ///
+    /// The radius picks the layer and the ANGLE picks the button within it, so
+    /// the cursor never has to land on a 46pt disc: pointing at one is enough,
+    /// from anywhere in that layer's band. Nearest-by-angle rather than a fixed
+    /// 45° sector, because a ring with empty slots would otherwise have
+    /// directions that select nothing — the gap belongs to its closest
+    /// neighbour instead.
+    ///
+    /// `nil` inside the center's dead zone (the ✕ lives there) and past the
+    /// wall beyond the outermost live ring. Those are the only places left
+    /// where a click still means "dismiss" rather than "run this".
+    static func angularPick(cursor: CGPoint, layers: [[CGPoint]]) -> (layer: Int, index: Int)? {
+        let radii = [ringRadius, outerRingRadius, thirdRingRadius]
+        let last = min(layers.count, radii.count) - 1
+        guard last >= 0 else { return nil }
+        let distance = hypot(cursor.x, cursor.y)
+        guard distance >= buttonDiameter / 2 else { return nil }
+        // Half the ring-to-ring gap, reused as the outer wall so the band
+        // around the outermost ring is as deep as the ones between rings.
+        let slack = (outerRingRadius - ringRadius) / 2
+        guard distance <= radii[last] + slack else { return nil }
+        // Bands split at the midpoints between neighbouring live rings.
+        let layer = (0..<last).first { distance < (radii[$0] + radii[$0 + 1]) / 2 } ?? last
+        let centers = layers[layer]
+        guard !centers.isEmpty else { return nil }
+        let heading = atan2(Double(cursor.y), Double(cursor.x))
+        guard let index = centers.indices.min(by: {
+            angularGap(heading, centers[$0]) < angularGap(heading, centers[$1])
+        }) else { return nil }
+        return (layer, index)
+    }
+
+    /// Shortest angle between a heading and an offset's direction, 0...π.
+    private static func angularGap(_ heading: Double, _ offset: CGPoint) -> Double {
+        let gap = abs(heading - atan2(Double(offset.y), Double(offset.x)))
+        return min(gap, 2 * .pi - gap)
+    }
+
     /// Which of the eight ring directions an offset points to — that
     /// button's hover bubble continues radially outward on the same side
     /// (Logi Options+ style), tail back toward the circle.

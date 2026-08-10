@@ -12,12 +12,21 @@ import SwiftUI
 import UserNotifications
 import Vision
 
-/// Transparent backdrop behind the ring buttons. A click that lands on it —
-/// rather than on a button — dismisses the menu. It also tracks hover over
-/// the ring's center: the panel occludes the presenter's own tracking area,
-/// so the bar underneath cannot see those hovers itself.
+/// Transparent backdrop behind the ring buttons, and the only view in the
+/// panel that takes a click. Selection is angular — what a click does is
+/// decided by the direction the cursor points from the ring's center, not by
+/// which disc happens to sit under it — so the click has to be resolved in one
+/// place that knows the whole ring. Cursor movement reaches the controller by
+/// monitor instead (this panel is non-activating and never key).
+///
+/// It also tracks hover over the ring's center: the panel occludes the
+/// presenter's own tracking area, so the bar underneath cannot see those
+/// hovers itself.
 final class RadialMenuBackdropView: NSView {
-    var onEmptyClick: (() -> Void)?
+    /// A left click landed. The controller runs whatever is picked, or
+    /// dismisses when the cursor points at nothing.
+    var onClick: (() -> Void)?
+    var onDismissClick: (() -> Void)?
     var onCenterHoverChange: ((Bool) -> Void)?
     private var centerTrackingArea: NSTrackingArea?
 
@@ -34,6 +43,14 @@ final class RadialMenuBackdropView: NSView {
         centerTrackingArea = area
     }
 
+    /// Every click in the panel belongs to this view. The buttons and their
+    /// callouts sit on top, but a pick is a direction rather than a rectangle,
+    /// so letting a subview intercept the click would make the disc's own
+    /// 46pt outline matter again.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        super.hitTest(point) == nil ? nil : self
+    }
+
     override func mouseEntered(with event: NSEvent) {
         onCenterHoverChange?(true)
     }
@@ -42,26 +59,32 @@ final class RadialMenuBackdropView: NSView {
         onCenterHoverChange?(false)
     }
 
-    override func mouseDown(with event: NSEvent) {
-        onEmptyClick?()
+    // Fire on mouseUp, not mouseDown: a press that starts pointing one way and
+    // is released pointing another must run the one the user ended up on.
+    override func mouseDown(with event: NSEvent) {}
+
+    override func mouseUp(with event: NSEvent) {
+        onClick?()
     }
 
+    // Right-click never runs anything — it only ever meant "put this away".
     override func rightMouseDown(with event: NSEvent) {
-        onEmptyClick?()
+        onDismissClick?()
     }
 }
 
-/// One circular glass button on the ring: SF Symbol icon, hover tint, and a
-/// small label that fades in under the circle on hover.
+/// One circular glass button on the ring: an SF Symbol icon on glass that
+/// swells when picked. Deliberately inert — it tracks no mouse and handles no
+/// click. Selection is angular and lives in the controller, so a disc that
+/// answered the cursor on its own would be a second, disagreeing opinion about
+/// what is selected.
 final class RadialMenuButtonView: NSView {
-    private let onPick: () -> Void
     private let circleView = NSVisualEffectView()
     /// Liquid Glass backing (NSGlassEffectView) when the OS has it; the class
     /// is resolved by name at runtime because the release SDK predates the
     /// symbol (same constraint as GlassHostView). nil → circleView fallback.
     private var liquidGlassView: NSView?
     private let iconView = NSImageView()
-    private var trackingArea: NSTrackingArea?
 
     /// Runtime-only NSGlassEffectView factory. KVC keys are guarded by
     /// responds checks so a future rename degrades to the fallback glass
@@ -79,18 +102,7 @@ final class RadialMenuButtonView: NSView {
         return (glass, content)
     }
 
-    /// Fired on hover in/out — the controller shows the label bubble, which
-    /// lives outside this view so the ring hit-areas stay circle-sized.
-    var onHoverChange: ((Bool) -> Void)?
-
-    /// When true, hover does NOT toggle the glass tint itself — the controller
-    /// drives it via `setHighlighted` instead (for the sticky second layer,
-    /// where the highlight is decoupled from the raw cursor position).
-    var suppressHoverTint = false
-
-    init(image: NSImage, onPick: @escaping () -> Void) {
-        self.onPick = onPick
-
+    init(image: NSImage) {
         let diameter = RadialMenuLayoutPolicy.buttonDiameter
         super.init(frame: NSRect(x: 0, y: 0, width: diameter, height: diameter))
         wantsLayer = true
@@ -148,45 +160,8 @@ final class RadialMenuButtonView: NSView {
         layer.masksToBounds = false
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        setHovered(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        setHovered(false)
-    }
-
-    // Swallow mouseDown: unhandled it would bubble up the responder chain to
-    // the backdrop, whose mouseDown dismisses the menu before mouseUp lands.
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        let location = convert(event.locationInWindow, from: nil)
-        guard bounds.contains(location) else { return }
-        onPick()
-    }
-
-    private func setHovered(_ hovered: Bool) {
-        if !suppressHoverTint { applyHighlight(hovered) }
-        onHoverChange?(hovered)
-    }
-
-    /// Controller-driven highlight (used by the sticky second layer, where the
-    /// highlighted button isn't necessarily the one under the cursor).
+    /// Controller-driven highlight: the ring's one angular pick decides which
+    /// button is swollen, at every layer.
     func setHighlighted(_ on: Bool) {
         applyHighlight(on)
     }

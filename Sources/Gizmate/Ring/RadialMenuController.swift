@@ -36,10 +36,29 @@ final class RadialActionMenuController {
     /// button comes and goes between apps.
     private let slots: [RingItem?]
     private let onDismiss: () -> Void
-    private var buttons: [RadialMenuButtonView] = []
-    /// A hover-revealed orbit: the buttons behind one expandable parent, built
-    /// hidden at init and parked on that parent until revealed. Kept out of
-    /// `buttons` so the ring's own open/close animations ignore them.
+    /// Center of the panel in its own coordinates — the origin every offset and
+    /// every cursor reading is measured from.
+    private var panelCenter: NSPoint = .zero
+
+    /// One rendered first-ring button. It carries its own offset because the
+    /// pick is resolved from angles, not from frames: frames move during the
+    /// open and collapse animations, the direction a button lives in never
+    /// does. `slotIndex` is its position on the eight-way ring, which is what
+    /// its orbit is keyed by — empty slots leave gaps, so it is not the index
+    /// in this array.
+    private struct RingButton {
+        let slotIndex: Int
+        let offset: CGPoint
+        let item: RingItem
+        let view: RadialMenuButtonView
+        let bubble: RadialMenuLabelBubbleView?
+    }
+
+    private var ringButtons: [RingButton] = []
+    /// An orbit revealed by pointing at its parent: the buttons behind one
+    /// expandable parent, built hidden at init and parked on that parent until
+    /// revealed. Kept out of `ringButtons` so the ring's own open/close
+    /// animations ignore them.
     ///
     /// Keyed per parent rather than held as one shared set — the ring can carry
     /// several expandable buttons at once (a Summarize plus any number of
@@ -51,7 +70,11 @@ final class RadialActionMenuController {
         var origin: NSPoint
         var buttons: [RadialMenuButtonView] = []
         var targets: [NSRect] = []
-        /// Each button's hover callout, parallel to `buttons`. `nil` where the
+        /// Direction each button lives in, parallel to `buttons` — what the
+        /// angular pick is resolved against.
+        var offsets: [CGPoint] = []
+        var items: [RingItem] = []
+        /// Each button's callout, parallel to `buttons`. `nil` where the
         /// button opens an orbit of its own — the callout would sit exactly
         /// where that orbit fans out — or carries no label at all.
         var bubbles: [RadialMenuLabelBubbleView?] = []
@@ -65,12 +88,13 @@ final class RadialActionMenuController {
     /// further one. Only one of each at a time, as before.
     private var openOrbitSlot: Int?
     private var openChildIndex: Int?
-    /// Which button of the open orbit the cursor is over — overrides the
-    /// default middle highlight while hovered.
-    private var hoveredSubIndex: Int?
-    /// Ignores hover while a fly-out plays, so the highlight doesn't jump to a
-    /// button passing under the cursor mid-flight.
-    private var isSubAnimating = false
+    /// The one thing the cursor points at: which layer (0 the ring, 1 the open
+    /// orbit, 2 the open child orbit) and which button in it. `nil` when the
+    /// cursor is in the center's dead zone or past the outer wall, the only
+    /// places left where a click means "dismiss".
+    private var pick: (layer: Int, index: Int)?
+    /// Every button currently drawn swollen. See `refreshHighlights`.
+    private var swollen: [RadialMenuButtonView] = []
     private var dismissMonitors: [Any] = []
     private var didClose = false
 
@@ -109,7 +133,8 @@ final class RadialActionMenuController {
         let container = RadialMenuBackdropView(
             frame: NSRect(origin: .zero, size: frame.size)
         )
-        container.onEmptyClick = { [weak self] in self?.dismiss() }
+        container.onClick = { [weak self] in self?.activatePick() }
+        container.onDismissClick = { [weak self] in self?.dismiss() }
         container.onCenterHoverChange = { [weak self] hovered in
             // Hovering the center ✕ dismisses any open orbit too.
             if hovered { self?.hideOrbit() }
@@ -124,35 +149,19 @@ final class RadialActionMenuController {
         ))
 
         let panelCenter = NSPoint(x: frame.width / 2, y: frame.height / 2)
+        self.panelCenter = panelCenter
         let ringCenters = RadialMenuLayoutPolicy.buttonCenters(count: slots.count)
         for (slotIndex, pair) in zip(slots, ringCenters).enumerated() {
             let (slot, offset) = pair
             guard let item = slot else { continue }
-            let isExpandable = item.expandsOnHover
-            let button = RadialMenuButtonView(image: item.image) { [weak self] in
-                // Expandable parents (a folder, or the messenger button) reveal
-                // their orbit instead of firing/closing — the ring stays. Unless
-                // the parent has a default of its own to run (`firesOnClick`),
-                // in which case hovering is what opens the orbit.
-                if isExpandable, !item.firesOnClick {
-                    self?.showOrbit(slotIndex)
-                } else {
-                    self?.finish(with: item)
-                }
-            }
+            let button = RadialMenuButtonView(image: item.image)
             button.setFrameOrigin(NSPoint(
                 x: panelCenter.x + offset.x - button.frame.width / 2,
                 y: panelCenter.y + offset.y - button.frame.height / 2
             ))
             container.addSubview(button)
-            buttons.append(button)
 
-            if isExpandable {
-                // Hovering an expandable button opens its orbit and keeps it
-                // open (sticky) — it closes only when a DIFFERENT first-ring
-                // button is hovered. Parent and sub highlights are driven by the
-                // controller, not each button's own hover tint.
-                button.suppressHoverTint = true
+            if item.expandsOnHover {
                 orbits[slotIndex] = buildOrbit(
                     for: item,
                     parent: button,
@@ -161,31 +170,27 @@ final class RadialActionMenuController {
                     panelCenter: panelCenter,
                     container: container
                 )
-                button.onHoverChange = { [weak self] hovered in
-                    if hovered { self?.showOrbit(slotIndex) }
-                }
-                continue
             }
 
-            // An empty label means "highlight only, no callout" — the app
-            // summarize button carries its identity in its app icon, so its
-            // hover shows just the glass highlight (no "Telegram" bubble).
-            guard let bubble = makeBubble(
-                for: item,
-                at: offset,
-                buttonFrame: button.frame,
-                in: container
-            ) else { continue }
-            button.onHoverChange = { [weak self, weak bubble] hovered in
-                // The collapse animation flies every button into the center —
-                // right under the cursor when the ✕ was clicked — and each
-                // pass fires a phantom mouseEntered. Dead ring, no bubbles.
-                guard let self, !self.didClose else { return }
-                // Hovering any other first-ring button dismisses the open
-                // orbit (the only thing that closes it besides picking).
-                if hovered { self.hideOrbit() }
-                Self.fade(bubble, to: hovered)
-            }
+            // An expandable parent gets no callout: its own orbit fans out into
+            // exactly the space the callout would occupy. An empty label means
+            // "highlight only" — the app summarize button carries its identity
+            // in its app icon, so pointing at it shows no "Telegram" bubble.
+            let bubble = item.expandsOnHover
+                ? nil
+                : makeBubble(
+                    for: item,
+                    at: offset,
+                    buttonFrame: button.frame,
+                    in: container
+                )
+            ringButtons.append(RingButton(
+                slotIndex: slotIndex,
+                offset: offset,
+                item: item,
+                view: button,
+                bubble: bubble
+            ))
         }
 
         // Batch every button's NSGlassEffectView into one backdrop pass via
@@ -295,28 +300,16 @@ final class RadialActionMenuController {
         for (index, entry) in placed.enumerated() {
             let sub = entry.item
             let expands = sub.expandsOnHover && depth < 2
-            let subButton = RadialMenuButtonView(image: sub.image) { [weak self] in
-                // An expandable sub reveals its own orbit on click; leaves fire.
-                // Same `firesOnClick` exception the first ring makes — Note is
-                // usually inside the More folder, so this is the path its click
-                // actually takes.
-                if expands, !sub.firesOnClick {
-                    self?.showChildOrbit(index)
-                } else {
-                    self?.finish(with: sub)
-                }
-            }
+            let subButton = RadialMenuButtonView(image: sub.image)
             subButton.setFrameOrigin(NSPoint(
                 x: panelCenter.x + entry.offset.x - subButton.frame.width / 2,
                 y: panelCenter.y + entry.offset.y - subButton.frame.height / 2
             ))
             orbit.targets.append(subButton.frame)
+            orbit.offsets.append(entry.offset)
+            orbit.items.append(sub)
             subButton.isHidden = true
             subButton.alphaValue = 0
-            subButton.suppressHoverTint = true
-            subButton.onHoverChange = { [weak self] hovered in
-                self?.subHoverChanged(index: index, depth: depth, hovered: hovered)
-            }
             container.addSubview(subButton)
             orbit.buttons.append(subButton)
             // An expandable sub gets no callout: its own orbit fans out into
@@ -346,63 +339,165 @@ final class RadialActionMenuController {
         return orbit
     }
 
-    /// Opens the orbit behind first-ring slot `slotIndex` and keeps it open.
-    /// It stays up until a DIFFERENT first-ring button is hovered, the ring is
-    /// dismissed, or something in it is picked.
-    private func showOrbit(_ slotIndex: Int) {
-        guard !didClose, let orbit = orbits[slotIndex] else { return }
-        if openOrbitSlot != slotIndex {
-            // Only one orbit at a time: whatever was open collapses first.
-            hideOrbit()
-            openOrbitSlot = slotIndex
-            reveal(orbit)
+    // MARK: - Angular selection
+
+    /// The layers a pick can currently land on, innermost first: the ring
+    /// always, then whichever orbits are open. Directions, not frames — a
+    /// button flying out of its parent is already selectable at the place it
+    /// is flying to.
+    private var liveLayers: [[CGPoint]] {
+        var layers = [ringButtons.map(\.offset)]
+        guard let orbit = openOrbit else { return layers }
+        layers.append(orbit.offsets)
+        if let index = openChildIndex, let child = orbit.children[index] {
+            layers.append(child.offsets)
         }
-        orbit.parent?.setHighlighted(true)
-        hoveredSubIndex = nil
-        refreshSubHighlight()
-        hideChildOrbit()
+        return layers
     }
 
-    /// `depth` says which orbit the hovered button belongs to — 1 is the ring
-    /// outside the main one, 2 the ring outside that. It has to be carried in:
-    /// without it every layer's hover was resolved against the second layer, so
-    /// a third-layer button grew its second-layer neighbour at the same index
-    /// and never grew itself.
-    private func subHoverChanged(index: Int, depth: Int, hovered: Bool) {
-        guard !isSubAnimating, !didClose else { return }
-        guard depth == 1 else {
-            childHoverChanged(index: index, hovered: hovered)
+    /// Where the cursor is relative to the ring's center, read from the screen
+    /// rather than from an event: mouse-moved events reach a non-activating
+    /// panel that is never key only through the monitors, and those carry
+    /// screen coordinates.
+    private var cursorOffset: CGPoint {
+        let location = NSEvent.mouseLocation
+        return CGPoint(
+            x: location.x - panel.frame.minX - panelCenter.x,
+            y: location.y - panel.frame.minY - panelCenter.y
+        )
+    }
+
+    private func refreshPick() {
+        guard !didClose else { return }
+        let next = RadialMenuLayoutPolicy.angularPick(cursor: cursorOffset, layers: liveLayers)
+        guard next?.layer != pick?.layer || next?.index != pick?.index else { return }
+        apply(next)
+    }
+
+    /// Moves the selection, and with it whichever orbit that selection implies.
+    /// The old callout is faded before the orbits move, while the layer it
+    /// belongs to still resolves.
+    private func apply(_ next: (layer: Int, index: Int)?) {
+        fadeBubble(for: pick, to: false)
+        pick = next
+
+        if let next {
+            switch next.layer {
+            case 0:
+                // Pointing at an expandable parent reveals its orbit; pointing
+                // at any other ring button puts away whatever was open. That is
+                // still the only thing besides picking that closes one.
+                let slot = ringButtons[next.index].slotIndex
+                if orbits[slot] != nil { showOrbit(slot) } else { hideOrbit() }
+            case 1:
+                if openOrbit?.children[next.index] != nil {
+                    showChildOrbit(next.index)
+                } else {
+                    hideChildOrbit()
+                }
+            default:
+                // The third layer is the outermost thing on screen: nothing
+                // further to reveal.
+                break
+            }
+        }
+
+        fadeBubble(for: next, to: true)
+        refreshHighlights()
+    }
+
+    private func fadeBubble(for target: (layer: Int, index: Int)?, to visible: Bool) {
+        guard let target, let layer = orbitLayer(target.layer) else { return }
+        Self.fade(layer.bubbles[safe: target.index] ?? nil, to: visible)
+    }
+
+    /// The one place a button swells, at every layer. Swollen means picked, or
+    /// parent of an open orbit — the breadcrumb saying which button these
+    /// others came out of, which has to survive the cursor travelling past it
+    /// into its own orbit.
+    ///
+    /// Diffed against what is already swollen rather than reasserted, because
+    /// `setHighlighted` starts a spring animation and restarting it on every
+    /// mouse move would leave the discs permanently mid-bounce.
+    private func refreshHighlights() {
+        var next: [RadialMenuButtonView] = []
+        if let slot = openOrbitSlot, let parent = orbits[slot]?.parent {
+            next.append(parent)
+        }
+        if let index = openChildIndex, let button = openOrbit?.buttons[safe: index] {
+            next.append(button)
+        }
+        if let pick,
+           let layer = orbitLayer(pick.layer),
+           let button = layer.buttons[safe: pick.index] {
+            next.append(button)
+        }
+        for button in swollen where !next.contains(where: { $0 === button }) {
+            button.setHighlighted(false)
+        }
+        for button in next where !swollen.contains(where: { $0 === button }) {
+            button.setHighlighted(true)
+        }
+        swollen = next
+    }
+
+    /// The buttons and callouts of one layer, with the ring itself dressed up
+    /// as an orbit so a pick reads the same at every depth.
+    private func orbitLayer(_ layer: Int) -> Orbit? {
+        switch layer {
+        case 0:
+            return Orbit(
+                origin: panelCenter,
+                buttons: ringButtons.map(\.view),
+                bubbles: ringButtons.map(\.bubble)
+            )
+        case 1:
+            return openOrbit
+        default:
+            return openChildIndex.flatMap { openOrbit?.children[$0] }
+        }
+    }
+
+    /// Runs whatever the cursor points at. Nothing picked means the cursor is
+    /// in the dead zone or past the outer wall, which is the one gesture left
+    /// that means "put this away".
+    private func activatePick() {
+        guard !didClose else { return }
+        // A click can be the first thing that happens after the ring opens, or
+        // land somewhere the last move monitor never reported. Read the cursor
+        // once more so what runs is what the user is pointing at now.
+        refreshPick()
+        guard let pick, let layer = orbitLayer(pick.layer) else {
+            dismiss()
             return
         }
-        guard let orbit = openOrbit else { return }
-        Self.fade(orbit.bubbles[safe: index] ?? nil, to: hovered)
-        // Sticky: hovering a sub moves the highlight to it and it STAYS there
-        // after the cursor leaves into empty space. Only re-hovering the parent
-        // resets the default back to the middle (in `showOrbit`).
-        guard hovered else { return }
-        hoveredSubIndex = index
-        refreshSubHighlight()
-        // An expandable sub opens its own orbit on hover; a plain one closes
-        // whichever was open.
-        if orbit.children[index] != nil {
-            showChildOrbit(index)
-        } else {
-            hideChildOrbit()
+        let item: RingItem?
+        switch pick.layer {
+        case 0: item = ringButtons[safe: pick.index]?.item
+        default: item = layer.items[safe: pick.index]
         }
+        guard let item else { return }
+        // An expandable parent reveals its orbit instead of firing and closing —
+        // the ring stays. Unless it has a default of its own to run
+        // (`firesOnClick`), in which case pointing at it is what opened the
+        // orbit and clicking runs the default. Note is usually inside the More
+        // folder, so that exception is the path its click actually takes.
+        let expands = pick.layer == 0
+            ? orbits[ringButtons[pick.index].slotIndex] != nil
+            : layer.children[pick.index] != nil
+        guard !expands || item.firesOnClick else { return }
+        finish(with: item)
     }
 
-    /// The third layer. Only one of its orbits is ever open, and its buttons
-    /// are the outermost thing on screen, so there is nothing further to reveal
-    /// — a hover here is just this button's own highlight and callout.
-    private func childHoverChanged(index: Int, hovered: Bool) {
-        guard let parentIndex = openChildIndex,
-              let child = openOrbit?.children[parentIndex]
-        else { return }
-        Self.fade(child.bubbles[safe: index] ?? nil, to: hovered)
-        guard hovered else { return }
-        for (i, sub) in child.buttons.enumerated() {
-            sub.setHighlighted(i == index)
-        }
+    /// Opens the orbit behind first-ring slot `slotIndex` and keeps it open.
+    /// It stays up until a DIFFERENT first-ring button is pointed at, the ring
+    /// is dismissed, or something in it is picked.
+    private func showOrbit(_ slotIndex: Int) {
+        guard !didClose, openOrbitSlot != slotIndex, let orbit = orbits[slotIndex] else { return }
+        // Only one orbit at a time: whatever was open collapses first.
+        hideOrbit()
+        openOrbitSlot = slotIndex
+        reveal(orbit)
     }
 
     /// A button's hover callout, parked outside it on the side it sits on, or
@@ -454,16 +549,16 @@ final class RadialActionMenuController {
         guard let index = openChildIndex else { return }
         openChildIndex = nil
         guard let child = openOrbit?.children[index] else { return }
-        collapse(child, restoringHighlight: false)
+        collapse(child)
+        refreshHighlights()
     }
 
     private func hideOrbit() {
         hideChildOrbit()
         guard let orbit = openOrbit else { return }
         openOrbitSlot = nil
-        hoveredSubIndex = nil
-        isSubAnimating = true
-        collapse(orbit, restoringHighlight: true)
+        collapse(orbit)
+        refreshHighlights()
     }
 
     /// Springs the orbit out of its parent button — the same feel and timing as
@@ -472,8 +567,12 @@ final class RadialActionMenuController {
     /// Staged over two CA transactions: an animation scheduled in the same
     /// commit that unhides a layer is skipped outright, which used to make the
     /// reveal pop in fully settled while the collapse animated fine.
+    ///
+    /// Nothing is gated on the fly-out finishing. Selection reads the direction
+    /// a button lives in, not the frame it currently occupies, so a button
+    /// crossing under the cursor mid-flight cannot steal the pick — which is
+    /// what the old hover tracking had to be suspended to prevent.
     private func reveal(_ orbit: Orbit) {
-        isSubAnimating = true
         for (sub, target) in zip(orbit.buttons, orbit.targets) {
             sub.frame = NSRect(
                 x: orbit.origin.x - target.width / 2,
@@ -487,30 +586,24 @@ final class RadialActionMenuController {
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.didClose else { return }
             for (sub, target) in zip(orbit.buttons, orbit.targets) {
-                // Hover is ignored until it settles (isSubAnimating) so the
-                // highlight doesn't jump to a button passing under the cursor
-                // mid-flight; tracking re-arms at the settled frame.
-                NSAnimationContext.runAnimationGroup({ context in
+                NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.22
                     context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
                     sub.animator().frame = target
                     sub.animator().alphaValue = 1
-                }, completionHandler: { [weak self, weak sub] in
-                    sub?.updateTrackingAreas()
-                    self?.isSubAnimating = false
-                })
+                }
             }
         }
     }
 
     /// Collapse back INTO the parent button, mirroring the ring's own close.
-    private func collapse(_ orbit: Orbit, restoringHighlight: Bool) {
-        if restoringHighlight { orbit.parent?.setHighlighted(false) }
+    /// Highlights are not touched here — `refreshHighlights` owns every one of
+    /// them, and it runs right after, once the open-orbit state is settled.
+    private func collapse(_ orbit: Orbit) {
         // The callouts go with the orbit. Letting one ride out the collapse
         // leaves a label naming a button that is no longer on screen.
         for bubble in orbit.bubbles { Self.fade(bubble, to: false) }
         for (sub, target) in zip(orbit.buttons, orbit.targets) {
-            sub.setHighlighted(false)
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.15
                 context.timingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -521,28 +614,16 @@ final class RadialActionMenuController {
                     height: target.height
                 )
                 sub.animator().alphaValue = 0
-            }, completionHandler: { [weak self, weak sub] in
+            }, completionHandler: { [weak sub] in
                 sub?.isHidden = true
                 sub?.frame = target   // reset for the next reveal
-                if restoringHighlight { self?.isSubAnimating = false }
             })
-        }
-    }
-
-    /// Highlights whichever button of the open orbit the cursor is actually on,
-    /// and none while it is still on the parent. Opening an orbit deliberately
-    /// pre-selects nothing: the highlight is a size bump, and bumping a button
-    /// the user never pointed at reads as the ring picking for them.
-    private func refreshSubHighlight() {
-        guard let orbit = openOrbit else { return }
-        for (i, sub) in orbit.buttons.enumerated() {
-            sub.setHighlighted(i == hoveredSubIndex)
         }
     }
 
     private func animateButtonsIn() {
         guard let container = panel.contentView else { return }
-        for button in buttons {
+        for button in ringButtons.map(\.view) {
             let target = button.frame
             button.frame = NSRect(
                 x: container.bounds.midX - target.width / 2,
@@ -572,6 +653,18 @@ final class RadialActionMenuController {
     private func installDismissMonitors() {
         guard dismissMonitors.isEmpty else { return }
         var monitors: [Any?] = []
+        // Selection follows the cursor's angle, so every move has to be seen.
+        // Both monitors are needed for the same reason Escape needs both, and
+        // they run straight through rather than hopping onto a Task: this fires
+        // at the mouse's sample rate, and a queued hop per sample would let the
+        // highlight trail the cursor.
+        monitors.append(NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { _ in
+            MainActor.assumeIsolated { [weak self] in self?.refreshPick() }
+        })
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in
+            MainActor.assumeIsolated { [weak self] in self?.refreshPick() }
+            return event
+        })
         monitors.append(NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in

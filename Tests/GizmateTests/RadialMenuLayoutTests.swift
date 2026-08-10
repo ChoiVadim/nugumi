@@ -52,6 +52,86 @@ final class RadialMenuLayoutTests: XCTestCase {
         XCTAssertEqual(RadialMenuLayoutPolicy.labelPlacement(for: CGPoint(x: -45, y: -45)), .bottomLeft)
     }
 
+    // MARK: - Angular selection
+
+    /// Three filled slots: right, bottom, top-right — the shape a ring with
+    /// five empty slots actually has.
+    private var sparseRing: [CGPoint] {
+        RadialMenuLayoutPolicy.buttonCenters(count: 3)
+    }
+
+    func testEmptyDirectionGoesToItsNearestNeighbour() {
+        // Pointing dead left, where no button lives. The bottom one (−90°) is
+        // 90° away; the right one is a full 180°.
+        let pick = RadialMenuLayoutPolicy.angularPick(
+            cursor: CGPoint(x: -90, y: 0),
+            layers: [sparseRing]
+        )
+        XCTAssertEqual(pick?.layer, 0)
+        XCTAssertEqual(pick?.index, 1)
+    }
+
+    func testPointingAtAButtonPicksItFromAnywhereInTheBand() {
+        // The disc is 46pt wide at radius 78; every one of these misses it.
+        for distance in [30.0, 60.0, 110.0] {
+            let pick = RadialMenuLayoutPolicy.angularPick(
+                cursor: CGPoint(x: distance * cos(.pi / 4), y: distance * sin(.pi / 4)),
+                layers: [sparseRing]
+            )
+            XCTAssertEqual(pick?.index, 2, "at \(distance)pt out")
+        }
+    }
+
+    func testDeadZoneAndOuterWallPickNothing() {
+        XCTAssertNil(RadialMenuLayoutPolicy.angularPick(
+            cursor: CGPoint(x: 10, y: 0),
+            layers: [sparseRing]
+        ))
+        // 152pt out is the second orbit's radius — past the wall while only
+        // the ring is up, so a click there still means "dismiss".
+        XCTAssertNil(RadialMenuLayoutPolicy.angularPick(
+            cursor: CGPoint(x: 152, y: 0),
+            layers: [sparseRing]
+        ))
+    }
+
+    func testOpeningAnOrbitMovesTheWallAndSplitsTheBands() {
+        let orbit = RadialMenuLayoutPolicy.orbitSlotCenters(
+            radius: RadialMenuLayoutPolicy.outerRingRadius,
+            count: 4
+        )
+        let layers = [sparseRing, orbit]
+        // Same 152pt reading, now that the orbit is out there.
+        XCTAssertEqual(
+            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 152, y: 0), layers: layers)?.layer,
+            1
+        )
+        // The ring keeps everything inside the midpoint between the two.
+        XCTAssertEqual(
+            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 100, y: 0), layers: layers)?.layer,
+            0
+        )
+        XCTAssertNil(
+            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 220, y: 0), layers: layers)
+        )
+    }
+
+    func testEveryDirectionOutsideTheDeadZonePicksSomething() {
+        // The point of the whole scheme: inside the band there is no direction
+        // that selects nothing, however few slots are filled.
+        for filled in 1...8 {
+            let ring = RadialMenuLayoutPolicy.buttonCenters(count: filled)
+            for step in 0..<72 {
+                let heading = Double(step) * .pi / 36
+                let cursor = CGPoint(x: 90 * cos(heading), y: 90 * sin(heading))
+                XCTAssertNotNil(
+                    RadialMenuLayoutPolicy.angularPick(cursor: cursor, layers: [ring]),
+                    "\(filled) slots, heading \(step * 5)°"
+                )
+            }
+        }
+    }
+
     func testDefaultRingSymbolsResolve() {
         let symbolNames = [
             "text.magnifyingglass",
