@@ -2,19 +2,19 @@ import AppKit
 import GizmateToolAgentCore
 import SwiftUI
 
-/// One leaf of a surface: an icon over a title over an optional subtitle —
-/// the shape of a file the user can drag out of the panel.
+/// One leaf of a surface: an icon, a title, and whatever else the layout asked
+/// for — the shape of a file the user can drag out of the panel, or of one
+/// reading on a stats strip.
 ///
-/// Reused for both a grid's cell and a list's row (`DESIGN.md` §12): the two
-/// only ever differ in how their repeater arranges cards, never in what a
-/// card looks like, so there is one card type rather than a grid variant and
-/// a list variant drifting apart from each other.
+/// One card type for both a grid's cell and a list's row (`DESIGN.md` §12),
+/// with the two arrangements differing only in the axis they stack on. A grid
+/// cell is a square (§13) and puts the icon above centred text, because a
+/// square's width is the scarce thing. A list row is as wide as the panel and
+/// as tall as it needs, so it puts the icon beside left-aligned text, which is
+/// what every list on this platform looks like — and it is the only one of the
+/// two with room for detail lines, a bar or a graph.
 struct SurfaceCard: View {
-    let title: ToolAgentLayoutBindingV1
-    let subtitle: ToolAgentLayoutBindingV1?
-    let icon: ToolAgentLayoutIconV1?
-    let drag: ToolAgentLayoutDragV1?
-    let tap: ToolAgentLayoutTapV1?
+    let card: ToolAgentLayoutCardV1
     let row: SurfaceRow
     /// The exact height every cell of a grid takes, so a two-line name can't
     /// make one card taller than its neighbours — `SurfaceGrid` passes its own
@@ -27,56 +27,34 @@ struct SurfaceCard: View {
     /// Always false for a gizmo surface, which has no selection.
     var isSelected: Bool = false
 
-    private var resolvedTitle: String { SurfaceBinding.resolve(title, in: row) }
+    private var resolvedTitle: String { SurfaceBinding.resolve(card.title, in: row) }
 
     /// `nil` both when the layout never asked for a subtitle and when the key
     /// it named is missing from this row — either way there is nothing to
     /// show, and the card loses the line, not itself.
     private var resolvedSubtitle: String? {
-        guard let subtitle else { return nil }
+        guard let subtitle = card.subtitle else { return nil }
         let value = SurfaceBinding.resolve(subtitle, in: row)
         return value.isEmpty ? nil : value
     }
 
+    /// The detail lines this row actually has something to say on, in the order
+    /// the layout gave. A line whose key is missing disappears rather than
+    /// leaving a blank — the same rule the subtitle has always followed, and
+    /// the reason a stats panel can list six possible readings and draw the
+    /// four a particular machine reports.
+    private var resolvedDetails: [String] {
+        card.details
+            .map { SurfaceBinding.resolve($0, in: row) }
+            .filter { !$0.isEmpty }
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            // Gated on whether the icon will actually draw something, not
-            // just on whether one was declared: an `if` with no `else`
-            // still occupies a slot in this VStack even when it renders
-            // nothing, so a `.file` icon whose key is missing left an 8pt
-            // gap above the title with no icon in it.
-            if let icon, hasVisibleIcon(icon) {
-                iconView(icon)
-            }
-            // Both lines sit at Caption (12px, DESIGN.md §3) — there is no
-            // 11px regular level, only Micro (11px, semibold, for monospaced
-            // section labels), which a file's subtitle isn't. Hierarchy
-            // comes from weight and colour instead, per §3's own rule: "Use
-            // medium and semibold for hierarchy instead of larger sizes."
-            VStack(spacing: 4) {
-                Text(resolvedTitle)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(FlowTheme.ink)
-                    // Two lines always in a grid, even for a short name: the
-                    // label is what the flexible preview above sizes itself
-                    // against, so a one-line name would otherwise hand its
-                    // card a taller thumbnail than its neighbours and the row
-                    // would stop lining up — the same reason the cell has a
-                    // fixed height at all.
-                    .lineLimit(2, reservesSpace: height != nil)
-                    // The tail is the half worth keeping: a card two lines
-                    // tall truncates most real filenames, and truncating the
-                    // end ate the extension — which is exactly the thing a
-                    // preview cannot tell you, since a video's thumbnail is a
-                    // still frame and looks like a photo.
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-                if let resolvedSubtitle {
-                    Text(resolvedSubtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(FlowTheme.inkTertiary)
-                        .lineLimit(1)
-                }
+        Group {
+            if height == nil {
+                listBody
+            } else {
+                gridBody
             }
         }
         // A fixed cell spends its budget on the preview, not on chrome — 8pt
@@ -94,7 +72,13 @@ struct SurfaceCard: View {
                 // Selection is a lit fill, not a border: a border on a square
                 // that already sits on a hairline-free glass panel reads as a
                 // second card edge, and at 110pt there is no room for both.
-                .fill(isSelected ? FlowTheme.accentSoft : FlowTheme.subtleFill)
+                //
+                // Unselected, only a grid cell carries a fill. A list rules
+                // its rows apart with a hairline, and a fill under every row
+                // as well draws a second edge just inside the first — the
+                // "border around a border" the question bubble avoids for the
+                // same reason.
+                .fill(fill)
         )
         // A border, not just a brighter fill. Selected and unselected were two
         // whites a tenth of an alpha apart, on a translucent panel, over an
@@ -108,7 +92,122 @@ struct SurfaceCard: View {
                 .strokeBorder(FlowTheme.ink.opacity(isSelected ? 0.75 : 0), lineWidth: 1.5)
         )
         .contentShape(Rectangle())
-        .modifier(SurfaceCardInteractionModifier(drag: drag, tap: tap, row: row))
+        .modifier(SurfaceCardInteractionModifier(drag: card.drag, tap: card.tap, row: row))
+    }
+
+    private var fill: Color {
+        if isSelected { return FlowTheme.accentSoft }
+        return height == nil ? .clear : FlowTheme.subtleFill
+    }
+
+    /// A square cell: icon above, text centred under it. Detail lines, a bar
+    /// and a graph cannot reach here — `SurfaceLayoutCheck` refuses a grid
+    /// whose cell asks for them, because this cell's height is its column's
+    /// width and there is nowhere for them to go.
+    private var gridBody: some View {
+        VStack(spacing: 8) {
+            // Gated on whether the icon will actually draw something, not
+            // just on whether one was declared: an `if` with no `else`
+            // still occupies a slot in this VStack even when it renders
+            // nothing, so a `.file` icon whose key is missing left an 8pt
+            // gap above the title with no icon in it.
+            if let icon = card.icon, hasVisibleIcon(icon) {
+                iconView(icon)
+            }
+            // Both lines sit at Caption (12px, DESIGN.md §3) — there is no
+            // 11px regular level, only Micro (11px, semibold, for monospaced
+            // section labels), which a file's subtitle isn't. Hierarchy
+            // comes from weight and colour instead, per §3's own rule: "Use
+            // medium and semibold for hierarchy instead of larger sizes."
+            VStack(spacing: 4) {
+                Text(resolvedTitle)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(FlowTheme.ink)
+                    // Two lines always in a grid, even for a short name: the
+                    // label is what the flexible preview above sizes itself
+                    // against, so a one-line name would otherwise hand its
+                    // card a taller thumbnail than its neighbours and the row
+                    // would stop lining up — the same reason the cell has a
+                    // fixed height at all.
+                    .lineLimit(2, reservesSpace: true)
+                    // The tail is the half worth keeping: a card two lines
+                    // tall truncates most real filenames, and truncating the
+                    // end ate the extension — which is exactly the thing a
+                    // preview cannot tell you, since a video's thumbnail is a
+                    // still frame and looks like a photo.
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+                if let resolvedSubtitle {
+                    Text(resolvedSubtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    /// A row across the panel: icon beside the text, everything left-aligned.
+    ///
+    /// The icon is pinned to the top rather than centred against the text
+    /// block. A reading with four detail lines would otherwise float its icon
+    /// somewhere in the middle of the block, and a column of icons that starts
+    /// at a different height in every row is the thing the eye notices before
+    /// it reads a single word.
+    private var listBody: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if let icon = card.icon, hasVisibleIcon(icon) {
+                iconView(icon)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(resolvedTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(FlowTheme.ink)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                if let resolvedSubtitle {
+                    Text(resolvedSubtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .lineLimit(1)
+                }
+                ForEach(Array(resolvedDetails.enumerated()), id: \.offset) { _, detail in
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkSecondary)
+                        .lineLimit(1)
+                }
+                if let fraction = meterFraction {
+                    SurfaceMeterBar(fraction: fraction)
+                        .padding(.top, 2)
+                }
+                if let series = chartSeries {
+                    SurfaceSparkline(values: series)
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// `nil` when the layout asked for no bar, when this row has no value for
+    /// it, or when the value isn't one `SurfaceMeter` accepts. The last case
+    /// is refused at build time against a real run, so reaching it means a
+    /// script that printed a good value then printed a bad one later — and a
+    /// missing bar is a better answer than a bar showing a number nobody can
+    /// defend.
+    private var meterFraction: Double? {
+        guard let key = card.meter, let value = SurfaceCard.path(for: key, in: row) else {
+            return nil
+        }
+        return SurfaceMeter.fraction(from: value)
+    }
+
+    private var chartSeries: [Double]? {
+        guard let key = card.chart, let value = SurfaceCard.path(for: key, in: row) else {
+            return nil
+        }
+        return SurfaceSeries.values(from: value)
     }
 
     /// Whether `iconView` will draw anything for this icon against this row

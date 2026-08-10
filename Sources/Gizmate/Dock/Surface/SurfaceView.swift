@@ -107,8 +107,19 @@ private struct SurfaceTreeView: View {
             if rows.isEmpty {
                 SurfaceEmptyLabel(text: empty)
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(rows, id: \.id) { row in
+                // A hairline between cards, and nothing between bare text
+                // lines. A card is a block with its own padding, so without a
+                // rule two of them read as one paragraph — every stats panel
+                // worth copying separates its sections. A `text` node is one
+                // line of prose, and ruling prose is noise.
+                let ruled = rowNode.isCard
+                VStack(alignment: .leading, spacing: ruled ? 0 : 8) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if ruled, index > 0 {
+                            Rectangle()
+                                .fill(FlowTheme.hairline)
+                                .frame(height: 1)
+                        }
                         SurfaceLeafView(node: rowNode, row: row, isSelected: selectedIDs.contains(row.id))
                     }
                 }
@@ -210,11 +221,8 @@ private struct SurfaceLeafView: View {
 
     var body: some View {
         switch node {
-        case let .card(title, subtitle, icon, drag, tap):
-            SurfaceCard(
-                title: title, subtitle: subtitle, icon: icon, drag: drag, tap: tap,
-                row: row, height: height, isSelected: isSelected
-            )
+        case let .card(card):
+            SurfaceCard(card: card, row: row, height: height, isSelected: isSelected)
 
         case let .text(binding):
             Text(SurfaceBinding.resolve(binding, in: row))

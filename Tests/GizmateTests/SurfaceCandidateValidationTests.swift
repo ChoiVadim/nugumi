@@ -7,8 +7,8 @@ final class SurfaceCandidateValidationTests: XCTestCase {
 
     func testALayoutWhoseKeysAllExistPasses() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: nil,
-                       drag: .file(key: "path"), tap: nil),
+            row: .card(.init(title: .key("name"),
+                       drag: .file(key: "path"))),
             empty: "Nothing"
         )
         XCTAssertNil(SurfaceLayoutCheck.diagnostic(for: layout, against: rows))
@@ -16,7 +16,7 @@ final class SurfaceCandidateValidationTests: XCTestCase {
 
     func testAKeyNoRowHasIsNamedInTheDiagnostic() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("filename"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+            row: .card(.init(title: .key("filename"))),
             empty: "Nothing"
         )
         let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
@@ -27,8 +27,8 @@ final class SurfaceCandidateValidationTests: XCTestCase {
 
     func testAFileKeyHoldingSomethingThatIsNotAPathIsRefused() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: nil,
-                       drag: .file(key: "name"), tap: nil),
+            row: .card(.init(title: .key("name"),
+                       drag: .file(key: "name"))),
             empty: "Nothing"
         )
         XCTAssertNotNil(SurfaceLayoutCheck.diagnostic(for: layout, against: rows))
@@ -44,7 +44,7 @@ final class SurfaceCandidateValidationTests: XCTestCase {
 
     func testAResolvableIconSymbolPasses() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: .symbol("folder"), drag: nil, tap: nil),
+            row: .card(.init(title: .key("name"), icon: .symbol("folder"))),
             empty: "Nothing"
         )
         XCTAssertNil(SurfaceLayoutCheck.diagnostic(for: layout, against: rows))
@@ -57,7 +57,7 @@ final class SurfaceCandidateValidationTests: XCTestCase {
     /// diagnostic here names its bad key.
     func testAnUnresolvableIconSymbolIsRefused() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: .symbol("not-a-real-glyph"), drag: nil, tap: nil),
+            row: .card(.init(title: .key("name"), icon: .symbol("not-a-real-glyph"))),
             empty: "Nothing"
         )
         let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
@@ -71,7 +71,7 @@ final class SurfaceCandidateValidationTests: XCTestCase {
     /// show yet, not just the day its folder stops being empty.
     func testAnUnresolvableIconSymbolIsRefusedEvenWithNoRows() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: .symbol("not-a-real-glyph"), drag: nil, tap: nil),
+            row: .card(.init(title: .key("name"), icon: .symbol("not-a-real-glyph"))),
             empty: "Nothing"
         )
         XCTAssertNotNil(SurfaceLayoutCheck.diagnostic(for: layout, against: []))
@@ -81,8 +81,7 @@ final class SurfaceCandidateValidationTests: XCTestCase {
     /// whole point of it — one surface showing a CPU card beside a disk card.
     func testAnIconKeyWhoseRowsHoldRealGlyphsPasses() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: .symbolKey(key: "glyph"),
-                       drag: nil, tap: nil),
+            row: .card(.init(title: .key("name"), icon: .symbolKey(key: "glyph"))),
             empty: "Nothing"
         )
         let rows = [
@@ -98,13 +97,64 @@ final class SurfaceCandidateValidationTests: XCTestCase {
     /// per-row icon was added to end.
     func testAnIconKeyHoldingSomethingThatIsNotAGlyphIsRefused() {
         let layout = ToolAgentLayoutV1.list(
-            row: .card(title: .key("name"), subtitle: nil, icon: .symbolKey(key: "glyph"),
-                       drag: nil, tap: nil),
+            row: .card(.init(title: .key("name"), icon: .symbolKey(key: "glyph"))),
             empty: "Nothing"
         )
         let rows = [SurfaceRow(id: "1", values: ["name": "CPU", "glyph": "not-a-real-glyph"])]
         let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
         XCTAssertNotNil(diagnostic)
         XCTAssertTrue(diagnostic!.contains("not-a-real-glyph"))
+    }
+
+    private func statRow(meter: String? = nil, chart: String? = nil) -> ToolAgentLayoutV1 {
+        .list(
+            row: .card(.init(title: .key("name"), details: [.key("detail")],
+                             meter: meter, chart: chart)),
+            empty: "Nothing"
+        )
+    }
+
+    func testAMeterAndAChartTheRowsCanActuallyFillPass() {
+        let layout = statRow(meter: "load", chart: "history")
+        let rows = [SurfaceRow(id: "1", values: [
+            "name": "CPU", "detail": "System: 7.5%", "load": "19.8%", "history": "18,22,19,41"
+        ])]
+        XCTAssertNil(SurfaceLayoutCheck.diagnostic(for: layout, against: rows))
+    }
+
+    /// The one a script is most likely to get wrong: a percentage written
+    /// without its sign is a number ten times too big for a fraction, and a
+    /// bar clamped to full would look like a working panel reporting a full
+    /// disk. The diagnostic names the value and both accepted spellings.
+    func testAMeterValueThatIsNeitherFractionNorPercentageIsRefused() {
+        let layout = statRow(meter: "load")
+        let rows = [SurfaceRow(id: "1", values: ["name": "CPU", "detail": "x", "load": "19.8"])]
+        let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
+        XCTAssertNotNil(diagnostic)
+        XCTAssertTrue(diagnostic!.contains("19.8"))
+        XCTAssertTrue(diagnostic!.contains("%"))
+    }
+
+    func testAChartValueThatIsNotASeriesIsRefused() {
+        let layout = statRow(chart: "history")
+        let rows = [SurfaceRow(id: "1", values: ["name": "CPU", "detail": "x", "history": "41"])]
+        let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
+        XCTAssertNotNil(diagnostic)
+        XCTAssertTrue(diagnostic!.contains("41"))
+    }
+
+    /// Checked from the layout alone, so a script with nothing to show today
+    /// still can't ship a grid full of readings that would be clipped away.
+    func testAGridCellAskingForRowOnlyFieldsIsRefusedWithNoRows() {
+        let layout = ToolAgentLayoutV1.grid(
+            cell: .card(.init(title: .key("name"), details: [.key("detail")], meter: "load")),
+            minimumWidth: 120,
+            empty: "Nothing"
+        )
+        let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: [])
+        XCTAssertNotNil(diagnostic)
+        XCTAssertTrue(diagnostic!.contains("details"))
+        XCTAssertTrue(diagnostic!.contains("meter"))
+        XCTAssertTrue(diagnostic!.contains("list"), "the diagnostic should name the fix")
     }
 }

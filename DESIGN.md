@@ -832,7 +832,39 @@ content-sized in a single column where uniform height only buys dead space.
 `SurfaceCard(height:)` is the same parameter for the same reason, and carries
 the three rules below with it.
 
-## 13. Cards in a grid of files
+## 13. Cards in a grid of files, rows in a list of readings
+
+One card type, two arrangements, and the repeater picks which. A `grid` cell is
+a square with the icon above centred text; a `list` row is as wide as the panel
+with the icon beside left-aligned text and a hairline ruling it off from the
+next. Nothing in the wire format says which — `SurfaceCard(height:)` is already
+the parameter that differs, so the axis follows it rather than becoming a knob
+the model has to set correctly (§12).
+
+That split is also what decides where the three row-only modifiers may be used.
+`details` (up to six more lines), `meter` (a bar, from a `0…1` number or a
+`"48.8%"` string) and `chart` (a sparkline, from 2–120 comma-separated numbers)
+draw in a list row and are refused in a grid cell, by name, with "use a list"
+as the diagnostic. A square sized from its own column has nowhere to put four
+lines and a bar, and the two ways of not saying so are both worse: clipping
+them silently, or dropping them silently.
+
+Three rules the readings brought with them:
+
+- **A row's value is a string, so a series is text.** `SurfaceRow` is flat and
+  `SurfaceRows` refuses a JSON array outright, so `chart` reads `"18,22,19"`.
+  The same trade `file:$path` already makes: the string promises a shape and
+  the host checks the promise against a real run rather than trusting it.
+- **One parser for drawing and for checking.** `SurfaceMeter` and
+  `SurfaceSeries` are read by `SurfaceCard` and by `SurfaceLayoutCheck` both. A
+  value the check accepted but the renderer could not draw is the worst
+  outcome available: the surface still appears, and quietly shows less than it
+  was asked to.
+- **Out of range is refused, never clamped.** A script printing `48.8` where a
+  fraction was asked for meant something, and a bar pinned at full would hide
+  that it meant it wrongly — on a panel whose entire job is to report a number.
+
+## 13.1 Inside a grid cell
 
 A grid cell is a square: `SurfaceGrid` hands each card the column width it
 already computed as the card's height. Uniform cells are the whole point — a

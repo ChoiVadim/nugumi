@@ -15,14 +15,17 @@ final class ToolAgentLayoutTests: XCTestCase {
         }
         XCTAssertEqual(minimumWidth, 96)
         XCTAssertEqual(empty, "Nothing in Downloads")
-        guard case let .card(title, subtitle, icon, drag, tap) = cell else {
+        guard case let .card(card) = cell else {
             return XCTFail("expected a card")
         }
-        XCTAssertEqual(title, .key("name"))
-        XCTAssertEqual(subtitle, .key("size"))
-        XCTAssertEqual(icon, .file(key: "path"))
-        XCTAssertEqual(drag, .file(key: "path"))
-        XCTAssertEqual(tap, .reveal(key: "path"))
+        XCTAssertEqual(card.title, .key("name"))
+        XCTAssertEqual(card.subtitle, .key("size"))
+        XCTAssertEqual(card.icon, .file(key: "path"))
+        XCTAssertEqual(card.drag, .file(key: "path"))
+        XCTAssertEqual(card.tap, .reveal(key: "path"))
+        XCTAssertEqual(card.details, [])
+        XCTAssertNil(card.meter)
+        XCTAssertNil(card.chart)
 
         let round = try JSONDecoder().decode(
             ToolAgentLayoutV1.self,
@@ -63,8 +66,7 @@ final class ToolAgentLayoutTests: XCTestCase {
         let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
         XCTAssertEqual(
             layout,
-            .list(row: .card(title: .key("n"), subtitle: nil, icon: .symbolKey(key: "glyph"),
-                             drag: nil, tap: nil),
+            .list(row: .card(.init(title: .key("n"), icon: .symbolKey(key: "glyph"))),
                   empty: "x")
         )
         XCTAssertEqual(layout.referencedKeys, ["n", "glyph"])
@@ -90,6 +92,91 @@ final class ToolAgentLayoutTests: XCTestCase {
                 icon
             )
         }
+    }
+
+    /// The readings a stats panel is made of: extra lines, a bar and a graph.
+    /// `details` holds ordinary bindings so a line can be fixed text, while
+    /// `meter` and `chart` take a key and nothing else — a fixed bar would be
+    /// a picture of data that isn't there.
+    func testACardCarriesDetailsAMeterAndAChart() throws {
+        let json = #"""
+        {"node":"list","empty":"x","row":{"node":"card","title":"$name",
+         "details":["$system","$user","Idle"],"meter":"$load","chart":"$history"}}
+        """#
+        let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        guard case let .list(row, _) = layout, case let .card(card) = row else {
+            return XCTFail("expected a list of cards")
+        }
+        XCTAssertEqual(card.details, [.key("system"), .key("user"), .literal("Idle")])
+        XCTAssertEqual(card.meter, "load")
+        XCTAssertEqual(card.chart, "history")
+        XCTAssertEqual(layout.referencedKeys, ["name", "system", "user", "load", "history"])
+        XCTAssertEqual(layout.meterKeys, ["load"])
+        XCTAssertEqual(layout.chartKeys, ["history"])
+        // Neither is a file, so neither may be dragged into the check that
+        // demands a leading "/".
+        XCTAssertEqual(layout.fileKeys, [])
+
+        let round = try JSONDecoder().decode(
+            ToolAgentLayoutV1.self, from: JSONEncoder().encode(layout)
+        )
+        XCTAssertEqual(round, layout)
+    }
+
+    /// A card with none of the three re-encodes without an empty `details`
+    /// array — the decoder's own strict key set would otherwise have to accept
+    /// a key that means nothing, and a round trip must produce the document it
+    /// started from.
+    func testACardWithoutDetailsEncodesNoDetailsKey() throws {
+        let layout = ToolAgentLayoutV1.card(.init(title: .key("name")))
+        let json = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
+        XCTAssertFalse(json.contains("details"))
+    }
+
+    func testMoreDetailLinesThanACardHoldsIsRejected() {
+        let lines = (0...ToolAgentLayoutCardV1.maximumDetails)
+            .map { "\"$line\($0)\"" }
+            .joined(separator: ",")
+        let json = #"{"node":"card","title":"$n","details":[\#(lines)]}"#
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        ) {
+            XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol)
+        }
+    }
+
+    func testAMeterOrChartWithoutAKeyIsRejected() {
+        for json in [
+            #"{"node":"card","title":"$n","meter":"0.5"}"#,
+            #"{"node":"card","title":"$n","chart":"1,2,3"}"#,
+            #"{"node":"card","title":"$n","meter":"$"}"#,
+        ] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8)), json
+            ) {
+                XCTAssertEqual($0 as? ToolAgentFailureCodeV1, .invalidProtocol, json)
+            }
+        }
+    }
+
+    /// A grid cell's height is its own column's width, so these three have
+    /// nowhere to go in one. Reported by name so the diagnostic can say which.
+    func testRowOnlyFieldsAreVisibleInsideAGrid() throws {
+        let json = #"""
+        {"node":"grid","minimumWidth":120,"empty":"x",
+         "cell":{"node":"card","title":"$name","details":["$a"],"meter":"$load"}}
+        """#
+        let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        XCTAssertEqual(layout.rowOnlyFieldsInsideAGrid, ["details", "meter"])
+    }
+
+    func testAListOfTheSameCardsCarriesNoGridComplaint() throws {
+        let json = #"""
+        {"node":"list","empty":"x",
+         "row":{"node":"card","title":"$name","details":["$a"],"meter":"$load"}}
+        """#
+        let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        XCTAssertEqual(layout.rowOnlyFieldsInsideAGrid, [])
     }
 
     func testALiteralTitleIsNotAKey() throws {

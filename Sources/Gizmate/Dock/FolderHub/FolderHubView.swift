@@ -59,17 +59,15 @@ struct FolderHubView: View {
     /// both — and you pick a file out of a shelf by recognising it, not by its
     /// byte count. The rows still carry `size` for anything that wants it.
     private static let layout: ToolAgentLayoutV1 = .grid(
-        cell: .card(
+        cell: .card(.init(
             title: .key("name"),
-            subtitle: nil,
             icon: .file(key: "path"),
-            drag: .file(key: "path"),
+            drag: .file(key: "path")
             // No layout tap: what a click does here depends on what was
             // clicked — a file opens, a folder is walked into — and a layout
             // action is bound to a row, not to the hub's own position in a
             // tree. `activate` below does both, on double-click.
-            tap: nil
-        ),
+        )),
         minimumWidth: 96,
         empty: "Nothing here yet."
     )

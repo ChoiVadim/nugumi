@@ -205,6 +205,18 @@ const layoutNode: z.ZodType<unknown> = z.lazy(() =>
           .string()
           .regex(/^(file:\$.+|symbol:\$.+|symbol:[^$].*)$/)
           .optional(),
+        // Mirrors ToolAgentLayoutCardV1: up to six ordinary bindings, and a
+        // meter/chart that must name a key — fixed text would be a picture of
+        // data that isn't there, so unlike a title they take no literal.
+        details: z.array(layoutBindingString).max(6).optional(),
+        meter: z
+          .string()
+          .regex(/^\$.+$/)
+          .optional(),
+        chart: z
+          .string()
+          .regex(/^\$.+$/)
+          .optional(),
         drag: z
           .string()
           .regex(/^(file|text):\$.+$/)

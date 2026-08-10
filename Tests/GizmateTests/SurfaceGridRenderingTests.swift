@@ -30,7 +30,7 @@ final class SurfaceGridRenderingTests: XCTestCase {
             SurfaceRow(id: "\(index)", values: ["name": "file-\(index).txt"])
         }
         let layout = ToolAgentLayoutV1.grid(
-            cell: .card(title: .key("name"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+            cell: .card(.init(title: .key("name"))),
             minimumWidth: 96,
             empty: "Nothing here yet."
         )
@@ -55,7 +55,7 @@ final class SurfaceGridRenderingTests: XCTestCase {
     func testAGridSurfaceWithOneRowRendersSomething() {
         let rows = [SurfaceRow(id: "1", values: ["name": "only.txt"])]
         let layout = ToolAgentLayoutV1.grid(
-            cell: .card(title: .key("name"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+            cell: .card(.init(title: .key("name"))),
             minimumWidth: 96,
             empty: "Nothing here yet."
         )
@@ -77,7 +77,7 @@ final class SurfaceGridRenderingTests: XCTestCase {
     /// since a card is SwiftUI-internal and has no `NSView` to measure.
     func testCardHeightDoesNotDependOnHowLongTheNameIs() {
         let layout = ToolAgentLayoutV1.grid(
-            cell: .card(title: .key("name"), subtitle: .key("size"), icon: nil, drag: nil, tap: nil),
+            cell: .card(.init(title: .key("name"), subtitle: .key("size"))),
             minimumWidth: 96,
             empty: "Nothing here yet."
         )

@@ -116,6 +116,21 @@ enum ToolEvalSuite {
             kind: .agent,
             input: .selection
         ),
+        // The readings half of a surface, as opposed to the files half the
+        // downloads case in `resultSweep` already covers. Written as a person
+        // would ask, naming neither "list" nor "details" nor "meter": the
+        // point is whether the capability description makes the model reach
+        // for a list of rows with several lines and a bar when the request is
+        // about numbers, rather than a grid of squares. A recipe naming those
+        // fields would grade the prompt instead of the builder.
+        ToolEvalCase(
+            name: "surface-machine-readings",
+            request: "хочу видеть сбоку экрана как загружен мой мак: процессор, "
+                + "память и диск, с разбивкой по каждому и полоской заполнения",
+            kind: .python,
+            input: ToolInput.none,
+            output: .surface
+        ),
     ] + inputSweep + resultSweep
 
     /// One case per input, written the way somebody would ask for a tool that

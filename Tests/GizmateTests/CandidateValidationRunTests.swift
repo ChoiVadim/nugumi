@@ -199,7 +199,7 @@ final class CandidateValidationRunTests: XCTestCase {
             input: .none,
             trigger: .always,
             layout: .list(
-                row: .card(title: .key("filename"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+                row: .card(.init(title: .key("filename"))),
                 empty: "Nothing here"
             )
         )

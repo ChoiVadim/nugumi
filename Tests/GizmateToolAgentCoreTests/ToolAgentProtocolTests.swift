@@ -666,7 +666,7 @@ final class ToolAgentProtocolTests: XCTestCase {
             symbolName: "tray", input: .none, output: .surface, trigger: .always,
             source: "print('{\"rows\":[]}')",
             layout: .grid(
-                cell: .list(row: .card(title: .key("name"), subtitle: nil, icon: nil, drag: nil, tap: nil),
+                cell: .list(row: .card(.init(title: .key("name"))),
                             empty: "Nothing here"),
                 minimumWidth: 96,
                 empty: "Nothing in Downloads"
@@ -680,9 +680,9 @@ final class ToolAgentProtocolTests: XCTestCase {
             symbolName: "tray", input: .none, output: .surface, trigger: .always,
             source: "print('{\"rows\":[]}')",
             layout: .grid(
-                cell: .card(title: .key("name"), subtitle: .key("size"),
+                cell: .card(.init(title: .key("name"), subtitle: .key("size"),
                             icon: .file(key: "path"), drag: .file(key: "path"),
-                            tap: .reveal(key: "path")),
+                            tap: .reveal(key: "path"))),
                 minimumWidth: 96,
                 empty: "Nothing in Downloads"
             )

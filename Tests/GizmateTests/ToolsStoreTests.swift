@@ -83,8 +83,8 @@ final class ToolsStoreTests: XCTestCase {
 
     func testASurfaceGizmoKeepsItsLayoutAcrossASaveAndLoad() throws {
         let layout = ToolAgentLayoutV1.grid(
-            cell: .card(title: .key("name"), subtitle: nil, icon: .file(key: "path"),
-                        drag: .file(key: "path"), tap: .reveal(key: "path")),
+            cell: .card(.init(title: .key("name"), icon: .file(key: "path"),
+                        drag: .file(key: "path"), tap: .reveal(key: "path"))),
             minimumWidth: 96, empty: "Nothing here"
         )
         var tool = GizmateTool()

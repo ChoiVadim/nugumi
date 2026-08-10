@@ -18,13 +18,7 @@ import Foundation
 public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
     case grid(cell: ToolAgentLayoutV1, minimumWidth: Int, empty: String)
     case list(row: ToolAgentLayoutV1, empty: String)
-    case card(
-        title: ToolAgentLayoutBindingV1,
-        subtitle: ToolAgentLayoutBindingV1?,
-        icon: ToolAgentLayoutIconV1?,
-        drag: ToolAgentLayoutDragV1?,
-        tap: ToolAgentLayoutTapV1?
-    )
+    case card(ToolAgentLayoutCardV1)
     case text(ToolAgentLayoutBindingV1)
 
     /// A surface is a strip on a screen edge, not a document.
@@ -56,14 +50,7 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         switch self {
         case let .grid(cell, _, _): return cell.referencedKeys
         case let .list(row, _): return row.referencedKeys
-        case let .card(title, subtitle, icon, drag, tap):
-            var keys: Set<String> = []
-            if let key = title.key { keys.insert(key) }
-            if let key = subtitle?.key { keys.insert(key) }
-            if let key = icon?.key { keys.insert(key) }
-            if let key = drag?.key { keys.insert(key) }
-            if let key = tap?.key { keys.insert(key) }
-            return keys
+        case let .card(card): return card.referencedKeys
         case let .text(binding): return binding.key.map { Set([$0]) } ?? []
         }
     }
@@ -73,12 +60,38 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         switch self {
         case let .grid(cell, _, _): return cell.fileKeys
         case let .list(row, _): return row.fileKeys
-        case let .card(_, _, icon, drag, tap):
+        case let .card(card):
             var keys: Set<String> = []
-            if case let .file(key) = icon { keys.insert(key) }
-            if case let .file(key) = drag { keys.insert(key) }
-            if let tap { keys.insert(tap.key) }
+            if case let .file(key) = card.icon { keys.insert(key) }
+            if case let .file(key) = card.drag { keys.insert(key) }
+            if let tap = card.tap { keys.insert(tap.key) }
             return keys
+        case .text: return []
+        }
+    }
+
+    /// The subset of `referencedKeys` whose value has to be a fraction — the
+    /// same kind of promise about a script's output as `fileKeys`, and checked
+    /// the same way, against rows a validation run really printed.
+    public var meterKeys: Set<String> {
+        switch self {
+        case let .grid(cell, _, _): return cell.meterKeys
+        case let .list(row, _): return row.meterKeys
+        case let .card(card): return card.meter.map { Set([$0]) } ?? []
+        case .text: return []
+        }
+    }
+
+    /// The subset of `referencedKeys` whose value has to be a series of
+    /// numbers. A row is flat by design (`SurfaceRow`), so a series arrives as
+    /// one comma-separated string rather than a JSON array — the same trade
+    /// `file:$path` already makes, where a string promises a shape and the
+    /// host checks the promise against a real run.
+    public var chartKeys: Set<String> {
+        switch self {
+        case let .grid(cell, _, _): return cell.chartKeys
+        case let .list(row, _): return row.chartKeys
+        case let .card(card): return card.chart.map { Set([$0]) } ?? []
         case .text: return []
         }
     }
@@ -94,8 +107,8 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         switch self {
         case let .grid(cell, _, _): return cell.iconSymbols
         case let .list(row, _): return row.iconSymbols
-        case let .card(_, _, icon, _, _):
-            if case let .symbol(name) = icon { return [name] }
+        case let .card(card):
+            if case let .symbol(name) = card.icon { return [name] }
             return []
         case .text: return []
         }
@@ -108,8 +121,8 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         switch self {
         case let .grid(cell, _, _): return cell.symbolKeys
         case let .list(row, _): return row.symbolKeys
-        case let .card(_, _, icon, _, _):
-            if case let .symbolKey(key) = icon { return [key] }
+        case let .card(card):
+            if case let .symbolKey(key) = card.icon { return [key] }
             return []
         case .text: return []
         }
@@ -119,6 +132,27 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         switch self {
         case .grid, .list: return true
         case .card, .text: return false
+        }
+    }
+
+    public var isCard: Bool {
+        if case .card = self { return true }
+        return false
+    }
+
+    /// The names of any modifiers a grid's cell carries that only a list row
+    /// can draw, for a diagnostic that says which ones. A grid cell is a
+    /// square sized from its own column (DESIGN.md §13), so three detail lines
+    /// and a bar have nowhere to go in one; drawing them anyway would clip
+    /// silently, and dropping them silently is worse. Refusing names the fix,
+    /// which is "make it a list".
+    public var rowOnlyFieldsInsideAGrid: [String] {
+        switch self {
+        case let .grid(cell, _, _):
+            if case let .card(card) = cell { return card.rowOnlyFields }
+            return cell.rowOnlyFieldsInsideAGrid
+        case let .list(row, _): return row.rowOnlyFieldsInsideAGrid
+        case .card, .text: return []
         }
     }
 
@@ -183,8 +217,9 @@ extension ToolAgentLayoutV1: Codable {
             self = .list(row: row, empty: empty)
 
         case .card:
-            guard keys.subtracting(["node", "title", "subtitle", "icon", "drag", "tap"]).isEmpty,
-                  keys.contains("title") else {
+            let accepted = ["node", "title", "subtitle", "icon", "details", "meter", "chart",
+                            "drag", "tap"]
+            guard keys.subtracting(accepted).isEmpty, keys.contains("title") else {
                 throw ToolAgentFailureCodeV1.invalidProtocol
             }
             let title = try ToolAgentLayoutBindingV1(
@@ -194,11 +229,24 @@ extension ToolAgentLayoutV1: Codable {
                 .map(ToolAgentLayoutBindingV1.init(wire:))
             let icon = try container.decodeIfPresent(String.self, forKey: .required("icon"))
                 .map(ToolAgentLayoutIconV1.init(wire:))
+            let details = try container
+                .decodeIfPresent([String].self, forKey: .required("details"))?
+                .map(ToolAgentLayoutBindingV1.init(wire:)) ?? []
+            guard details.count <= ToolAgentLayoutCardV1.maximumDetails else {
+                throw ToolAgentFailureCodeV1.invalidProtocol
+            }
+            let meter = try container.decodeIfPresent(String.self, forKey: .required("meter"))
+                .map(ToolAgentLayoutCardV1.key(fromWire:))
+            let chart = try container.decodeIfPresent(String.self, forKey: .required("chart"))
+                .map(ToolAgentLayoutCardV1.key(fromWire:))
             let drag = try container.decodeIfPresent(String.self, forKey: .required("drag"))
                 .map(ToolAgentLayoutDragV1.init(wire:))
             let tap = try container.decodeIfPresent(String.self, forKey: .required("tap"))
                 .map(ToolAgentLayoutTapV1.init(wire:))
-            self = .card(title: title, subtitle: subtitle, icon: icon, drag: drag, tap: tap)
+            self = .card(ToolAgentLayoutCardV1(
+                title: title, subtitle: subtitle, icon: icon, details: details,
+                meter: meter, chart: chart, drag: drag, tap: tap
+            ))
 
         case .text:
             guard keys == Set(["node", "value"]) else {
@@ -229,18 +277,114 @@ extension ToolAgentLayoutV1: Codable {
             try container.encode(empty, forKey: .required("empty"))
             try container.encode(row, forKey: .required("row"))
 
-        case let .card(title, subtitle, icon, drag, tap):
+        case let .card(card):
             try container.encode(NodeKind.card.rawValue, forKey: .required("node"))
-            try container.encode(title.wire, forKey: .required("title"))
-            try container.encodeIfPresent(subtitle?.wire, forKey: .required("subtitle"))
-            try container.encodeIfPresent(icon?.wire, forKey: .required("icon"))
-            try container.encodeIfPresent(drag?.wire, forKey: .required("drag"))
-            try container.encodeIfPresent(tap?.wire, forKey: .required("tap"))
+            try container.encode(card.title.wire, forKey: .required("title"))
+            try container.encodeIfPresent(card.subtitle?.wire, forKey: .required("subtitle"))
+            try container.encodeIfPresent(card.icon?.wire, forKey: .required("icon"))
+            // Absent rather than `[]` when there are none: an empty array is a
+            // key the decoder's own strict key-set check would then have to
+            // accept as meaning nothing, and a round trip must produce the
+            // document it started from.
+            if !card.details.isEmpty {
+                try container.encode(card.details.map(\.wire), forKey: .required("details"))
+            }
+            try container.encodeIfPresent(card.meter.map { "$" + $0 }, forKey: .required("meter"))
+            try container.encodeIfPresent(card.chart.map { "$" + $0 }, forKey: .required("chart"))
+            try container.encodeIfPresent(card.drag?.wire, forKey: .required("drag"))
+            try container.encodeIfPresent(card.tap?.wire, forKey: .required("tap"))
 
         case let .text(binding):
             try container.encode(NodeKind.text.rawValue, forKey: .required("node"))
             try container.encode(binding.wire, forKey: .required("value"))
         }
+    }
+}
+
+/// One leaf of a surface: what a single row of a script's output looks like.
+///
+/// A struct rather than eight associated values on the enum case. Every field
+/// but `title` is optional, and a case cannot give an associated value a
+/// default — so each new modifier would otherwise have to be spelled out at all
+/// twenty-odd construction sites, including the ones that want none of it.
+///
+/// Everything here is flat and prefixed, never nested, for the reason in
+/// `ToolAgentLayoutV1`'s own doc comment: the author writing this JSON is a
+/// model doing it by hand.
+public struct ToolAgentLayoutCardV1: Equatable, Sendable {
+    public let title: ToolAgentLayoutBindingV1
+    public let subtitle: ToolAgentLayoutBindingV1?
+    public let icon: ToolAgentLayoutIconV1?
+    /// Lines under the title, in the order given — "System: 7.5%", "User:
+    /// 12.3%". Ordinary bindings, so a line can be a row's value or fixed
+    /// text, and a line whose key is missing from a row simply isn't drawn.
+    public let details: [ToolAgentLayoutBindingV1]
+    /// The row key holding how full something is, drawn as a bar.
+    public let meter: String?
+    /// The row key holding a series of numbers, drawn as a sparkline.
+    public let chart: String?
+    public let drag: ToolAgentLayoutDragV1?
+    public let tap: ToolAgentLayoutTapV1?
+
+    /// Enough for the busiest row on a real stats panel (a battery has four:
+    /// source, capacity, cycles, temperature) with room to spare. A cap at all
+    /// because a surface is a strip on a screen edge, and a row that scrolls
+    /// past the panel is a row nobody can read.
+    public static let maximumDetails = 6
+
+    public init(
+        title: ToolAgentLayoutBindingV1,
+        subtitle: ToolAgentLayoutBindingV1? = nil,
+        icon: ToolAgentLayoutIconV1? = nil,
+        details: [ToolAgentLayoutBindingV1] = [],
+        meter: String? = nil,
+        chart: String? = nil,
+        drag: ToolAgentLayoutDragV1? = nil,
+        tap: ToolAgentLayoutTapV1? = nil
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.icon = icon
+        self.details = details
+        self.meter = meter
+        self.chart = chart
+        self.drag = drag
+        self.tap = tap
+    }
+
+    public var referencedKeys: Set<String> {
+        var keys: Set<String> = []
+        if let key = title.key { keys.insert(key) }
+        if let key = subtitle?.key { keys.insert(key) }
+        if let key = icon?.key { keys.insert(key) }
+        for detail in details { if let key = detail.key { keys.insert(key) } }
+        if let meter { keys.insert(meter) }
+        if let chart { keys.insert(chart) }
+        if let key = drag?.key { keys.insert(key) }
+        if let key = tap?.key { keys.insert(key) }
+        return keys
+    }
+
+    /// The modifiers only a list row can draw. See
+    /// `ToolAgentLayoutV1.rowOnlyFieldsInsideAGrid`.
+    var rowOnlyFields: [String] {
+        var names: [String] = []
+        if !details.isEmpty { names.append("details") }
+        if meter != nil { names.append("meter") }
+        if chart != nil { names.append("chart") }
+        return names
+    }
+
+    /// `meter` and `chart` name a row key and nothing else — unlike `title`,
+    /// where fixed text is a sensible thing to want, a fixed bar or a fixed
+    /// graph would be a picture of data that isn't there. So the `$` is
+    /// required rather than optional, and a bare `"$"` is refused the same way
+    /// `ToolAgentLayoutBindingV1` refuses it.
+    static func key(fromWire wire: String) throws -> String {
+        guard wire.hasPrefix("$"), wire.count > 1 else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        return String(wire.dropFirst())
     }
 }
 

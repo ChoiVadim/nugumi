@@ -365,10 +365,28 @@ finishes.
   plain text unless noted otherwise. "grid" repeats one cell per row of data in
   a wrapping grid — minimumWidth 48-400, plus empty copy for when there are no
   rows yet. "list" stacks one instance per row of data, top to bottom — same
-  empty copy. "card" is a title with an optional subtitle, icon, drag and tap.
-  "text" is one bare line, no card chrome. A surface's own root has to repeat —
-  a grid or a list — since a bare card or text would draw only one row and
-  never the rest. icon, drag and tap each read their key through a prefix
+  empty copy, and its rows are ruled apart with a hairline. "card" is a title
+  with an optional subtitle, icon, drag and tap. "text" is one bare line, no
+  card chrome. A surface's own root has to repeat — a grid or a list — since a
+  bare card or text would draw only one row and never the rest.
+  A card in a list is a row across the panel: the icon sits beside the text and
+  everything is left-aligned. A card in a grid is a square, icon above centred
+  text, sized from its own column. That is what decides where three more
+  modifiers may be used, all of them list-only and all optional:
+  "details" is up to six more lines under the title, each an ordinary binding —
+  ["$system","$user","$idle"] under a title of "$name". A line whose key this
+  row lacks simply isn't drawn, so listing every reading a machine might report
+  is safe.
+  "meter" is "$name" and draws a bar. The script prints either a number from 0
+  to 1 or a percentage like "48.8%"; anything else fails validation and names
+  the value.
+  "chart" is "$name" and draws a small graph. The script prints 2 to 120
+  numbers separated by commas, like "18,22,19,41,27" — a row's value is one
+  string, never a list, so a series is written as text.
+  A grid cell is a square with no room for any of the three: asking for them
+  there fails validation. Use a list when a row has readings rather than a name.
+  Reach for a list with details when the request is "show me how my machine is
+  doing" and for a grid when it is "show me my files". icon, drag and tap each read their key through a prefix
   instead of the plain "$name" binding: icon takes "file:$name" (that row's
   file, drawn as the Finder icon for that path), "symbol:name" — a real SF
   Symbol name from the same safe shortlist below, never a name you are

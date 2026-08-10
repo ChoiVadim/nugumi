@@ -30,6 +30,17 @@ enum SurfaceLayoutCheck {
             return "The layout uses icon \"symbol:\(name)\", but \"\(name)\" isn't a real SF Symbol name."
         }
 
+        // Also independent of what today's run printed: a grid cell's height is
+        // its own column's width (DESIGN.md §13), so detail lines, a bar and a
+        // graph have nowhere to go in one. Naming the fix rather than the rule
+        // — "make it a list" — is what stops the model dropping the readings
+        // it was asked for in order to satisfy the diagnostic.
+        let rowOnly = layout.rowOnlyFieldsInsideAGrid
+        if !rowOnly.isEmpty {
+            return "A grid cell is a square and can't draw \(rowOnly.joined(separator: ", ")). "
+                + "Use a list for a card that has them."
+        }
+
         // A script that legitimately has nothing to show today — an empty
         // Downloads folder — cannot be checked against its own keys. Failing
         // the build over that would refuse a gizmo that works the moment it
@@ -64,6 +75,27 @@ enum SurfaceLayoutCheck {
             if let notAGlyph = rows.compactMap({ $0[key] }).first(where: { !ToolIcons.resolves($0) }) {
                 return "The layout uses \"\(key)\" as an icon, but a row's value for it — "
                     + "\"\(notAGlyph)\" — isn't a real SF Symbol name."
+            }
+        }
+
+        // A bar and a graph are the two places a layout asks a script for a
+        // number rather than for words, and both are checked with the very
+        // parser that draws them (`SurfaceMeter`, `SurfaceSeries`) — a value
+        // this accepted but the renderer could not draw would be the worst of
+        // both, since the surface would still appear and just quietly show
+        // less than it was asked to.
+        for key in layout.meterKeys.sorted() {
+            if let bad = rows.compactMap({ $0[key] }).first(where: { SurfaceMeter.fraction(from: $0) == nil }) {
+                return "The layout uses \"\(key)\" as a meter, but a row's value for it — "
+                    + "\"\(bad)\" — isn't a number from 0 to 1 or a percentage like \"48.8%\"."
+            }
+        }
+
+        for key in layout.chartKeys.sorted() {
+            if let bad = rows.compactMap({ $0[key] }).first(where: { SurfaceSeries.values(from: $0) == nil }) {
+                return "The layout uses \"\(key)\" as a chart, but a row's value for it — "
+                    + "\"\(bad)\" — isn't \(SurfaceSeries.minimumCount) to \(SurfaceSeries.maximumCount) "
+                    + "numbers separated by commas."
             }
         }
 
