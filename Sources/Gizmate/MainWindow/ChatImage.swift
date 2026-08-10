@@ -98,18 +98,36 @@ extension ChatImage {
         }
     }
 
-    /// What ⌘V should attach, or nothing if ⌘V means what it always meant.
+    /// What ⌘V is carrying.
+    struct Paste {
+        let pictures: [ChatImage]
+        /// Whether the words on the board should still reach the text field
+        /// after the pictures have been taken off it.
+        let keepsText: Bool
+    }
+
+    /// What ⌘V should attach, and whether it was only about the picture.
     ///
-    /// Text wins whenever the board has any. Plenty of apps put a rendered image
-    /// on the board beside the text they copied, and a person pasting a sentence
-    /// wants the sentence. The cost is that a picture *file* copied in Finder,
-    /// which arrives with its name as a string, pastes as its name — dropping it
-    /// on the composer or using the clip attaches it instead.
-    static func pasted(_ pasteboard: NSPasteboard = .general) -> [ChatImage] {
-        guard !pasteboard.canReadObject(forClasses: [NSString.self], options: nil) else {
-            return []
-        }
-        return onPasteboard(pasteboard)
+    /// This used to refuse the whole paste whenever the board had any text on
+    /// it, on the theory that a person pasting a sentence wants the sentence.
+    /// That rule refuses most photos: one copied in Finder arrives with its own
+    /// name as a string beside it, and a browser's "Copy image" often puts
+    /// markup on the board with the pixels. The rule now decides for the two
+    /// cases separately instead of taking one of them away.
+    static func pasted(_ pasteboard: NSPasteboard = .general) -> Paste {
+        let pictures = onPasteboard(pasteboard)
+        guard !pictures.isEmpty else { return Paste(pictures: [], keepsText: true) }
+        // A picture copied as a file carries its own name as text, and pasting
+        // "IMG_4021.HEIC" into the message is noise. Pixels with words beside
+        // them really do have words: a spreadsheet cell arrives as a rendered
+        // copy of itself, and picking one of the two halves for someone is how
+        // a paste silently loses the half they wanted.
+        let isFile = pasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        )
+        let hasWords = pasteboard.canReadObject(forClasses: [NSString.self], options: nil)
+        return Paste(pictures: pictures, keepsText: hasWords && !isFile)
     }
 
     /// The open panel, which is the third way in and the discoverable one.

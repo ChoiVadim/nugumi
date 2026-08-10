@@ -53,7 +53,75 @@ final class ChatImageTests: XCTestCase {
         XCTAssertEqual(corner.blueComponent, 1, accuracy: 0.02)
     }
 
+    // MARK: - What ⌘V is carrying
+
+    /// A screenshot on the clipboard is pixels and nothing else, so nobody
+    /// else needs the event.
+    func testPixelsAloneAreAttachedAndTheEventIsSpent() throws {
+        let board = Self.board("pictures-only")
+        board.writeObjects([Self.solid(width: 40, height: 40)])
+
+        let paste = ChatImage.pasted(board)
+
+        XCTAssertEqual(paste.pictures.count, 1)
+        XCTAssertFalse(paste.keepsText)
+    }
+
+    /// A picture copied as a file carries its own name as text. The name is
+    /// noise in a message, so the file is attached and the paste ends there.
+    func testAPictureFileIsAttachedWithoutPastingItsName() throws {
+        let file = try Self.write(Self.solid(width: 40, height: 40))
+        defer { try? FileManager.default.removeItem(at: file) }
+        let board = Self.board("picture-file")
+        board.writeObjects([file as NSURL])
+
+        let paste = ChatImage.pasted(board)
+
+        XCTAssertEqual(paste.pictures.count, 1)
+        XCTAssertFalse(paste.keepsText)
+    }
+
+    /// Pixels *and* words is a spreadsheet cell, which carries a rendered copy
+    /// of itself. Both halves get through rather than one being chosen for you.
+    func testPixelsBesideWordsKeepBoth() throws {
+        let board = Self.board("pictures-and-words")
+        board.writeObjects([Self.solid(width: 40, height: 40), "40" as NSString])
+
+        let paste = ChatImage.pasted(board)
+
+        XCTAssertEqual(paste.pictures.count, 1)
+        XCTAssertTrue(paste.keepsText)
+    }
+
+    /// And an ordinary copied sentence is untouched: nothing to attach, and the
+    /// field editor never sees the watcher.
+    func testWordsAloneAreNotAPaste() throws {
+        let board = Self.board("words-only")
+        board.writeObjects(["just a sentence" as NSString])
+
+        let paste = ChatImage.pasted(board)
+
+        XCTAssertTrue(paste.pictures.isEmpty)
+        XCTAssertTrue(paste.keepsText)
+    }
+
     // MARK: - Fixtures
+
+    private static func board(_ name: String) -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name("com.nugumi.app.tests.\(name)"))
+        board.clearContents()
+        return board
+    }
+
+    private static func write(_ image: NSImage) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("png")
+        let cg = try XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+        let png = try XCTUnwrap(NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]))
+        try png.write(to: url)
+        return url
+    }
 
     /// Drawn through Core Graphics rather than `lockFocus`, so the picture has
     /// exactly the pixels it is asked for. `lockFocus` inherits the main

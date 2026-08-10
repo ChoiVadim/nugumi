@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// Home's chat: one place to talk, to build a gizmo, or to change one.
@@ -391,12 +392,17 @@ struct HomeChatPane: View {
         // it reaches the field editor the field editor has already decided a
         // paste means text and swallowed the event.
         //
-        // Installed for as long as the pane is on screen and gated on focus
-        // inside the handler, rather than added and removed as focus moves: a
-        // monitor keyed to an `onChange` is not reinstalled when the pane comes
-        // back with the focus it left with, and paste stops working for the rest
-        // of the session with nothing on screen to say so.
-        .onAppear(perform: startWatchingForPastedPictures)
+        // The monitor exists exactly while the composer holds the keyboard, and
+        // reads no focus of its own. It used to be installed once and gated on
+        // `composerFocused` from inside the handler, which asks a closure
+        // holding a copy of this view made at `onAppear` — when focus was
+        // false — what focus is now. The install itself is the gate instead,
+        // and `onAppear` covers coming back to the pane still focused, which is
+        // the one case an `onChange` alone would never see.
+        .onAppear { if composerFocused { startWatchingForPastedPictures() } }
+        .onChange(of: composerFocused) { _, focused in
+            if focused { startWatchingForPastedPictures() } else { stopWatchingForPastedPictures() }
+        }
         .onDisappear(perform: stopWatchingForPastedPictures)
     }
 
@@ -440,17 +446,21 @@ struct HomeChatPane: View {
     private func startWatchingForPastedPictures() {
         guard pasteMonitor == nil else { return }
         pasteMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // Only the composer's own ⌘V. Everywhere else in the app it still
-            // means whatever it meant, including in the field editor two lines
-            // up when what is on the board is text.
-            guard composerFocused,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers?.lowercased() == "v"
+            // The physical key, not the letter printed on it.
+            // `charactersIgnoringModifiers` ignores the modifiers and not the
+            // layout, so with a Russian layout active ⌘V arrives as "м" and
+            // with a Korean one as a jamo — and this watcher, keyed to "v",
+            // did nothing at all for anyone not typing in English.
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  Int(event.keyCode) == kVK_ANSI_V
             else { return event }
-            let pictures = ChatImage.pasted()
-            guard !pictures.isEmpty else { return event }
-            attachments.append(contentsOf: pictures)
-            return nil
+            let paste = ChatImage.pasted()
+            guard !paste.pictures.isEmpty else { return event }
+            attachments.append(contentsOf: paste.pictures)
+            // Words on the board as well as pixels: take the picture and let
+            // the field editor have the event, rather than choosing which half
+            // of somebody's paste they meant.
+            return paste.keepsText ? event : nil
         }
     }
 
