@@ -182,6 +182,26 @@ _act_ (closures that read the host's live state, so they never count as
 changed); which rows are _lit_ is a plain value handed down the tree, so only
 the cards whose state actually changed re-render.
 
+**In the ring, selection is a direction, not a rectangle.** Which button is
+picked comes from the angle between the cursor and the ring's centre; the
+distance only says which orbit is being read. The ring is a radial menu, and
+asking someone to land inside a 46pt disc at radius 78 spends its one advantage
+— that the target's size is the whole sector, not the glyph. `angularPick`
+takes the nearest button by angle rather than a fixed 45° sector, because an
+empty slot deliberately leaves a gap in the eight-way grid and a sector scheme
+would hand that gap to nobody. A click anywhere in the band runs what is being
+pointed at; the dead zone under the ✕ and everything past the outer wall are
+the two places where a click still means "put this away".
+
+The corollary is stronger than the feature: **one input decides, and every
+highlight is derived from it.** The discs used to carry a hover tint of their
+own beside the controller's `setHighlighted`, with a `suppressHoverTint` flag
+switching between them, and every highlight defect in that file came from the
+two disagreeing about what was selected. `RadialMenuButtonView` tracks no mouse
+now. This is the same rule the one-agent chat router follows (see the project
+instructions): never add a second mechanism whose job is to have an opinion
+about what the first one meant.
+
 ### Timing
 
 | Type     | Duration  | Easing      | Usage                                                |
