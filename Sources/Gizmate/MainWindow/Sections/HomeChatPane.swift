@@ -421,10 +421,17 @@ struct HomeChatPane: View {
             attachments.append(contentsOf: ChatImage.pick())
             composerFocused = true
         } label: {
+            // Leading, not centred. The send button's disc fills its 22pt frame
+            // and lands flush on the right margin; a glyph centred in the same
+            // frame keeps the click area but starts a few points inside the
+            // margin, so the clip read as indented from the line of text above
+            // it. Aligning the glyph and not shrinking the frame is what keeps
+            // both true at once.
             Image(systemName: "paperclip")
                 .font(.system(size: 12.5))
                 .foregroundStyle(FlowTheme.inkSecondary)
-                .frame(width: 22, height: 22)
+                .frame(width: 22, height: 22, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Show Gizmate a picture. Drag one in, or paste it.")
