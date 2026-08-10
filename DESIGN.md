@@ -1013,16 +1013,28 @@ person aims at the conversation, not at a control.
   still learns where the picture lands. The clip is last and smallest — it is
   the discoverable one, not the fast one.
 - **⌘V is caught before the responder chain or it is not caught at all.** A
-  `NSEvent` local monitor, gated on the composer holding focus. By the time the
-  event reaches the field editor, the field editor has already decided a paste
-  means text and swallowed it, so `onPasteCommand` on a view under a focused
-  `TextField` never fires. The monitor is installed for as long as the pane is
-  on screen and checks focus inside the handler: keyed to an `onChange` instead,
-  it is not reinstalled when the pane returns with the focus it left with, and
-  paste dies for the session with nothing on screen to say so.
-- **Text on the pasteboard wins.** Plenty of apps put a rendered image beside
-  the text they copied, and someone pasting a sentence wants the sentence
-  (`ChatImage.pasted`).
+  `NSEvent` local monitor. By the time the event reaches the field editor, the
+  field editor has already decided a paste means text and swallowed it, so
+  `onPasteCommand` on a view under a focused `TextField` never fires.
+- **A key monitor matches the physical key, never the character.**
+  `charactersIgnoringModifiers` ignores the modifiers, not the layout: ⌘V is
+  "м" on a Russian layout and a jamo on a Korean one. Keyed to `"v"`, this
+  watcher did nothing whatsoever for anyone not typing in English, and it read
+  as "paste is broken" rather than as anything about layouts. Match `kVK_ANSI_V`
+  through `Carbon.HIToolbox`, the way `GlobalShortcutModels` already does.
+- **Focus gates a monitor by when it is installed, not by what it reads.** A
+  handler installed at `onAppear` holds a copy of the view made when focus was
+  false, and asking that copy for `@FocusState` later is asking the wrong
+  object. Install on focus, remove on blur, and let `onAppear` cover coming
+  back to a pane that is still focused — the one case `onChange` alone never
+  sees.
+- **Pixels and words on the board are two questions, not one.** Refusing every
+  board that carries text refuses most photos: one copied in Finder arrives with
+  its own file name beside it, and a browser's "Copy image" puts markup there.
+  So a picture _file_ attaches and the paste ends (its name is noise in a
+  message), and pixels sitting beside real words attach _and_ let the event
+  through, because a spreadsheet cell is a rendered copy of its own text and
+  picking one half for someone loses the half they wanted (`ChatImage.pasted`).
 - **Encode at attach, twice.** One fitted to the 2048px edge vision models tile
   at, which is what keeps a retina screenshot under the 5 MB every cloud backend
   guards on; one thumbnail. The second is not a nicety: a streaming answer
@@ -1035,4 +1047,4 @@ person aims at the conversation, not at a control.
   clip disappears while a build owns the composer, because the next message
   there is an answer to the builder's own question and a picture has nowhere to
   go. The builder never receives pictures at all: the one agent sees it and
-  writes the `BUILD:` line, so what the picture *showed* travels as words.
+  writes the `BUILD:` line, so what the picture _showed_ travels as words.
