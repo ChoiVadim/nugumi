@@ -51,6 +51,47 @@ final class ToolAgentLayoutTests: XCTestCase {
         XCTAssertEqual(layout.iconSymbols, ["folder"])
     }
 
+    /// `"symbol:$glyph"` binds a row key the same way every other modifier's
+    /// `$` does. It is a row key, not a glyph, so it belongs to
+    /// `referencedKeys` and `symbolKeys` and to neither `iconSymbols` (which
+    /// `SurfaceLayoutCheck` resolves against the OS) nor `fileKeys` (which it
+    /// checks for a leading "/").
+    func testABoundIconIsAKeyRatherThanAGlyph() throws {
+        let json = #"""
+        {"node":"list","empty":"x","row":{"node":"card","title":"$n","icon":"symbol:$glyph"}}
+        """#
+        let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            layout,
+            .list(row: .card(title: .key("n"), subtitle: nil, icon: .symbolKey(key: "glyph"),
+                             drag: nil, tap: nil),
+                  empty: "x")
+        )
+        XCTAssertEqual(layout.referencedKeys, ["n", "glyph"])
+        XCTAssertEqual(layout.symbolKeys, ["glyph"])
+        XCTAssertEqual(layout.iconSymbols, [])
+        XCTAssertEqual(layout.fileKeys, [])
+
+        let round = try JSONDecoder().decode(
+            ToolAgentLayoutV1.self, from: JSONEncoder().encode(layout)
+        )
+        XCTAssertEqual(round, layout)
+    }
+
+    /// Neither decodes to anything that draws: `"symbol:$"` names no key and
+    /// `"symbol:"` names no glyph. The sidecar's schema refuses both too —
+    /// the two validators disagreeing is what sends a candidate to the host
+    /// with no repair diagnostic attached.
+    func testAnIconThatNamesNeitherKeyNorGlyphIsRefused() {
+        for icon in ["symbol:$", "symbol:"] {
+            let json = #"{"node":"card","title":"$n","icon":"\#(icon)"}"#
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8)),
+                icon
+            )
+        }
+    }
+
     func testALiteralTitleIsNotAKey() throws {
         let json = #"{"node":"text","value":"Downloads"}"#
         let layout = try JSONDecoder().decode(ToolAgentLayoutV1.self, from: Data(json.utf8))

@@ -119,7 +119,7 @@ struct SurfaceCard: View {
     /// regardless. A `.file` icon draws only when its row actually has one.
     private func hasVisibleIcon(_ icon: ToolAgentLayoutIconV1) -> Bool {
         switch icon {
-        case let .file(key): return SurfaceCard.path(for: key, in: row) != nil
+        case let .file(key), let .symbolKey(key): return SurfaceCard.path(for: key, in: row) != nil
         case .symbol: return true
         }
     }
@@ -145,20 +145,32 @@ struct SurfaceCard: View {
                 }
             }
         case let .symbol(name):
-            // SF Symbols — the same catalog `GizmateTool.resolvedSymbolName`
-            // draws a gizmo's own icon from, not the ring's bundled
-            // Phosphor set: none of those five glyphs is a plausible row
-            // icon, and the model is never told their names. Resolved
-            // through `ToolIcons` rather than trusting `name` outright:
-            // `CandidateValidation` already refuses an unresolvable name at
-            // build time, but a layout loaded back off disk after an OS
-            // change could still name one that stopped resolving, and this
-            // is the difference between a fallback glyph and a blank one.
-            Image(nsImage: RingIconKind.symbol(ToolIcons.resolved(name)).image(pointSize: 20))
-                .resizable()
-                .foregroundStyle(FlowTheme.ink)
-                .frame(width: 20, height: 20)
+            symbolIcon(name)
+        case let .symbolKey(key):
+            // The glyph this particular row asked for, so one surface can show
+            // a CPU card beside a disk card. `ToolIcons.resolved` is doing real
+            // work here rather than standing by as it does above: this name is
+            // data, so no build-time check ever saw the value a run prints
+            // today, and the fallback glyph is what a script's typo costs.
+            if let name = SurfaceCard.path(for: key, in: row) {
+                symbolIcon(name)
+            }
         }
+    }
+
+    /// SF Symbols — the same catalog `GizmateTool.resolvedSymbolName` draws a
+    /// gizmo's own icon from, not the ring's bundled Phosphor set: none of
+    /// those five glyphs is a plausible row icon, and the model is never told
+    /// their names. Resolved through `ToolIcons` rather than trusting `name`
+    /// outright: `CandidateValidation` already refuses an unresolvable name at
+    /// build time, but a layout loaded back off disk after an OS change could
+    /// still name one that stopped resolving, and this is the difference
+    /// between a fallback glyph and a blank one.
+    private func symbolIcon(_ name: String) -> some View {
+        Image(nsImage: RingIconKind.symbol(ToolIcons.resolved(name)).image(pointSize: 20))
+            .resizable()
+            .foregroundStyle(FlowTheme.ink)
+            .frame(width: 20, height: 20)
     }
 
     /// A row's value for `key`, or `nil` when the key is missing or empty —

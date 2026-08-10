@@ -370,10 +370,15 @@ finishes.
   a grid or a list — since a bare card or text would draw only one row and
   never the rest. icon, drag and tap each read their key through a prefix
   instead of the plain "$name" binding: icon takes "file:$name" (that row's
-  file, drawn as the Finder icon for that path) or "symbol:name" — a real SF
+  file, drawn as the Finder icon for that path), "symbol:name" — a real SF
   Symbol name from the same safe shortlist below, never a name you are
   guessing at, since one that doesn't resolve fails validation and names the
-  bad glyph; drag takes "file:$name" or "text:$name", for what the user's
+  bad glyph — or "symbol:$name", where the row itself carries the glyph name
+  and the script prints it. Reach for the bound form whenever the rows are
+  unlike each other: a CPU card beside a disk card wants two icons, and
+  "symbol:name" can only give every card the same one. A printed name that
+  isn't a real SF Symbol fails validation the same way a literal one does.
+  drag takes "file:$name" or "text:$name", for what the user's
   drag actually carries out; tap takes "open:$name" or "reveal:$name", for
   what a click does with that row.
 

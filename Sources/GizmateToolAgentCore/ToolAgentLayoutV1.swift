@@ -83,18 +83,33 @@ public indirect enum ToolAgentLayoutV1: Equatable, Sendable {
         }
     }
 
-    /// The `symbol:` names an icon binds. Unlike `fileKeys`, this never
+    /// The literal `symbol:` names an icon binds. Unlike `fileKeys`, this never
     /// depends on the rows a script prints — a symbol name is either a real
     /// SF Symbol on this OS or it isn't, checkable from the layout alone.
     /// `SurfaceLayoutCheck` uses this to catch a name the model invented
     /// before the user ever docks the gizmo, rather than let it draw a
-    /// silent blank icon.
+    /// silent blank icon. A `symbol:$key` icon is deliberately absent: its
+    /// name is data, so it belongs to `symbolKeys` below instead.
     public var iconSymbols: Set<String> {
         switch self {
         case let .grid(cell, _, _): return cell.iconSymbols
         case let .list(row, _): return row.iconSymbols
         case let .card(_, _, icon, _, _):
             if case let .symbol(name) = icon { return [name] }
+            return []
+        case .text: return []
+        }
+    }
+
+    /// The subset of `referencedKeys` whose value has to be an SF Symbol name.
+    /// The same shape as `fileKeys`: a promise about what a script prints,
+    /// checkable only against rows it really printed.
+    public var symbolKeys: Set<String> {
+        switch self {
+        case let .grid(cell, _, _): return cell.symbolKeys
+        case let .list(row, _): return row.symbolKeys
+        case let .card(_, _, icon, _, _):
+            if case let .symbolKey(key) = icon { return [key] }
             return []
         case .text: return []
         }
@@ -261,15 +276,36 @@ public enum ToolAgentLayoutBindingV1: Equatable, Sendable {
 public enum ToolAgentLayoutIconV1: Equatable, Sendable {
     case file(key: String)
     case symbol(String)
+    /// The glyph name comes from the row, not from the layout. `.symbol` holds
+    /// one literal for every card a repeater draws, so a surface whose rows are
+    /// unlike each other — a CPU card beside a disk card — had no way to say so
+    /// and settled for the same glyph on all of them. This is the same
+    /// `"prefix:$key"` grammar `drag` and `tap` already speak, applied to the
+    /// one modifier that was missing it.
+    case symbolKey(key: String)
 
     public var key: String? {
-        if case let .file(key) = self { return key }
-        return nil
+        switch self {
+        case let .file(key), let .symbolKey(key): return key
+        case .symbol: return nil
+        }
     }
 
     public init(wire: String) throws {
         if let glyph = wire.stripping(prefix: "symbol:") {
-            self = .symbol(glyph)
+            // A `$` names a row key here exactly as it does everywhere else in
+            // this grammar; anything else is the glyph itself. Both the bare
+            // `"symbol:$"` and the empty `"symbol:"` throw rather than decode
+            // to something that draws nothing — the sidecar's schema refuses
+            // both too, and these two validators disagreeing is what puts a
+            // candidate in front of the host with no repair diagnostic.
+            if glyph.hasPrefix("$") {
+                guard glyph.count > 1 else { throw ToolAgentFailureCodeV1.invalidProtocol }
+                self = .symbolKey(key: String(glyph.dropFirst()))
+            } else {
+                guard !glyph.isEmpty else { throw ToolAgentFailureCodeV1.invalidProtocol }
+                self = .symbol(glyph)
+            }
             return
         }
         guard let key = try wire.strippingKeyed(prefix: "file:") else {
@@ -282,6 +318,7 @@ public enum ToolAgentLayoutIconV1: Equatable, Sendable {
         switch self {
         case let .file(key): return "file:$" + key
         case let .symbol(glyph): return "symbol:" + glyph
+        case let .symbolKey(key): return "symbol:$" + key
         }
     }
 }

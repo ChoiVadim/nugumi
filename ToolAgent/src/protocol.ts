@@ -196,9 +196,14 @@ const layoutNode: z.ZodType<unknown> = z.lazy(() =>
         node: z.literal("card"),
         title: layoutBindingString,
         subtitle: layoutBindingString.optional(),
+        // `symbol:` takes either a literal glyph or, with a `$`, the row key
+        // holding one. `[^$].*` rather than `.*` on the literal branch so the
+        // bare `symbol:$` and the empty `symbol:` are refused here — the host
+        // throws `invalidProtocol` on both, and that arrives with no repair
+        // diagnostic attached.
         icon: z
           .string()
-          .regex(/^(file:\$.+|symbol:.*)$/)
+          .regex(/^(file:\$.+|symbol:\$.+|symbol:[^$].*)$/)
           .optional(),
         drag: z
           .string()

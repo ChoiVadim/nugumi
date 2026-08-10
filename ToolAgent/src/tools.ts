@@ -47,7 +47,9 @@ const layoutNode = Type.Cyclic(
         title: Type.String(),
         subtitle: Type.Optional(Type.String()),
         icon: Type.Optional(
-          Type.String({ pattern: "^(file:\\$.+|symbol:.*)$" }),
+          Type.String({
+            pattern: "^(file:\\$.+|symbol:\\$.+|symbol:[^$].*)$",
+          }),
         ),
         drag: Type.Optional(Type.String({ pattern: "^(file|text):\\$.+$" })),
         tap: Type.Optional(Type.String({ pattern: "^(open|reveal):\\$.+$" })),

@@ -54,6 +54,19 @@ enum SurfaceLayoutCheck {
             }
         }
 
+        // A `symbol:$key` promises the script prints a real glyph name. The
+        // renderer falls back to `sparkles` when it doesn't, which is a silent
+        // failure of exactly the kind this whole gizmo was built to avoid: the
+        // surface still draws, every card just wears the same wrong icon. The
+        // literal `symbol:` check at the top of this function catches the same
+        // mistake in the layout; this catches it in the data.
+        for key in layout.symbolKeys.sorted() {
+            if let notAGlyph = rows.compactMap({ $0[key] }).first(where: { !ToolIcons.resolves($0) }) {
+                return "The layout uses \"\(key)\" as an icon, but a row's value for it — "
+                    + "\"\(notAGlyph)\" — isn't a real SF Symbol name."
+            }
+        }
+
         return nil
     }
 }

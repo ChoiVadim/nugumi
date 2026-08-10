@@ -76,4 +76,35 @@ final class SurfaceCandidateValidationTests: XCTestCase {
         )
         XCTAssertNotNil(SurfaceLayoutCheck.diagnostic(for: layout, against: []))
     }
+
+    /// A `symbol:$key` icon lets each row name its own glyph, which is the
+    /// whole point of it — one surface showing a CPU card beside a disk card.
+    func testAnIconKeyWhoseRowsHoldRealGlyphsPasses() {
+        let layout = ToolAgentLayoutV1.list(
+            row: .card(title: .key("name"), subtitle: nil, icon: .symbolKey(key: "glyph"),
+                       drag: nil, tap: nil),
+            empty: "Nothing"
+        )
+        let rows = [
+            SurfaceRow(id: "1", values: ["name": "CPU", "glyph": "cpu"]),
+            SurfaceRow(id: "2", values: ["name": "Disk", "glyph": "internaldrive"]),
+        ]
+        XCTAssertNil(SurfaceLayoutCheck.diagnostic(for: layout, against: rows))
+    }
+
+    /// The glyph now comes from the script's own output, so the literal check
+    /// above never sees it. Without this the renderer falls back to `sparkles`
+    /// and every card wears the same wrong icon — the exact silent failure a
+    /// per-row icon was added to end.
+    func testAnIconKeyHoldingSomethingThatIsNotAGlyphIsRefused() {
+        let layout = ToolAgentLayoutV1.list(
+            row: .card(title: .key("name"), subtitle: nil, icon: .symbolKey(key: "glyph"),
+                       drag: nil, tap: nil),
+            empty: "Nothing"
+        )
+        let rows = [SurfaceRow(id: "1", values: ["name": "CPU", "glyph": "not-a-real-glyph"])]
+        let diagnostic = SurfaceLayoutCheck.diagnostic(for: layout, against: rows)
+        XCTAssertNotNil(diagnostic)
+        XCTAssertTrue(diagnostic!.contains("not-a-real-glyph"))
+    }
 }
