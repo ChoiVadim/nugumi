@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import GizmateToolAgentCore
 
@@ -77,6 +78,7 @@ final class GizmoBuilder: ObservableObject {
 
     private var drafts: [GizmoDraft.Subject: GizmoDraft] = [:]
     private var generateTask: Task<Void, Never>?
+    private var chatChanges: AnyCancellable?
 
     private let tools: ToolsStore
     private let runner: GizmoDraft.Runner
@@ -94,6 +96,22 @@ final class GizmoBuilder: ObservableObject {
         // No greeting: Home's chat opens on its own invitation, and a line
         // sitting here from launch would mean that screen is never empty.
         self.chat = chat ?? ToolBuilderChatSession(greeting: nil)
+        // The chat is a second `ObservableObject` hanging off this one, and
+        // SwiftUI does not follow that hop: a view holding `@ObservedObject var
+        // builder` is subscribed to this object alone, so `chat.activity`
+        // changing redrew nothing. The build's running commentary sat on one
+        // line until something *else* here published — leaving the section and
+        // coming back was the reliable way to see the next step, which is the
+        // same symptom, from the same cause, that `HomeChatPane` documents for
+        // `homeChat`.
+        //
+        // Forwarded here rather than fixed by handing every view a second
+        // `@ObservedObject`: `chat` is a `let`, so there is no re-subscription
+        // to get wrong, and three call sites reading `builder.chat` cannot each
+        // remember to observe it.
+        chatChanges = self.chat.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 
     /// The draft for this gizmo, made once and kept.
@@ -238,6 +256,24 @@ final class GizmoBuilder: ObservableObject {
         }
     }
 
+    /// Whether the person can usefully run this one themselves before saving,
+    /// which is the single decision behind both the offer and the sentence
+    /// making it. It used to be two: the copy asked "run it once and tell me
+    /// what happened" whenever Gizmate's own run proved nothing, while the
+    /// button appeared only for a script — so a prompt gizmo asked to be run
+    /// and gave you nothing to press.
+    ///
+    /// A surface is the other half of the same mistake. Its run prints rows
+    /// for a panel, not an answer: pressing Try it shows a person a line of
+    /// JSON, which grades nothing. The way to judge one is to look at the edge
+    /// it lives on, and saving is what puts it there.
+    static func trial(for generated: GeneratedTool) -> ToolBuilderTrial {
+        guard generated.tool.kind == .python, generated.tool.output != .surface else {
+            return .notNeeded
+        }
+        return generated.assurance == .verified ? .notNeeded : .untried
+    }
+
     /// Clears the builder's half of Home's transcript, for the "new chat"
     /// control beside the panel toggle.
     ///
@@ -355,7 +391,7 @@ final class GizmoBuilder: ObservableObject {
                 self.chat.candidateReady(
                     generated.tool.name,
                     note: generated.assurance.explanation,
-                    trial: generated.assurance == .verified ? .notNeeded : .untried
+                    trial: Self.trial(for: generated)
                 )
             case .failure(let error):
                 self.chat.appendError(error.localizedDescription)

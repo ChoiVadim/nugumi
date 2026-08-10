@@ -243,7 +243,10 @@ struct HomeChatPane: View {
                         // work, so the chat opens again the way it opened.
                         conversation.clear()
                     }
-                    if builder.live?.canSave == true, builder.live?.draft.kind == .python {
+                    // Keyed off the same trial the sentence above is written
+                    // from, so the offer and the words describing it cannot
+                    // disagree — see `GizmoBuilder.trial(for:)`.
+                    if builder.chat.trial == .untried, builder.live?.canSave == true {
                         SecondaryButton(title: "Try it") {
                             Task { await builder.live?.runTest() }
                         }
