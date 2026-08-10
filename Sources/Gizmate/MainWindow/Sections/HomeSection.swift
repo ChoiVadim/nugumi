@@ -120,12 +120,28 @@ struct HomeSectionContent: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                PanelToggleButton(
-                    isOpen: bridge.showsGizmoRail,
-                    edge: .trailing,
-                    help: bridge.showsGizmoRail ? "Hide your gizmos" : "Show your gizmos"
-                ) {
-                    withAnimation(.easeOut(duration: 0.18)) { bridge.showsGizmoRail.toggle() }
+                // Beside the panel toggle rather than in the composer: both are
+                // things you do to the whole conversation, not to the message
+                // you are writing, and chrome for the window belongs in the
+                // window's chrome. Same quiet-until-hovered treatment for the
+                // same reason — see `PanelToggleButton`.
+                HStack(spacing: 2) {
+                    if let host = bridge.host {
+                        ChromeIconButton(
+                            symbol: "square.and.pencil",
+                            help: "Start a new chat"
+                        ) {
+                            host.homeChat.clear()
+                            host.gizmoBuilder.startFresh()
+                        }
+                    }
+                    PanelToggleButton(
+                        isOpen: bridge.showsGizmoRail,
+                        edge: .trailing,
+                        help: bridge.showsGizmoRail ? "Hide your gizmos" : "Show your gizmos"
+                    ) {
+                        withAnimation(.easeOut(duration: 0.18)) { bridge.showsGizmoRail.toggle() }
+                    }
                 }
                 .padding(10)
             }

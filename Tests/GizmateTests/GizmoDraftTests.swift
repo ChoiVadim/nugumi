@@ -201,8 +201,8 @@ final class GizmoBuilderTests: XCTestCase {
             // about building. A closure that traps says so, rather than a stub
             // that would quietly answer if one of them ever did build.
             agent: GizmoBuilder.Agent(
-                generate: { _, _, _, _, _ in fatalError("unused") },
-                revise: { _, _, _, _, _, _, _ in fatalError("unused") },
+                generate: { _, _, _, _, _, _ in fatalError("unused") },
+                revise: { _, _, _, _, _, _, _, _ in fatalError("unused") },
                 repair: { _, _, _, _, _, _, _ in fatalError("unused") }
             )
         )

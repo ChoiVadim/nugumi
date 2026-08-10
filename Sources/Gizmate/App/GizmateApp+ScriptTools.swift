@@ -115,9 +115,46 @@ extension GizmateApp {
     /// has to read a stack trace and repair it, which is the same kind of work
     /// Ask is picked for. The readiness check below has to name that model too,
     /// or the build fails on a model nobody was going to use.
+    /// `SettingsHost`'s shape, for every caller that has no picture to show —
+    /// the editor's own repair path. Kept as a forwarder rather than widening
+    /// the protocol: pictures reach a build from Home's composer alone, and a
+    /// contract should say what its callers actually need.
     @MainActor
     func generateScriptTool(
         description: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
+    ) async -> Result<GeneratedTool, Error> {
+        await generateScriptTool(
+            description: description, images: [], onPartial: onPartial,
+            clarification: clarification, clarificationCancellation: clarificationCancellation,
+            secretRequest: secretRequest
+        )
+    }
+
+    @MainActor
+    func reviseScriptTool(
+        tool: GizmateTool,
+        script: String,
+        instruction: String,
+        onPartial: @escaping @Sendable (String) -> Void,
+        clarification: @escaping ToolBuildClarificationHandlerV1,
+        clarificationCancellation: @escaping @Sendable () async -> Void,
+        secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
+    ) async -> Result<GeneratedTool, Error> {
+        await reviseScriptTool(
+            tool: tool, script: script, instruction: instruction, images: [],
+            onPartial: onPartial, clarification: clarification,
+            clarificationCancellation: clarificationCancellation, secretRequest: secretRequest
+        )
+    }
+
+    @MainActor
+    func generateScriptTool(
+        description: String,
+        images: [ChatImage],
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
         clarificationCancellation: @escaping @Sendable () async -> Void,
@@ -132,6 +169,7 @@ extension GizmateApp {
         do {
             let generated = try await ToolAgentLiveBuilder.build(
                 description: description,
+                images: images.map(\.input),
                 backend: askBackend,
                 thinkingLevel: askGizmateThinkingLevel,
                 uv: uv,
@@ -157,6 +195,7 @@ extension GizmateApp {
         tool: GizmateTool,
         script: String,
         instruction: String,
+        images: [ChatImage],
         onPartial: @escaping @Sendable (String) -> Void,
         clarification: @escaping ToolBuildClarificationHandlerV1,
         clarificationCancellation: @escaping @Sendable () async -> Void,
@@ -173,6 +212,7 @@ extension GizmateApp {
                 tool: tool,
                 script: script,
                 instruction: instruction,
+                images: images.map(\.input),
                 failure: nil,
                 backend: askBackend,
                 thinkingLevel: askGizmateThinkingLevel,

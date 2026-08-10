@@ -79,18 +79,19 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             return await self.testScriptTool(tool, script: script, onOutput: onOutput)
         },
         agent: GizmoBuilder.Agent(
-            generate: { [weak self] description, onPartial, clarification, cancelled, secret in
+            generate: { [weak self] description, images, onPartial, clarification, cancelled, secret in
                 guard let self else { return .failure(ToolGeneratorError.emptyDescription) }
                 return await self.generateScriptTool(
-                    description: description, onPartial: onPartial,
+                    description: description, images: images, onPartial: onPartial,
                     clarification: clarification, clarificationCancellation: cancelled,
                     secretRequest: secret
                 )
             },
-            revise: { [weak self] tool, script, instruction, onPartial, clarification, cancelled, secret in
+            revise: { [weak self] tool, script, instruction, images, onPartial, clarification, cancelled, secret in
                 guard let self else { return .failure(ToolGeneratorError.emptyDescription) }
                 return await self.reviseScriptTool(
-                    tool: tool, script: script, instruction: instruction, onPartial: onPartial,
+                    tool: tool, script: script, instruction: instruction, images: images,
+                    onPartial: onPartial,
                     clarification: clarification, clarificationCancellation: cancelled,
                     secretRequest: secret
                 )
@@ -102,6 +103,13 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
                     clarification: clarification, clarificationCancellation: cancelled,
                     secretRequest: secret
                 )
+            },
+            // The Ask model, because that is the one a build runs on — see
+            // `generateScriptTool`. Read at call time rather than captured: the
+            // user may switch models between two messages.
+            seesPictures: { [weak self] in
+                guard let self else { return false }
+                return LLMModel.option(id: self.askGizmateModelID).supportsImages
             }
         )
     )

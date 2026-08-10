@@ -189,7 +189,7 @@ struct HomeChatPane: View {
     private var buildTranscript: some View {
         ForEach(builder.chat.messages) { message in
             if message.role == .user {
-                ChatQuestionBubble(text: message.text)
+                ChatQuestionBubble(text: message.text, images: message.images)
             } else {
                 ChatAssistantTurn(trailingGutter: 0) {
                     ChatAnswerText(markdown: message.text)
@@ -571,18 +571,17 @@ struct HomeChatPane: View {
         // answer to the agent's own question anywhere else would strand the
         // continuation it is waiting on, and start a second build besides.
         if builder.chat.isAwaitingAnswer || builder.isBuilding {
-            Task { await builder.send(text) }
+            Task { await builder.send(text, showing: pictures) }
             return
         }
 
-        // A mention is certain, so it costs no call at all.
-        //
-        // ponytail: a picture attached to an `@Prices` message is dropped here,
-        // because the builder takes an instruction and not a payload. Give the
-        // builder pictures when someone asks for it; naming a gizmo *and*
-        // showing one is not a sentence anyone has typed yet.
+        // A mention is certain, so it costs no call at all — and it takes the
+        // pictures with it. This used to drop them: the builder took an
+        // instruction and not a payload, so "@Mac Usage make it look like
+        // this" arrived as words with the reference silently gone, and the
+        // transcript showed a message nobody had sent.
         if let mentioned = ToolChatRouter.mentioned(in: text, among: usable) {
-            builder.startEdit(mentioned, instruction: text, asking: text)
+            builder.startEdit(mentioned, instruction: text, asking: text, showing: pictures)
             return
         }
 
@@ -590,11 +589,15 @@ struct HomeChatPane: View {
             guard let directive = ToolChatRouter.directive(in: reply, tools: usable) else {
                 return false
             }
+            // `asking:` still carries the question, because a directive makes
+            // the conversation drop its own turn — see `ToolBuilderChatSession
+            // .record(request:)`. `showing:` carries what went with it, so the
+            // picture survives the same hand-over the words already did.
             switch directive {
             case .build(let brief):
-                builder.startNew(brief ?? text, asking: text)
+                builder.startNew(brief ?? text, asking: text, showing: pictures)
             case .edit(let id):
-                builder.startEdit(id, instruction: text, asking: text)
+                builder.startEdit(id, instruction: text, asking: text, showing: pictures)
             }
             return true
         }

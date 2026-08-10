@@ -61,6 +61,28 @@ private actor ToolAgentModelFailure {
     var value: String? { message }
 }
 
+/// The pictures a person attached to the message that started this build,
+/// handed to the model once and then let go.
+///
+/// A build is a multi-turn session and the sidecar re-sends the whole
+/// conversation as text on every turn, so the model's own reading of the
+/// picture stays in context after the picture itself is gone. Re-attaching it
+/// to all ten turns would buy a second look at the cost of a vision payload
+/// per turn, which is the same trade `ToolChatConversation.Turn.images`
+/// already settled the same way.
+private actor ToolAgentShownPictures {
+    private var pending: [ImageInput]
+
+    init(_ images: [ImageInput]) {
+        pending = images
+    }
+
+    func take() -> [ImageInput] {
+        defer { pending = [] }
+        return pending
+    }
+}
+
 enum ToolAgentLiveBuilder {
     typealias ClarificationCancellation = @Sendable () async -> Void
 
@@ -169,6 +191,7 @@ enum ToolAgentLiveBuilder {
     @MainActor
     static func build(
         description: String,
+        images: [ImageInput] = [],
         backend: any LLMBackend,
         thinkingLevel: ThinkingLevel,
         uv: URL,
@@ -195,6 +218,7 @@ enum ToolAgentLiveBuilder {
         )
         return try await build(
             request: request,
+            images: images,
             backend: backend,
             thinkingLevel: thinkingLevel,
             uv: uv,
@@ -210,6 +234,7 @@ enum ToolAgentLiveBuilder {
         tool: GizmateTool,
         script: String,
         instruction: String,
+        images: [ImageInput] = [],
         failure: String? = nil,
         backend: any LLMBackend,
         thinkingLevel: ThinkingLevel,
@@ -237,6 +262,7 @@ enum ToolAgentLiveBuilder {
         )
         let generated = try await build(
             request: request,
+            images: images,
             backend: backend,
             thinkingLevel: thinkingLevel,
             uv: uv,
@@ -251,6 +277,7 @@ enum ToolAgentLiveBuilder {
     @MainActor
     private static func build(
         request: ToolBuildRequestV1,
+        images: [ImageInput] = [],
         backend: any LLMBackend,
         thinkingLevel: ThinkingLevel,
         uv: URL,
@@ -262,6 +289,7 @@ enum ToolAgentLiveBuilder {
         let runtime = try ToolAgentRuntimeLocation.resolve()
         let store = try ToolBuildStore(directoryURL: GizmatePaths.toolAgentRuns)
         let modelFailure = ToolAgentModelFailure()
+        let shown = ToolAgentShownPictures(images)
         let fixtures = ToolAgentFixtureHistory()
         let supervisor = makeSupervisor(
             store: store,
@@ -280,6 +308,7 @@ enum ToolAgentLiveBuilder {
                 do {
                     let text = try await answerPiModelRequest(
                         request,
+                        images: await shown.take(),
                         backend: backend,
                         thinkingLevel: thinkingLevel,
                         onStatus: onStatus
@@ -428,6 +457,7 @@ enum ToolAgentLiveBuilder {
     @MainActor
     private static func answerPiModelRequest(
         _ request: ToolAgentModelRequestV1,
+        images: [ImageInput] = [],
         backend: any LLMBackend,
         thinkingLevel: ThinkingLevel,
         onStatus: @escaping @Sendable (String) -> Void
@@ -435,7 +465,7 @@ enum ToolAgentLiveBuilder {
         let first = try await backend.complete(
             systemPrompt: request.system,
             userPrompt: request.user,
-            images: [],
+            images: images,
             thinkingLevel: thinkingLevel,
             onPartial: { _ in }
         )

@@ -22,8 +22,13 @@ final class GizmoBuilder: ObservableObject {
     /// methods that six stub conformances would have to spell out.
     @MainActor
     struct Agent {
+        /// `images` is what the person showed rather than described — a
+        /// reference screenshot, a photo of the thing they want read. Carried
+        /// only by the two calls a person starts; `repair` is started by a
+        /// failure and has no message to attach one to.
         var generate: (
             _ description: String,
+            _ images: [ChatImage],
             _ onPartial: @escaping @Sendable (String) -> Void,
             _ clarification: @escaping ToolBuildClarificationHandlerV1,
             _ cancelled: @escaping @Sendable () async -> Void,
@@ -33,6 +38,7 @@ final class GizmoBuilder: ObservableObject {
             _ tool: GizmateTool,
             _ script: String,
             _ instruction: String,
+            _ images: [ChatImage],
             _ onPartial: @escaping @Sendable (String) -> Void,
             _ clarification: @escaping ToolBuildClarificationHandlerV1,
             _ cancelled: @escaping @Sendable () async -> Void,
@@ -47,6 +53,14 @@ final class GizmoBuilder: ObservableObject {
             _ cancelled: @escaping @Sendable () async -> Void,
             _ secret: @escaping ToolAgentLiveBuilder.SecretRequest
         ) async -> Result<GeneratedTool, Error>
+        /// Whether the model a build would run on can look at a picture.
+        ///
+        /// Asked before the build rather than discovered inside it: the clients
+        /// throw on a picture a model can't take, which would end the whole
+        /// build over an attachment. Losing the picture and saying so is the
+        /// smaller loss, and it is the user's call whether to switch models and
+        /// ask again.
+        var seesPictures: () -> Bool = { false }
     }
 
     /// One transcript for the app, not one per gizmo.
@@ -119,26 +133,52 @@ final class GizmoBuilder: ObservableObject {
     ///   else. `request` is Gizmate's own wording of the job and is what the
     ///   agent is given; this is what the transcript shows, because a person
     ///   should see their own sentence above the work it started.
-    func startNew(_ request: String, asking question: String? = nil) {
-        if let question { chat.record(request: question) }
+    func startNew(
+        _ request: String,
+        asking question: String? = nil,
+        showing images: [ChatImage] = []
+    ) {
+        if let question { chat.record(request: question, images: images) }
+        let carried = picturesTheModelCanSee(images)
         let draft = self.draft(for: .new)
         draft.brief = request
         live = draft
         run { agent, partial, clarify, cancelled, secret in
-            await agent.generate(request, partial, clarify, cancelled, secret)
+            await agent.generate(request, carried, partial, clarify, cancelled, secret)
         }
     }
 
     /// Changes one that exists.
-    func startEdit(_ id: UUID, instruction: String, asking question: String? = nil) {
-        if let question { chat.record(request: question) }
+    func startEdit(
+        _ id: UUID,
+        instruction: String,
+        asking question: String? = nil,
+        showing images: [ChatImage] = []
+    ) {
+        if let question { chat.record(request: question, images: images) }
+        let carried = picturesTheModelCanSee(images)
         let draft = self.draft(for: .existing(id))
         live = draft
         let tool = draft.draft
         let script = draft.script
         run { agent, partial, clarify, cancelled, secret in
-            await agent.revise(tool, script, instruction, partial, clarify, cancelled, secret)
+            await agent.revise(tool, script, instruction, carried, partial, clarify, cancelled, secret)
         }
+    }
+
+    /// The pictures worth sending, and a line in the transcript when there is a
+    /// difference. Said in the chat rather than as a status line, because a
+    /// status line is replaced by the next one and this is a fact about what
+    /// the finished gizmo was built from.
+    private func picturesTheModelCanSee(_ images: [ChatImage]) -> [ChatImage] {
+        guard !images.isEmpty else { return [] }
+        guard !agent.seesPictures() else { return images }
+        chat.record(
+            note: "I can't look at pictures on the model that's picked for building, "
+                + "so I'll go by your words. Choose one that reads images in Settings "
+                + "if you want me to use what you showed me."
+        )
+        return []
     }
 
     /// Fixes a gizmo whose last run failed, from the error it produced.
@@ -160,8 +200,8 @@ final class GizmoBuilder: ObservableObject {
 
     /// A message typed while a build is open: either an answer to a question
     /// the agent asked, or the next instruction.
-    func send(_ text: String) async {
-        guard let submission = await chat.submit(text) else { return }
+    func send(_ text: String, showing images: [ChatImage] = []) async {
+        guard let submission = await chat.submit(text, images: images) else { return }
         switch submission {
         case .answeredClarification:
             // The agent is waiting on this and will carry on by itself. Starting
@@ -171,15 +211,30 @@ final class GizmoBuilder: ObservableObject {
         case .buildRequest(let request):
             chat.markCandidateStale()
             guard let live, live.hasTool else {
-                startNew(request)
+                startNew(request, showing: images)
                 return
             }
             guard case .existing(let id) = live.subject else {
-                startNew(request)
+                startNew(request, showing: images)
                 return
             }
-            startEdit(id, instruction: request)
+            startEdit(id, instruction: request, showing: images)
         }
+    }
+
+    /// Clears the builder's half of Home's transcript, for the "new chat"
+    /// control beside the panel toggle.
+    ///
+    /// Drafts are deliberately left in place. `stop` ends the build in flight
+    /// and `chat.reset` takes the conversation away, but an unsaved gizmo is
+    /// real work that a second surface may be showing — the Details modal
+    /// holds the same object, per `draft(for:)` — so discarding it here would
+    /// destroy something the user never asked to lose. Opening that gizmo again
+    /// finds it exactly as it was.
+    func startFresh() {
+        stop()
+        chat.reset()
+        live = nil
     }
 
     func stop() {

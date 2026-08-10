@@ -11,6 +11,10 @@ struct ToolBuilderChatMessage: Identifiable, Equatable {
     let id = UUID()
     let role: ToolBuilderChatRole
     let text: String
+    /// What was shown along with the words. Kept so the transcript can draw the
+    /// message the way it was sent: a reference picture that vanished the
+    /// moment it was sent reads as a message Gizmate never received.
+    var images: [ChatImage] = []
 }
 
 enum ToolBuilderSubmission: Equatable {
@@ -81,16 +85,23 @@ final class ToolBuilderChatSession: ObservableObject {
     /// Gizmate writes a directive, and drops its own turn because the answer was
     /// never prose. Without this the question would vanish with it, and the
     /// build would appear to have started on its own.
-    func record(request text: String) {
+    func record(request text: String, images: [ChatImage] = []) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        messages.append(.init(role: .user, text: value))
+        guard !value.isEmpty || !images.isEmpty else { return }
+        messages.append(.init(role: .user, text: value, images: images))
     }
 
-    func submit(_ text: String) async -> ToolBuilderSubmission? {
+    /// Something the builder needs to say on its own behalf — not a model's
+    /// answer and not a step, but a fact about what it could and couldn't do
+    /// with what it was given.
+    func record(note: String) {
+        messages.append(.init(role: .assistant, text: note))
+    }
+
+    func submit(_ text: String, images: [ChatImage] = []) async -> ToolBuilderSubmission? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
-        record(request: value)
+        record(request: value, images: images)
         guard isAwaitingAnswer, let answerGeneration else {
             return .buildRequest(value)
         }
