@@ -462,6 +462,11 @@ enum ToolAgentLiveBuilder {
         thinkingLevel: ThinkingLevel,
         onStatus: @escaping @Sendable (String) -> Void
     ) async throws -> String {
+        // Traced because the whole path is invisible from the outside: a
+        // picture that never reaches this line and a picture the provider
+        // discards look identical from the transcript, where the model simply
+        // says it didn't get one.
+        NSLog("[Gizmate/Build] model turn with %d picture(s)", images.count)
         let first = try await backend.complete(
             systemPrompt: request.system,
             userPrompt: request.user,

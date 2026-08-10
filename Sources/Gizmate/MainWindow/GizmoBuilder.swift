@@ -172,6 +172,8 @@ final class GizmoBuilder: ObservableObject {
     /// the finished gizmo was built from.
     private func picturesTheModelCanSee(_ images: [ChatImage]) -> [ChatImage] {
         guard !images.isEmpty else { return [] }
+        NSLog("[Gizmate/Build] %d picture(s) offered, model sees pictures: %@",
+              images.count, agent.seesPictures() ? "yes" : "no")
         guard !agent.seesPictures() else { return images }
         chat.record(
             note: "I can't look at pictures on the model that's picked for building, "
@@ -207,6 +209,20 @@ final class GizmoBuilder: ObservableObject {
             // The agent is waiting on this and will carry on by itself. Starting
             // a second build here is what would strand the first one's
             // continuation.
+            //
+            // Which is also why a picture cannot ride along: an answer travels
+            // as `ToolAgentAskUserResponseV1`, which is text, and it resumes a
+            // turn that is already in flight. Said out loud rather than
+            // swallowed, because the agent's own question is often "show me the
+            // reference", and a picture that vanishes at exactly that moment is
+            // the worst place to be quiet.
+            if !images.isEmpty {
+                chat.record(
+                    note: "I can't take a picture along with an answer to my own question. "
+                        + "Answer in words, then show me the picture in a new message and "
+                        + "I'll look at it."
+                )
+            }
             return
         case .buildRequest(let request):
             chat.markCandidateStale()
