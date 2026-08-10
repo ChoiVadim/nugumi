@@ -61,27 +61,22 @@ private actor ToolAgentModelFailure {
     var value: String? { message }
 }
 
-/// The pictures a person attached to the message that started this build,
-/// handed to the model once and then let go.
-///
-/// A build is a multi-turn session and the sidecar re-sends the whole
-/// conversation as text on every turn, so the model's own reading of the
-/// picture stays in context after the picture itself is gone. Re-attaching it
-/// to all ten turns would buy a second look at the cost of a vision payload
-/// per turn, which is the same trade `ToolChatConversation.Turn.images`
-/// already settled the same way.
-private actor ToolAgentShownPictures {
-    private var pending: [ImageInput]
-
-    init(_ images: [ImageInput]) {
-        pending = images
-    }
-
-    func take() -> [ImageInput] {
-        defer { pending = [] }
-        return pending
-    }
-}
+// A picture shown to a build rides along on every model turn of that build,
+// and this is the second answer to the question. The first was "the first turn
+// only", reasoned from the sidecar re-sending the whole conversation as text
+// each turn: the model's own reading of the picture would stay in context
+// after the picture itself was gone.
+//
+// It does not, and a trace said so. The first turn of a real build was the
+// agent asking "what would you like to change?", which mentions no picture at
+// all, so turn two had neither the image nor a word about it and the agent
+// asked the user to attach the reference it had already been given. A model's
+// reading only persists if the model happened to write it down, and a turn
+// that asks a question never does.
+//
+// The cost is a vision payload per turn, bounded by the run's own 12-turn
+// model budget. Losing the reference halfway through a build costs the whole
+// build.
 
 enum ToolAgentLiveBuilder {
     typealias ClarificationCancellation = @Sendable () async -> Void
@@ -289,7 +284,6 @@ enum ToolAgentLiveBuilder {
         let runtime = try ToolAgentRuntimeLocation.resolve()
         let store = try ToolBuildStore(directoryURL: GizmatePaths.toolAgentRuns)
         let modelFailure = ToolAgentModelFailure()
-        let shown = ToolAgentShownPictures(images)
         let fixtures = ToolAgentFixtureHistory()
         let supervisor = makeSupervisor(
             store: store,
@@ -308,7 +302,7 @@ enum ToolAgentLiveBuilder {
                 do {
                     let text = try await answerPiModelRequest(
                         request,
-                        images: await shown.take(),
+                        images: images,
                         backend: backend,
                         thinkingLevel: thinkingLevel,
                         onStatus: onStatus
