@@ -30,17 +30,16 @@ export UV_PYTHON_INSTALL_DIR="$PYTHON_INSTALL_DIR"
     "$PYTHON_VERSION_REQUIRED" \
     --no-bin \
     --no-progress
-PYTHON_EXECUTABLE="$(
-    "$UV_EXECUTABLE" python find \
-        --managed-python \
-        --resolve-links \
-        "$PYTHON_VERSION_REQUIRED"
-)"
-PYTHON_MANAGED_ROOT="$(
-    dirname "$(dirname "$(dirname "$PYTHON_EXECUTABLE")")"
-)"
-[ "$PYTHON_MANAGED_ROOT" -ef "$PYTHON_INSTALL_DIR" ] ||
-    fail "uv resolved Python outside the managed runtime directory"
+# Point straight at what the install above just wrote, rather than asking
+# `uv python find` where it is. `find` searches uv's *global* install dir too and
+# returns that first, so on any machine whose developer already has a managed
+# 3.12.11 of their own (~/.local/share/uv/python) it answers with a path outside
+# this build, and the guard below turned that into a hard release-build failure.
+# The layout is not a guess: build-app-bundle.sh already hardcodes this exact
+# path when it packages the interpreter into the .xpc.
+PYTHON_EXECUTABLE="$PYTHON_INSTALL_DIR/cpython-$PYTHON_VERSION_REQUIRED-macos-aarch64-none/bin/python3.12"
+[ -x "$PYTHON_EXECUTABLE" ] ||
+    fail "uv did not install Python into the managed runtime directory"
 MANAGED_ALIAS="$PYTHON_INSTALL_DIR/cpython-3.12-macos-aarch64-none"
 if [ -L "$MANAGED_ALIAS" ]; then
     unlink "$MANAGED_ALIAS"
