@@ -15,5 +15,16 @@
             Each release item must include a sparkle:edSignature attribute
             generated via sign_update so installers will accept the update.
         -->
+        <item>
+            <title>Version 0.1.0</title>
+            <pubDate>Tue, 11 Aug 2026 02:56:32 +0000</pubDate>
+            <sparkle:version>1</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/ChoiVadim/nugumi/releases/download/gizmate-v0.1.0/Gizmate-0.1.0.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="DvO3dWeyfeKvIWH4sSzrnobxIkgy5oq0um9g/6aPRaj+kgxxXK2LmTtcMpWJ41bdo39Pk4WSGzu4tL7/UzTFBw==" length="179426110" />
+        </item>
     </channel>
 </rss>

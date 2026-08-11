@@ -6,27 +6,20 @@
 	<string>Gizmate</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
-	<!-- com.gizmate.app, not the old com.nugumi.app, and that is the whole point:
-	     macOS keys TCC grants, the UserDefaults domain and LaunchServices identity
-	     off the bundle ID, so a different one is what lets Gizmate install beside
-	     an existing Nugumi instead of on top of it. The cost is real and accepted:
-	     a beta user re-grants Accessibility / Screen Recording / Microphone and
-	     starts with fresh settings. API keys are carried over as files, see
-	     GizmatePaths.root. -->
 	<key>CFBundleIdentifier</key>
 	<string>com.gizmate.app</string>
 	<key>CFBundleName</key>
 	<string>Gizmate</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
-	<!-- The Gizmate line counts from zero. It shares no feed and no bundle ID with
-	     Nugumi, whose last release was 0.17.0 at build 72, so nothing compares the
-	     two and there is nothing to be newer than. Scripts/release.sh increments
-	     CFBundleVersion, so 0 here makes the first Gizmate release build 1. -->
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>0</string>
+	<string>1</string>
+	<key>GizmatePostHogAPIKey</key>
+	<string>phc_sFcbh5NcPxOFnpEOoQhxTRQ6dFo667xQX8c10P9cUZ9</string>
+	<key>GizmatePostHogEndpoint</key>
+	<string>https://app.posthog.com/batch/</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
@@ -37,14 +30,8 @@
 	<string>Gizmate uses the microphone to translate what you say in real time into live captions.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Gizmate captures the selected screen area so it can recognize visible text and translate it.</string>
-	<key>GizmatePostHogAPIKey</key>
-	<string>phc_sFcbh5NcPxOFnpEOoQhxTRQ6dFo667xQX8c10P9cUZ9</string>
-	<key>GizmatePostHogEndpoint</key>
-	<string>https://app.posthog.com/batch/</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
-	<!-- The only place the update feed is named. appcast.xml beside it is the
-	     frozen com.nugumi.app feed and must stay unreachable from here. -->
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/ChoiVadim/nugumi/main/appcast-gizmate.xml</string>
 	<key>SUPublicEDKey</key>
