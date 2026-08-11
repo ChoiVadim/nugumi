@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Release helper for Gizmate.
 #
-# Usage: bash Scripts/release.sh <version>
-#   version: semver string, e.g. 0.2.0
+# Usage: UNIVERSAL=0 bash Scripts/release.sh <version>
+#   version: semver string, e.g. 0.1.0
+#
+# UNIVERSAL=0 is mandatory for now: build-app-bundle.sh refuses a universal build
+# until an x86_64 tool-worker runtime is proven, so the plain form only errors.
+# The resulting DMG is arm64-only.
 #
 # What it does:
 #   1. Updates CFBundleShortVersionString and CFBundleVersion in Info.plist.
@@ -18,11 +22,11 @@
 #   - Make Sparkle's bin/sign_update available in PATH, OR set SPARKLE_BIN
 #     to the directory that contains it (e.g. /opt/homebrew/Caskroom/sparkle).
 #
-# After this script:
+# After this script (it prints the same commands with the version filled in):
 #   - git add appcast-gizmate.xml Resources/Info.plist
-#   - git commit -m "Release vX.Y.Z"
-#   - git tag vX.Y.Z && git push --tags
-#   - gh release create vX.Y.Z dist/Gizmate.dmg --title "vX.Y.Z" --notes "..."
+#   - git commit -m "Release Gizmate X.Y.Z"
+#   - git tag gizmate-vX.Y.Z && git push --tags
+#   - gh release create gizmate-vX.Y.Z dist/Gizmate-X.Y.Z.dmg --prerelease ...
 
 set -euo pipefail
 
@@ -89,9 +93,16 @@ SIGN_OUTPUT="$("$SIGN_UPDATE" "$DMG_PATH")"
 #   sparkle:edSignature="…" length="123456"
 echo "$SIGN_OUTPUT"
 
-# 4. Append item to appcast.xml.
+# 4. Append item to the appcast.
+#
+# The tag is `gizmate-vX.Y.Z`, not `vX.Y.Z`, and that is not decoration. The
+# Gizmate line restarts its numbering at 0.1.0 while v0.2.0 through v0.17.0 are
+# already taken by Yaku and Nugumi releases that still exist and still serve
+# DMGs. Without the prefix the *second* Gizmate release would collide with Yaku
+# 0.2.0, and forcing it would overwrite a release people can still download.
 DMG_FILENAME="Gizmate-$VERSION.dmg"
-DMG_URL="$DMG_URL_BASE/v$VERSION/$DMG_FILENAME"
+TAG="gizmate-v$VERSION"
+DMG_URL="$DMG_URL_BASE/$TAG/$DMG_FILENAME"
 PUB_DATE="$(date -u +"%a, %d %b %Y %H:%M:%S +0000")"
 
 ITEM_BLOCK=$(cat <<EOF
@@ -118,10 +129,13 @@ mv "$TMP_APPCAST" "$APPCAST"
 mv "$DMG_PATH" "$ROOT/dist/$DMG_FILENAME"
 
 echo
-echo "Release v$VERSION prepared."
+echo "Gizmate $VERSION prepared (build $NEW_BUILD, tag $TAG)."
 echo
 echo "Next steps:"
 echo "  git add Resources/Info.plist appcast-gizmate.xml"
-echo "  git commit -m \"Release v$VERSION\""
-echo "  git tag v$VERSION && git push origin main --tags"
-echo "  gh release create v$VERSION dist/$DMG_FILENAME --title \"v$VERSION\" --notes \"...\""
+echo "  git commit -m \"Release Gizmate $VERSION\""
+echo "  git tag $TAG && git push origin main --tags"
+echo "  gh release create $TAG dist/$DMG_FILENAME --prerelease \\"
+echo "      --title \"Gizmate $VERSION\" --notes \"...\""
+echo
+echo "--prerelease keeps /releases/latest resolving to the frozen Nugumi 0.17.0."

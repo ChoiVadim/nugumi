@@ -161,10 +161,15 @@ than on top of.
 
 So there are two, and they never see each other:
 
-| Line            | Bundle ID         | Feed                  | State                                |
-| --------------- | ----------------- | --------------------- | ------------------------------------ |
-| Nugumi (legacy) | `com.nugumi.app`  | `appcast.xml`         | Frozen at 0.17.0. Never append to it |
-| Gizmate         | `com.gizmate.app` | `appcast-gizmate.xml` | Every release from now on goes here  |
+| Line            | Bundle ID         | Feed                  | Tags             | State                                |
+| --------------- | ----------------- | --------------------- | ---------------- | ------------------------------------ |
+| Nugumi (legacy) | `com.nugumi.app`  | `appcast.xml`         | `vX.Y.Z`         | Frozen at 0.17.0. Never append to it |
+| Gizmate         | `com.gizmate.app` | `appcast-gizmate.xml` | `gizmate-vX.Y.Z` | Every release from now on goes here  |
+
+Gizmate counts from 0.1.0, which is why the tags carry a prefix. `v0.2.0` through
+`v0.17.0` already exist and still serve DMGs people can download, so an unprefixed
+Gizmate 0.2.0 would collide with Yaku's on the very next release and forcing it
+would destroy a live download. `Scripts/release.sh` builds the tag; do not hand-tag.
 
 `appcast.xml` is append-only history: its 63 existing `<enclosure>` URLs point at
 DMGs that really exist on GitHub under those exact names. Never bulk-edit it, and
@@ -213,16 +218,16 @@ The release flow is fully scripted. Do **not** run individual steps manually unl
 # command below can only fail. It also means the DMG is arm64-only and an Intel
 # beta user cannot run it. Say so in the release notes until that gate is lifted.
 export SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin"
-UNIVERSAL=0 bash Scripts/release.sh 0.6.0
+UNIVERSAL=0 bash Scripts/release.sh 0.2.0
 
-# Then commit + tag + GitHub Release. Tag must be vX.Y.Z (the appcast item's
-# enclosure URL is built as github.com/ChoiVadim/nugumi/releases/download/vX.Y.Z/Gizmate-X.Y.Z.dmg).
+# Then commit + tag + GitHub Release. Tag must be gizmate-vX.Y.Z (the appcast item's
+# enclosure URL is built as github.com/ChoiVadim/nugumi/releases/download/gizmate-vX.Y.Z/Gizmate-X.Y.Z.dmg).
 # Betas go up as pre-releases (`--prerelease`) so /releases/latest keeps resolving
 # to the frozen Nugumi 0.17.0 that the README badge points at.
 git add Resources/Info.plist appcast-gizmate.xml
-git commit -m "Release v0.6.0"
-git tag v0.6.0 && git push origin main --tags
-gh release create v0.6.0 dist/Gizmate-0.6.0.dmg --title "v0.6.0" --notes "Release notes here"
+git commit -m "Release Gizmate 0.2.0"
+git tag gizmate-v0.2.0 && git push origin main --tags
+gh release create gizmate-v0.2.0 dist/Gizmate-0.2.0.dmg --prerelease --title "Gizmate 0.2.0" --notes "Release notes here"
 ```
 
 What `Scripts/release.sh` does, in order:
@@ -282,11 +287,11 @@ The build script picks the signing identity from `DEVELOPER_ID` env var. Three m
 export SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin"
 export DEVELOPER_ID='Developer ID Application: Vadim Choi (XXXXXXXXXX)'
 export NOTARIZE_PROFILE='nugumi-notarize'
-UNIVERSAL=0 bash Scripts/release.sh 0.6.0
+UNIVERSAL=0 bash Scripts/release.sh 0.2.0
 git add Resources/Info.plist appcast-gizmate.xml
-git commit -m "Release v0.6.0"
-git tag v0.6.0 && git push origin main --tags
-gh release create v0.6.0 dist/Gizmate-0.6.0.dmg --title "v0.6.0" --notes "..."
+git commit -m "Release Gizmate 0.2.0"
+git tag gizmate-v0.2.0 && git push origin main --tags
+gh release create gizmate-v0.2.0 dist/Gizmate-0.2.0.dmg --prerelease --title "Gizmate 0.2.0" --notes "..."
 ```
 
 Notarization adds 2–5 minutes per release; `xcrun notarytool submit --wait` blocks until Apple finishes. The DMG is sent twice (once for the bundled `.app`, once for the DMG container itself) so Gatekeeper can verify offline at every stage.

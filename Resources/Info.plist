@@ -19,10 +19,14 @@
 	<string>Gizmate</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- The Gizmate line counts from zero. It shares no feed and no bundle ID with
+	     Nugumi, whose last release was 0.17.0 at build 72, so nothing compares the
+	     two and there is nothing to be newer than. Scripts/release.sh increments
+	     CFBundleVersion, so 0 here makes the first Gizmate release build 1. -->
 	<key>CFBundleShortVersionString</key>
-	<string>0.17.0</string>
+	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>72</string>
+	<string>0</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
