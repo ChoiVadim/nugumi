@@ -208,11 +208,17 @@ The release flow is fully scripted. Do **not** run individual steps manually unl
 
 ```sh
 # One-shot — bumps Info.plist, builds, signs, updates appcast, renames dmg.
+# UNIVERSAL=0 is currently mandatory, not optional: build-app-bundle.sh refuses a
+# universal build until an x86_64 tool-worker runtime is proven, so the plain
+# command below can only fail. It also means the DMG is arm64-only and an Intel
+# beta user cannot run it. Say so in the release notes until that gate is lifted.
 export SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin"
-bash Scripts/release.sh 0.6.0
+UNIVERSAL=0 bash Scripts/release.sh 0.6.0
 
 # Then commit + tag + GitHub Release. Tag must be vX.Y.Z (the appcast item's
 # enclosure URL is built as github.com/ChoiVadim/nugumi/releases/download/vX.Y.Z/Gizmate-X.Y.Z.dmg).
+# Betas go up as pre-releases (`--prerelease`) so /releases/latest keeps resolving
+# to the frozen Nugumi 0.17.0 that the README badge points at.
 git add Resources/Info.plist appcast-gizmate.xml
 git commit -m "Release v0.6.0"
 git tag v0.6.0 && git push origin main --tags
@@ -276,7 +282,7 @@ The build script picks the signing identity from `DEVELOPER_ID` env var. Three m
 export SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin"
 export DEVELOPER_ID='Developer ID Application: Vadim Choi (XXXXXXXXXX)'
 export NOTARIZE_PROFILE='nugumi-notarize'
-bash Scripts/release.sh 0.6.0
+UNIVERSAL=0 bash Scripts/release.sh 0.6.0
 git add Resources/Info.plist appcast-gizmate.xml
 git commit -m "Release v0.6.0"
 git tag v0.6.0 && git push origin main --tags
