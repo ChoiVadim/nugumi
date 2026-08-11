@@ -238,6 +238,11 @@ What `Scripts/release.sh` does, in order:
 4. Appends an `<item>` to `appcast-gizmate.xml` with `sparkle:edSignature`, length, version metadata.
 5. Renames `dist/Gizmate.dmg` → `dist/Gizmate-<version>.dmg` so the URL in the appcast matches the GitHub Release asset name.
 
+Step 1 goes through `PlistBuddy`, which rewrites `Resources/Info.plist` whole: it
+strips every XML comment and re-sorts the keys. So do not explain anything in that
+file expecting it to survive. The reasoning for the bundle ID, the feed URL and the
+version reset lives here instead, which is why "Two lines" above is as long as it is.
+
 After the GitHub Release is published, all installed copies of Gizmate will see the new version on their next daily Sparkle check (or immediately when the user clicks "Check for Updates...").
 
 ## Sparkle keys
