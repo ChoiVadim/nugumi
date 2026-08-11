@@ -99,7 +99,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     // renders plain text (no markdown/NSTextTable re-layout to amortize). Kept
     // small so tokens land near word-by-word; first and final chunks always
     // render (leading + trailing edge).
-    static let streamDebug = ProcessInfo.processInfo.environment["NUGUMI_STREAM_DEBUG"] == "1"
+    static let streamDebug = ProcessInfo.processInfo.environment["GIZMATE_STREAM_DEBUG"] == "1"
     private static let resultThrottleInterval: TimeInterval = 0.03
     private var pendingResultText: String?
     private var pendingResultTone: ResultTone = .normal
@@ -118,7 +118,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         override func scrollRangeToVisible(_ range: NSRange) {}
     }
 
-    /// NUGUMI_STREAM_DEBUG only: logs who moves the result clip's origin.
+    /// GIZMATE_STREAM_DEBUG only: logs who moves the result clip's origin.
     private final class StreamDebugClipView: NSClipView {
         override func setBoundsOrigin(_ newOrigin: NSPoint) {
             if abs(newOrigin.y - bounds.origin.y) > 0.5 {

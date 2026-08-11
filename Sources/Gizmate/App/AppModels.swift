@@ -329,7 +329,7 @@ enum ModelUseScope: String, CaseIterable {
         case .textActions:
             return "textModelID"
         case .askGizmate:
-            return "askNugumiModelID"
+            return "askGizmateModelID"
         }
     }
 
@@ -436,7 +436,7 @@ extension ModelUseScope {
             return "textThinkingLevel"
         case .askGizmate:
             // Pre-rename spelling on purpose — see `defaultsKey`.
-            return "askNugumiThinkingLevel"
+            return "askGizmateThinkingLevel"
         }
     }
 

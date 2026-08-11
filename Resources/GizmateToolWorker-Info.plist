@@ -4,7 +4,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>com.nugumi.app.tool-worker</string>
+  <string>com.gizmate.app.tool-worker</string>
   <key>CFBundleExecutable</key>
   <string>GizmateToolWorker</string>
   <key>CFBundlePackageType</key>

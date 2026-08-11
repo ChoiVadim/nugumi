@@ -322,15 +322,16 @@ for component in \
 done
 codesign --force --sign "$SIGN_IDENTITY" --options runtime "$CONTENTS_DIR/Frameworks/Sparkle.framework"
 
-# The designated requirement stays pinned to the pre-rename identifier
-# com.nugumi.app so accessibility / screen-recording grants survive rebuilds.
-# Must stay in sync with CFBundleIdentifier in Resources/Info.plist.
+# The designated requirement is pinned so accessibility / screen-recording grants
+# survive rebuilds. Must stay in sync with CFBundleIdentifier in
+# Resources/Info.plist, which is com.gizmate.app: the old com.nugumi.app belongs
+# to the frozen Nugumi line and signing with it would make the two collide in TCC.
 codesign \
     --force \
     --sign "$SIGN_IDENTITY" \
     --options runtime \
     --entitlements "$ROOT/Resources/Gizmate.entitlements" \
-    --requirements '=designated => identifier "com.nugumi.app"' \
+    --requirements '=designated => identifier "com.gizmate.app"' \
     "$APP_DIR"
 
 xattr -cr "$APP_DIR"

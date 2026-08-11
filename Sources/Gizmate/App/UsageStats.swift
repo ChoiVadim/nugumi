@@ -222,7 +222,7 @@ struct UsageStatsSnapshot {
 @MainActor
 final class UsageStatsStore: ObservableObject {
     // Pre-rename key on purpose — renaming it hides every existing user's stats.
-    private static let storageKey = "com.nugumi.app.usageStats.events.v1"
+    private static let storageKey = "com.gizmate.app.usageStats.events.v1"
     private static let maxStoredEvents = 2_500
 
     private let defaults: UserDefaults

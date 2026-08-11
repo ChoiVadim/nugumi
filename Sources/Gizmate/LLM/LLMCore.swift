@@ -43,8 +43,6 @@ enum CloudProvider: String, Codable, CaseIterable {
         }
     }
 
-    var keychainService: String { "com.nugumi.app.\(rawValue.lowercased())" }
-
     /// Single brand label used everywhere the provider is named — the
     /// Cloud access rows and the model picker section headers — so the two
     /// agree. The API-key vs subscription distinction is carried by the
@@ -146,15 +144,11 @@ enum KeychainStore {
     }
     private static var cache: [CloudProvider: CacheEntry] = [:]
 
-    static let storageDirectory: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        // Stays "Nugumi" across the Gizmate rename: API keys and OAuth creds are
-        // plain files in here, so renaming the directory signs every existing
-        // user out of every provider. Cosmetics are not worth that.
-        let dir = appSupport.appending(path: "Nugumi", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }()
+    /// API keys and OAuth creds are plain files in the app's support directory.
+    /// This used to compute that path a second time, which is how a rename could
+    /// move the gizmos and leave the credentials behind. `GizmatePaths.root` is
+    /// the only place it is named, and it carries the Nugumi-to-Gizmate seeding.
+    static var storageDirectory: URL { GizmatePaths.root }
 
     static func apiKey(for provider: CloudProvider) -> String? {
         if let entry = cache[provider] {

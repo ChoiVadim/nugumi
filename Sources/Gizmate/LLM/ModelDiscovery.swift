@@ -365,10 +365,10 @@ enum CloudModelCache {
 }
 
 extension Notification.Name {
-    static let codexModelsUpdated = Notification.Name("com.nugumi.codex.modelsUpdated")
-    static let ollamaModelsUpdated = Notification.Name("com.nugumi.ollama.modelsUpdated")
-    static let cloudModelsUpdated = Notification.Name("com.nugumi.cloud.modelsUpdated")
-    static let updateAvailabilityChanged = Notification.Name("com.nugumi.updateAvailabilityChanged")
+    static let codexModelsUpdated = Notification.Name("com.gizmate.codex.modelsUpdated")
+    static let ollamaModelsUpdated = Notification.Name("com.gizmate.ollama.modelsUpdated")
+    static let cloudModelsUpdated = Notification.Name("com.gizmate.cloud.modelsUpdated")
+    static let updateAvailabilityChanged = Notification.Name("com.gizmate.updateAvailabilityChanged")
 }
 
 // MARK: Discovered Ollama models (live /api/tags + cached fallback)

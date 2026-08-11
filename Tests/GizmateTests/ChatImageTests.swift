@@ -108,7 +108,7 @@ final class ChatImageTests: XCTestCase {
     // MARK: - Fixtures
 
     private static func board(_ name: String) -> NSPasteboard {
-        let board = NSPasteboard(name: NSPasteboard.Name("com.nugumi.app.tests.\(name)"))
+        let board = NSPasteboard(name: NSPasteboard.Name("com.gizmate.app.tests.\(name)"))
         board.clearContents()
         return board
     }

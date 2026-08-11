@@ -13,7 +13,7 @@ import Foundation
 final class FolderHubStore: ObservableObject {
     @Published private(set) var folders: [URL]
 
-    static let defaultsKey = "com.nugumi.app.folderHub.v1"
+    static let defaultsKey = "com.gizmate.app.folderHub.v1"
 
     private let defaults: UserDefaults
 

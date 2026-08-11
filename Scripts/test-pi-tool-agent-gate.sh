@@ -17,7 +17,7 @@ GATE_DIR="$ROOT/.build/pi-tool-agent-gate"
 FIRST_REPORT="$GATE_DIR/report-first.json"
 SECOND_REPORT="$GATE_DIR/report-second.json"
 TOOLS_STORAGE="$HOME/Library/Application Support/Gizmate/Tools"
-NUGUMI_SUPPORT="$HOME/Library/Application Support/Gizmate"
+GIZMATE_SUPPORT="$HOME/Library/Application Support/Gizmate"
 BAD_FINGERPRINT="304feb5fccc7394bb9bb2294ca65e7a1bad47c37faa0833f4fbdb41a955ca640"
 REPAIRED_FINGERPRINT="3c28f8691996f4f67863d79f69a763d10f1d415446704feebb8fb5dcc5779667"
 
@@ -49,7 +49,7 @@ require_digest() {
 
 snapshot_tools() {
     if [ -e "$TOOLS_STORAGE" ]; then
-        /usr/bin/tar -cf - -C "$NUGUMI_SUPPORT" Tools 2>/dev/null |
+        /usr/bin/tar -cf - -C "$GIZMATE_SUPPORT" Tools 2>/dev/null |
             /usr/bin/shasum -a 256 |
             /usr/bin/awk '{print $1}'
     else
@@ -58,8 +58,8 @@ snapshot_tools() {
 }
 
 snapshot_ring_layout() {
-    if /usr/bin/defaults read com.nugumi.app ringLayout >/dev/null 2>&1; then
-        /usr/bin/defaults read com.nugumi.app ringLayout 2>/dev/null |
+    if /usr/bin/defaults read com.gizmate.app ringLayout >/dev/null 2>&1; then
+        /usr/bin/defaults read com.gizmate.app ringLayout 2>/dev/null |
             /usr/bin/shasum -a 256 |
             /usr/bin/awk '{print $1}'
     else

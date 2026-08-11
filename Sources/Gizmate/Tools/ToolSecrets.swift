@@ -3,7 +3,7 @@ import Foundation
 /// Credentials the user hands to their own tools — an OpenAI key, a search API
 /// token, whatever a script needs to authenticate with. One file per secret:
 ///
-///   `~/Library/Application Support/Nugumi/Secrets/<NAME>`
+///   `~/Library/Application Support/Gizmate/Secrets/<NAME>`
 ///
 /// Plain 0600 files, exactly like the provider keys `KeychainStore` writes next
 /// door (which, despite the name, has never used the Keychain either). The point

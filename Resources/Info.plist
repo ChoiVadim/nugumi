@@ -6,12 +6,15 @@
 	<string>Gizmate</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
-	<!-- Deliberately still com.nugumi.app after the rename to Gizmate. TCC keys
-	     Accessibility / Screen Recording / Microphone grants off the bundle ID,
-	     and the UserDefaults domain is the bundle ID too. Changing it wipes every
-	     existing user's permissions and settings. -->
+	<!-- com.gizmate.app, not the old com.nugumi.app, and that is the whole point:
+	     macOS keys TCC grants, the UserDefaults domain and LaunchServices identity
+	     off the bundle ID, so a different one is what lets Gizmate install beside
+	     an existing Nugumi instead of on top of it. The cost is real and accepted:
+	     a beta user re-grants Accessibility / Screen Recording / Microphone and
+	     starts with fresh settings. API keys are carried over as files, see
+	     GizmatePaths.root. -->
 	<key>CFBundleIdentifier</key>
-	<string>com.nugumi.app</string>
+	<string>com.gizmate.app</string>
 	<key>CFBundleName</key>
 	<string>Gizmate</string>
 	<key>CFBundlePackageType</key>
@@ -36,8 +39,10 @@
 	<string>https://app.posthog.com/batch/</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<!-- The only place the update feed is named. appcast.xml beside it is the
+	     frozen com.nugumi.app feed and must stay unreachable from here. -->
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/ChoiVadim/nugumi/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/ChoiVadim/nugumi/main/appcast-gizmate.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>zIip1qSsidz0YJK2L4DEkUBhH8iiUcmZ4qfyhDcR/s4=</string>
 	<key>SUScheduledCheckInterval</key>

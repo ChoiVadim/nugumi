@@ -90,8 +90,8 @@ Select an incoming message, customer request, recruiting note, or work thread. G
 
 | Action                    | Default                                               |
 | ------------------------- | ----------------------------------------------------- |
-| Ask Gizmate                | double-tap <kbd>Control</kbd>                         |
-| Ask Gizmate alias          | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>A</kbd> |
+| Ask Gizmate               | double-tap <kbd>Control</kbd>                         |
+| Ask Gizmate alias         | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>A</kbd> |
 | Translate selected text   | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>T</kbd> |
 | Rewrite my text           | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>R</kbd> |
 | Toggle writing language   | <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>G</kbd> |
@@ -122,7 +122,13 @@ Everyday text actions and Ask Gizmate can use different models. Ask Gizmate need
 
 ## Install
 
-1. Download `Gizmate-X.Y.Z.dmg` from the [latest release](https://github.com/ChoiVadim/nugumi/releases/latest).
+Gizmate is in beta, and its builds are published as GitHub pre-releases. If you
+already run Nugumi, Gizmate installs **beside** it rather than replacing it: the
+two are separate apps to macOS, so your Nugumi keeps working and keeps its own
+updates. Quit one of them before using the other, or they will both answer the
+same keyboard shortcuts. Your API keys and gizmos are copied over on first launch.
+
+1. Download `Gizmate-X.Y.Z.dmg` from the [releases page](https://github.com/ChoiVadim/nugumi/releases).
 2. Open the DMG and drag **Gizmate.app** to **Applications**.
 3. Launch Gizmate from Applications or Spotlight.
 4. Choose an engine: local Ollama, a subscription account, or an API-key provider.
@@ -176,24 +182,24 @@ swift test --filter LiveTranslationTests
 
 ### Useful Areas
 
-| Area                                          | Files                                                                                                                                                          |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App lifecycle, menu actions                   | `Sources/Gizmate/App/GizmateApp.swift`, `Sources/Gizmate/App/GizmateApp+*.swift`                                                                                 |
+| Area                                          | Files                                                                                                                                                           |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App lifecycle, menu actions                   | `Sources/Gizmate/App/GizmateApp.swift`, `Sources/Gizmate/App/GizmateApp+*.swift`                                                                                |
 | Providers, OAuth, LLM clients                 | `Sources/Gizmate/LLM/` (`LLMCore.swift`, `OllamaClient.swift`, `OpenAIChatClient.swift`, `CodexClient.swift`, `ClaudeCodeClient.swift`, `ModelDiscovery.swift`) |
 | Agent tool building and validation            | `Sources/Gizmate/App/ToolAgent*.swift`, `Sources/Gizmate/Tools/`, `Sources/GizmateToolAgentCore/`                                                               |
 | Modes, prompts, writing styles                | `Sources/Gizmate/Panels/TranslationModes.swift`                                                                                                                 |
 | Result panels and floating button             | `Sources/Gizmate/Panels/` (`TranslationPanel.swift`, `TranslationContentView.swift`, `FloatingButton.swift`)                                                    |
 | Selection capture and text pipeline           | `Sources/Gizmate/Selection/`                                                                                                                                    |
 | Quick-menu ring                               | `Sources/Gizmate/Ring/`                                                                                                                                         |
-| Ask Gizmate prompt behavior                    | `Sources/Gizmate/Ask/` (`AskGizmateResponse.swift`, `AskGizmateConversation.swift`, `AskGizmateLayout.swift`, `AskPrompt.swift`, `AskOverlays.swift`)              |
-| Settings window and AI Engine UI              | `Sources/Gizmate/MainWindow/Core/`, `Sources/Gizmate/MainWindow/Sections/`                                                                                        |
+| Ask Gizmate prompt behavior                   | `Sources/Gizmate/Ask/` (`AskGizmateResponse.swift`, `AskGizmateConversation.swift`, `AskGizmateLayout.swift`, `AskPrompt.swift`, `AskOverlays.swift`)           |
+| Settings window and AI Engine UI              | `Sources/Gizmate/MainWindow/Core/`, `Sources/Gizmate/MainWindow/Sections/`                                                                                      |
 | Shortcuts                                     | `Sources/Gizmate/App/Shortcuts/`                                                                                                                                |
 | Onboarding and permissions                    | `Sources/Gizmate/App/Onboarding/`                                                                                                                               |
 | Ollama and provider readiness                 | `Sources/Gizmate/App/Bootstrap.swift`                                                                                                                           |
 | Live captions, summaries, follow-up questions | `Sources/Gizmate/Live/`                                                                                                                                         |
 | Chat archives (KakaoTalk, Telegram)           | `Sources/Gizmate/Archive/`                                                                                                                                      |
 | Snippets and reusable writing terms           | `Sources/Gizmate/MainWindow/Snippets.swift`                                                                                                                     |
-| History and usage stats                       | `Sources/Gizmate/Archive/TranslationHistory.swift`, `Sources/Gizmate/App/UsageStats.swift`                                                                       |
+| History and usage stats                       | `Sources/Gizmate/Archive/TranslationHistory.swift`, `Sources/Gizmate/App/UsageStats.swift`                                                                      |
 
 ### Updating README Media
 
@@ -202,7 +208,7 @@ Use the GIF exports in `assets` for README demos so they render directly on GitH
 | Workflow                 | Asset                      |
 | ------------------------ | -------------------------- |
 | Product overview         | `assets/intro.gif`         |
-| Ask Gizmate               | `assets/ask_v2.gif`        |
+| Ask Gizmate              | `assets/ask_v2.gif`        |
 | Understand selected text | `assets/understand_v2.gif` |
 | Rewrite draft            | `assets/fix_v2.gif`        |
 | Smart reply              | `assets/reply_v2.gif`      |

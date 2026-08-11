@@ -408,7 +408,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         app.run()
     }
 
-    // MARK: Streaming-jitter repro (NUGUMI_STREAM_DEBUG=1) — delete when solved.
+    // MARK: Streaming-jitter repro (GIZMATE_STREAM_DEBUG=1) — delete when solved.
     private var fakeStreamTimer: Timer?
     private func runFakeStreamRepro() {
         let controller = TranslationPanelController(
@@ -471,12 +471,12 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Developer switch: NUGUMI_FIRST_RUN=1 clears the first-run flags so
+        // Developer switch: GIZMATE_FIRST_RUN=1 clears the first-run flags so
         // the full install experience (intro video → permissions → feature
         // tour → engine choice → main window) replays on this launch. TCC
         // permissions can't be revoked from here — use `tccutil reset` for
         // full fidelity.
-        if ProcessInfo.processInfo.environment["NUGUMI_FIRST_RUN"] == "1" {
+        if ProcessInfo.processInfo.environment["GIZMATE_FIRST_RUN"] == "1" {
             for key in [
                 OnboardingModel.featureTourCompletedKey,
                 OnboardingModel.introPlayedKey,
@@ -487,7 +487,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
-        // Developer switch: NUGUMI_STREAM_DEBUG=1 opens a result panel on
+        // Developer switch: GIZMATE_STREAM_DEBUG=1 opens a result panel on
         // launch and streams fake markdown chunks into it, logging per-render
         // geometry — repro harness for streaming-jitter debugging.
         if TranslationContentView.streamDebug {

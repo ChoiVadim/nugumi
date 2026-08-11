@@ -6,7 +6,7 @@ import XCTest
 /// This exists because the first two versions of the figure could not be
 /// checked at all. Both moved a dragged tool through the pasteboard
 /// (`.draggable` / `.dropDestination`), whose payload type —
-/// `UTType(exportedAs: "com.nugumi.app.edge-resident")` — is declared in no
+/// `UTType(exportedAs: "com.gizmate.app.edge-resident")` — is declared in no
 /// `Info.plist`, and under `swift run` there is no bundle to declare it in.
 /// Every drag picked up and every drop silently did nothing, and no test could
 /// have said so: the failure was in AppKit's type registry, not in any code

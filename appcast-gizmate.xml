@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+    <channel>
+        <title>Gizmate Updates</title>
+        <link>https://github.com/ChoiVadim/nugumi</link>
+        <description>Gizmate application updates</description>
+        <language>en</language>
+        <!--
+            The feed for com.gizmate.app. Deliberately starts empty: appcast.xml
+            beside it is the frozen legacy feed for com.nugumi.app, and the two
+            must never see each other's items. A Nugumi 0.17.0 install polls
+            appcast.xml forever and will never be offered a Gizmate build.
+
+            New <item> entries are appended by Scripts/release.sh.
+            Each release item must include a sparkle:edSignature attribute
+            generated via sign_update so installers will accept the update.
+        -->
+    </channel>
+</rss>

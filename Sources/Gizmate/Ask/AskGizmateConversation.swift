@@ -13,8 +13,8 @@ enum AskGizmateHistoryStore {
     static let maxAge: TimeInterval = 24 * 60 * 60
     // Pre-rename spellings on purpose: renaming these keys would drop the
     // conversation every existing user has in flight.
-    private static let turnsKey = "askNugumiHistory"
-    private static let savedAtKey = "askNugumiHistorySavedAt"
+    private static let turnsKey = "askGizmateHistory"
+    private static let savedAtKey = "askGizmateHistorySavedAt"
 
     static func load(defaults: UserDefaults = .standard, now: Date = Date()) -> [AskGizmateTurn] {
         let savedAt = defaults.double(forKey: savedAtKey)

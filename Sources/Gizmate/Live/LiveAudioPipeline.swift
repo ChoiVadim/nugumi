@@ -151,7 +151,7 @@ final class SystemAudioCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private var stream: SCStream?
     private let downsampler = PCM16Downsampler()
-    private let sampleQueue = DispatchQueue(label: "com.nugumi.live.systemaudio")
+    private let sampleQueue = DispatchQueue(label: "com.gizmate.live.systemaudio")
     private var isStopped = false
 
     func start() async {

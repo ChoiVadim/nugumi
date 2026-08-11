@@ -7,11 +7,12 @@ extension GizmateApp {
     }
 }
 
-extension GizmateApp: SPUUpdaterDelegate {
-    nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
-        "https://raw.githubusercontent.com/ChoiVadim/nugumi/main/appcast.xml"
-    }
-}
+/// The feed is named once, in `Resources/Info.plist` (`SUFeedURL`). This used to
+/// also hardcode it here, which silently won: a delegate's `feedURLString` beats
+/// the plist, so changing the plist alone moved nothing. With the legacy
+/// `appcast.xml` frozen for the old com.nugumi.app and `appcast-gizmate.xml` live for
+/// com.gizmate.app, a second copy of the URL is a way to ship the wrong one.
+extension GizmateApp: SPUUpdaterDelegate {}
 
 extension GizmateApp: SPUStandardUserDriverDelegate {
     // Opt into gentle reminders: scheduled checks surface our own badge instead

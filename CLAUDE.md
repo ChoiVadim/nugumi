@@ -81,12 +81,12 @@ sibling to them. Add a gizmo, or add a capability every gizmo can use.
 ## Project at a glance
 
 - macOS menu bar app, Swift Package Manager, deployment target macOS 14.
-- Bundle ID: `com.nugumi.app`. GitHub repo: `ChoiVadim/nugumi` (`origin`).
+- Bundle ID: `com.gizmate.app`. GitHub repo: `ChoiVadim/nugumi` (`origin`) — the repo name is load-bearing and stays, see "Two lines" below.
 - GitHub CLI account for this repo: use `ChoiVadim`. If multiple accounts are configured locally, prefer `gh-vadim ...` or run `gh-use-vadim` before release/repo operations.
 - Sources are split by subsystem into feature folders under `Sources/Gizmate/` (`App/`, `Selection/`, `Panels/`, `Ask/`, `Ring/`, `Dock/`, `Tools/`, `LLM/`, `Live/`, `Archive/`, `MainWindow/`) — one subsystem per file. `App/GizmateApp.swift` holds the `@main` app delegate and lifecycle, while `App/GizmateApp+*.swift` owns domain extensions. SwiftPM discovers files recursively; adding a file needs no `Package.swift` change. `App/Bootstrap.swift` covers the Ollama setup wizard.
 - `Dock/` is the screen-edge subsystem: `Dock/Surface/` renders a generated gizmo's rows, `Dock/FolderHub/` is the shipped folder shelf. `Tools/` is gizmo storage and execution.
 - Distribution: ad-hoc signed `.app` + universal DMG packaged via `Scripts/build-app-bundle.sh`. In-app updates via Sparkle 2.9.1.
-- Renamed twice: "Yaku" → "Nugumi" at v0.6.0, then "Nugumi" → "Gizmate". Existing v0.5.0 (Yaku) installs never auto-migrated via Sparkle and must download the new bundle manually. The Gizmate rename deliberately kept the bundle ID, feed URL, and EdDSA key untouched, so it updates in place like any other release — see "Identity that must not change" below.
+- Renamed twice: "Yaku" → "Nugumi" at v0.6.0, then "Nugumi" → "Gizmate". Neither rename auto-migrated: Yaku 0.5.0 installs had to download the new bundle by hand, and Gizmate went further and took a new bundle ID, so it installs _beside_ an existing Nugumi rather than updating it. Nugumi 0.17.0 is the legacy line's last release and it stays reachable at its own feed forever. See "Two lines, and the split between them" below before touching any identity string.
 
 ## Two kinds of tool, three places
 
@@ -149,25 +149,58 @@ only as an in-memory `@Published var` on `GizmateSettingsBridge`, reset to
 cheap to keep stable, though: if launch-to-launch restoration is ever added,
 keeping them stable now is what makes that a no-op instead of a migration.
 
-## Identity that must not change
+## Two lines, and the split between them
 
-The app is called Gizmate, but its identity to macOS is still `nugumi`. This is
-deliberate and load-bearing. Do **not** "finish the rename" on anything below —
-each one costs existing users something they cannot get back by reinstalling.
+This section used to argue the opposite, and the reversal is the point. It said
+the bundle ID must stay `com.nugumi.app` forever because TCC grants and settings
+key off it. That was right while there was one line of the app. It stopped being
+right the moment the ask was "let beta users try Gizmate without losing the
+Nugumi they already have" — the very fact that macOS keys everything off the
+bundle ID is what makes a _different_ one the only way to install beside rather
+than on top of.
 
-| Stays `nugumi`                         | Where                                                                                                                                                                    | Cost of changing it                                                                                         |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `com.nugumi.app` bundle ID             | `Resources/Info.plist`                                                                                                                                                   | TCC keys Accessibility / Screen Recording / Microphone off the bundle ID. Every user re-grants from scratch |
-| designated requirement                 | `Scripts/build-app-bundle.sh`                                                                                                                                            | Same grants, pinned at signing time                                                                         |
-| UserDefaults domain + keys             | domain is the bundle ID; `com.nugumi.app.usageStats.events.v1`, `com.nugumi.app.translationHistory.v1`, `askNugumiModelID`, `askNugumiThinkingLevel`, `askNugumiHistory` | Settings, history and stats silently vanish                                                                 |
-| `~/Library/Application Support/Nugumi` | `App/GizmatePaths.swift`, `LLM/LLMCore.swift`                                                                                                                            | API keys and OAuth tokens live here as plain files. Everyone is signed out of every provider                |
-| `com.nugumi.app.tool-worker`           | `Tools/ToolWorkerClient.swift`, `Resources/GizmateToolWorker-Info.plist`                                                                                                 | XPC lookup fails; tool runs die                                                                             |
-| `SUFeedURL`, `SUPublicEDKey`           | `Resources/Info.plist`                                                                                                                                                   | Update channel breaks for everyone already installed                                                        |
-| `ChoiVadim/nugumi` URLs                | `Info.plist`, `Scripts/release.sh`, README badges                                                                                                                        | Shipped builds poll the old URL forever                                                                     |
-| `nugumi-tool-agent`                    | `ToolAgent/package.json`, `Scripts/prepare-tool-agent-runtime.sh`                                                                                                        | Internal pnpm workspace name. Renaming means regenerating the lockfile for zero user benefit                |
+So there are two, and they never see each other:
+
+| Line            | Bundle ID         | Feed                  | State                                |
+| --------------- | ----------------- | --------------------- | ------------------------------------ |
+| Nugumi (legacy) | `com.nugumi.app`  | `appcast.xml`         | Frozen at 0.17.0. Never append to it |
+| Gizmate         | `com.gizmate.app` | `appcast-gizmate.xml` | Every release from now on goes here  |
 
 `appcast.xml` is append-only history: its 63 existing `<enclosure>` URLs point at
-DMGs that really exist on GitHub under those exact names. Never bulk-edit it.
+DMGs that really exist on GitHub under those exact names. Never bulk-edit it, and
+never add to it — an item there is an update pushed at people who never asked for
+a beta. `Scripts/release.sh` writes `appcast-gizmate.xml` and only that.
+
+The feed is named in exactly one place, `SUFeedURL` in `Resources/Info.plist`.
+`GizmateApp+Updates.swift` used to also hardcode it in `feedURLString`, which
+silently beats the plist — the trap being that changing the plist alone moves
+nothing. Keep the conformance empty.
+
+What the split costs, all of it accepted on purpose:
+
+- Beta users re-grant Accessibility / Screen Recording / Microphone. A new bundle
+  ID is a new app to TCC and there is no way around it. Onboarding already asks.
+- Settings start empty: the UserDefaults domain _is_ the bundle ID. Nothing
+  migrates them, deliberately — a beta of a renamed app should exercise the
+  first-run path, and the defaults keys got renamed to `com.gizmate.app.*` for
+  free precisely because there is no data behind the old ones.
+- API keys, OAuth tokens and gizmos _are_ carried over: `GizmatePaths.seed` copies
+  everything from `~/Library/Application Support/Nugumi` into `.../Gizmate` once,
+  on first launch, skipping the regenerable heavies (`python/`, `cache/`, `bin/`,
+  the two run-scratch dirs). A copy, never a move — the Nugumi on their Mac has
+  to keep working. Checked by `SupportDirectorySeedTests`.
+- Both apps can run at once, and both claim the same global shortcuts. Say so in
+  the beta notes; do not try to solve it in code.
+
+Still `nugumi` on purpose, and each for its own reason:
+
+| Stays `nugumi`                         | Where                                                             | Why                                                                                             |
+| -------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `ChoiVadim/nugumi` repo URLs           | `Info.plist`, `Scripts/release.sh`, README badges                 | Renaming the repo 404s all 63 enclosure URLs. Every installed Nugumi loses updates permanently  |
+| `SUPublicEDKey`                        | `Resources/Info.plist`                                            | Both lines are signed by the same private key. Rotating strands whoever hasn't taken the update |
+| `~/Library/Application Support/Nugumi` | `App/GizmatePaths.swift`                                          | Read once, by `seed`. It is the legacy install's directory, not ours                            |
+| `nugumi-tool-agent`                    | `ToolAgent/package.json`, `Scripts/prepare-tool-agent-runtime.sh` | Internal pnpm workspace name. Renaming means regenerating the lockfile for zero user benefit    |
+| `/nugumi/` CloudFront paths            | `App/Onboarding/OnboardingSupport.swift`                          | Real hosted onboarding videos. Renaming the path 404s them                                      |
 
 ## Cutting a release
 
@@ -180,7 +213,7 @@ bash Scripts/release.sh 0.6.0
 
 # Then commit + tag + GitHub Release. Tag must be vX.Y.Z (the appcast item's
 # enclosure URL is built as github.com/ChoiVadim/nugumi/releases/download/vX.Y.Z/Gizmate-X.Y.Z.dmg).
-git add Resources/Info.plist appcast.xml
+git add Resources/Info.plist appcast-gizmate.xml
 git commit -m "Release v0.6.0"
 git tag v0.6.0 && git push origin main --tags
 gh release create v0.6.0 dist/Gizmate-0.6.0.dmg --title "v0.6.0" --notes "Release notes here"
@@ -191,7 +224,7 @@ What `Scripts/release.sh` does, in order:
 1. Bumps `CFBundleShortVersionString` to the supplied version and increments `CFBundleVersion`.
 2. Runs `Scripts/build-app-bundle.sh` to produce `dist/Gizmate.app` and `dist/Gizmate.dmg` (universal arm64 + x86_64, ad-hoc signed, Sparkle.framework bundled and signed).
 3. Signs the DMG via Sparkle's `sign_update` (uses the EdDSA private key in macOS Keychain).
-4. Appends an `<item>` to `appcast.xml` with `sparkle:edSignature`, length, version metadata.
+4. Appends an `<item>` to `appcast-gizmate.xml` with `sparkle:edSignature`, length, version metadata.
 5. Renames `dist/Gizmate.dmg` → `dist/Gizmate-<version>.dmg` so the URL in the appcast matches the GitHub Release asset name.
 
 After the GitHub Release is published, all installed copies of Gizmate will see the new version on their next daily Sparkle check (or immediately when the user clicks "Check for Updates...").
@@ -244,7 +277,7 @@ export SPARKLE_BIN="$PWD/.build/artifacts/sparkle/Sparkle/bin"
 export DEVELOPER_ID='Developer ID Application: Vadim Choi (XXXXXXXXXX)'
 export NOTARIZE_PROFILE='nugumi-notarize'
 bash Scripts/release.sh 0.6.0
-git add Resources/Info.plist appcast.xml
+git add Resources/Info.plist appcast-gizmate.xml
 git commit -m "Release v0.6.0"
 git tag v0.6.0 && git push origin main --tags
 gh release create v0.6.0 dist/Gizmate-0.6.0.dmg --title "v0.6.0" --notes "..."

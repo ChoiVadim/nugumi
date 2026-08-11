@@ -114,11 +114,11 @@ final class OnboardingModel: ObservableObject {
         refreshFullDiskAccessStatus()
     }
 
-    /// Developer switch: NUGUMI_ONBOARDING_PAGE=intro|permissions|feature|finale
+    /// Developer switch: GIZMATE_ONBOARDING_PAGE=intro|permissions|feature|finale
     /// jumps straight to that page, for iterating on onboarding UI without
     /// clicking through the whole flow.
     static var devPageOverride: Page? {
-        switch ProcessInfo.processInfo.environment["NUGUMI_ONBOARDING_PAGE"] {
+        switch ProcessInfo.processInfo.environment["GIZMATE_ONBOARDING_PAGE"] {
         case "intro": return .intro
         case "permissions": return .permissions
         case "feature": return .feature(0)

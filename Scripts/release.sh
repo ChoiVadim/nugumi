@@ -8,7 +8,7 @@
 #   1. Updates CFBundleShortVersionString and CFBundleVersion in Info.plist.
 #   2. Builds dist/Gizmate.app and dist/Gizmate.dmg via build-app-bundle.sh.
 #   3. Calls Sparkle's sign_update to produce an EdDSA signature for the dmg.
-#   4. Appends a new <item> to appcast.xml.
+#   4. Appends a new <item> to appcast-gizmate.xml.
 #   5. Prints next steps (commit, tag, push, GitHub Release upload).
 #
 # Prereqs (one-time):
@@ -19,7 +19,7 @@
 #     to the directory that contains it (e.g. /opt/homebrew/Caskroom/sparkle).
 #
 # After this script:
-#   - git add VERSION? appcast.xml Resources/Info.plist
+#   - git add appcast-gizmate.xml Resources/Info.plist
 #   - git commit -m "Release vX.Y.Z"
 #   - git tag vX.Y.Z && git push --tags
 #   - gh release create vX.Y.Z dist/Gizmate.dmg --title "vX.Y.Z" --notes "..."
@@ -34,7 +34,10 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFO_PLIST="$ROOT/Resources/Info.plist"
-APPCAST="$ROOT/appcast.xml"
+# appcast-gizmate.xml, not appcast.xml. The latter is the frozen com.nugumi.app
+# feed that every installed Nugumi still polls daily; appending there would push
+# a beta at users who never asked for one.
+APPCAST="$ROOT/appcast-gizmate.xml"
 DMG_PATH="$ROOT/dist/Gizmate.dmg"
 DMG_URL_BASE="https://github.com/ChoiVadim/nugumi/releases/download"
 
@@ -118,7 +121,7 @@ echo
 echo "Release v$VERSION prepared."
 echo
 echo "Next steps:"
-echo "  git add Resources/Info.plist appcast.xml"
+echo "  git add Resources/Info.plist appcast-gizmate.xml"
 echo "  git commit -m \"Release v$VERSION\""
 echo "  git tag v$VERSION && git push origin main --tags"
 echo "  gh release create v$VERSION dist/$DMG_FILENAME --title \"v$VERSION\" --notes \"...\""

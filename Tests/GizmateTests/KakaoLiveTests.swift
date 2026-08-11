@@ -2,11 +2,11 @@ import XCTest
 @testable import Gizmate
 
 /// Live end-to-end check against the real KakaoTalk database on this machine.
-/// Skipped unless `NUGUMI_LIVE_KAKAO=1` and Full Disk Access is granted to the
+/// Skipped unless `GIZMATE_LIVE_KAKAO=1` and Full Disk Access is granted to the
 /// test runner — it is a manual verification tool, never a CI gate.
 final class KakaoLiveTests: XCTestCase {
     func testOpenRealDatabase() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["NUGUMI_LIVE_KAKAO"] == "1")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["GIZMATE_LIVE_KAKAO"] == "1")
         let archive = try KakaoArchive.open()
         let chats = try archive.recentChats(limit: 5)
         XCTAssertFalse(chats.isEmpty, "expected at least one chat")

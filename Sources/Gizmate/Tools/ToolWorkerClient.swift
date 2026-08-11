@@ -75,10 +75,13 @@ enum ToolWorkerClient {
     private static func requestProbe(
         _ request: SandboxProbeRequest
     ) async throws -> SandboxProbeResult {
-        // Must match CFBundleIdentifier in GizmateToolWorker-Info.plist, which is
-        // still com.nugumi.* like the host app — see Resources/Info.plist.
+        // Must match CFBundleIdentifier in GizmateToolWorker-Info.plist. It moved
+        // off the old com.nugumi.* with the host app: an XPC service is looked up
+        // by name,
+        // so a Gizmate installed beside a Nugumi would otherwise have two services
+        // answering to one name.
         let connection = NSXPCConnection(
-            serviceName: "com.nugumi.app.tool-worker"
+            serviceName: "com.gizmate.app.tool-worker"
         )
         connection.remoteObjectInterface = NSXPCInterface(
             with: GizmateToolWorkerProtocol.self

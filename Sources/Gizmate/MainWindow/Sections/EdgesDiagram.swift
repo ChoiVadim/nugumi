@@ -14,7 +14,7 @@ import SwiftUI
 /// `.dropDestination`, and that is not a style preference. SwiftUI's drag and
 /// drop moves the payload through the pasteboard, which means a
 /// `Transferable` needs a content type the system recognises. The type this
-/// used was `UTType(exportedAs: "com.nugumi.app.edge-resident")`, which is
+/// used was `UTType(exportedAs: "com.gizmate.app.edge-resident")`, which is
 /// declared in no `Info.plist` — and under `swift run` there is no bundle to
 /// declare it in at all. Every drag picked up and every drop silently did
 /// nothing, in the old edge cards as well as the first version of this figure.

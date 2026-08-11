@@ -110,7 +110,7 @@ extension GizmateApp {
     /// Relaunch Gizmate reliably without depending on macOS's TCC "Quit &
     /// Reopen" — that path is flaky for LSUIElement agent apps (it quits but
     /// doesn't reopen) and gets confused when more than one copy of
-    /// com.nugumi.app is registered. Detach a helper that waits for us to fully
+    /// com.gizmate.app is registered. Detach a helper that waits for us to fully
     /// exit, then reopens our exact bundle. Falls back to a plain quit in dev
     /// (`swift run`), where there is no .app to reopen.
     @MainActor

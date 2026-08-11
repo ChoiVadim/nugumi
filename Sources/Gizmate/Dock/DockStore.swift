@@ -71,11 +71,11 @@ final class DockStore: ObservableObject {
     @Published private(set) var dismissals: [String: DockDismissal] = [:]
     var onChange: (() -> Void)?
 
-    static let defaultsKey = "com.nugumi.app.dock.v1"
+    static let defaultsKey = "com.gizmate.app.dock.v1"
     /// `.v2` because `.v1` was keyed by edge. An old file would read as three
     /// tools called "top", "left" and "right", which match nothing and would
     /// sit there forever being ignored.
-    static let dismissalsDefaultsKey = "com.nugumi.app.dock.pinned.v2"
+    static let dismissalsDefaultsKey = "com.gizmate.app.dock.pinned.v2"
 
     private let defaults: UserDefaults
 

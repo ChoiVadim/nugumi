@@ -6,9 +6,14 @@
         <description>Nugumi application updates</description>
         <language>en</language>
         <!--
-            New <item> entries are appended by Scripts/release.sh.
-            Each release item must include a sparkle:edSignature attribute
-            generated via sign_update so installers will accept the update.
+            FROZEN. This is the feed for com.nugumi.app, and Nugumi 0.17.0 is
+            its last release. Everything shipped since is com.gizmate.app and
+            goes to appcast-gizmate.xml, which Scripts/release.sh now writes.
+
+            Do not append here and do not bulk-edit: the 63 enclosure URLs below
+            point at DMGs that really exist under those exact names, and every
+            installed copy of Nugumi still polls this file daily. Adding an item
+            would push an update at users who never asked for a beta.
         -->
         <item>
             <title>Version 0.2.0</title>
