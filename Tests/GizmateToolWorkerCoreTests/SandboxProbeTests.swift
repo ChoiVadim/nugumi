@@ -129,6 +129,16 @@ final class SandboxProbeTests: XCTestCase {
             .appendingPathComponent(
                 ".local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12"
             )
+        // This is the one test that runs a real interpreter, and the interpreter
+        // is uv's own managed 3.12.11 in the developer's home. A fresh checkout
+        // has no such thing, so on CI the missing binary arrived as
+        // `spawn(errno: 2)` and read as a genuine assertion failure. One machine
+        // detail kept the whole suite red on every push for months. Absent
+        // interpreter is "not applicable here", not "the probe is wrong".
+        try XCTSkipUnless(
+            FileManager.default.isExecutableFile(atPath: python.path),
+            "needs uv's managed CPython 3.12.11 at \(python.path)"
+        )
         let source = """
         import errno, importlib.util, json, platform, socket, sys
         assert platform.python_version() == "3.12.11"

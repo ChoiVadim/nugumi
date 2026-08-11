@@ -1,5 +1,11 @@
 name: macOS CI
 
+# Deliberately just build + test. Packaging the .app used to be a step here and
+# it could never have passed: build-app-bundle.sh wants a pinned uv 0.11.26, a
+# pnpm workspace and a Developer ID identity, none of which a runner has, and the
+# release is cut locally anyway. A check nobody can make green teaches people to
+# ignore the red dot, which is worse than having no check.
+
 on:
   push:
     branches:
@@ -15,40 +21,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test-and-build:
-    name: Test and build app bundle
+  build-and-test:
+    name: Build and test
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Show toolchain versions
-        run: |
-          swift --version
-          xcodebuild -version
+      - name: Show toolchain version
+        run: swift --version
 
-      - name: Resolve Swift package dependencies
-        run: swift package resolve
+      # Separate from `swift test` on purpose: the tests do not depend on the
+      # Gizmate executable target, so only this step notices if it stops building.
+      - name: Build
+        run: swift build
 
-      - name: Run Swift tests
+      - name: Test
         run: swift test
-
-      - name: Build distributable app bundle
-        run: bash Scripts/build-app-bundle.sh
-
-      - name: Verify app bundle artifacts
-        run: |
-          test -d dist/Gizmate.app
-          test -f dist/Gizmate.dmg
-          test -d dist/Gizmate.app/Contents/Resources/Gizmate_Gizmate.bundle
-          plutil -lint dist/Gizmate.app/Contents/Info.plist
-
-      - name: Upload DMG artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: Gizmate-${{ github.sha }}.dmg
-          path: dist/Gizmate.dmg
-          if-no-files-found: error
-          retention-days: 14
