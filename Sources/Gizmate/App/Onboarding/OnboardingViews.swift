@@ -593,8 +593,8 @@ private func loadOnboardingImage(named name: String) -> NSImage? {
     // .process("Resources") flattens subdirectories into the bundle root, so
     // try the subdirectory first (in case packaging ever changes) and fall
     // back to the root, where the files actually live today.
-    let url = Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Onboarding")
-        ?? Bundle.module.url(forResource: name, withExtension: "png")
+    let url = GizmateResources.bundle.url(forResource: name, withExtension: "png", subdirectory: "Onboarding")
+        ?? GizmateResources.bundle.url(forResource: name, withExtension: "png")
     guard let url else { return nil }
     return NSImage(contentsOf: url)
 }

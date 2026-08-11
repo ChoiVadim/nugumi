@@ -90,8 +90,8 @@ struct FeatureTourStep {
     /// Bundled clip first (works offline); CloudFront only as a safety net if
     /// the resource is somehow missing from the bundle.
     private static func videoURL(named name: String, remote: String) -> URL {
-        if let url = Bundle.module.url(forResource: name, withExtension: "MOV", subdirectory: "Onboarding")
-            ?? Bundle.module.url(forResource: name, withExtension: "MOV") {
+        if let url = GizmateResources.bundle.url(forResource: name, withExtension: "MOV", subdirectory: "Onboarding")
+            ?? GizmateResources.bundle.url(forResource: name, withExtension: "MOV") {
             return url
         }
         return URL(string: remote)!
@@ -128,6 +128,6 @@ struct FeatureTourStep {
 
 /// First-run intro clip. Optional so a missing resource simply skips the page.
 enum OnboardingIntroVideo {
-    static let url: URL? = Bundle.module.url(forResource: "intro", withExtension: "mov", subdirectory: "Onboarding")
-        ?? Bundle.module.url(forResource: "intro", withExtension: "mov")
+    static let url: URL? = GizmateResources.bundle.url(forResource: "intro", withExtension: "mov", subdirectory: "Onboarding")
+        ?? GizmateResources.bundle.url(forResource: "intro", withExtension: "mov")
 }

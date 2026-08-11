@@ -174,7 +174,7 @@ private struct CodexEnableDeviceCodeView: View {
 
 
     private var settingImage: NSImage? {
-        Bundle.module.url(forResource: "codex-device-code-setting", withExtension: "png")
+        GizmateResources.bundle.url(forResource: "codex-device-code-setting", withExtension: "png")
             .flatMap { NSImage(contentsOf: $0) }
     }
 

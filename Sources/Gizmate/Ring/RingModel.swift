@@ -91,7 +91,7 @@ struct RingItem {
     /// there). Template + 20pt logical size = tints and scales exactly like
     /// the SF Symbol items it replaced.
     static func phosphor(_ name: String, label: String, handler: @escaping () -> Void) -> RingItem {
-        let img = Bundle.module.url(forResource: "\(name)-bold", withExtension: "png")
+        let img = GizmateResources.bundle.url(forResource: "\(name)-bold", withExtension: "png")
             .flatMap { NSImage(contentsOf: $0) } ?? NSImage()
         img.isTemplate = true
         img.size = NSSize(width: 20, height: 20)

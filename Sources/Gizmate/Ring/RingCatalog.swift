@@ -148,7 +148,7 @@ extension RingIconKind {
     func image(pointSize: CGFloat = 20) -> NSImage {
         switch self {
         case .phosphor(let name):
-            let image = Bundle.module.url(forResource: "\(name)-bold", withExtension: "png")
+            let image = GizmateResources.bundle.url(forResource: "\(name)-bold", withExtension: "png")
                 .flatMap { NSImage(contentsOf: $0) } ?? NSImage()
             image.isTemplate = true
             image.size = NSSize(width: pointSize, height: pointSize)

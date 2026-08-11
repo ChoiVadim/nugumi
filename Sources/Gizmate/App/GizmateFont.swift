@@ -6,7 +6,7 @@ import CoreText
 /// process before `NSFont(name:)` can resolve it.
 enum GizmateFont {
     private static let didRegisterPixelifySans: Bool = {
-        guard let url = Bundle.module.url(
+        guard let url = GizmateResources.bundle.url(
             forResource: "PixelifySans",
             withExtension: "ttf",
             subdirectory: "Fonts"

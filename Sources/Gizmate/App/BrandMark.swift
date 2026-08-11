@@ -16,7 +16,7 @@ enum BrandMark {
     /// because that is the generic system placeholder in `swift run` builds, and
     /// AppKit happily renders the placeholder as a blue folder.
     static let appIcon: NSImage? = {
-        guard let url = Bundle.module.url(forResource: "logo", withExtension: "png") else { return nil }
+        guard let url = GizmateResources.bundle.url(forResource: "logo", withExtension: "png") else { return nil }
         return NSImage(contentsOf: url)
     }()
 
@@ -44,7 +44,7 @@ enum BrandMark {
     }
 
     private static func buildTemplate(height: CGFloat) -> NSImage? {
-        guard let url = Bundle.module.url(forResource: "logo", withExtension: "png"),
+        guard let url = GizmateResources.bundle.url(forResource: "logo", withExtension: "png"),
               let source = NSImage(contentsOf: url),
               let tiff = source.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),

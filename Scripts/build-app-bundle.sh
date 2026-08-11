@@ -113,18 +113,30 @@ cp "$BINARY_PATH" "$MACOS_DIR/Gizmate"
 cp "$ROOT/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$ICNS_PATH" "$RESOURCES_DIR/AppIcon.icns"
 
-# SwiftPM emits target resources (the PixelifySans font, etc.) into a
-# generated `Gizmate_Gizmate.bundle` next to the product binary. `Bundle.module`
-# fatalErrors if it can't find this at runtime — and one of its fallbacks is a
-# build-time absolute path under .build that only exists on the build machine.
-# Without copying the bundle into the .app, the app launches for the builder
-# but crashes on every other Mac the moment any resource is touched.
+# SwiftPM emits target resources (the PixelifySans font, etc.) into a generated
+# `Gizmate_Gizmate.bundle` next to the product binary, and `Bundle.module` is
+# generated code that looks in exactly two places:
+#
+#     Bundle.main.bundleURL/Gizmate_Gizmate.bundle      <- the .app ROOT
+#     <absolute .build path on the build machine>
+#
+# Inside a shipped .app the first of those is the bundle *root*, and the bundle
+# cannot go there: codesign refuses to seal an app with anything outside
+# Contents/ ("unsealed contents present in the bundle root"), which was tried and
+# rejected. The second exists only on this machine. So neither of Bundle.module's
+# two paths can ever work in a shipped build, and 0.1.0 died on launch with a
+# fatalError on every Mac but this one.
+#
+# It goes in Contents/Resources and `GizmateResources.bundle` finds it there,
+# which is exactly what GizmateToolWorker has always done for its own bundle via
+# Bundle.main.resourceURL (see ToolWorkerRuntime.bundled). Nothing in the app may
+# use Bundle.module.
 RESOURCE_BUNDLE="$(dirname "$BINARY_PATH")/Gizmate_Gizmate.bundle"
 if [ ! -d "$RESOURCE_BUNDLE" ]; then
     echo "SwiftPM resource bundle not found at $RESOURCE_BUNDLE — did 'swift build' run?" >&2
     exit 1
 fi
-rm -rf "$RESOURCES_DIR/Gizmate_Gizmate.bundle"
+rm -rf "$RESOURCES_DIR/Gizmate_Gizmate.bundle" "$APP_DIR/Gizmate_Gizmate.bundle"
 cp -R "$RESOURCE_BUNDLE" "$RESOURCES_DIR/Gizmate_Gizmate.bundle"
 
 XPC_DIR="$CONTENTS_DIR/XPCServices/GizmateToolWorker.xpc"
@@ -336,6 +348,19 @@ codesign \
 
 xattr -cr "$APP_DIR"
 /usr/bin/codesign --verify --deep --strict --verbose=4 "$APP_DIR"
+
+# Assert each resource bundle sits exactly where its own lookup will search, and
+# that it still has contents. Nothing else in this build fails when they do not:
+# the builder's machine resolves them through .build and never notices, so this
+# check stands in for the other Mac nobody here can test on. 0.1.0 shipped a
+# fatalError-on-launch because it did not exist.
+test -f "$RESOURCES_DIR/Gizmate_Gizmate.bundle/logo.png" ||
+    { echo "app resource bundle is not where GizmateResources.bundle looks" >&2; exit 1; }
+# --exclude: GizmateResources.swift names it in the comment explaining the ban.
+grep -rq --exclude=GizmateResources.swift "Bundle\.module" "$ROOT/Sources/Gizmate" &&
+    { echo "Sources/Gizmate uses Bundle.module, which cannot resolve in a shipped .app" >&2; exit 1; }
+test -f "$XPC_RESOURCES/Gizmate_GizmateToolWorker.bundle/tool_worker_probe.py" ||
+    { echo "worker resource bundle is not where ToolWorkerRuntime.bundled looks" >&2; exit 1; }
 
 # Notarize and staple the .app *before* it is dropped into the DMG. That way
 # the DMG's contents already carry the notarization ticket so Gatekeeper can
