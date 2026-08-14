@@ -367,11 +367,19 @@ final class RadialActionMenuController {
         )
     }
 
+    /// Re-resolved in a loop rather than once, because `apply` can put a NEW
+    /// layer under a cursor that has not moved: pointing at a folder from out
+    /// where its orbit is about to appear used to leave the selection sitting
+    /// on the folder until the next mouse sample. Opening an orbit strictly
+    /// grows `liveLayers` and there are only three, so the loop settles — the
+    /// bound is the layer count, not a guess.
     private func refreshPick() {
         guard !didClose else { return }
-        let next = RadialMenuLayoutPolicy.angularPick(cursor: cursorOffset, layers: liveLayers)
-        guard next?.layer != pick?.layer || next?.index != pick?.index else { return }
-        apply(next)
+        for _ in 0..<3 {
+            let next = RadialMenuLayoutPolicy.angularPick(cursor: cursorOffset, layers: liveLayers)
+            guard next?.layer != pick?.layer || next?.index != pick?.index else { return }
+            apply(next)
+        }
     }
 
     /// Moves the selection, and with it whichever orbit that selection implies.

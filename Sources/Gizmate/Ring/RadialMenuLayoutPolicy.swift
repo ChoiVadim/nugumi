@@ -98,19 +98,24 @@ enum RadialMenuLayoutPolicy {
     /// directions that select nothing — the gap belongs to its closest
     /// neighbour instead.
     ///
-    /// `nil` inside the center's dead zone (the ✕ lives there) and past the
-    /// wall beyond the outermost live ring. Those are the only places left
-    /// where a click still means "dismiss" rather than "run this".
+    /// The outermost live layer's band runs all the way out to the panel's
+    /// edge — the wall used to sit half a ring-gap past that layer, which meant
+    /// that with only the ring up (`layers.count == 1`) nothing past 115pt
+    /// selected anything at all. Pointing at a button from across the panel is
+    /// the whole point of an angular pick, so the only wall left is the panel
+    /// itself: past it the cursor is over another app, where a click is that
+    /// app's to keep and the global monitor dismisses anyway.
+    ///
+    /// `nil` inside the center's dead zone (the ✕ lives there) and outside the
+    /// panel. Those are the only places left where a click still means
+    /// "dismiss" rather than "run this".
     static func angularPick(cursor: CGPoint, layers: [[CGPoint]]) -> (layer: Int, index: Int)? {
         let radii = [ringRadius, outerRingRadius, thirdRingRadius]
         let last = min(layers.count, radii.count) - 1
         guard last >= 0 else { return nil }
         let distance = hypot(cursor.x, cursor.y)
         guard distance >= buttonDiameter / 2 else { return nil }
-        // Half the ring-to-ring gap, reused as the outer wall so the band
-        // around the outermost ring is as deep as the ones between rings.
-        let slack = (outerRingRadius - ringRadius) / 2
-        guard distance <= radii[last] + slack else { return nil }
+        guard distance <= panelSide / 2 else { return nil }
         // Bands split at the midpoints between neighbouring live rings.
         let layer = (0..<last).first { distance < (radii[$0] + radii[$0 + 1]) / 2 } ?? last
         let centers = layers[layer]

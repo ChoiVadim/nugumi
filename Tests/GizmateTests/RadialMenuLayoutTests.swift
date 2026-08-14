@@ -82,20 +82,34 @@ final class RadialMenuLayoutTests: XCTestCase {
         }
     }
 
-    func testDeadZoneAndOuterWallPickNothing() {
+    func testDeadZoneAndOutsideThePanelPickNothing() {
         XCTAssertNil(RadialMenuLayoutPolicy.angularPick(
             cursor: CGPoint(x: 10, y: 0),
             layers: [sparseRing]
         ))
-        // 152pt out is the second orbit's radius — past the wall while only
-        // the ring is up, so a click there still means "dismiss".
+        // Past the panel the cursor is over another app, so a click there is
+        // still "dismiss" rather than "run this".
         XCTAssertNil(RadialMenuLayoutPolicy.angularPick(
-            cursor: CGPoint(x: 152, y: 0),
+            cursor: CGPoint(x: RadialMenuLayoutPolicy.panelSide / 2 + 1, y: 0),
             layers: [sparseRing]
         ))
     }
 
-    func testOpeningAnOrbitMovesTheWallAndSplitsTheBands() {
+    func testRingIsPickableFromRightAcrossThePanel() {
+        // The ring alone, pointed at from as far out as the third orbit and
+        // beyond. Nothing is open out there, so every one of these belongs to
+        // the ring — this is the reading the old wall at 115pt threw away.
+        for distance in [152.0, 226.0, 300.0, Double(RadialMenuLayoutPolicy.panelSide / 2)] {
+            let pick = RadialMenuLayoutPolicy.angularPick(
+                cursor: CGPoint(x: distance * cos(.pi / 4), y: distance * sin(.pi / 4)),
+                layers: [sparseRing]
+            )
+            XCTAssertEqual(pick?.layer, 0, "at \(distance)pt out")
+            XCTAssertEqual(pick?.index, 2, "at \(distance)pt out")
+        }
+    }
+
+    func testOpeningAnOrbitHandsItTheOuterBand() {
         let orbit = RadialMenuLayoutPolicy.orbitSlotCenters(
             radius: RadialMenuLayoutPolicy.outerRingRadius,
             count: 4
@@ -111,8 +125,41 @@ final class RadialMenuLayoutTests: XCTestCase {
             RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 100, y: 0), layers: layers)?.layer,
             0
         )
-        XCTAssertNil(
-            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 220, y: 0), layers: layers)
+        // Everything past the outermost live ring belongs to it, out to the
+        // panel's edge — the third orbit's radius included, while it is shut.
+        for distance in [220.0, 226.0, 350.0] {
+            XCTAssertEqual(
+                RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: distance, y: 0), layers: layers)?.layer,
+                1,
+                "at \(distance)pt out"
+            )
+        }
+    }
+
+    func testThirdOrbitTakesTheOuterBandBackOnceItOpens() {
+        let second = RadialMenuLayoutPolicy.orbitSlotCenters(
+            radius: RadialMenuLayoutPolicy.outerRingRadius,
+            count: 4
+        )
+        let third = RadialMenuLayoutPolicy.orbitSlotCenters(
+            radius: RadialMenuLayoutPolicy.thirdRingRadius,
+            count: 4
+        )
+        let layers = [sparseRing, second, third]
+        // 250pt read layer 1 with two layers up; with three it is layer 2.
+        // That is what makes the drill-in automatic: the same cursor lands in
+        // whichever orbit just appeared under it.
+        XCTAssertEqual(
+            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 250, y: 0), layers: layers)?.layer,
+            2
+        )
+        XCTAssertEqual(
+            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 152, y: 0), layers: layers)?.layer,
+            1
+        )
+        XCTAssertEqual(
+            RadialMenuLayoutPolicy.angularPick(cursor: CGPoint(x: 100, y: 0), layers: layers)?.layer,
+            0
         )
     }
 
