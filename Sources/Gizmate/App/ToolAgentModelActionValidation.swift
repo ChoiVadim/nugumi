@@ -15,8 +15,65 @@ enum ToolAgentModelActionValidator {
             return trimmed
         }
         let body = unfenced(text)
-        guard body != trimmed, isStrictlyValid(body) else { return nil }
-        return body
+        if body != trimmed, isStrictlyValid(body) {
+            return body
+        }
+        guard let rewritten = rewrappedEnvelope(body), isStrictlyValid(rewritten) else {
+            return nil
+        }
+        return rewritten
+    }
+
+    /// A tool name written where the envelope belongs, put back where it goes.
+    ///
+    /// `{"version":1,"action":"ask_user","questions":[…]}` instead of
+    /// `{"version":1,"action":"toolCall","name":"ask_user","arguments":
+    /// {"questions":[…]}}`. Small models do this constantly — the default
+    /// builder model is whatever the machine has, and a local one got the
+    /// request, the tool and every argument exactly right and still failed the
+    /// build on turn one. Naming the mistake back to it does not fix it: the
+    /// repair turn made the same mistake again with a different tool.
+    ///
+    /// Safe because it is not a guess. `"action"` may only be `toolCall` or
+    /// `finalText`, so a tool name there has exactly one possible meaning, and
+    /// the arguments still face the same strict validation as any other action.
+    /// The wire protocol stays strict; this is leniency about presentation, the
+    /// same kind `unfenced` already grants a code fence.
+    /// - Note: Validation is the caller's, deliberately. `normalized` needs a
+    ///   rewrap that is also *valid*; a diagnosis needs one that is merely
+    ///   *rewrapped*, so it can go on to explain what is wrong with the
+    ///   arguments rather than stopping at an envelope the host was going to
+    ///   repair by itself.
+    static func rewrappedEnvelope(_ body: String) -> String? {
+        guard let parsed = try? JSONSerialization.jsonObject(with: Data(body.utf8)),
+              var object = parsed as? [String: Any],
+              let action = object["action"] as? String,
+              ToolAgentToolNameV1(rawValue: action) != nil else {
+            return nil
+        }
+        // Either already nested under "arguments", or spread across the top
+        // level. Both shapes turn up, and the top-level one is the common one.
+        let arguments: Any
+        if let nested = object["arguments"] as? [String: Any] {
+            arguments = nested
+        } else {
+            object.removeValue(forKey: "version")
+            object.removeValue(forKey: "action")
+            object.removeValue(forKey: "name")
+            arguments = object
+        }
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: [
+                "version": 1,
+                "action": "toolCall",
+                "name": action,
+                "arguments": arguments,
+            ],
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        ), let rewritten = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return rewritten
     }
 
     /// The response with a single surrounding JSON code fence taken off, or
@@ -131,7 +188,14 @@ enum ToolAgentModelActionDiagnosis {
     /// The one sentence to hand back. `nil` when the response is a valid action.
     static func problem(with text: String) -> String? {
         guard ToolAgentModelActionValidator.normalized(text) == nil else { return nil }
-        let body = ToolAgentModelActionValidator.unfenced(text)
+        // Diagnose what the host would have run, not what the model typed. A
+        // tool name in "action" is repaired here without a model turn, so
+        // reporting it as the problem spends the one repair attempt on a
+        // mistake that was already forgiven and hides the real one underneath
+        // it — which is how a candidate missing a required key came back as
+        // "action must be toolCall".
+        let unfenced = ToolAgentModelActionValidator.unfenced(text)
+        let body = ToolAgentModelActionValidator.rewrappedEnvelope(unfenced) ?? unfenced
         guard
             let parsed = try? JSONSerialization.jsonObject(with: Data(body.utf8)),
             let object = parsed as? [String: Any]

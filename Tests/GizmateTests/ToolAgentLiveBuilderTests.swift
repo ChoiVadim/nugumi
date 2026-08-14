@@ -434,6 +434,49 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         ))
     }
 
+    /// A tool name in "action" is a rewrap, not a rejection.
+    ///
+    /// The default builder model is whatever the machine has, and a local one
+    /// writes the tool name where the envelope goes: `{"action":"ask_user",
+    /// "questions":[…]}` instead of `{"action":"toolCall","name":"ask_user",
+    /// "arguments":{"questions":[…]}}`. The intent and every argument are
+    /// already exactly right, and telling the model so in a repair turn does
+    /// not help — it made the same mistake again with a different tool name,
+    /// which is how a build died on turn one having understood the request
+    /// perfectly. There is only one thing `"action":"ask_user"` can mean, so
+    /// the host means it rather than spending a model turn asking.
+    func testModelActionValidatorRewrapsAToolNameWrittenIntoAction() {
+        XCTAssertEqual(
+            ToolAgentModelActionValidator.normalized(
+                #"{"version":1,"action":"ask_user","questions":[{"question":"Which app?","options":["Notes"]}]}"#
+            ),
+            #"{"action":"toolCall","arguments":{"questions":[{"options":["Notes"],"question":"Which app?"}]},"name":"ask_user","version":1}"#
+        )
+        // No arguments at all, which is the correct shape for this one.
+        XCTAssertTrue(ToolAgentModelActionValidator.isValid(
+            #"{"version":1,"action":"read_build_context"}"#
+        ))
+        // Already nested under "arguments", only the envelope wrong.
+        XCTAssertTrue(ToolAgentModelActionValidator.isValid(
+            #"{"version":1,"action":"read_build_context","arguments":{}}"#
+        ))
+        // Fenced and wrapped wrong at once, which is what a weak model does.
+        XCTAssertTrue(ToolAgentModelActionValidator.isValid(
+            "```json\n" + #"{"version":1,"action":"ask_user","questions":[{"question":"Where?"}]}"# + "\n```"
+        ))
+        // The rewrap buys no leniency about the arguments themselves.
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(
+            #"{"version":1,"action":"ask_user","questions":[]}"#
+        ))
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(
+            #"{"version":1,"action":"read_build_context","unexpected":1}"#
+        ))
+        // Not a tool name, so still exactly as wrong as it was.
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(
+            #"{"version":1,"action":"ask_the_user","questions":[{"question":"Which app?"}]}"#
+        ))
+    }
+
     func testModelActionValidatorMatchesSidecarNativeOutputAndPythonDirectoryRules() {
         let invalidNativeOutput = #"""
             {"version":1,"action":"toolCall","name":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"native","name":"Open Link","brief":"Opens a selected link.","symbolName":"link","input":"selection","output":"panel","trigger":"selection","hosts":[],"extensions":[],"nativeAction":"openURL","target":"{input}"}}}
@@ -480,6 +523,25 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
         XCTAssertFalse(ToolAgentModelActionValidator.isValid(missingHosts))
         XCTAssertEqual(problem?.contains("\"hosts\""), true, problem ?? "no diagnosis")
         XCTAssertEqual(problem?.contains("missing"), true, problem ?? "no diagnosis")
+    }
+
+    /// The envelope is repaired without a model turn, so it is not the problem.
+    ///
+    /// A local model wrote `"action":"write_candidate"` around a candidate that
+    /// was also missing a required key. Diagnosing the raw text reported only
+    /// the envelope, the model spent its one repair fixing something the host
+    /// had already forgiven, and the real defect surfaced a turn too late to be
+    /// fixed. The diagnosis reads what the host would have run.
+    func testTheDiagnosisLooksPastAnEnvelopeTheHostRepairsItself() {
+        let wrongEnvelopeAndMissingKey = #"""
+            {"version":1,"action":"write_candidate","arguments":{"candidate":{"schemaVersion":1,"kind":"python","name":"Uppercase","brief":"Uppercases text.","symbolName":"textformat","input":"selection","output":"clipboard","trigger":"always","extensions":[],"source":"print('OK')","fixtures":[{"input":"ok","expectedOutput":"OK"}],"timeoutSeconds":30,"declaresNetwork":false}}}
+            """#
+
+        let problem = ToolAgentModelActionDiagnosis.problem(with: wrongEnvelopeAndMissingKey)
+
+        XCTAssertFalse(ToolAgentModelActionValidator.isValid(wrongEnvelopeAndMissingKey))
+        XCTAssertEqual(problem?.contains("\"hosts\""), true, problem ?? "no diagnosis")
+        XCTAssertEqual(problem?.contains("toolCall"), false, problem ?? "no diagnosis")
     }
 
     func testTheDiagnosisNamesAKeyThatBelongsToAnotherKind() {

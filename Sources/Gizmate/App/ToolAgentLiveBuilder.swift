@@ -460,7 +460,14 @@ enum ToolAgentLiveBuilder {
         // picture that never reaches this line and a picture the provider
         // discards look identical from the transcript, where the model simply
         // says it didn't get one.
-        NSLog("[Gizmate/Build] model turn with %d picture(s)", images.count)
+        // The backend is named because "the model returned nonsense" is a
+        // different bug for a local 4B and for a cloud flagship, and the
+        // transcript never says which one answered.
+        NSLog(
+            "[Gizmate/Build] model turn with %d picture(s) on %@",
+            images.count,
+            String(describing: type(of: backend))
+        )
         let first = try await backend.complete(
             systemPrompt: request.system,
             userPrompt: request.user,
@@ -481,6 +488,20 @@ enum ToolAgentLiveBuilder {
         // neither the action nor the problem.
         let problem = ToolAgentModelActionDiagnosis.problem(with: first)
             ?? "It did not match the agent protocol."
+        // The model gets told what it got wrong; nobody maintaining this ever
+        // did. A protocol failure reported as "that was not a single JSON
+        // object" is unactionable from the outside, because the one thing that
+        // would explain it — what the model actually wrote — was held in a
+        // local and dropped. Logged head-and-tail: the interesting parts of a
+        // bad reply are the preamble it should not have written and whatever it
+        // trailed after the object.
+        NSLog(
+            "[Gizmate/Build] rejected model action (%d bytes): %@ | head: %@ | tail: %@",
+            first.utf8.count,
+            problem,
+            String(first.prefix(400)),
+            String(first.suffix(200))
+        )
         let repairPayload: String
         if let data = try? JSONSerialization.data(
             withJSONObject: [
