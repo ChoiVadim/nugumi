@@ -190,8 +190,25 @@ asking someone to land inside a 46pt disc at radius 78 spends its one advantage
 takes the nearest button by angle rather than a fixed 45° sector, because an
 empty slot deliberately leaves a gap in the eight-way grid and a sector scheme
 would hand that gap to nobody. A click anywhere in the band runs what is being
-pointed at; the dead zone under the ✕ and everything past the outer wall are
+pointed at; the dead zone under the ✕ and everything outside the panel are
 the two places where a click still means "put this away".
+
+**The outermost live layer owns the band out to the panel's edge.** The wall
+used to sit half a ring-gap past whichever layer was outermost, which made it
+move: with only the ring up it stood at 115pt, so pointing at a button from
+further out than that selected nothing at all and a click there dismissed. That
+is the opposite of what a direction-based pick promises. The bands still split
+at the midpoints between neighbouring live rings, but the last one runs to the
+panel wall, and there is nothing past the panel to get wrong — the cursor is
+over another app, whose click the global monitor turns into a dismiss anyway.
+Two things fall out of it. Reaching for a far-out orbit no longer has a gap in
+the middle where nothing is selected. And because a layer opening puts a new
+band under a cursor that has not moved, `refreshPick` re-resolves in a loop
+rather than once: pointing at a folder from out where its orbit is about to
+appear lands the selection inside that orbit on the same gesture, and again in
+the third if what it lands on is another folder. The loop is bounded by the
+layer count, not by a guess — opening an orbit strictly grows `liveLayers` and
+there are only three.
 
 The corollary is stronger than the feature: **one input decides, and every
 highlight is derived from it.** The discs used to carry a hover tint of their
