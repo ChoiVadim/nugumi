@@ -737,10 +737,21 @@ share of users regardless of what looks right.
   what it does: the one thing nothing else on the machine can do, arriving as an
   afterthought. Building tools leads, and answering questions is named as the
   fallback it is.
-  Two clauses in there are not style and must survive any rewrite. This
+  Three clauses in there are not style and must survive any rewrite. This
   conversation sends no picture, so claiming to see the screen is a lie the user
-  catches one question later; and explaining how to build a gizmo competes with
-  the builder that would actually build it.
+  catches one question later; explaining how to build a gizmo competes with the
+  builder that would actually build it; and the prompt has to say what a gizmo
+  _can be_, in terms of the enums rather than in examples.
+  That third one is here because its absence was a refusal. Told only that a
+  gizmo is "a chore they keep doing by hand" and shown five examples of exactly
+  that, the model invented a ceiling and declined a request that sat squarely
+  inside `prompt` + `selection` + `replace`: "too complex for what a local mac
+  utility can do right now". The builder's own prompt is hardened against
+  precisely this, but that hardening sits behind the gate and the refusal
+  happened at it, so `ToolChatRouter.directiveContract` now also says the chat
+  does not decide what is buildable and that an unsure case is still a `BUILD`
+  line. Never fix a refusal by adding its subject to the example list: that
+  teaches one answer, and the next request fails the same way.
 - **Ask about the work, not about the person.** Home opened with "What do you
   want to do?", which asks someone to describe their own afternoon. What the box
   needs is a job for a gizmo, so the question names the gizmo as the thing doing
@@ -776,6 +787,30 @@ share of users regardless of what looks right.
   before the router is asked anything. The key request is answered in the
   transcript for the same reason: a build blocked on a question nobody can see
   waits forever.
+- **A question is a control, not a paragraph.** The builder's clarifications
+  arrived as ordinary assistant prose and were answered in the main composer,
+  which cost twice. Typing: "Safari" is a word someone has to spell to a machine
+  that already knew the three apps worth naming. And scrolling: a question drawn
+  as prose scrolls away, and a build waiting on an answer nobody can still see
+  waits forever. `ChatQuestionCard` is a stop instead — it says how many
+  questions are left, its options are one click each, and it carries its own
+  field so the main composer stands down while it is up (two fields asking for
+  one answer makes a person read both, §12).
+  Three rules travel with it. **Options are a shortcut, never a constraint**:
+  the free-text field is always beside them, because the moment a closed list is
+  the only way to answer, an incomplete list becomes a wrong answer nobody can
+  correct. **✕ skips, it does not cancel**: the builder gets empty answers and
+  decides for itself, since a person who does not know the answer must not be
+  the reason the gizmo is never made. And **one card, not one question at a
+  time**: `ask_user` carries up to six questions and the host budget is a single
+  call (`ToolBuildSupervisorRequests.acceptClarification`), because three
+  separate calls were three model turns and three stops for facts that fit in
+  one breath.
+  What the card must always ask, when the request did not say it, is which input
+  the gizmo reads and where its result goes. Those are the two choices a person
+  touches every time they run the thing, and the two they are least likely to
+  know exist, so a silent default there is a decision taken from them rather
+  than made for them.
 - **Reaching a gizmo is not the same as opening it.** Home's tile grid was
   both: clicking a tile opened the editor as a modal, so changing one gizmo cost
   an open and a close, and changing two cost four. The editor now runs inline

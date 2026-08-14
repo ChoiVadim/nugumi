@@ -22,6 +22,50 @@ enum ToolBuilderSubmission: Equatable {
     case answeredClarification
 }
 
+/// The builder's questions and how far through them the user is.
+///
+/// The step lives here rather than in the card's `@State` because the
+/// transcript re-evaluates its body on every streamed chunk above it, and the
+/// one thing that must not be lost to a redraw is the answer someone already
+/// gave. It is also what makes the flow testable without a view.
+struct ToolBuilderQuestions: Equatable {
+    let questions: [ToolAgentAskUserQuestionV1]
+    /// One per question already answered, in order. An empty string is a skip.
+    private(set) var answers: [String] = []
+
+    var current: ToolAgentAskUserQuestionV1? {
+        questions.indices.contains(answers.count) ? questions[answers.count] : nil
+    }
+
+    /// One-based, for "2 of 3". Reads as the count when everything is answered,
+    /// which is only ever a frame before the card goes away.
+    var step: Int { min(answers.count + 1, questions.count) }
+    var total: Int { questions.count }
+    var isComplete: Bool { answers.count >= questions.count }
+
+    mutating func answer(_ text: String) {
+        guard !isComplete else { return }
+        answers.append(text)
+    }
+
+    /// Everything from here on is the builder's call. Used by the card's ✕:
+    /// dismissing a question is not cancelling a build, and a person who does
+    /// not know the answer must not be the reason nothing gets made.
+    mutating func skipRemaining() {
+        answers.append(contentsOf: Array(repeating: "", count: questions.count - answers.count))
+    }
+
+    /// What the transcript keeps once the card is gone. Skips are left out
+    /// entirely: a row saying the user declined to answer is noise about a
+    /// decision they already made.
+    var recap: String? {
+        let lines = zip(questions, answers)
+            .filter { !$0.1.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "**\($0.0.question)** \($0.1)" }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n\n")
+    }
+}
+
 /// What is still missing before saving would be an honest thing to offer.
 ///
 /// Gizmate grades its own validation, and two of the three grades do not prove
@@ -42,6 +86,9 @@ final class ToolBuilderChatSession: ObservableObject {
     @Published private(set) var messages: [ToolBuilderChatMessage]
     @Published private(set) var activity: [String] = []
     @Published private(set) var isAwaitingAnswer = false
+    /// The questions the builder stopped to ask, and the answers so far.
+    /// Non-nil means a card is up and owns the composer.
+    @Published private(set) var pendingQuestions: ToolBuilderQuestions?
     @Published private(set) var readyMessage: String?
     @Published private(set) var hasError = false
     @Published private(set) var trial: ToolBuilderTrial = .notNeeded
@@ -101,12 +148,48 @@ final class ToolBuilderChatSession: ObservableObject {
     func submit(_ text: String, images: [ChatImage] = []) async -> ToolBuilderSubmission? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
+        // A card is up: this is an answer to the question it is showing, not a
+        // message. It gets no bubble of its own, because the card draws the
+        // answer itself and the recap keeps it afterwards.
+        if pendingQuestions != nil {
+            await answer(value)
+            return .answeredClarification
+        }
         record(request: value, images: images)
         guard isAwaitingAnswer, let answerGeneration else {
             return .buildRequest(value)
         }
-        await answers.answer(value, for: answerGeneration)
+        await answers.answer([value], for: answerGeneration)
         return .answeredClarification
+    }
+
+    /// Answers whichever question the card is showing, and hands the whole set
+    /// back to the builder once the last one is in.
+    func answer(_ text: String) async {
+        guard var pending = pendingQuestions else { return }
+        pending.answer(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        await settle(pending)
+    }
+
+    /// The card's ✕. Skipping is not cancelling: the builder gets empty answers
+    /// and is told to decide for itself, so the gizmo still gets made.
+    func skipQuestions() async {
+        guard var pending = pendingQuestions else { return }
+        pending.skipRemaining()
+        await settle(pending)
+    }
+
+    private func settle(_ pending: ToolBuilderQuestions) async {
+        guard pending.isComplete else {
+            pendingQuestions = pending
+            return
+        }
+        pendingQuestions = nil
+        if let recap = pending.recap {
+            messages.append(.init(role: .assistant, text: recap))
+        }
+        guard let answerGeneration else { return }
+        await answers.answer(pending.answers, for: answerGeneration)
     }
 
     func ask(_ request: ToolAgentAskUserRequestV1) async throws
@@ -117,16 +200,18 @@ final class ToolBuilderChatSession: ObservableObject {
             throw CancellationError()
         }
         answerGeneration = generation
-        messages.append(.init(role: .assistant, text: request.question))
+        pendingQuestions = ToolBuilderQuestions(questions: request.questions)
         isAwaitingAnswer = true
         defer {
             if answerGeneration == generation {
                 answerGeneration = nil
                 isAwaitingAnswer = false
+                pendingQuestions = nil
             }
         }
-        let answer = try await answers.wait(for: generation)
-        return try ToolAgentAskUserResponseV1(answer: answer)
+        return try ToolAgentAskUserResponseV1(
+            answers: try await answers.wait(for: generation)
+        )
     }
 
     /// Parks the build in front of a key field and waits.
@@ -222,6 +307,7 @@ final class ToolBuilderChatSession: ObservableObject {
         messages = greeting.map { [ToolBuilderChatMessage(role: .assistant, text: $0)] } ?? []
         activity = []
         pendingSecret = nil
+        pendingQuestions = nil
     }
 
     func markCandidateStale() {
@@ -238,6 +324,7 @@ final class ToolBuilderChatSession: ObservableObject {
 
     func cancel() async {
         isAwaitingAnswer = false
+        pendingQuestions = nil
         // A build torn down while a key row is up would otherwise leave the
         // validation handler suspended on a continuation nobody will resume.
         resolveSecret(false)
@@ -254,8 +341,8 @@ actor ToolBuilderAnswerBroker {
 
     private enum State {
         case idle
-        case accepting(Generation, buffered: String?)
-        case waiting(Generation, CheckedContinuation<String, Error>)
+        case accepting(Generation, buffered: [String]?)
+        case waiting(Generation, CheckedContinuation<[String], Error>)
         case cancelledBeforeRegistration(Generation)
     }
 
@@ -280,7 +367,7 @@ actor ToolBuilderAnswerBroker {
         return generation
     }
 
-    func wait(for generation: Generation) async throws -> String {
+    func wait(for generation: Generation) async throws -> [String] {
         await beforeWaitRegistration()
         switch state {
         case .cancelledBeforeRegistration(let active) where active == generation:
@@ -300,7 +387,7 @@ actor ToolBuilderAnswerBroker {
         }
     }
 
-    func answer(_ value: String, for generation: Generation) {
+    func answer(_ value: [String], for generation: Generation) {
         switch state {
         case .accepting(let active, buffered: nil) where active == generation:
             state = .accepting(generation, buffered: value)

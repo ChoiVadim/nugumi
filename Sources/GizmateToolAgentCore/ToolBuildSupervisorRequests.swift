@@ -73,8 +73,11 @@ extension ToolBuildSupervisor {
     }
 
     func acceptClarification(_ clarificationRequest: ToolAgentAskUserRequestV1, request: ToolBuildRequestV1) async throws -> ToolAgentAskUserResponseV1 {
+        // One call, not three. The request carries every question at once now,
+        // so a second call is the model coming back for a fact it already had
+        // the room to ask for, and each one costs the user another stop.
         guard latestAttempt == nil,
-              clarificationCount < 3 else {
+              clarificationCount < 1 else {
             throw ToolAgentFailureCodeV1.invalidProtocol
         }
         clarificationCount += 1

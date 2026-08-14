@@ -51,11 +51,18 @@ final class ToolBuilderChatTests: XCTestCase {
             beforeAnswerWaitRegistration: { await gate.pause() }
         )
         let request = try ToolAgentAskUserRequestV1(
-            question: "Which app should receive the text?"
+            questions: [.init(question: "Which app should receive the text?")]
         )
         let responseTask = Task { try await session.ask(request) }
         await gate.waitUntilPaused()
         XCTAssertTrue(session.isAwaitingAnswer)
+        // The question is the card's, not the transcript's: drawing it as prose
+        // as well would say it twice and leave the second copy unanswerable.
+        XCTAssertEqual(
+            session.pendingQuestions?.current?.question,
+            "Which app should receive the text?"
+        )
+        XCTAssertFalse(session.messages.contains { $0.text.hasPrefix("Which app") })
 
         let submission = await session.submit("Notes")
         await gate.release()
@@ -69,16 +76,51 @@ final class ToolBuilderChatTests: XCTestCase {
         watchdog.cancel()
 
         XCTAssertEqual(submission, .answeredClarification)
-        XCTAssertEqual(response.answer, "Notes")
+        XCTAssertEqual(response.answers, ["Notes"])
+        // What the transcript keeps once the card is gone: one line pairing the
+        // question with the answer, so the record survives without the control.
+        XCTAssertEqual(session.messages.last?.role, .assistant)
         XCTAssertEqual(
-            session.messages.suffix(2).map(\.role),
-            [.assistant, .user]
+            session.messages.last?.text,
+            "**Which app should receive the text?** Notes"
         )
-        XCTAssertEqual(
-            session.messages.suffix(2).map(\.text),
-            ["Which app should receive the text?", "Notes"]
-        )
+        XCTAssertNil(session.pendingQuestions)
         XCTAssertFalse(session.isAwaitingAnswer)
+    }
+
+    /// Every question in one card, and the card is what steps through them.
+    func testStepsThroughEveryQuestionBeforeAnsweringTheBuilder() async throws {
+        let gate = AnswerRegistrationGate()
+        let session = ToolBuilderChatSession(
+            beforeAnswerWaitRegistration: { await gate.pause() }
+        )
+        let request = try ToolAgentAskUserRequestV1(questions: [
+            .init(question: "What should it read?", options: ["My selection", "A screenshot"]),
+            .init(question: "Where should the answer go?", options: ["A panel"]),
+            .init(question: "What should it be called?"),
+        ])
+        let responseTask = Task { try await session.ask(request) }
+        await gate.waitUntilPaused()
+
+        XCTAssertEqual(session.pendingQuestions?.step, 1)
+        XCTAssertEqual(session.pendingQuestions?.total, 3)
+        await session.answer("My selection")
+        XCTAssertEqual(session.pendingQuestions?.step, 2)
+        XCTAssertEqual(session.pendingQuestions?.current?.question, "Where should the answer go?")
+        await session.answer("A panel")
+        // ✕ on the last one. Skipping is not cancelling, so the builder still
+        // gets a full set and still finishes the gizmo.
+        await session.skipQuestions()
+        await gate.release()
+
+        let response = try await responseTask.value
+        XCTAssertEqual(response.answers, ["My selection", "A panel", ""])
+        XCTAssertNil(session.pendingQuestions)
+        XCTAssertFalse(session.isAwaitingAnswer)
+        XCTAssertEqual(
+            session.messages.last?.text,
+            "**What should it read?** My selection\n\n**Where should the answer go?** A panel"
+        )
     }
 
     func testActivityIsDeduplicatedAndBounded() {
@@ -108,7 +150,7 @@ final class ToolBuilderChatTests: XCTestCase {
             beforeAnswerWaitRegistration: { await gate.pause() }
         )
         let request = try ToolAgentAskUserRequestV1(
-            question: "Where should I save it?"
+            questions: [.init(question: "Where should I save it?")]
         )
         let responseTask = Task { try await session.ask(request) }
         await gate.waitUntilPaused()
@@ -130,7 +172,7 @@ final class ToolBuilderChatTests: XCTestCase {
             beforeAnswerWaitRegistration: { await gate.pause() }
         )
         let firstRequest = try ToolAgentAskUserRequestV1(
-            question: "Where should I save it?"
+            questions: [.init(question: "Where should I save it?")]
         )
         let firstTask = Task { try await session.ask(firstRequest) }
         await gate.waitUntilPaused()
@@ -141,7 +183,7 @@ final class ToolBuilderChatTests: XCTestCase {
         await gate.reset()
 
         let retryRequest = try ToolAgentAskUserRequestV1(
-            question: "Which folder should I use?"
+            questions: [.init(question: "Which folder should I use?")]
         )
         let retryTask = Task { try await session.ask(retryRequest) }
         await gate.waitUntilPaused()
@@ -149,7 +191,7 @@ final class ToolBuilderChatTests: XCTestCase {
         await gate.release()
         let response = try await retryTask.value
 
-        XCTAssertEqual(response.answer, "Downloads")
+        XCTAssertEqual(response.answers, ["Downloads"])
     }
 
     func testLateAnswerAfterRegisteredCancellationIsDropped() async throws {
@@ -168,18 +210,18 @@ final class ToolBuilderChatTests: XCTestCase {
 
         await broker.cancel(firstGeneration)
         _ = await firstWait.result
-        await broker.answer("stale", for: firstGeneration)
+        await broker.answer(["stale"], for: firstGeneration)
 
         let retryGeneration = try await broker.begin()
         let retryWait = Task {
             try await broker.wait(for: retryGeneration)
         }
         await retryGate.waitUntilPaused()
-        await broker.answer("fresh", for: retryGeneration)
+        await broker.answer(["fresh"], for: retryGeneration)
         await retryGate.release()
         let response = try await retryWait.value
 
-        XCTAssertEqual(response, "fresh")
+        XCTAssertEqual(response, ["fresh"])
     }
 
     func testSubmissionWithoutQuestionBecomesBuildRequest() async {

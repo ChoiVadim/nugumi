@@ -490,8 +490,14 @@ final class ToolAgentProtocolTests: XCTestCase {
 
     func testAskUserRequestAndResponseRoundTrip() throws {
         // Given
-        let request = try ToolAgentAskUserRequestV1(question: "Which app should receive the selected text?")
-        let response = try ToolAgentAskUserResponseV1(answer: "Notes")
+        let request = try ToolAgentAskUserRequestV1(questions: [
+            .init(
+                question: "Which app should receive the selected text?",
+                options: ["Notes", "Mail"]
+            ),
+            .init(question: "What should it be called?"),
+        ])
+        let response = try ToolAgentAskUserResponseV1(answers: ["Notes", ""])
         let requestEnvelope = ToolAgentToolRequestEnvelopeV1(
             callID: UUID(),
             request: .askUser(request)
@@ -519,28 +525,49 @@ final class ToolAgentProtocolTests: XCTestCase {
     func testAskUserRejectsUnknownEmptyAndOversizedUTF8Text() throws {
         // Given
         let oversized = "😀".repeated(
-            count: (ToolAgentProtocolLimitsV1.maximumSafeMessageBytes / 4) + 1
+            count: (ToolAgentProtocolLimitsV1.askUserQuestionBytes / 4) + 1
         )
-        let unexpectedField = try ToolAgentCanonicalJSONV1.encode([
-            "question": "Where should the result go?",
-            "unexpected": "value"
-        ])
-        let unexpectedResponseField = try ToolAgentCanonicalJSONV1.encode([
-            "answer": "Notes",
-            "unexpected": "value"
-        ])
+        // Written out rather than encoded from a dictionary: the payloads are
+        // heterogeneous now, and the shape being rejected is the point.
+        let unexpectedField = Data(
+            #"{"questions":[{"question":"Where should the result go?"}],"unexpected":"value"}"#.utf8
+        )
+        let unexpectedResponseField = Data(#"{"answers":["Notes"],"unexpected":"value"}"#.utf8)
+        let unexpectedQuestionField = Data(
+            #"{"questions":[{"question":"Which?","hint":"none"}]}"#.utf8
+        )
+        let tooMany = (0...ToolAgentProtocolLimitsV1.askUserQuestionsPerRequest)
+            .map { try! ToolAgentAskUserQuestionV1(question: "Question \($0)?") }
+        let tooManyOptions = Array(
+            repeating: "pick me",
+            count: ToolAgentProtocolLimitsV1.askUserOptionsPerQuestion + 1
+        )
 
         // Then
-        XCTAssertThrowsError(try ToolAgentAskUserRequestV1(question: ""))
-        XCTAssertThrowsError(try ToolAgentAskUserResponseV1(answer: ""))
-        XCTAssertThrowsError(try ToolAgentAskUserRequestV1(question: oversized))
-        XCTAssertThrowsError(try ToolAgentAskUserResponseV1(answer: oversized))
+        XCTAssertThrowsError(try ToolAgentAskUserQuestionV1(question: ""))
+        XCTAssertThrowsError(try ToolAgentAskUserQuestionV1(question: oversized))
+        XCTAssertThrowsError(
+            try ToolAgentAskUserQuestionV1(question: "Which?", options: [""])
+        )
+        XCTAssertThrowsError(
+            try ToolAgentAskUserQuestionV1(question: "Which?", options: tooManyOptions)
+        )
+        XCTAssertThrowsError(try ToolAgentAskUserRequestV1(questions: []))
+        XCTAssertThrowsError(try ToolAgentAskUserRequestV1(questions: tooMany))
+        XCTAssertThrowsError(try ToolAgentAskUserResponseV1(answers: []))
+        XCTAssertThrowsError(try ToolAgentAskUserResponseV1(answers: [oversized]))
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentAskUserRequestV1.self, from: unexpectedField)
         )
         XCTAssertThrowsError(
             try JSONDecoder().decode(ToolAgentAskUserResponseV1.self, from: unexpectedResponseField)
         )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(ToolAgentAskUserRequestV1.self, from: unexpectedQuestionField)
+        )
+        // A skipped question is an empty answer, and that is the one string the
+        // response must keep: the count is what lines answers up with questions.
+        XCTAssertNoThrow(try ToolAgentAskUserResponseV1(answers: ["", ""]))
     }
 
     /// Options are optional on the wire on purpose: the validator compares a

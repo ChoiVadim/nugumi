@@ -70,6 +70,7 @@ enum ToolChatRouter {
 
         Rules about those two lines, all of which matter:
         - Never ask them anything about the gizmo first. The builder asks its own questions while it works, and anything you ask here they answer twice.
+        - You do not decide whether something can be built, and you are not the one who would find out. Never tell them a request is too complex, too broad, too vague, or not the kind of thing a gizmo is for. When you are unsure it is possible, that is still a BUILD line: the builder either builds it or comes back with the one reason it could not, and both of those beat a guess from you.
         - Never say you are about to build it. The line is the whole reply; the build starts the moment you write it and they watch it happen.
         - Write the description from everything they have told you, not only from the last message. "Yes, do that" is a build request whose description is in the line before it.
         - Never write these lines inside a sentence, never explain them, and never use the words for anything else.

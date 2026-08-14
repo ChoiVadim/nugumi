@@ -427,10 +427,10 @@ final class ToolAgentLiveBuilderTests: XCTestCase {
             #"{"version":1,"action":"toolCall","name":"read_build_context","arguments":{}}"#
         ))
         XCTAssertTrue(ToolAgentModelActionValidator.isValid(
-            #"{"version":1,"action":"toolCall","name":"ask_user","arguments":{"question":"Which app should receive the text?"}}"#
+            #"{"version":1,"action":"toolCall","name":"ask_user","arguments":{"questions":[{"question":"Which app should receive the text?","options":["Notes","Mail"]}]}}"#
         ))
         XCTAssertFalse(ToolAgentModelActionValidator.isValid(
-            #"{"version":1,"action":"toolCall","name":"ask_user","arguments":{"question":"Which app?","extra":true}}"#
+            #"{"version":1,"action":"toolCall","name":"ask_user","arguments":{"questions":[{"question":"Which app?"}],"extra":true}}"#
         ))
     }
 
@@ -681,7 +681,7 @@ private actor ToolAgentLiveBuilderClarificationProbe {
     func handle(
         _ request: ToolAgentAskUserRequestV1
     ) async throws -> ToolAgentAskUserResponseV1 {
-        question = request.question
+        question = request.questions.first?.question
         return try await withCheckedThrowingContinuation {
             continuation = $0
         }
@@ -723,7 +723,7 @@ private actor ToolAgentLiveBuilderClarificationProcess {
                 .init(
                     callID: UUID(),
                     request: .askUser(
-                        try .init(question: "Which app should receive the text?")
+                        try .init(questions: [.init(question: "Which app should receive the text?")])
                     )
                 )
             ),

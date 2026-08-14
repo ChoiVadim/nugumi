@@ -8,13 +8,35 @@ function requestPayload(
   params: Record<string, unknown>,
 ): Record<string, unknown> {
   if (name !== "ask_user") return params;
-  const question = params["question"];
-  if (
-    Object.keys(params).length !== 1 ||
-    typeof question !== "string" ||
-    question.length === 0 ||
-    Buffer.byteLength(question) > 1_024
-  ) {
+  const questions = params["questions"];
+  const valid =
+    Object.keys(params).length === 1 &&
+    Array.isArray(questions) &&
+    questions.length >= 1 &&
+    questions.length <= 6 &&
+    questions.every((entry) => {
+      if (typeof entry !== "object" || entry === null) return false;
+      const row = entry as Record<string, unknown>;
+      const question = row["question"];
+      const options = row["options"];
+      const keys = Object.keys(row);
+      return (
+        keys.every((key) => key === "question" || key === "options") &&
+        typeof question === "string" &&
+        question.length > 0 &&
+        Buffer.byteLength(question) <= 1_024 &&
+        (options === undefined ||
+          (Array.isArray(options) &&
+            options.length <= 6 &&
+            options.every(
+              (option) =>
+                typeof option === "string" &&
+                option.length > 0 &&
+                Buffer.byteLength(option) <= 200,
+            )))
+      );
+    });
+  if (!valid) {
     throw new ProtocolError("invalidProtocol", "invalid ask_user request");
   }
   return params;
@@ -239,9 +261,20 @@ export function createTools(runtime: SidecarRuntime) {
     }),
     tool({
       name: "ask_user",
-      description: "Ask one bounded clarification question.",
+      description:
+        "Ask every bounded clarification you need, in one call. Offer options when the useful answers are a short closed set; the user can always type their own instead.",
       parameters: Type.Object({
-        question: Type.String({ minLength: 1, maxLength: 1_024 }),
+        questions: Type.Array(
+          Type.Object({
+            question: Type.String({ minLength: 1, maxLength: 1_024 }),
+            options: Type.Optional(
+              Type.Array(Type.String({ minLength: 1, maxLength: 200 }), {
+                maxItems: 6,
+              }),
+            ),
+          }),
+          { minItems: 1, maxItems: 6 },
+        ),
       }),
     }),
   ];

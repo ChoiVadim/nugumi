@@ -454,7 +454,21 @@ struct ToolEvalMode: Equatable {
                 thinkingLevel: thinkingLevel,
                 uv: uv,
                 runID: runID,
-                onStatus: { statuses.append($0) }
+                onStatus: { statuses.append($0) },
+                clarification: { request in
+                    // A headless user who never answers. The builder is told to
+                    // ask which input a gizmo reads and where its result goes
+                    // whenever the request does not say, so the default handler
+                    // — which refuses — would fail every case here on a question
+                    // that is working as designed. Empty answers mean "you
+                    // decide", so the sweeps still grade the model's own read of
+                    // the sentence, which is the thing they were written to
+                    // measure.
+                    statuses.append("asked \(request.questions.count) question(s)")
+                    return try .init(
+                        answers: Array(repeating: "", count: request.questions.count)
+                    )
+                }
             )
         } catch {
             buildError = error.localizedDescription

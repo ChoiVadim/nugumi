@@ -315,8 +315,8 @@ final class ToolBuildSupervisorTests: XCTestCase {
             model: { _ in .error(.workerFailure) },
             validation: { _ in throw ToolAgentFailureCodeV1.workerFailure },
             clarification: { request in
-                XCTAssertEqual(request.question, "Which app should receive the text?")
-                return try .init(answer: "Notes")
+                XCTAssertEqual(request.questions.map(\.question), ["Which app should receive the text?"])
+                return try .init(answers: ["Notes"])
             }
         )
 
@@ -379,9 +379,9 @@ final class ToolBuildSupervisorTests: XCTestCase {
                 model: { _ in .error(.workerFailure) },
                 validation: { _ in throw ToolAgentFailureCodeV1.workerFailure },
                 clarification: { clarification in
-                    XCTAssertEqual(clarification.question, "Which app should receive the text?")
+                    XCTAssertEqual(clarification.questions.map(\.question), ["Which app should receive the text?"])
                     await invocations.increment()
-                    return try .init(answer: entry.answer)
+                    return try .init(answers: [entry.answer])
                 }
             )
 
@@ -411,7 +411,7 @@ final class ToolBuildSupervisorTests: XCTestCase {
             validation: { _ in throw ToolAgentFailureCodeV1.workerFailure },
             clarification: { _ in
                 await invocations.increment()
-                return try .init(answer: "Notes")
+                return try .init(answers: ["Notes"])
             }
         )
 
@@ -423,10 +423,13 @@ final class ToolBuildSupervisorTests: XCTestCase {
         XCTAssertEqual(count, 0)
     }
 
-    func testRejectsFourthClarificationAfterThreeAcceptedAnswers() async throws {
+    /// One call, and the questions live inside it. This used to allow three
+    /// separate calls, which cost three model turns and three stops in front of
+    /// the user for facts that fit in one card.
+    func testRejectsSecondClarificationAfterOneAcceptedAnswer() async throws {
         let store = try temporaryStore()
         let request = ToolBuildRequestV1(description: "send selected text")
-        let process = ClarificationProcess(runID: request.runID, mode: .questions(4))
+        let process = ClarificationProcess(runID: request.runID, mode: .questions(2))
         let invocations = InvocationCounter()
         let supervisor = ToolBuildSupervisor(
             store: store,
@@ -437,7 +440,7 @@ final class ToolBuildSupervisorTests: XCTestCase {
             validation: { _ in throw ToolAgentFailureCodeV1.workerFailure },
             clarification: { _ in
                 let count = await invocations.increment()
-                return try .init(answer: "answer-\(count)")
+                return try .init(answers: ["answer-\(count)"])
             }
         )
 
@@ -445,9 +448,9 @@ final class ToolBuildSupervisorTests: XCTestCase {
         let record = try await store.record(runID: request.runID)
         let result = await process.result
         let count = await invocations.value
-        XCTAssertEqual(record.counters.toolCalls, 4)
-        XCTAssertEqual(count, 3)
-        XCTAssertEqual(result.answers, ["answer-1", "answer-2", "answer-3"])
+        XCTAssertEqual(record.counters.toolCalls, 2)
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(result.answers, ["answer-1"])
     }
 
     func testCancellationHandshakeStopsNonCooperativeClarificationHandler() async throws {
@@ -731,7 +734,7 @@ private actor ClarificationProcess {
         guard case .toolResponse(let envelope) = message.payload else { return }
         switch envelope.result {
         case .askUser(let response):
-            answers.append(response.answer)
+            answers.append(contentsOf: response.answers)
             switch mode {
             case .askThenWrite:
                 messages.append(Self.write(runID: runID))
@@ -768,7 +771,7 @@ private actor ClarificationProcess {
             .init(
                 callID: UUID(),
                 request: .askUser(
-                    try! .init(question: "Which app should receive the text?")
+                    try! .init(questions: [.init(question: "Which app should receive the text?")])
                 )
             )
         )

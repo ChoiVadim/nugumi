@@ -162,6 +162,30 @@ struct ChatThinkingText: View {
     }
 }
 
+/// The disc that sends what is in the field next to it.
+///
+/// One shape, two composers: Home's own and the one inside a question card. A
+/// second copy would have drifted the moment either grew a state, and the state
+/// it already has is the one that matters — a disc that looks pressable with an
+/// empty field beside it is a control lying about what it will do.
+struct ChatSendDisc: View {
+    let idle: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(Color.black.opacity(0.8))
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(idle ? FlowTheme.ink.opacity(0.22) : FlowTheme.ink))
+        }
+        .buttonStyle(.plain)
+        .disabled(idle)
+        .help("Send")
+    }
+}
+
 struct ChatProblemText: View {
     let message: String
 

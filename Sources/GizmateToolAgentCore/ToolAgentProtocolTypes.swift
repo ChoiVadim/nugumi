@@ -21,6 +21,14 @@ public enum ToolAgentProtocolLimitsV1 {
     /// what the outer orbit fans cleanly; two is the smallest real choice.
     public static let maximumOptionCount = 5
     public static let minimumOptionCount = 2
+    /// Mirrors LIMITS.askUser* in protocol.ts. Six questions is what a card can
+    /// step through before answering it stops feeling like a conversation and
+    /// starts feeling like a form, which is the point at which people close it
+    /// unread. Six options is the same argument one level down.
+    public static let askUserQuestionsPerRequest = 6
+    public static let askUserOptionsPerQuestion = 6
+    public static let askUserQuestionBytes = 1_024
+    public static let askUserOptionBytes = 200
     public static let maximumOptionBytes = 64
     public static let maximumFilterCount = 16
     public static let maximumFilterValueBytes = 255
@@ -88,58 +96,127 @@ public struct ToolAgentFixtureV1: Codable, Equatable, Sendable {
     }
 }
 
-public struct ToolAgentAskUserRequestV1: Codable, Equatable, Sendable {
+/// One question, and the answers worth offering as a tap rather than as typing.
+///
+/// `options` is a suggestion, never a constraint: the card that draws this
+/// always carries a free-text field beside the taps, because the moment a
+/// closed list is the only way to answer, an incomplete list becomes a wrong
+/// answer nobody could correct. An empty list is the ordinary case for a
+/// question whose answer is a name or a number.
+public struct ToolAgentAskUserQuestionV1: Codable, Equatable, Sendable {
     public let question: String
+    public let options: [String]
 
-    public init(question: String) throws {
+    public init(question: String, options: [String] = []) throws {
         guard !question.isEmpty,
-              question.utf8.count <= ToolAgentProtocolLimitsV1.maximumSafeMessageBytes else {
+              question.utf8.count <= ToolAgentProtocolLimitsV1.askUserQuestionBytes,
+              options.count <= ToolAgentProtocolLimitsV1.askUserOptionsPerQuestion,
+              options.allSatisfy({
+                  !$0.isEmpty && $0.utf8.count <= ToolAgentProtocolLimitsV1.askUserOptionBytes
+              }) else {
             throw ToolAgentFailureCodeV1.invalidProtocol
         }
         self.question = question
+        self.options = options
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: ToolAgentDynamicCodingKeyV1.self)
-        guard Set(container.allKeys.map(\.stringValue)) == Set(["question"]) else {
+        let keys = Set(container.allKeys.map(\.stringValue))
+        guard keys == Set(["question"]) || keys == Set(["question", "options"]) else {
             throw ToolAgentFailureCodeV1.invalidProtocol
         }
-        try self.init(question: container.decode(String.self, forKey: .required("question")))
+        try self.init(
+            question: container.decode(String.self, forKey: .required("question")),
+            options: keys.contains("options")
+                ? container.decode([String].self, forKey: .required("options"))
+                : []
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(question, forKey: .question)
+        if !options.isEmpty { try container.encode(options, forKey: .options) }
     }
 
-    private enum CodingKeys: String, CodingKey { case question }
+    private enum CodingKeys: String, CodingKey { case question, options }
 }
 
-public struct ToolAgentAskUserResponseV1: Codable, Equatable, Sendable {
-    public let answer: String
+/// Everything the builder needs to know before it writes the candidate, asked
+/// once.
+///
+/// This used to be a single `question` string, answered in the composer, and
+/// the builder spent its three-question budget one round trip at a time: three
+/// model turns burned on three sentences the user could have answered in one
+/// breath. A batch is one stop rather than three, which is also why the host
+/// budget below it is one call rather than three.
+public struct ToolAgentAskUserRequestV1: Codable, Equatable, Sendable {
+    public let questions: [ToolAgentAskUserQuestionV1]
 
-    public init(answer: String) throws {
-        guard !answer.isEmpty,
-              answer.utf8.count <= ToolAgentProtocolLimitsV1.maximumSafeMessageBytes else {
+    public init(questions: [ToolAgentAskUserQuestionV1]) throws {
+        guard !questions.isEmpty,
+              questions.count <= ToolAgentProtocolLimitsV1.askUserQuestionsPerRequest else {
             throw ToolAgentFailureCodeV1.invalidProtocol
         }
-        self.answer = answer
+        self.questions = questions
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: ToolAgentDynamicCodingKeyV1.self)
-        guard Set(container.allKeys.map(\.stringValue)) == Set(["answer"]) else {
+        guard Set(container.allKeys.map(\.stringValue)) == Set(["questions"]) else {
             throw ToolAgentFailureCodeV1.invalidProtocol
         }
-        try self.init(answer: container.decode(String.self, forKey: .required("answer")))
+        try self.init(
+            questions: container.decode(
+                [ToolAgentAskUserQuestionV1].self,
+                forKey: .required("questions")
+            )
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(answer, forKey: .answer)
+        try container.encode(questions, forKey: .questions)
     }
 
-    private enum CodingKeys: String, CodingKey { case answer }
+    private enum CodingKeys: String, CodingKey { case questions }
+}
+
+/// One answer per question, in the order they were asked.
+///
+/// An answer is allowed to be empty, and that is not a protocol slip: the card
+/// can be dismissed, and dismissing it means "you decide", not "cancel the
+/// build". The count still has to match, so an empty string is the only way to
+/// say it and the model is told to read it that way.
+public struct ToolAgentAskUserResponseV1: Codable, Equatable, Sendable {
+    public let answers: [String]
+
+    public init(answers: [String]) throws {
+        guard !answers.isEmpty,
+              answers.count <= ToolAgentProtocolLimitsV1.askUserQuestionsPerRequest,
+              answers.allSatisfy({
+                  $0.utf8.count <= ToolAgentProtocolLimitsV1.askUserQuestionBytes
+              }) else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        self.answers = answers
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: ToolAgentDynamicCodingKeyV1.self)
+        guard Set(container.allKeys.map(\.stringValue)) == Set(["answers"]) else {
+            throw ToolAgentFailureCodeV1.invalidProtocol
+        }
+        try self.init(answers: container.decode([String].self, forKey: .required("answers")))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(answers, forKey: .answers)
+    }
+
+    private enum CodingKeys: String, CodingKey { case answers }
 }
 
 public enum ToolAgentCandidateKindV1: String, Codable, Equatable, Sendable {

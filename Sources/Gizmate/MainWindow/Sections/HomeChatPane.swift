@@ -68,7 +68,14 @@ struct HomeChatPane: View {
             } else {
                 VStack(spacing: 0) {
                     transcript
-                    composer
+                    // Two fields asking for one answer makes a person read
+                    // both (DESIGN.md §12), and only one of them is attached
+                    // to the question they are looking at. The card carries
+                    // its own, so this one stands down until it is answered
+                    // or skipped.
+                    if builder.chat.pendingQuestions == nil {
+                        composer
+                    }
                 }
                 .frame(maxWidth: Self.column)
                 .frame(maxWidth: .infinity)
@@ -121,6 +128,14 @@ struct HomeChatPane: View {
                 // the words being written.
                 .onChange(of: conversation.pending) { _, _ in
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                }
+                // A question card off the bottom of the view is a build waiting
+                // on an answer nobody knows it wants. Every step of it counts,
+                // because the next question is taller or shorter than the last.
+                .onChange(of: builder.chat.pendingQuestions) { _, _ in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                    }
                 }
         }
     }
@@ -200,6 +215,13 @@ struct HomeChatPane: View {
             ChatAssistantTurn(trailingGutter: 0) {
                 ChatThinkingText(text: builder.chat.currentActivity ?? "Building")
             }
+        }
+        if let questions = builder.chat.pendingQuestions {
+            ChatQuestionCard(
+                questions: questions,
+                onAnswer: { answer in Task { await builder.chat.answer(answer) } },
+                onSkip: { Task { await builder.chat.skipQuestions() } }
+            )
         }
         if let secret = builder.chat.pendingSecret {
             secretRow(secret)
@@ -532,18 +554,11 @@ struct HomeChatPane: View {
     private var sendButton: some View {
         // A picture on its own is a message: "look at this" is what dropping one
         // in already said.
-        let idle = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && attachments.isEmpty
-        return Button(action: send) {
-            Image(systemName: "arrow.up")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Color.black.opacity(0.8))
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(idle ? FlowTheme.ink.opacity(0.22) : FlowTheme.ink))
-        }
-        .buttonStyle(.plain)
-        .disabled(idle)
-        .help("Send")
+        ChatSendDisc(
+            idle: draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && attachments.isEmpty,
+            action: send
+        )
     }
 
     // MARK: - Routing

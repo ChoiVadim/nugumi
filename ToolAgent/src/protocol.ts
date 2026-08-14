@@ -7,6 +7,10 @@ export const LIMITS = {
   modelTextBytes: 512 * 1024,
   safeMessageBytes: 1024,
   askUserBytes: 1024,
+  // Mirrors ToolAgentProtocolLimitsV1.askUser*.
+  askUserQuestionCount: 6,
+  askUserOptionCount: 6,
+  askUserOptionLabelBytes: 200,
   nameBytes: 128,
   briefBytes: 1024,
   symbolBytes: 128,
@@ -610,7 +614,22 @@ export const installedToolSchema = z
 export type InstalledTool = z.infer<typeof installedToolSchema>;
 
 export const askUserRequestSchema = z
-  .object({ question: byteString(LIMITS.askUserBytes) })
+  .object({
+    questions: z
+      .array(
+        z
+          .object({
+            question: byteString(LIMITS.askUserBytes),
+            options: z
+              .array(byteString(LIMITS.askUserOptionLabelBytes))
+              .max(LIMITS.askUserOptionCount)
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(LIMITS.askUserQuestionCount),
+  })
   .strict();
 
 export const toolResponsePayloadSchemas = {
@@ -674,7 +693,16 @@ export const toolResponsePayloadSchemas = {
       fingerprint,
     })
     .strict(),
-  ask_user: z.object({ answer: byteString(LIMITS.askUserBytes) }).strict(),
+  // An answer is allowed to be empty. Dismissing the card means "you decide",
+  // not "cancel", and the count still has to line up with the questions.
+  ask_user: z
+    .object({
+      answers: z
+        .array(byteString(LIMITS.askUserBytes, true))
+        .min(1)
+        .max(LIMITS.askUserQuestionCount),
+    })
+    .strict(),
 } as const;
 
 const modelResult = z.discriminatedUnion("kind", [

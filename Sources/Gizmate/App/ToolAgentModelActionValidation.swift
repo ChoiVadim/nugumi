@@ -95,7 +95,7 @@ enum ToolAgentModelActionValidator {
                 }
                 return true
             case .askUser:
-                guard Set(object.keys) == Set(["question"]) else { return false }
+                guard Set(object.keys) == Set(["questions"]) else { return false }
                 return decodes(arguments, as: ToolAgentAskUserRequestV1.self)
             }
         }
@@ -188,7 +188,9 @@ enum ToolAgentModelActionDiagnosis {
                 + "\"fingerprint\": {\"value\": \"<the 64 hex characters validation "
                 + "returned>\"}}."
         case .askUser:
-            return "ask_user takes exactly {\"question\": \"...\"}."
+            return "ask_user takes exactly {\"questions\": [{\"question\": \"...\", "
+                + "\"options\": [\"...\"]}]} with one to 6 questions. "
+                + "\"options\" is optional and holds up to 6 short labels."
         case .writeCandidate:
             return candidateProblem(arguments)
         }

@@ -57,7 +57,7 @@ export function makeInitialPrompt(start: StartPayload): string {
 }
 
 export const buildSystemPrompt =
-  "Build and verify one complete Gizmate tool using only the five available tools. For Create, Edit, and Fix, ask up to three short clarifications before the first candidate write only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.";
+  "Build and verify one complete Gizmate tool using only the five available tools. For Create, Edit, and Fix, ask every short clarification you need in one ask_user call before the first candidate write. Ask which input the gizmo reads and where its result should go whenever the request does not already say, since users rarely know those are choices, and otherwise ask only when a missing fact materially changes executable behavior and cannot be inferred safely. Never ask for confirmation or preferences. Preserve behavior the user did not ask to change. Change kind only when the requested behavior genuinely needs a different tool type.";
 
 export function buildDefinition(
   makeProvider: (runtime: SidecarRuntime) => ProviderBundle,
