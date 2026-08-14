@@ -637,6 +637,14 @@ final class EdgeDockController {
         host.frame = root.bounds
         glass = host
 
+        // Every edge sits on black, not on whatever the desktop happens to be.
+        // The glass stays underneath for the flare and the rim; this is the
+        // sheet the rows are read off. Painted on the content view, which is a
+        // subview of the material, so the concave `cornerPath` mask clips it
+        // for free.
+        host.contentView.wantsLayer = true
+        host.contentView.layer?.backgroundColor = NSColor.black.cgColor
+
         // Keep the content off the flare — the shape pulls in by
         // `inverseCornerRadius` on the bezel side — and, at the top, off the
         // notch as well.
