@@ -373,7 +373,7 @@ struct ToolEvalMode: Equatable {
     @MainActor
     func run() async -> Int32 {
         // Whatever the tool builder runs on, so the eval measures what ships.
-        let scope = ModelUseScope.askGizmate
+        let scope = ModelUseScope.deep
         let modelID = UserDefaults.standard
             .string(forKey: scope.defaultsKey)
             ?? scope.defaultModelID(legacySelectedModelID: nil)

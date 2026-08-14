@@ -1010,6 +1010,24 @@ are structural. Neither is reachable by adjusting spacing.
   job instead, because there the card is inline in a transcript and the header
   is chrome.
 
+- **A model tier is chosen by the weight of the work, and a tier with no work
+  is not a tier.** `ModelUseScope` is `fast` (translate, rewrite, replies:
+  runs on every selection and wants to be cheap), `standard` (the conversation
+  and screen questions) and `deep` (building and fixing gizmos). Vision is a
+  _requirement_ of `standard`, not a tier beside it, because the only jobs that
+  are handed a picture are the ones in that row.
+  `deep` exists because its absence was a bug rather than because three rows
+  look tidier than two. The builder ran on `standard` and inherited that tier's
+  vision filter, a filter it has no use for since it writes Python and JSON and
+  is never handed a picture. With the catalog narrowed to models that read
+  images, the default landed on a small local one that could not hold the
+  action envelope, and the heaviest job in the app died on its first model turn
+  having understood the request perfectly. The rule the tier encodes: never let
+  a constraint that belongs to one job decide another job's model.
+  Before adding a fourth row, name the work that would sit in it. A tier whose
+  subtitle describes nothing the app does is a setting every user has to read
+  and nobody can answer.
+
 ## 15. Copy
 
 Never write "translate", "translation" or "translator" in anything the user

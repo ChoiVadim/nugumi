@@ -45,10 +45,12 @@ extension GizmateApp {
             "liveTranslationShowSource",
             "customAppAssignmentsV1",           // per-app modes (re-synced below)
             "suppressedBuiltInAppsV1",
-            ModelUseScope.textActions.defaultsKey,
-            ModelUseScope.askGizmate.defaultsKey,
-            ModelUseScope.textActions.thinkingDefaultsKey,
-            ModelUseScope.askGizmate.thinkingDefaultsKey,
+            ModelUseScope.fast.defaultsKey,
+            ModelUseScope.standard.defaultsKey,
+            ModelUseScope.deep.defaultsKey,
+            ModelUseScope.fast.thinkingDefaultsKey,
+            ModelUseScope.standard.thinkingDefaultsKey,
+            ModelUseScope.deep.thinkingDefaultsKey,
             "selectedOllamaModel",
             "thinkingLevel",
             "cleanupLevel",              // retired Auto Cleanup; cleared so a reset
@@ -81,10 +83,10 @@ extension GizmateApp {
         InvisibilityState.applyToAllOpenWindows()
 
         if textModelID != previousTextModelID {
-            onModelSelectionChanged(for: .textActions)
+            onModelSelectionChanged(for: .fast)
         }
         if askGizmateModelID != previousAskModelID {
-            onModelSelectionChanged(for: .askGizmate)
+            onModelSelectionChanged(for: .standard)
         }
 
         updateMenuState()
@@ -189,8 +191,10 @@ extension GizmateApp: SettingsHost {
             writingStyles: styles,
             textModelID: textModelID,
             askGizmateModelID: askGizmateModelID,
+            deepModelID: deepModelID,
             textThinkingLevel: textThinkingLevel,
             askGizmateThinkingLevel: askGizmateThinkingLevel,
+            deepThinkingLevel: deepThinkingLevel,
             shortcuts: shortcuts,
             appsByCategory: appsByCategory()
         )

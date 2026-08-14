@@ -8,14 +8,18 @@ struct ModelsTab: View {
 
     var body: some View {
         Group {
-            ModelScopeCard(scope: .textActions,
-                           title: "Everyday text",
-                           subtitle: "Translate, rewrite, and smart replies.",
-                           onOpenPicker: { bridge.modelPickerScope = .textActions })
-            ModelScopeCard(scope: .askGizmate,
-                           title: "Ask Gizmate",
-                           subtitle: "Screenshot questions. Vision-capable models only.",
-                           onOpenPicker: { bridge.modelPickerScope = .askGizmate })
+            ModelScopeCard(scope: .fast,
+                           title: "Fast",
+                           subtitle: "Quick, bounded text work: translate, rewrite, replies.",
+                           onOpenPicker: { bridge.modelPickerScope = .fast })
+            ModelScopeCard(scope: .standard,
+                           title: "Standard",
+                           subtitle: "Conversation and screen questions. Vision-capable models only.",
+                           onOpenPicker: { bridge.modelPickerScope = .standard })
+            ModelScopeCard(scope: .deep,
+                           title: "Deep",
+                           subtitle: "Hard reasoning: building and fixing gizmos.",
+                           onOpenPicker: { bridge.modelPickerScope = .deep })
         }
     }
 }

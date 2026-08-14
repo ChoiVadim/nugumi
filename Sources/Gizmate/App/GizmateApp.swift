@@ -43,6 +43,13 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     var askBackend: any LLMBackend {
         backend(for: askGizmateModelID)
     }
+    /// The heavy tier. Separate from `askBackend` because building a gizmo and
+    /// holding a conversation are not the same weight of work, and because the
+    /// conversation's tier is filtered to models that can read a picture — a
+    /// requirement the builder does not have and was being narrowed by anyway.
+    var deepBackend: any LLMBackend {
+        backend(for: deepModelID)
+    }
 
     private func backend(for modelID: String) -> any LLMBackend {
         LLMBackendFactory.backend(for: modelID)
@@ -104,12 +111,12 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
                     secretRequest: secret
                 )
             },
-            // The Ask model, because that is the one a build runs on — see
+            // The Deep model, because that is the one a build runs on — see
             // `generateScriptTool`. Read at call time rather than captured: the
             // user may switch models between two messages.
             seesPictures: { [weak self] in
                 guard let self else { return false }
-                return LLMModel.option(id: self.askGizmateModelID).supportsImages
+                return LLMModel.option(id: self.deepModelID).supportsImages
             }
         )
     )
@@ -633,7 +640,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     @MainActor
     func onModelSelectionChanged(for scope: ModelUseScope) {
         bootstrap.refresh()
-        guard scope == .textActions else { return }
+        guard scope == .fast else { return }
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard let self else { return }
@@ -665,7 +672,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         if let pendingID = pendingOllamaAutoSelectID,
            case .ok = state.modelReady(for: pendingID) {
             pendingOllamaAutoSelectID = nil
-            applyModelSelection(pendingID, for: .textActions)
+            applyModelSelection(pendingID, for: .fast)
         }
         if anyBecameReady {
             applyEnginePreset(.ollama)

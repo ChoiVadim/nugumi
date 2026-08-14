@@ -71,36 +71,53 @@ extension GizmateApp {
     }
     var textModelID: String {
         get {
-            UserDefaults.standard.string(forKey: ModelUseScope.textActions.defaultsKey)
-                ?? ModelUseScope.textActions.defaultModelID(legacySelectedModelID: legacySelectedModelID)
+            UserDefaults.standard.string(forKey: ModelUseScope.fast.defaultsKey)
+                ?? ModelUseScope.fast.defaultModelID(legacySelectedModelID: legacySelectedModelID)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: ModelUseScope.textActions.defaultsKey)
+            UserDefaults.standard.set(newValue, forKey: ModelUseScope.fast.defaultsKey)
         }
     }
+    // Property names keep the pre-tier spelling, like the defaults keys they
+    // read. `askGizmateModelID` is `.standard`'s and `textModelID` is
+    // `.fast`'s; renaming them would be forty edits that change nothing a user
+    // can see.
     var askGizmateModelID: String {
         get {
-            UserDefaults.standard.string(forKey: ModelUseScope.askGizmate.defaultsKey)
-                ?? ModelUseScope.askGizmate.defaultModelID(legacySelectedModelID: legacySelectedModelID)
+            UserDefaults.standard.string(forKey: ModelUseScope.standard.defaultsKey)
+                ?? ModelUseScope.standard.defaultModelID(legacySelectedModelID: legacySelectedModelID)
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: ModelUseScope.askGizmate.defaultsKey)
+            UserDefaults.standard.set(newValue, forKey: ModelUseScope.standard.defaultsKey)
+        }
+    }
+    var deepModelID: String {
+        get {
+            UserDefaults.standard.string(forKey: ModelUseScope.deep.defaultsKey)
+                ?? ModelUseScope.deep.defaultModelID(legacySelectedModelID: legacySelectedModelID)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: ModelUseScope.deep.defaultsKey)
         }
     }
     func modelID(for scope: ModelUseScope) -> String {
         switch scope {
-        case .textActions:
+        case .fast:
             return textModelID
-        case .askGizmate:
+        case .standard:
             return askGizmateModelID
+        case .deep:
+            return deepModelID
         }
     }
     func setModelID(_ modelID: String, for scope: ModelUseScope) {
         switch scope {
-        case .textActions:
+        case .fast:
             textModelID = modelID
-        case .askGizmate:
+        case .standard:
             askGizmateModelID = modelID
+        case .deep:
+            deepModelID = modelID
         }
     }
     private var legacyThinkingRawValue: String? {
@@ -108,38 +125,52 @@ extension GizmateApp {
     }
     var textThinkingLevel: ThinkingLevel {
         get {
-            UserDefaults.standard.string(forKey: ModelUseScope.textActions.thinkingDefaultsKey)
+            UserDefaults.standard.string(forKey: ModelUseScope.fast.thinkingDefaultsKey)
                 .flatMap(ThinkingLevel.init(rawValue:))
-                ?? ModelUseScope.textActions.defaultThinkingLevel(legacyThinkingRawValue: legacyThinkingRawValue)
+                ?? ModelUseScope.fast.defaultThinkingLevel(legacyThinkingRawValue: legacyThinkingRawValue)
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: ModelUseScope.textActions.thinkingDefaultsKey)
+            UserDefaults.standard.set(newValue.rawValue, forKey: ModelUseScope.fast.thinkingDefaultsKey)
         }
     }
     var askGizmateThinkingLevel: ThinkingLevel {
         get {
-            UserDefaults.standard.string(forKey: ModelUseScope.askGizmate.thinkingDefaultsKey)
+            UserDefaults.standard.string(forKey: ModelUseScope.standard.thinkingDefaultsKey)
                 .flatMap(ThinkingLevel.init(rawValue:))
-                ?? ModelUseScope.askGizmate.defaultThinkingLevel(legacyThinkingRawValue: legacyThinkingRawValue)
+                ?? ModelUseScope.standard.defaultThinkingLevel(legacyThinkingRawValue: legacyThinkingRawValue)
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: ModelUseScope.askGizmate.thinkingDefaultsKey)
+            UserDefaults.standard.set(newValue.rawValue, forKey: ModelUseScope.standard.thinkingDefaultsKey)
+        }
+    }
+    var deepThinkingLevel: ThinkingLevel {
+        get {
+            UserDefaults.standard.string(forKey: ModelUseScope.deep.thinkingDefaultsKey)
+                .flatMap(ThinkingLevel.init(rawValue:))
+                ?? ModelUseScope.deep.defaultThinkingLevel(legacyThinkingRawValue: legacyThinkingRawValue)
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: ModelUseScope.deep.thinkingDefaultsKey)
         }
     }
     func thinkingLevel(for scope: ModelUseScope) -> ThinkingLevel {
         switch scope {
-        case .textActions:
+        case .fast:
             return textThinkingLevel
-        case .askGizmate:
+        case .standard:
             return askGizmateThinkingLevel
+        case .deep:
+            return deepThinkingLevel
         }
     }
     func setThinkingLevel(_ level: ThinkingLevel, for scope: ModelUseScope) {
         switch scope {
-        case .textActions:
+        case .fast:
             textThinkingLevel = level
-        case .askGizmate:
+        case .standard:
             askGizmateThinkingLevel = level
+        case .deep:
+            deepThinkingLevel = level
         }
     }
 

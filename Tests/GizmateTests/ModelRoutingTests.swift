@@ -3,7 +3,7 @@ import XCTest
 
 final class ModelRoutingTests: XCTestCase {
     func testEverydayTextDefaultsToLegacySelectedModel() {
-        let modelID = ModelUseScope.textActions.defaultModelID(
+        let modelID = ModelUseScope.fast.defaultModelID(
             legacySelectedModelID: "gpt-oss:20b"
         )
 
@@ -11,7 +11,7 @@ final class ModelRoutingTests: XCTestCase {
     }
 
     func testEverydayTextDefaultsToOnlineWithoutLegacySelection() {
-        let modelID = ModelUseScope.textActions.defaultModelID(
+        let modelID = ModelUseScope.fast.defaultModelID(
             legacySelectedModelID: nil
         )
 
@@ -21,7 +21,7 @@ final class ModelRoutingTests: XCTestCase {
     func testAskGizmateDefaultsToFirstVisionCapableModel() {
         // No hardcoded cloud flagship anymore — the default is the first
         // vision-capable model in the catalog (Gemma 4 locally).
-        let modelID = ModelUseScope.askGizmate.defaultModelID(
+        let modelID = ModelUseScope.standard.defaultModelID(
             legacySelectedModelID: "gpt-oss:20b"
         )
         let model = LLMModel.option(id: modelID)
@@ -31,15 +31,74 @@ final class ModelRoutingTests: XCTestCase {
     }
 
     func testAskGizmateScopeOnlyOffersVisionModels() {
-        let models = ModelUseScope.askGizmate.availableModels()
+        let models = ModelUseScope.standard.availableModels()
 
         XCTAssertFalse(models.isEmpty)
         XCTAssertTrue(models.allSatisfy(\.supportsImages))
         XCTAssertFalse(models.contains { $0.id == "gpt-oss:20b" })
     }
 
+    /// The bug this tier exists to prevent, pinned.
+    ///
+    /// The builder used to run on `.standard` and inherit its vision filter,
+    /// which narrowed the catalog to the models that read pictures and left the
+    /// heaviest job in the app on a small local one. The builder writes Python
+    /// and JSON and is never handed a picture, so a filter about pictures must
+    /// not decide what builds gizmos.
+    func testDeepScopeIsNotNarrowedByAFilterAboutPictures() {
+        let deep = ModelUseScope.deep.availableModels()
+
+        XCTAssertEqual(deep.map(\.id), LLMModel.all.map(\.id))
+        XCTAssertTrue(deep.contains { !$0.supportsImages })
+        XCTAssertGreaterThan(deep.count, ModelUseScope.standard.availableModels().count)
+    }
+
+    /// A new row must not move someone who had already chosen well: until this
+    /// tier existed, `.standard`'s model is literally what built every gizmo.
+    func testDeepInheritsAStandardChoiceThatWasAlreadyMade() {
+        let key = ModelUseScope.standard.defaultsKey
+        let restore = UserDefaults.standard.string(forKey: key)
+        defer {
+            if let restore {
+                UserDefaults.standard.set(restore, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        UserDefaults.standard.set("claude-code/claude-opus-4-8", forKey: key)
+        XCTAssertEqual(
+            ModelUseScope.deep.defaultModelID(legacySelectedModelID: nil),
+            "claude-code/claude-opus-4-8"
+        )
+
+        UserDefaults.standard.removeObject(forKey: key)
+        XCTAssertEqual(
+            ModelUseScope.deep.defaultModelID(legacySelectedModelID: nil),
+            LLMModel.defaultModel.id
+        )
+    }
+
+    /// `scope.rawValue` is reported to analytics as `model_scope`, so renaming
+    /// the cases has to leave the wire spelling alone or it breaks the series
+    /// rather than renaming it.
+    func testScopeRawValuesSurviveTheTierRename() {
+        XCTAssertEqual(ModelUseScope.fast.rawValue, "textActions")
+        XCTAssertEqual(ModelUseScope.standard.rawValue, "askGizmate")
+        XCTAssertEqual(ModelUseScope.fast.defaultsKey, "textModelID")
+        XCTAssertEqual(ModelUseScope.standard.defaultsKey, "askGizmateModelID")
+        XCTAssertEqual(ModelUseScope.fast.thinkingDefaultsKey, "textThinkingLevel")
+        XCTAssertEqual(
+            ModelUseScope.standard.thinkingDefaultsKey,
+            "askGizmateThinkingLevel"
+        )
+        // Every scope's keys are distinct, or two tiers share one setting.
+        XCTAssertEqual(Set(ModelUseScope.allCases.map(\.defaultsKey)).count, 3)
+        XCTAssertEqual(Set(ModelUseScope.allCases.map(\.thinkingDefaultsKey)).count, 3)
+    }
+
     func testEverydayThinkingDefaultsToLegacyThinkingLevel() {
-        let level = ModelUseScope.textActions.defaultThinkingLevel(
+        let level = ModelUseScope.fast.defaultThinkingLevel(
             legacyThinkingRawValue: ThinkingLevel.medium.rawValue
         )
 
@@ -47,7 +106,7 @@ final class ModelRoutingTests: XCTestCase {
     }
 
     func testEverydayThinkingDefaultsLowWithoutLegacySelection() {
-        let level = ModelUseScope.textActions.defaultThinkingLevel(
+        let level = ModelUseScope.fast.defaultThinkingLevel(
             legacyThinkingRawValue: nil
         )
 
@@ -55,7 +114,7 @@ final class ModelRoutingTests: XCTestCase {
     }
 
     func testAskGizmateThinkingDefaultsHigh() {
-        let level = ModelUseScope.askGizmate.defaultThinkingLevel(
+        let level = ModelUseScope.standard.defaultThinkingLevel(
             legacyThinkingRawValue: ThinkingLevel.low.rawValue
         )
 
@@ -64,23 +123,31 @@ final class ModelRoutingTests: XCTestCase {
 
     func testScopedThinkingMenuTitlesUsePurposeFirstLabels() {
         XCTAssertEqual(
-            ModelUseScope.textActions.thinkingMenuTitle(for: .low),
-            "Everyday text: Low"
+            ModelUseScope.fast.thinkingMenuTitle(for: .low),
+            "Fast: Low"
         )
         XCTAssertEqual(
-            ModelUseScope.askGizmate.thinkingMenuTitle(for: .high),
-            "Ask Gizmate: High"
+            ModelUseScope.standard.thinkingMenuTitle(for: .high),
+            "Standard: High"
+        )
+        XCTAssertEqual(
+            ModelUseScope.deep.thinkingMenuTitle(for: .high),
+            "Deep: High"
         )
     }
 
     func testScopedMenuTitlesUsePurposeFirstLabels() {
         XCTAssertEqual(
-            ModelUseScope.textActions.menuTitle(for: LLMModel.option(id: "gpt-oss:120b-cloud")),
-            "Everyday text: gpt-oss:120b"
+            ModelUseScope.fast.menuTitle(for: LLMModel.option(id: "gpt-oss:120b-cloud")),
+            "Fast: gpt-oss:120b"
         )
         XCTAssertEqual(
-            ModelUseScope.askGizmate.menuTitle(for: LLMModel.option(id: "gemma4")),
-            "Ask Gizmate: Gemma 4"
+            ModelUseScope.standard.menuTitle(for: LLMModel.option(id: "gemma4")),
+            "Standard: Gemma 4"
+        )
+        XCTAssertEqual(
+            ModelUseScope.deep.menuTitle(for: LLMModel.option(id: "gpt-oss:20b")),
+            "Deep: gpt-oss:20b"
         )
     }
 
@@ -89,10 +156,10 @@ final class ModelRoutingTests: XCTestCase {
         // providers (OpenAI, Anthropic API key, Gemini, OpenRouter) no longer
         // have hardcoded presets — they return the first discovered model, or
         // nil until a key + /models fetch populates the catalog.
-        XCTAssertEqual(EngineModelPreset.ollama.modelID(for: .textActions), "gpt-oss:20b")
-        XCTAssertEqual(EngineModelPreset.ollama.modelID(for: .askGizmate), "gemma4")
+        XCTAssertEqual(EngineModelPreset.ollama.modelID(for: .fast), "gpt-oss:20b")
+        XCTAssertEqual(EngineModelPreset.ollama.modelID(for: .standard), "gemma4")
         // Claude Code (no /models endpoint) keeps a prefixed curated default.
-        if let ccText = EngineModelPreset.cloud(.anthropicClaudeCode).modelID(for: .textActions) {
+        if let ccText = EngineModelPreset.cloud(.anthropicClaudeCode).modelID(for: .fast) {
             XCTAssertEqual(LLMModel.option(id: ccText).cloudProvider, .anthropicClaudeCode)
         } else {
             XCTFail("Claude Code must keep a curated preset")
@@ -110,7 +177,7 @@ final class ModelRoutingTests: XCTestCase {
                 }
                 let model = LLMModel.option(id: id)
                 XCTAssertEqual(model.id, id, "preset \(id) must resolve in the catalog")
-                if scope == .askGizmate {
+                if scope == .standard {
                     XCTAssertTrue(model.supportsImages, "Ask Gizmate preset \(id) must be vision-capable")
                 }
             }
@@ -127,8 +194,8 @@ final class ModelRoutingTests: XCTestCase {
 
     func testCodexEnginePresetResolvesMiniAndFlagshipFromCatalog() {
         // With the fallback catalog: mini for everyday text, flagship for Ask.
-        let text = EngineModelPreset.cloud(.openAICodex).modelID(for: .textActions)
-        let ask = EngineModelPreset.cloud(.openAICodex).modelID(for: .askGizmate)
+        let text = EngineModelPreset.cloud(.openAICodex).modelID(for: .fast)
+        let ask = EngineModelPreset.cloud(.openAICodex).modelID(for: .standard)
 
         XCTAssertNotNil(text)
         XCTAssertNotNil(ask)

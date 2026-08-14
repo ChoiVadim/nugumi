@@ -318,52 +318,102 @@ struct LLMModel: Equatable {
     }
 }
 
+/// Which model does a job, chosen by how heavy the job is.
+///
+/// Three weights, because Gizmate has three and not because a matrix looks
+/// tidy. `fast` runs on every selection and wants to be cheap. `standard` is
+/// the conversation, and it has to be able to read a picture the person
+/// attached, which is a requirement of the tier rather than a tier of its own.
+/// `deep` writes and repairs code against a strict protocol.
+///
+/// `deep` exists because its absence was a bug. The builder ran on `standard`,
+/// inherited that tier's vision filter — a filter it has no use for, since it
+/// writes Python and JSON — and with the list narrowed to vision-capable models
+/// the default landed on a local Gemma that cannot hold the action envelope.
+/// The heaviest job in the app was being chosen by a criterion that has nothing
+/// to do with it. Anything hard and unattended belongs here.
 enum ModelUseScope: String, CaseIterable {
-    case textActions
-    case askGizmate
+    // Raw values keep their pre-rename spelling for the same reason the
+    // defaults keys below do, one system over: `scope.rawValue` is reported to
+    // analytics as `model_scope`, and renaming it would break the series rather
+    // than rename it.
+    case fast = "textActions"
+    case standard = "askGizmate"
+    case deep
 
     /// Persisted UserDefaults keys keep their pre-rename spelling — renaming them
     /// would silently reset every existing user's model choice.
     var defaultsKey: String {
         switch self {
-        case .textActions:
+        case .fast:
             return "textModelID"
-        case .askGizmate:
+        case .standard:
             return "askGizmateModelID"
+        case .deep:
+            return "deepModelID"
         }
     }
 
     func defaultModelID(legacySelectedModelID: String?) -> String {
         switch self {
-        case .textActions:
+        case .fast:
             if let legacySelectedModelID,
                LLMModel.all.contains(where: { $0.id == legacySelectedModelID }) {
                 return legacySelectedModelID
             }
             return LLMModel.defaultModel.id
-        case .askGizmate:
+        case .standard:
             // No hardcoded cloud flagship anymore — the first vision-capable
             // model in `all` (Gemma 4 locally, or a curated Claude Code model)
             // is the safe default until the user picks one.
             return LLMModel.all.first(where: \.supportsImages)?.id ?? LLMModel.defaultModel.id
+        case .deep:
+            // Whatever the conversation is already using, because until this
+            // tier existed that is literally what built every gizmo, and a new
+            // row must not silently move anyone who had chosen well. Read from
+            // defaults rather than from `standard`'s own default so a deliberate
+            // choice carries and an accident does not.
+            if let chosen = UserDefaults.standard.string(forKey: Self.standard.defaultsKey),
+               LLMModel.all.contains(where: { $0.id == chosen }) {
+                return chosen
+            }
+            // Nothing chosen: the app's baseline model, unfiltered. Note what
+            // this is *not* — `first(where: \.supportsImages)`, which is what
+            // `standard` uses and what put a small local vision model on the
+            // heaviest job. There is no "strongest model" signal in the catalog
+            // to sort by, so the honest fallback is the baseline, and
+            // `EngineModelPreset` moves this to a real flagship the moment a
+            // provider actually connects.
+            return LLMModel.defaultModel.id
         }
     }
 
     func menuTitle(for model: LLMModel) -> String {
         switch self {
-        case .textActions:
-            return "Everyday text: \(model.shortName)"
-        case .askGizmate:
-            return "Ask Gizmate: \(model.shortName)"
+        case .fast:
+            return "Fast: \(model.shortName)"
+        case .standard:
+            return "Standard: \(model.shortName)"
+        case .deep:
+            return "Deep: \(model.shortName)"
         }
     }
 
     func availableModels(from models: [LLMModel] = LLMModel.all) -> [LLMModel] {
         switch self {
-        case .textActions:
+        case .fast:
             return models
-        case .askGizmate:
+        case .standard:
+            // The conversation is handed pictures, so a model that cannot read
+            // one has nothing to say about the thing it was shown.
             return models.filter(\.supportsImages)
+        case .deep:
+            // Every model, deliberately. The builder writes Python and JSON and
+            // never sees a picture on its own; a build started from one arrives
+            // as the words the conversation wrote into the BUILD line. Filtering
+            // this tier by vision is what put the heaviest job on a small local
+            // model, so the filter that does not apply is not applied.
+            return models
         }
     }
 }
@@ -380,18 +430,28 @@ enum EngineModelPreset {
     func modelID(for scope: ModelUseScope) -> String? {
         switch self {
         case .ollama:
-            return scope == .textActions ? "gpt-oss:20b" : "gemma4"
+            switch scope {
+            case .fast: return "gpt-oss:20b"
+            // The one curated local model that reads a picture.
+            case .standard: return "gemma4"
+            // Not gemma4. Deep needs no vision and does need to hold a strict
+            // action protocol across a dozen turns, which is the thing the
+            // small vision model cannot do.
+            case .deep: return "gpt-oss:20b"
+            }
         case .cloud(.anthropicClaudeCode):
-            return scope == .textActions ? "claude-code/claude-sonnet-4-6" : "claude-code/claude-opus-4-8"
+            return scope == .fast
+                ? "claude-code/claude-sonnet-4-6"
+                : "claude-code/claude-opus-4-8"
         case .cloud(.openAICodex):
             // Codex slugs are discovered per account — resolve against the
             // live catalog instead of hardcoding ids.
             let slugs = CodexModelCache.slugs
             let slug: String?
             switch scope {
-            case .textActions:
+            case .fast:
                 slug = slugs.first { $0.hasSuffix("-mini") && !$0.contains("codex") } ?? slugs.first
-            case .askGizmate:
+            case .standard, .deep:
                 slug = slugs.first { !$0.contains("mini") && !$0.contains("codex") } ?? slugs.first
             }
             return slug.map { "codex/\($0)" }
@@ -402,8 +462,9 @@ enum EngineModelPreset {
             // Preset leaves the slot put instead of jumping to a missing model.
             let models = LLMModel.cloudModels(for: provider)
             switch scope {
-            case .textActions: return models.first?.id
-            case .askGizmate:   return (models.first(where: \.supportsImages) ?? models.first)?.id
+            case .fast: return models.first?.id
+            case .standard: return (models.first(where: \.supportsImages) ?? models.first)?.id
+            case .deep: return models.first?.id
             }
         }
     }
@@ -432,31 +493,35 @@ enum ThinkingLevel: String, CaseIterable {
 extension ModelUseScope {
     var thinkingDefaultsKey: String {
         switch self {
-        case .textActions:
+        case .fast:
             return "textThinkingLevel"
-        case .askGizmate:
+        case .standard:
             // Pre-rename spelling on purpose — see `defaultsKey`.
             return "askGizmateThinkingLevel"
+        case .deep:
+            return "deepThinkingLevel"
         }
     }
 
     func defaultThinkingLevel(legacyThinkingRawValue: String?) -> ThinkingLevel {
         switch self {
-        case .textActions:
+        case .fast:
             return legacyThinkingRawValue
                 .flatMap(ThinkingLevel.init(rawValue:))
                 ?? .low
-        case .askGizmate:
+        case .standard, .deep:
             return .high
         }
     }
 
     func thinkingMenuTitle(for level: ThinkingLevel) -> String {
         switch self {
-        case .textActions:
-            return "Everyday text: \(level.menuTitle)"
-        case .askGizmate:
-            return "Ask Gizmate: \(level.menuTitle)"
+        case .fast:
+            return "Fast: \(level.menuTitle)"
+        case .standard:
+            return "Standard: \(level.menuTitle)"
+        case .deep:
+            return "Deep: \(level.menuTitle)"
         }
     }
 }

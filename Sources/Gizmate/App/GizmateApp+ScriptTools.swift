@@ -160,7 +160,7 @@ extension GizmateApp {
         clarificationCancellation: @escaping @Sendable () async -> Void,
         secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
-        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: deepModelID) {
             return .failure(setupError)
         }
         guard let uv = await uvForBuilding(onPartial: onPartial) else {
@@ -170,8 +170,8 @@ extension GizmateApp {
             let generated = try await ToolAgentLiveBuilder.build(
                 description: description,
                 images: images.map(\.input),
-                backend: askBackend,
-                thinkingLevel: askGizmateThinkingLevel,
+                backend: deepBackend,
+                thinkingLevel: deepThinkingLevel,
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
@@ -201,7 +201,7 @@ extension GizmateApp {
         clarificationCancellation: @escaping @Sendable () async -> Void,
         secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
-        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: deepModelID) {
             return .failure(setupError)
         }
         guard let uv = await uvForBuilding(onPartial: onPartial) else {
@@ -214,8 +214,8 @@ extension GizmateApp {
                 instruction: instruction,
                 images: images.map(\.input),
                 failure: nil,
-                backend: askBackend,
-                thinkingLevel: askGizmateThinkingLevel,
+                backend: deepBackend,
+                thinkingLevel: deepThinkingLevel,
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
@@ -239,7 +239,7 @@ extension GizmateApp {
         clarificationCancellation: @escaping @Sendable () async -> Void,
         secretRequest: @escaping ToolAgentLiveBuilder.SecretRequest = { _ in false }
     ) async -> Result<GeneratedTool, Error> {
-        if let setupError = translationErrorIfBootstrapNeedsSetup(for: askGizmateModelID) {
+        if let setupError = translationErrorIfBootstrapNeedsSetup(for: deepModelID) {
             return .failure(setupError)
         }
         guard let uv = await uvForBuilding(onPartial: onPartial) else {
@@ -251,8 +251,8 @@ extension GizmateApp {
                 script: script,
                 instruction: "Repair this tool without changing its intended behavior.",
                 failure: failure,
-                backend: askBackend,
-                thinkingLevel: askGizmateThinkingLevel,
+                backend: deepBackend,
+                thinkingLevel: deepThinkingLevel,
                 uv: uv,
                 onStatus: onPartial,
                 clarification: clarification,
@@ -437,6 +437,9 @@ extension GizmateApp {
         let screenPoint = NSEvent.mouseLocation
         let loadingBar = showInstantTranslationLoading(near: screenPoint)
         let backend = askBackend
+        // Standard, not Deep, and that is not an oversight. An agent gizmo is
+        // handed the screenshot its input captured, so it belongs to the tier
+        // whose contract is "can read a picture". The builder never is.
         let thinkingLevel = askGizmateThinkingLevel
 
         Task { @MainActor [weak self] in

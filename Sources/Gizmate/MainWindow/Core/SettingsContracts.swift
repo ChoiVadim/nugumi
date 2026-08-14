@@ -13,10 +13,15 @@ struct SettingsSnapshot {
     var invisibilityEnabled: Bool
     var launchAtLogin: Bool = false
     var writingStyles: [AppCategory: WritingStyle]
+    // Named for the defaults keys they carry rather than for their tiers:
+    // `textModelID` is `.fast`, `askGizmateModelID` is `.standard`. See
+    // `ModelUseScope.defaultsKey` for why the old spellings stay.
     var textModelID: String
     var askGizmateModelID: String
+    var deepModelID: String
     var textThinkingLevel: ThinkingLevel
     var askGizmateThinkingLevel: ThinkingLevel
+    var deepThinkingLevel: ThinkingLevel
     var shortcuts: [GlobalShortcutAction: GlobalShortcut]
     var appsByCategory: [AppCategory: [AppRef]] = [:]
 
@@ -27,10 +32,18 @@ struct SettingsSnapshot {
         appsByCategory[category] ?? []
     }
     func modelID(for scope: ModelUseScope) -> String {
-        scope == .textActions ? textModelID : askGizmateModelID
+        switch scope {
+        case .fast: return textModelID
+        case .standard: return askGizmateModelID
+        case .deep: return deepModelID
+        }
     }
     func thinkingLevel(for scope: ModelUseScope) -> ThinkingLevel {
-        scope == .textActions ? textThinkingLevel : askGizmateThinkingLevel
+        switch scope {
+        case .fast: return textThinkingLevel
+        case .standard: return askGizmateThinkingLevel
+        case .deep: return deepThinkingLevel
+        }
     }
     func shortcut(for action: GlobalShortcutAction) -> GlobalShortcut {
         shortcuts[action] ?? action.defaultShortcut
