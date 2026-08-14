@@ -369,6 +369,18 @@ share of users regardless of what looks right.
   strip stays a peek whatever any of them says: it is the thing you aim at to
   open a dock, not the dock. A result panel always carries a handle, because it
   owns the edge until it closes itself by definition.
+- **A tab opens by being pulled as well as clicked.** A tab sticking out of the
+  bezel looks like something you take hold of, and a dock is already closed by
+  dragging it back into that bezel, so the pull was the half of the pair that
+  did not work. `DockTab` fires the same pick once the drag has travelled 16pt
+  off the edge — far below the 64pt a close asks for, because opening is cheap
+  and undone by moving away, while a close throws a panel out. Simultaneous
+  with the button rather than replacing it: a press that never moves stays a
+  press, and a pull that ends back inside the tab firing both costs nothing,
+  since `transition` refuses a state it is already in. What it deliberately is
+  not is a panel that follows the pointer out: the strip does not morph into
+  the dock (see the arrival rule above), so crossing the threshold hands over
+  to the normal arrival out of the bezel.
 - **Every way out has a visible affordance.** A dock that stays open carries
   `DockDragHandle` on its inner edge. An exit nobody can see is not an exit.
   The handle follows the setting above rather than the edge — which was two

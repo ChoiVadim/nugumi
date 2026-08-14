@@ -72,6 +72,16 @@ private struct DockTab: View {
     let onPick: () -> Void
 
     @State private var hovering = false
+    @State private var pulled = false
+
+    /// How far off the bezel a tab has to be pulled before it opens.
+    ///
+    /// Short, because opening is cheap and undone by moving away, unlike the
+    /// 64pt `EdgeDockController.dragCloseThreshold` asks for before it throws a
+    /// panel away. Pulling is the gesture the shape suggests — a tab sticking
+    /// out of the edge looks like something you take hold of — and the click
+    /// stays, so nobody has to learn it.
+    private static let pullToOpen: CGFloat = 16
 
     var body: some View {
         Button(action: onPick) {
@@ -91,7 +101,31 @@ private struct DockTab: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        // Simultaneous rather than instead of the button: a press that never
+        // moves has to stay a press. Firing both — a pull that ends back inside
+        // the tab — costs nothing, because `EdgeDockController.transition`
+        // refuses a state it is already in.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    guard !pulled, pull(value.translation) > Self.pullToOpen else { return }
+                    pulled = true
+                    onPick()
+                }
+                .onEnded { _ in pulled = false }
+        )
         .help(item.title)
+    }
+
+    /// Travel away from the bezel, and only that. A tab dragged along its own
+    /// edge, or pushed back into it, is not being opened.
+    private func pull(_ translation: CGSize) -> CGFloat {
+        switch edge {
+        case .left: return translation.width
+        case .right: return -translation.width
+        // SwiftUI's y grows downward, which for the notch is inward.
+        case .top: return translation.height
+        }
     }
 
     /// Which one you are looking at, said with a shape rather than a shade.
