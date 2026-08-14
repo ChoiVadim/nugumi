@@ -86,11 +86,27 @@ final class RadialMenuButtonView: NSView {
     private var liquidGlassView: NSView?
     private let iconView = NSImageView()
     /// The fill that inverts the picked disc, under the icon and inside
-    /// whichever glass backs the circle. A plain view rather than
+    /// whichever glass backs the circle. Its own view rather than
     /// `NSGlassEffectView.tintColor` so both backings invert identically and
-    /// neither path needs its own runtime KVC probe — and because inverting
-    /// means covering the material, not tinting it.
-    private let fillView = NSView()
+    /// neither path needs a runtime KVC probe — and because inverting means
+    /// covering the material, not tinting it.
+    ///
+    /// An `NSBox` specifically, because it holds a live `NSColor` and resolves
+    /// it at draw time. A layer's `backgroundColor` takes a `CGColor`, which
+    /// FREEZES a dynamic system colour against whatever appearance was current
+    /// when it was read — and the app pins `NSApp.appearance` to darkAqua while
+    /// this panel pins itself to the SYSTEM one, so a disc built before it
+    /// joins the panel froze the dark palette and painted white-on-white on a
+    /// light-mode Mac. The box also repaints itself if the system theme flips
+    /// while the ring is open, which the frozen colour could not.
+    private let fillView: NSBox = {
+        let box = NSBox()
+        box.boxType = .custom
+        box.borderWidth = 0
+        box.titlePosition = .noTitle
+        box.fillColor = .labelColor
+        return box
+    }()
 
     /// Runtime-only NSGlassEffectView factory. KVC keys are guarded by
     /// responds checks so a future rename degrades to the fallback glass
@@ -133,10 +149,9 @@ final class RadialMenuButtonView: NSView {
             contentHost = circleView
         }
 
-        fillView.wantsLayer = true
         fillView.frame = contentHost.bounds
         fillView.autoresizingMask = [.width, .height]
-        fillView.layer?.cornerRadius = diameter / 2
+        fillView.cornerRadius = diameter / 2
         fillView.alphaValue = 0
         contentHost.addSubview(fillView)
 
@@ -190,14 +205,11 @@ final class RadialMenuButtonView: NSView {
     /// glyph spends the crossfade in its new colour against the old ground,
     /// which is the one combination that is unreadable — and a pick that
     /// eases in reads as lag on a menu the cursor is sweeping through.
+    ///
+    /// Both colours are live `NSColor`s, so the swap is one pair for both
+    /// appearances: dark ground and light glyph on a light-mode Mac, the other
+    /// way round on a dark one, with nothing here to branch on.
     private func applyInverted(_ on: Bool) {
-        // `cgColor` freezes whatever appearance is current when it is read, and
-        // the ring's panel picks its own (system light/dark, not the app's
-        // forced dark). Resolve against this view's, or the fill comes out of
-        // the wrong palette on a light-mode Mac.
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            fillView.layer?.backgroundColor = NSColor.labelColor.cgColor
-        }
         fillView.alphaValue = on ? 1 : 0
         iconView.contentTintColor = on ? .textBackgroundColor : .labelColor
     }
@@ -222,7 +234,7 @@ final class RadialMenuButtonView: NSView {
         }
         // The fill autoresizes with the glass but its radius does not, and a
         // circle grown 16% with the old radius is visibly a rounded square.
-        fillView.layer?.cornerRadius = scaled / 2
+        fillView.cornerRadius = scaled / 2
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.22
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
