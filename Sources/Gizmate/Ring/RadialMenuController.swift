@@ -95,6 +95,9 @@ final class RadialActionMenuController {
     private var pick: (layer: Int, index: Int)?
     /// Every button currently drawn swollen. See `refreshHighlights`.
     private var swollen: [RadialMenuButtonView] = []
+    /// The one button currently drawn inverted — the pick. Tracked apart from
+    /// `swollen` because that list also holds the breadcrumb parents.
+    private var inverted: RadialMenuButtonView?
     private var dismissMonitors: [Any] = []
     private var didClose = false
 
@@ -419,12 +422,14 @@ final class RadialActionMenuController {
         Self.fade(layer.bubbles[safe: target.index] ?? nil, to: visible)
     }
 
-    /// The one place a button swells, at every layer. Swollen means picked, or
-    /// parent of an open orbit — the breadcrumb saying which button these
-    /// others came out of, which has to survive the cursor travelling past it
-    /// into its own orbit.
+    /// The one place a button changes how it looks, at every layer, in two
+    /// strengths. Swollen means picked, or parent of an open orbit — the
+    /// breadcrumb saying which button these others came out of, which has to
+    /// survive the cursor travelling past it into its own orbit. Inverted means
+    /// picked and nothing else: with two or three discs swollen at once, size
+    /// alone stops saying which one a click would run.
     ///
-    /// Diffed against what is already swollen rather than reasserted, because
+    /// Diffed against what is already drawn rather than reasserted, because
     /// `setHighlighted` starts a spring animation and restarting it on every
     /// mouse move would leave the discs permanently mid-bounce.
     private func refreshHighlights() {
@@ -435,10 +440,9 @@ final class RadialActionMenuController {
         if let index = openChildIndex, let button = openOrbit?.buttons[safe: index] {
             next.append(button)
         }
-        if let pick,
-           let layer = orbitLayer(pick.layer),
-           let button = layer.buttons[safe: pick.index] {
-            next.append(button)
+        let picked = pick.flatMap { orbitLayer($0.layer)?.buttons[safe: $0.index] }
+        if let picked {
+            next.append(picked)
         }
         for button in swollen where !next.contains(where: { $0 === button }) {
             button.setHighlighted(false)
@@ -447,6 +451,12 @@ final class RadialActionMenuController {
             button.setHighlighted(true)
         }
         swollen = next
+
+        if inverted !== picked {
+            inverted?.setInverted(false)
+            picked?.setInverted(true)
+            inverted = picked
+        }
     }
 
     /// The buttons and callouts of one layer, with the ring itself dressed up

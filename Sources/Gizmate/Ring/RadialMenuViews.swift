@@ -85,6 +85,12 @@ final class RadialMenuButtonView: NSView {
     /// symbol (same constraint as GlassHostView). nil → circleView fallback.
     private var liquidGlassView: NSView?
     private let iconView = NSImageView()
+    /// The fill that inverts the picked disc, under the icon and inside
+    /// whichever glass backs the circle. A plain view rather than
+    /// `NSGlassEffectView.tintColor` so both backings invert identically and
+    /// neither path needs its own runtime KVC probe — and because inverting
+    /// means covering the material, not tinting it.
+    private let fillView = NSView()
 
     /// Runtime-only NSGlassEffectView factory. KVC keys are guarded by
     /// responds checks so a future rename degrades to the fallback glass
@@ -127,6 +133,13 @@ final class RadialMenuButtonView: NSView {
             contentHost = circleView
         }
 
+        fillView.wantsLayer = true
+        fillView.frame = contentHost.bounds
+        fillView.autoresizingMask = [.width, .height]
+        fillView.layer?.cornerRadius = diameter / 2
+        fillView.alphaValue = 0
+        contentHost.addSubview(fillView)
+
         iconView.image = image
         iconView.contentTintColor = .labelColor
         iconView.imageAlignment = .alignCenter
@@ -137,9 +150,8 @@ final class RadialMenuButtonView: NSView {
         iconView.autoresizingMask = [.width, .height]
         contentHost.addSubview(iconView)
 
-        // Resting look is the inverted glass (colors swapped vs. the old
-        // default) — highlight flips it back to plain system glass.
         applyHighlight(false)
+        applyInverted(false)
     }
 
     required init?(coder: NSCoder) {
@@ -166,11 +178,34 @@ final class RadialMenuButtonView: NSView {
         applyHighlight(on)
     }
 
+    /// Colours swapped, which is a STRICTLY narrower state than swollen: the
+    /// parent of every open orbit stays swollen as a breadcrumb, so swelling
+    /// alone cannot say which of two or three lit discs a click would run.
+    /// Exactly one button is inverted at a time, and it is the pick.
+    func setInverted(_ on: Bool) {
+        applyInverted(on)
+    }
+
+    /// No fade. The fill and the glyph have to swap on the same frame or the
+    /// glyph spends the crossfade in its new colour against the old ground,
+    /// which is the one combination that is unreadable — and a pick that
+    /// eases in reads as lag on a menu the cursor is sweeping through.
+    private func applyInverted(_ on: Bool) {
+        // `cgColor` freezes whatever appearance is current when it is read, and
+        // the ring's panel picks its own (system light/dark, not the app's
+        // forced dark). Resolve against this view's, or the fill comes out of
+        // the wrong palette on a light-mode Mac.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            fillView.layer?.backgroundColor = NSColor.labelColor.cgColor
+        }
+        fillView.alphaValue = on ? 1 : 0
+        iconView.contentTintColor = on ? .textBackgroundColor : .labelColor
+    }
+
     private func applyHighlight(_ on: Bool) {
-        // Bare glass always — no color wash. Hover/selection is a springy
-        // size bump of the glass disc itself. Only the CHILD's frame moves;
-        // the root frame belongs to the ring's fan/collapse animations, so
-        // the bump can never fight them (bounds stays the fixed diameter).
+        // A springy size bump of the glass disc itself. Only the CHILD's frame
+        // moves; the root frame belongs to the ring's fan/collapse animations,
+        // so the bump can never fight them (bounds stays the fixed diameter).
         let diameter = RadialMenuLayoutPolicy.buttonDiameter
         let scaled = on ? diameter * 1.16 : diameter
         let inset = (diameter - scaled) / 2
@@ -185,6 +220,9 @@ final class RadialMenuButtonView: NSView {
         } else {
             circleView.layer?.cornerRadius = scaled / 2
         }
+        // The fill autoresizes with the glass but its radius does not, and a
+        // circle grown 16% with the old radius is visibly a rounded square.
+        fillView.layer?.cornerRadius = scaled / 2
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.22
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.45, 0.5, 1)
