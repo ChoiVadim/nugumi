@@ -532,6 +532,16 @@ share of users regardless of what looks right.
   Dragging the dock shut is the other half of that rule and deliberately does
   **not** clear them: circling the button you have to click is only useful if
   you can then put the chat away and click it.
+- **A rare panel-wide action floats over the content; it does not buy a header
+  row.** A dock is 360pt wide, and a strip above the first message is paid for
+  on every reading of the panel by an action used once a day. Ask's "New chat"
+  is a `ResetDiscButton` overlaid on the top-trailing corner of the transcript,
+  inside the top fade where content is dissolving anyway, and absent entirely
+  until there is something to clear. Notes has a real header row because that
+  row also carries the tag chips — it earns its height; a lone button does not.
+  Nor may such an action move into the composer: the camera and the pencil are
+  there to say what _this message_ carries, and a conversation-wide action
+  standing among them reads as one more thing the next question will do.
 - **A resident does not have to be a ring action or a gizmo.** The folder hub
   is a third kind: it is not in `residentBuiltIns` (no `RingActionID` names
   it) and not a gizmo output in `dockableGizmoOutputs` (no `GizmateTool`

@@ -37,10 +37,40 @@ struct AskChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             transcript
+                .overlay(alignment: .topTrailing) { newChatButton }
             composer
         }
         .foregroundStyle(FlowTheme.ink)
         .onAppear { composerFocused = true }
+    }
+
+    /// Starts over: empties the transcript and, with it, the context the model
+    /// is answering against. "New chat" rather than "Clear" because both of
+    /// those happen and only one of them is visible — a cleared panel that
+    /// still carried twenty turns of history into the next question would be
+    /// the worse surprise.
+    ///
+    /// Floated over the transcript instead of sitting in a header row of its
+    /// own. A dock is 360pt wide and this is a once-a-day action; a permanent
+    /// strip above the first message costs every reading of the chat to pay for
+    /// it. It rides in the top fade, where content is dissolving anyway, and it
+    /// is absent until there is something to clear. It also cannot go in the
+    /// composer: the camera and the pencil are there to say what *this message*
+    /// carries, and this is about the whole conversation.
+    @ViewBuilder
+    private var newChatButton: some View {
+        if !conversation.turns.isEmpty {
+            ResetDiscButton(
+                symbol: "square.and.pencil",
+                label: "",
+                accessibilityTitle: "New chat"
+            ) {
+                conversation.clear()
+                composerFocused = true
+            }
+            .help("New chat")
+            .padding(.trailing, 6)
+        }
     }
 
     // MARK: - Transcript
