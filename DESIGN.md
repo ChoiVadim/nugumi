@@ -520,7 +520,18 @@ share of users regardless of what looks right.
   screen the strokes were never drawn on. Arming is what pins the frame.
   It follows that an answer's shapes need a life of their own once the surface
   showing them stops closing. They clear on the next send, on arming the pencil,
-  on Escape, and with the dock; a modal answer used to take them with it.
+  and on Escape; a modal answer used to take them with it.
+- **Escape clears the shapes, wherever you are, and it is not a layered
+  dismissal.** The layer ignores mouse events by design, so a keystroke is the
+  only exit it can own, and it needs a local monitor as well as a global one:
+  the edge dock is key while its chat is open, and a global monitor never sees
+  that Escape. That was the bug — Escape closed the dock and left the shapes
+  standing over the screen with nothing left to explain them. Neither monitor
+  consumes the event. One Escape means "clear this answer", and whatever else
+  it meant on the way past still happens.
+  Dragging the dock shut is the other half of that rule and deliberately does
+  **not** clear them: circling the button you have to click is only useful if
+  you can then put the chat away and click it.
 - **A resident does not have to be a ring action or a gizmo.** The folder hub
   is a third kind: it is not in `residentBuiltIns` (no `RingActionID` names
   it) and not a gizmo output in `dockableGizmoOutputs` (no `GizmateTool`

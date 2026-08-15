@@ -235,10 +235,9 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     /// The same canvas serving a `.drawnScreen` gizmo instead of Ask. Kept
     /// apart so a gizmo run started while Ask is open cannot tear down Ask's.
     var gizmoDrawingOverlay: AskDrawingOverlayController?
-    /// A `.annotate` gizmo's shapes, and the Esc watcher that clears them.
-    /// Ask's copy dies with its panel; this one has no panel to die with.
+    /// A `.annotate` gizmo's shapes. Kept apart from Ask's copy so one run
+    /// cannot tear down the other's; both clear themselves on Esc.
     var gizmoAnnotationOverlay: AskAnnotationOverlayController?
-    var gizmoAnnotationDismissMonitor: Any?
     var isScreenshotTranslationRunning = false
     var isAskGizmateRunning = false
     /// True while a cloud sign-in flow (ChatGPT or Claude) is on screen.

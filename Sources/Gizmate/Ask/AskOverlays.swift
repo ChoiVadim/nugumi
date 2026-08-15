@@ -230,11 +230,17 @@ final class AskAnnotationOverlayController {
     private let panel: AnnotationPanel
     private let canvas: AnnotationCanvasView
     private var didClose = false
+    private var dismissMonitors: [Any] = []
+    private let onDismiss: (() -> Void)?
 
     let screenFrame: NSRect
 
-    init(screenFrame: NSRect) {
+    /// `onDismiss` fires when Esc cleared the layer, so the owner can drop its
+    /// reference — the shapes are gone either way, but an owner still holding a
+    /// closed controller would try to draw the next answer into it.
+    init(screenFrame: NSRect, onDismiss: (() -> Void)? = nil) {
         self.screenFrame = screenFrame
+        self.onDismiss = onDismiss
         canvas = AnnotationCanvasView(frame: NSRect(origin: .zero, size: screenFrame.size))
         canvas.screenFrame = screenFrame
         panel = AnnotationPanel(
@@ -260,6 +266,36 @@ final class AskAnnotationOverlayController {
         panel.ignoresMouseEvents = true
         panel.contentView = canvas
         panel.orderFrontRegardless()
+        installDismissMonitors()
+    }
+
+    /// Esc clears the shapes, from wherever the user happens to be.
+    ///
+    /// The layer ignores mouse events by design, so a keystroke is the only way
+    /// out it can own. Two monitors because either app can be frontmost: global
+    /// for the app the shapes are drawn over, local for Gizmate's own windows —
+    /// the edge dock is key while its chat is open, and a global monitor never
+    /// sees that Esc. Neither consumes the event: one Esc means "clear this
+    /// answer", and whatever else it meant (closing the dock, cancelling a
+    /// field) still happens.
+    private func installDismissMonitors() {
+        let clear = { [weak self] in
+            Task { @MainActor in
+                guard let self, !self.didClose else { return }
+                self.close()
+                self.onDismiss?()
+            }
+        }
+        dismissMonitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+                guard Int(event.keyCode) == kVK_Escape else { return }
+                clear()
+            },
+            NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                if Int(event.keyCode) == kVK_Escape { clear() }
+                return event
+            }
+        ].compactMap { $0 }
     }
 
     /// Replaces the whole layer with this answer's shapes. Re-ordering front
@@ -274,6 +310,8 @@ final class AskAnnotationOverlayController {
     func close() {
         guard !didClose else { return }
         didClose = true
+        dismissMonitors.forEach(NSEvent.removeMonitor)
+        dismissMonitors = []
         panel.close()
     }
 }

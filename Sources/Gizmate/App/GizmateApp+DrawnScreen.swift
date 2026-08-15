@@ -119,39 +119,17 @@ extension GizmateApp {
             existing.show(shapes)
         } else {
             gizmoAnnotationOverlay?.close()
-            let overlay = AskAnnotationOverlayController(screenFrame: screenFrame)
+            let overlay = AskAnnotationOverlayController(screenFrame: screenFrame) { [weak self] in
+                self?.gizmoAnnotationOverlay = nil
+            }
             overlay.show(shapes)
             gizmoAnnotationOverlay = overlay
         }
-        installGizmoAnnotationDismissMonitor()
     }
 
     @MainActor
     func closeGizmoAnnotations() {
         gizmoAnnotationOverlay?.close()
         gizmoAnnotationOverlay = nil
-        if let monitor = gizmoAnnotationDismissMonitor {
-            NSEvent.removeMonitor(monitor)
-            gizmoAnnotationDismissMonitor = nil
-        }
-    }
-
-    /// Ask's annotation layer is torn down with the panel that produced it.
-    /// Standing alone it needs its own way out, and it ignores mouse events by
-    /// design, so the dismissal is a key watcher: Esc anywhere clears it.
-    ///
-    /// Global rather than local, because the shapes sit over the user's app and
-    /// Gizmate is not frontmost by the time they appear. Global monitors cannot
-    /// consume the event, which is right here — Esc keeps working in whatever
-    /// the user is actually using.
-    @MainActor
-    private func installGizmoAnnotationDismissMonitor() {
-        guard gizmoAnnotationDismissMonitor == nil else { return }
-        gizmoAnnotationDismissMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: .keyDown
-        ) { [weak self] event in
-            guard Int(event.keyCode) == kVK_Escape else { return }
-            Task { @MainActor in self?.closeGizmoAnnotations() }
-        }
     }
 }

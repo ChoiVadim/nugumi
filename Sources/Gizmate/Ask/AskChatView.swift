@@ -75,8 +75,22 @@ struct AskChatView: View {
                 .padding(.horizontal, 14)
                 .padding(.top, 16)
                 .padding(.bottom, 4)
+                // DESIGN.md §8: thin, overlay, auto-hiding, light knob — a
+                // user set to "always show scroll bars" would otherwise get a
+                // permanent legacy track down the side of a narrow dock.
+                .background(ScrollerConfigurator())
             }
-            .scrollIndicators(.never)
+            // Opens where the conversation left off, not at its beginning: a
+            // transcript that survives every close is read from the end, and
+            // scrolling back down was the price of every reopen. A scroll
+            // anchor rather than an `onAppear` jump — the rows are lazy, so
+            // the bottom one does not exist yet at the moment `onAppear` runs.
+            .defaultScrollAnchor(.bottom)
+            // The dock has no scrollbar of its own and the transcript is long,
+            // so with indicators off there was nothing at all to say how far
+            // back the history went. `.automatic` is macOS's overlay bar: it
+            // appears while scrolling and fades out after.
+            .scrollIndicators(.automatic)
             .mask(Self.topFade)
             // Both, not just the turn count: an answer streaming in grows the
             // transcript continuously, and following only completed turns would

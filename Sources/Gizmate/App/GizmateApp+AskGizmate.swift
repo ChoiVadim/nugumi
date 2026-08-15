@@ -497,7 +497,11 @@ extension GizmateApp {
             existing.show(annotations)
         } else {
             askAnnotationOverlay?.close()
-            let overlay = AskAnnotationOverlayController(screenFrame: capture.screenFrame)
+            let overlay = AskAnnotationOverlayController(
+                screenFrame: capture.screenFrame
+            ) { [weak self] in
+                self?.askAnnotationOverlay = nil
+            }
             overlay.show(annotations)
             askAnnotationOverlay = overlay
         }
