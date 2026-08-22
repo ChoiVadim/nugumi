@@ -167,7 +167,7 @@ extension GizmateApp {
             // a selection gesture, surface the permission request — throttled so
             // we never spam System Settings on repeated drags / stray gestures.
             if selectionDisplayMode != .off,
-               isLikelySelectionGesture(event, upLocation: NSEvent.mouseLocation),
+               isDragSelectionGesture(event, upLocation: NSEvent.mouseLocation),
                NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
                 let now = Date()
                 if lastAccessibilitySelectionPromptAt.map({ now.timeIntervalSince($0) > 15 }) ?? true {
@@ -201,11 +201,26 @@ extension GizmateApp {
             return
         }
 
+        // A stationary double-click does nothing. It selects a word in text
+        // but *activates* rows/folders/chats everywhere else, and there is no
+        // pre-flight signal to tell those apart — so it popped the button on
+        // every word lookup and beeped through the synthesized ⌘C on every
+        // navigation. Vadim asked for it gone on 2026-08-22, after having
+        // asked for it back on 2026-07-16 (which reversed 2026-07-03). Drag
+        // to select; the shortcut still reads whatever is selected.
+        if event.clickCount >= 2, !isDragSelectionGesture(event, upLocation: mouseLocation) {
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier {
+                translateButtonController?.close()
+                translateButtonController = nil
+            }
+            return
+        }
+
         // Capture the frontmost app at gesture time, not at completion time —
         // the user may have switched apps during the 80ms+AX-read window, and
         // we want to attribute the unreadable-selection signal to the app
         // where the drag actually happened.
-        let isSelectionGesture = isLikelySelectionGesture(event, upLocation: mouseLocation)
+        let isSelectionGesture = isDragSelectionGesture(event, upLocation: mouseLocation)
         let frontmostApp = NSWorkspace.shared.frontmostApplication
         let frontmostBundleID = frontmostApp?.bundleIdentifier
         let frontmostAppName = frontmostApp?.localizedName ?? frontmostBundleID ?? "this app"
@@ -339,30 +354,11 @@ extension GizmateApp {
     }
 
     private func shouldAttemptClipboardSelectionFallback(for event: NSEvent, upLocation: NSPoint) -> Bool {
-        guard isLikelySelectionGesture(event, upLocation: upLocation) else {
+        guard isDragSelectionGesture(event, upLocation: upLocation) else {
             return false
         }
 
         return !selectionReader.isLikelyEditableElementAtMouseLocation()
-    }
-
-    /// Drag OR double-click. Double-click selects a word in text but
-    /// *activates* rows/folders/chats elsewhere, and in AX-opaque apps
-    /// (KakaoTalk) there is no pre-flight signal to tell the cases apart —
-    /// so a navigation double-click there beeps via the synthesized ⌘C.
-    /// Vadim accepted that trade-off on 2026-07-16 (reversing the
-    /// 2026-07-03 drag-only decision) so double-click word lookup works
-    /// in AX-opaque apps again.
-    private func isLikelySelectionGesture(_ event: NSEvent, upLocation: NSPoint) -> Bool {
-        guard event.type == .leftMouseUp else {
-            return false
-        }
-
-        if event.clickCount >= 2 {
-            return true
-        }
-
-        return isDragSelectionGesture(event, upLocation: upLocation)
     }
 
     /// A real drag: ≥15pt of travel with no refuting signal (drag-and-drop
