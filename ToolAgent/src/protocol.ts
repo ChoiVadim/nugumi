@@ -133,6 +133,10 @@ const promptCandidate = z
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
+    // Optional, never defaulted: the host re-encodes a candidate byte for
+    // byte, so a key the model didn't write must stay absent on the way back.
+    usesNotes: z.boolean().optional(),
+    usesVoice: z.boolean().optional(),
   })
   .strict();
 
@@ -352,6 +356,9 @@ const agentCandidate = z
       .array(byteString(LIMITS.secretNameBytes))
       .max(LIMITS.secretNameCount)
       .default([]),
+    // Optional, never defaulted — same byte-for-byte reason as promptCandidate.
+    usesNotes: z.boolean().optional(),
+    usesVoice: z.boolean().optional(),
   })
   .strict();
 
@@ -503,6 +510,11 @@ const installedPromptTool = z
     trigger: z.enum(["always", "selection"]),
     prompt: byteString(LIMITS.promptBytes),
     appliesTargetLanguage: z.boolean(),
+    // Whether the tool already reads the user's Notes / Voice settings —
+    // carried into an edit so a revision that never mentioned them keeps
+    // them, the same way secretNames is.
+    usesNotes: z.boolean().optional(),
+    usesVoice: z.boolean().optional(),
   })
   .strict();
 
@@ -565,6 +577,9 @@ const installedAgentTool = z
       .array(byteString(LIMITS.secretNameBytes))
       .max(LIMITS.secretNameCount)
       .default([]),
+    // Same carry-through as installedPromptTool's.
+    usesNotes: z.boolean().optional(),
+    usesVoice: z.boolean().optional(),
   })
   .strict();
 

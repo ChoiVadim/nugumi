@@ -168,6 +168,14 @@ Choose the candidate kind before writing it:
   instruction, written to the agent, not to the user), maxSteps, timeoutSeconds,
   secretNames, and zero or one fixture.
 
+A prompt or agent candidate may also set usesNotes: true, which appends the
+notes the user keeps in Gizmate's Notes tab to its prompt as context. Set it
+when the request is about their notes — pair it with input "none" when the
+notes are the whole subject — or when knowing what they have saved would make
+every answer better. Its sibling usesVoice: true layers the user's own writing
+register, dictionary and snippets over the prompt; set it only for gizmos that
+write in the user's voice, never for ones that produce structured output.
+
 === THE SEVEN ACTIONS ===
 
 What a native candidate's "nativeAction" may be. Each is a thing macOS already
@@ -293,7 +301,10 @@ is nothing to detect them by before they exist.
   has to point at — "обведи то что я отмечу", "look at what I circle", "this
   button here". Plain "screenshot" is the same picture without the drawing step;
   prefer it when the request needs no pointing. Trigger "always".
-- "none": nothing at all. For a tool whose whole job is its side effect.
+- "none": nothing at all. For a tool whose whole job is its side effect, or one
+  that works over context the user has already given Gizmate — a prompt or
+  agent candidate with usesNotes reads their saved notes without being handed
+  anything.
 
 There is no clipboard-text and no clipboard-link input: text the user is looking
 at is "selection", and anything else they supply per run is "ask".

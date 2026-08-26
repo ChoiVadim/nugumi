@@ -23,6 +23,7 @@ struct ToolEvalCase {
     var input: ToolInput?
     var output: ToolOutput?
     var declaresNetwork: Bool?
+    var usesNotes: Bool?
     var minimumAssurance: ToolAgentAssuranceV1?
     /// How many options the finished gizmo must carry. The point of the case is
     /// that the model reached for options unprompted, so this asserts the count,
@@ -123,6 +124,20 @@ enum ToolEvalSuite {
         // for a list of rows with several lines and a bar when the request is
         // about numbers, rather than a grid of squares. A recipe naming those
         // fields would grade the prompt instead of the builder.
+        // A gizmo whose whole subject is what the user has already saved: no
+        // input to hand it, the notes context is the material. Grades whether
+        // the capability description makes the model reach for input "none"
+        // plus usesNotes, rather than demanding a selection it will never get.
+        // `ToolInput.none` spelled out — a bare `.none` in this position is
+        // `Optional.none` and asserts nothing.
+        ToolEvalCase(
+            name: "prompt-none-notes-digest",
+            request: "сделай кнопку, которая соберёт всё из моих заметок "
+                + "в короткую сводку",
+            kind: .prompt,
+            input: ToolInput.none,
+            usesNotes: true
+        ),
         ToolEvalCase(
             name: "surface-machine-readings",
             request: "хочу видеть сбоку экрана как загружен мой мак: процессор, "
@@ -532,6 +547,7 @@ struct ToolEvalMode: Equatable {
         check("input", testCase.input, generated.tool.input)
         check("output", testCase.output, generated.tool.output)
         check("declaresNetwork", testCase.declaresNetwork, generated.tool.declaresNetwork)
+        check("usesNotes", testCase.usesNotes, generated.tool.usesNotes)
         if let minimum = testCase.minimumOptions, generated.tool.options.count < minimum {
             failures.append(
                 "options: expected at least \(minimum), got \(generated.tool.options.count)"

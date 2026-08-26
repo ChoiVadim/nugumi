@@ -37,6 +37,55 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         }
     }
 
+    /// The exact defect class this file exists for, on the two booleans instead
+    /// of the enums: `usesNotes`/`usesVoice` shipped on `GizmateTool` without a
+    /// wire field, so every chat edit silently reset them to off. The contract
+    /// now: the installed snapshot carries them in, a candidate that omits them
+    /// keeps what the tool had, and only an explicit false turns them off.
+    func testNotesAndVoiceFlagsSurviveAChatEditThatNeverMentionedThem() throws {
+        var existing = GizmateTool(name: "Digest", kind: .prompt, prompt: "Summarize.")
+        existing.usesNotes = true
+        existing.usesVoice = true
+
+        let snapshot = try ToolAgentLiveBuilder.installedTool(from: existing, script: "")
+        XCTAssertEqual(snapshot.usesNotes, true, "an edit session must see the current value")
+        XCTAssertEqual(snapshot.usesVoice, true)
+
+        func candidate(usesNotes: Bool?, usesVoice: Bool?) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .prompt,
+                name: "Digest",
+                brief: "Summarizes the notes.",
+                symbolName: "sparkles",
+                input: .none,
+                output: .panel,
+                trigger: .always,
+                prompt: "Summarize.",
+                usesNotes: usesNotes,
+                usesVoice: usesVoice
+            )
+        }
+        let silent = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(usesNotes: nil, usesVoice: nil),
+            preserving: existing
+        )
+        XCTAssertEqual(silent.tool.usesNotes, true, "nil is \"didn't say\", not \"turn it off\"")
+        XCTAssertEqual(silent.tool.usesVoice, true)
+
+        let cleared = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(usesNotes: false, usesVoice: false),
+            preserving: existing
+        )
+        XCTAssertEqual(cleared.tool.usesNotes, false, "an explicit false must still win")
+        XCTAssertEqual(cleared.tool.usesVoice, false)
+
+        let fresh = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(usesNotes: true, usesVoice: nil)
+        )
+        XCTAssertEqual(fresh.tool.usesNotes, true, "a new build takes the candidate's word")
+        XCTAssertEqual(fresh.tool.usesVoice, false, "and nil on a new build means off")
+    }
+
     /// The editor is what the user picks from, and the protocol is what the chat
     /// builder validates against. When the editor offers more than the protocol
     /// accepts, saving works and opening that gizmo in the builder throws

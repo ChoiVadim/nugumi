@@ -33,6 +33,15 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     public let options: [String]?
     public let prompt: String
     public let appliesTargetLanguage: Bool
+    /// `.prompt` and `.agent` only: appends the user's saved Notes to the
+    /// prompt as context (see `NotesContext`). Optional for the same reason
+    /// `options` is — the validator's byte-for-byte re-encode means an absent
+    /// key must stay absent, and nil is "didn't say", which an edit resolves
+    /// as "keep what the tool already had".
+    public let usesNotes: Bool?
+    /// Same contract as `usesNotes`, for the user's Voice settings — writing
+    /// register, dictionary and snippets.
+    public let usesVoice: Bool?
     public let nativeAction: ToolAgentNativeActionV1?
     public let target: String
     public let source: String
@@ -74,6 +83,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         options: [String]? = nil,
         prompt: String = "",
         appliesTargetLanguage: Bool = false,
+        usesNotes: Bool? = nil,
+        usesVoice: Bool? = nil,
         nativeAction: ToolAgentNativeActionV1? = nil,
         target: String = "",
         source: String = "",
@@ -120,6 +131,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.options = options
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
+        self.usesNotes = usesNotes
+        self.usesVoice = usesVoice
         self.nativeAction = nativeAction
         self.target = target
         self.source = source
@@ -185,6 +198,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             Bool.self,
             forKey: .appliesTargetLanguage
         ) ?? false
+        let usesNotes = try container.decodeIfPresent(Bool.self, forKey: .usesNotes)
+        let usesVoice = try container.decodeIfPresent(Bool.self, forKey: .usesVoice)
         let nativeAction = try container.decodeIfPresent(
             ToolAgentNativeActionV1.self,
             forKey: .nativeAction
@@ -251,6 +266,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.options = options
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
+        self.usesNotes = usesNotes
+        self.usesVoice = usesVoice
         self.nativeAction = nativeAction
         self.target = target
         self.source = source
@@ -280,6 +297,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         case .prompt:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(appliesTargetLanguage, forKey: .appliesTargetLanguage)
+            try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
+            try container.encodeIfPresent(usesVoice, forKey: .usesVoice)
         case .native:
             try container.encode(nativeAction, forKey: .nativeAction)
             try container.encode(target, forKey: .target)
@@ -304,6 +323,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             try container.encode(maxSteps, forKey: .maxSteps)
             try container.encode(timeoutSeconds, forKey: .timeoutSeconds)
             try container.encodeIfPresent(secretNames, forKey: .secretNames)
+            try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
+            try container.encodeIfPresent(usesVoice, forKey: .usesVoice)
         }
     }
 
@@ -503,6 +524,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         case options
         case prompt
         case appliesTargetLanguage
+        case usesNotes
+        case usesVoice
         case nativeAction
         case target
         case source
@@ -538,6 +561,12 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
     public let options: [String]?
     public let prompt: String
     public let appliesTargetLanguage: Bool
+    /// Whether the installed tool already reads the user's Notes, carried into
+    /// an edit session for the same reason `secretNames` is: without it, a
+    /// revision that never mentioned notes would silently strip them.
+    public let usesNotes: Bool?
+    /// Same carry-through as `usesNotes`, for the user's Voice settings.
+    public let usesVoice: Bool?
     public let nativeAction: ToolAgentNativeActionV1?
     public let target: String
     public let source: String
@@ -568,6 +597,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         options: [String]? = nil,
         prompt: String = "",
         appliesTargetLanguage: Bool = false,
+        usesNotes: Bool? = nil,
+        usesVoice: Bool? = nil,
         nativeAction: ToolAgentNativeActionV1? = nil,
         target: String = "",
         source: String = "",
@@ -612,6 +643,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         self.options = options
         self.prompt = prompt
         self.appliesTargetLanguage = appliesTargetLanguage
+        self.usesNotes = usesNotes
+        self.usesVoice = usesVoice
         self.nativeAction = nativeAction
         self.target = target
         self.source = source
@@ -638,6 +671,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             options: try container.decodeIfPresent([String].self, forKey: .options),
             prompt: try container.decodeIfPresent(String.self, forKey: .prompt) ?? "",
             appliesTargetLanguage: try container.decodeIfPresent(Bool.self, forKey: .appliesTargetLanguage) ?? false,
+            usesNotes: try container.decodeIfPresent(Bool.self, forKey: .usesNotes),
+            usesVoice: try container.decodeIfPresent(Bool.self, forKey: .usesVoice),
             nativeAction: try container.decodeIfPresent(ToolAgentNativeActionV1.self, forKey: .nativeAction),
             target: try container.decodeIfPresent(String.self, forKey: .target) ?? "",
             source: try container.decodeIfPresent(String.self, forKey: .source) ?? "",
@@ -674,6 +709,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case .prompt:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(appliesTargetLanguage, forKey: .appliesTargetLanguage)
+            try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
+            try container.encodeIfPresent(usesVoice, forKey: .usesVoice)
         case .native:
             try container.encode(nativeAction, forKey: .nativeAction)
             try container.encode(target, forKey: .target)
@@ -698,6 +735,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             if !secretNames.isEmpty {
                 try container.encode(secretNames, forKey: .secretNames)
             }
+            try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
+            try container.encodeIfPresent(usesVoice, forKey: .usesVoice)
         }
     }
 
@@ -841,6 +880,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case options
         case prompt
         case appliesTargetLanguage
+        case usesNotes
+        case usesVoice
         case nativeAction
         case target
         case source

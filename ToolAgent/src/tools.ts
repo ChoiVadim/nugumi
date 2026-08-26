@@ -130,6 +130,8 @@ export function createTools(runtime: SidecarRuntime) {
       trigger: Type.Union([Type.Literal("always"), Type.Literal("selection")]),
       prompt: Type.String({ maxLength: 16_384 }),
       appliesTargetLanguage: Type.Boolean(),
+      usesNotes: Type.Optional(Type.Boolean()),
+      usesVoice: Type.Optional(Type.Boolean()),
     }),
     Type.Object({
       ...commonCandidate,
@@ -202,6 +204,8 @@ export function createTools(runtime: SidecarRuntime) {
       secretNames: Type.Optional(
         Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8 }),
       ),
+      usesNotes: Type.Optional(Type.Boolean()),
+      usesVoice: Type.Optional(Type.Boolean()),
     }),
   ]);
   const tool = <T extends ReturnType<typeof Type.Object>>(definition: {

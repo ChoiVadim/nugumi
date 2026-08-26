@@ -169,6 +169,10 @@ enum ToolAgentLiveBuilder {
             // prompt does, so both carry it into an edit.
             prompt: kind == .prompt || kind == .agent ? tool.prompt : "",
             appliesTargetLanguage: kind == .prompt && tool.appliesTargetLanguage,
+            // Carried so an edit session shows the model the current values —
+            // without them, a revision that never mentioned notes stripped them.
+            usesNotes: kind == .prompt || kind == .agent ? tool.usesNotes : nil,
+            usesVoice: kind == .prompt || kind == .agent ? tool.usesVoice : nil,
             nativeAction: kind == .native
                 ? ToolAgentNativeActionV1(rawValue: tool.nativeAction.rawValue)
                 : nil,
@@ -581,7 +585,9 @@ enum ToolAgentLiveBuilder {
                 : [],
             layout: output == .surface ? candidate.layout : nil,
             maxSteps: candidate.maxSteps,
-            brief: candidate.brief
+            brief: candidate.brief,
+            usesVoice: candidate.usesVoice ?? false,
+            usesNotes: candidate.usesNotes ?? false
         )
         return GeneratedTool(
             tool: tool,
@@ -595,7 +601,14 @@ enum ToolAgentLiveBuilder {
         from candidate: ToolAgentCandidateV1,
         preserving existing: GizmateTool
     ) -> GeneratedTool {
-        preservingIdentity(of: existing, in: generatedTool(from: candidate))
+        var generated = preservingIdentity(of: existing, in: generatedTool(from: candidate))
+        // nil is "the model didn't say", and an edit that never mentioned notes
+        // or voice must not strip them — only an explicit false turns them off.
+        // This is the same defect class ToolProtocolEnumParityTests guards: a
+        // field the round trip silently drops.
+        generated.tool.usesNotes = candidate.usesNotes ?? existing.usesNotes
+        generated.tool.usesVoice = candidate.usesVoice ?? existing.usesVoice
+        return generated
     }
 
     static func preservingIdentity(

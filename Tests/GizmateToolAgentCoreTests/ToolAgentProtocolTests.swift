@@ -606,6 +606,61 @@ final class ToolAgentProtocolTests: XCTestCase {
         XCTAssertEqual(decoded.options, ["short", "medium", "long"])
     }
 
+    /// Same wire contract as options: absent must stay absent through the
+    /// byte-for-byte re-encode, and nil must be distinguishable from an
+    /// explicit false — nil is "the model didn't say", which an edit resolves
+    /// as "keep what the tool already had".
+    func testNotesAndVoiceFlagsAreOmittedWhenAbsentAndRoundTripWhenPresent() throws {
+        func candidate(usesNotes: Bool?, usesVoice: Bool?) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .prompt,
+                name: "Digest",
+                brief: "Reads what the user saved.",
+                symbolName: "sparkles",
+                input: .none,
+                output: .panel,
+                trigger: .always,
+                prompt: "Summarize the notes above.",
+                usesNotes: usesNotes,
+                usesVoice: usesVoice
+            )
+        }
+        let plain = try candidate(usesNotes: nil, usesVoice: nil)
+        let plainJSON = String(data: try JSONEncoder().encode(plain), encoding: .utf8) ?? ""
+        XCTAssertFalse(plainJSON.contains("usesNotes"))
+        XCTAssertFalse(plainJSON.contains("usesVoice"))
+
+        for flag in [true, false] {
+            let set = try candidate(usesNotes: flag, usesVoice: flag)
+            let decoded = try JSONDecoder().decode(
+                ToolAgentCandidateV1.self,
+                from: try JSONEncoder().encode(set)
+            )
+            XCTAssertEqual(decoded.usesNotes, flag)
+            XCTAssertEqual(decoded.usesVoice, flag)
+        }
+
+        let installed = try ToolAgentInstalledToolV1(
+            kind: .agent,
+            name: "Digest",
+            brief: "Reads what the user saved.",
+            symbolName: "sparkles",
+            input: .none,
+            output: .panel,
+            trigger: .always,
+            prompt: "Summarize the notes above.",
+            usesNotes: true,
+            usesVoice: true,
+            timeoutSeconds: 120
+        )
+        let carried = try JSONDecoder().decode(
+            ToolAgentInstalledToolV1.self,
+            from: try JSONEncoder().encode(installed)
+        )
+        XCTAssertEqual(carried.usesNotes, true)
+        XCTAssertEqual(carried.usesVoice, true)
+    }
+
     /// One option is not a choice, six do not fan cleanly, and a blank circle is
     /// a button with no name. All three are the model's mistake to fix, not
     /// something to quietly repair on the way in.
