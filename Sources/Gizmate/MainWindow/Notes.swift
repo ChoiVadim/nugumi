@@ -186,6 +186,29 @@ final class NotesStore: ObservableObject {
         onChange?()
     }
 
+    /// Puts `id` where `targetID` currently sits, the way dragging one card
+    /// onto another reads.
+    ///
+    /// Both indices are looked up in the whole array rather than in whatever
+    /// tag tab is on screen: a filtered list is a subsequence of this one, so
+    /// moving inside the filter has to land in the same place here or the two
+    /// orders drift apart the moment the tab changes.
+    ///
+    /// Removing before inserting is what makes a downward drag land *after* the
+    /// target and an upward one *before* it — everything past the old position
+    /// has shifted left by one, so the same index means two different things
+    /// depending on the direction, which is exactly the two behaviours wanted.
+    func move(_ id: UUID, toPositionOf targetID: UUID) {
+        guard id != targetID,
+              let from = notes.firstIndex(where: { $0.id == id }),
+              let to = notes.firstIndex(where: { $0.id == targetID })
+        else { return }
+        let note = notes.remove(at: from)
+        notes.insert(note, at: min(to, notes.count))
+        save()
+        onChange?()
+    }
+
     func delete(_ id: UUID) {
         notes.removeAll { $0.id == id }
         save()

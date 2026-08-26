@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Everything the user asked Gizmate to keep. Ticked notes are what gizmos with
 /// "Use my notes" turned on receive as background — see `NotesContext`.
@@ -294,10 +295,19 @@ struct NotesGrid: View {
     /// per row and should follow their text.
     var cardHeight: CGFloat? = 186
 
-    /// Most recently edited first, so a just-saved note is where the eye lands.
+    /// The store's own order: the order they were made, and then whatever
+    /// order they were dragged into. Sorting by `updatedAt` put every card the
+    /// user was mid-way through typing at the top, so the list rearranged
+    /// itself under the pointer while it was being read — and a list you cannot
+    /// arrange is one nobody can make mean anything.
     private var items: [Note] {
-        store.notes(taggedWith: tagID).sorted { $0.updatedAt > $1.updatedAt }
+        store.notes(taggedWith: tagID)
     }
+
+    /// What is being dragged, so a card knows whether the pointer arriving over
+    /// it is a reorder. Stale after a cancelled drop, which costs nothing: no
+    /// `dropEntered` fires without a drag, and the next drag overwrites it.
+    @State private var dragging: UUID?
 
     /// Column count follows the window: three across a wide window, one when the
     /// sidebar has squeezed the detail column down.
@@ -353,11 +363,48 @@ struct NotesGrid: View {
                 store.update(note.id, usedAsContext: !note.usedAsContext)
             },
             onDelete: { store.delete(note.id) },
+            onDragHandle: {
+                dragging = note.id
+                return NSItemProvider(object: note.id.uuidString as NSString)
+            },
             fixedHeight: cardHeight
         )
         // Keyed by id alone: re-keying on content would rebuild the card
         // mid-keystroke and drop the caret.
         .id(note.id)
+        .onDrop(
+            of: [.text],
+            delegate: NoteReorderDrop(target: note.id, dragging: $dragging, store: store)
+        )
+    }
+}
+
+/// Reorders on the way past rather than on the drop: the cards shuffle under
+/// the pointer as it crosses them, so the list itself is the preview and there
+/// is no ghost card to draw or insertion bar to place.
+///
+/// A plain-text payload rather than a `Transferable` of our own. A custom type
+/// has to be declared in an `Info.plist`, which a `swift run` build does not
+/// have at all — the same trap that left every drag in `EdgesDiagram` silently
+/// doing nothing. The id travels as a string, which the system already knows.
+private struct NoteReorderDrop: DropDelegate {
+    let target: UUID
+    @Binding var dragging: UUID?
+    let store: NotesStore
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging, dragging != target else { return }
+        MainActor.assumeIsolated { store.move(dragging, toPositionOf: target) }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        // The move already happened on the way in; this only ends the gesture.
+        dragging = nil
+        return true
     }
 }
 
@@ -376,6 +423,11 @@ private struct NoteCard: View {
     let onTag: (UUID?) -> Void
     let onToggleContext: () -> Void
     let onDelete: () -> Void
+    /// Starts a reorder drag. Lives on a handle of its own rather than on the
+    /// card, because the card is a title field over a text view — a drag begun
+    /// anywhere on it is someone selecting words, and `NSTextView` wins that
+    /// argument against any SwiftUI gesture wrapped around it.
+    let onDragHandle: () -> NSItemProvider
     /// A fixed card height keeps every card in a grid *row* the same height.
     /// `nil` drops that and follows the text instead — right wherever the cards
     /// are stacked one per row, like the dock, where uniform height only buys
@@ -421,6 +473,7 @@ private struct NoteCard: View {
         onTag: @escaping (UUID?) -> Void,
         onToggleContext: @escaping () -> Void,
         onDelete: @escaping () -> Void,
+        onDragHandle: @escaping () -> NSItemProvider,
         fixedHeight: CGFloat?
     ) {
         self.note = note
@@ -431,6 +484,7 @@ private struct NoteCard: View {
         self.onTag = onTag
         self.onToggleContext = onToggleContext
         self.onDelete = onDelete
+        self.onDragHandle = onDragHandle
         self.fixedHeight = fixedHeight
         _title = State(initialValue: note.title)
         _text = State(initialValue: note.text)
@@ -504,6 +558,13 @@ private struct NoteCard: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(FlowTheme.inkTertiary)
+                .contentShape(Rectangle())
+                .onDrag(onDragHandle)
+                .help("Drag to reorder")
+
             Button(action: onToggleContext) {
                 Image(systemName: note.usedAsContext ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12.5, weight: .medium))
