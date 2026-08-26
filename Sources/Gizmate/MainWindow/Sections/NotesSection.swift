@@ -703,46 +703,47 @@ private struct NoteCard: View {
         return !paste.keepsText
     }
 
-    /// A strip of thumbnails above the body; a click opens the full view, and
-    /// the cross that fades in on hover removes — the same treatment as the
-    /// card's own bin (DESIGN.md §9).
+    /// Thumbnails above the body, wrapping onto new rows; a click opens the
+    /// full view, and the cross that fades in on hover removes — the same
+    /// treatment as the card's own bin (DESIGN.md §9).
+    ///
+    /// Wrapped rather than scrolled sideways: a `ScrollView` here took the
+    /// wheel from the list of cards around it, so the list stopped wherever
+    /// the pointer rested on a picture.
     private var pictures: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(note.images.enumerated()), id: \.element) { index, id in
-                    Group {
-                        if let image = thumbnail(id) {
-                            Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-                        } else {
-                            Image(systemName: "photo")
-                                .foregroundStyle(FlowTheme.inkTertiary)
-                        }
+        FlowWrap(spacing: 6) {
+            ForEach(Array(note.images.enumerated()), id: \.element) { index, id in
+                Group {
+                    if let image = thumbnail(id) {
+                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Image(systemName: "photo")
+                            .foregroundStyle(FlowTheme.inkTertiary)
                     }
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .contentShape(Rectangle())
-                    .onTapGesture { onOpenImage(index) }
-                    .cursor(.pointingHand)
-                    .overlay(alignment: .topTrailing) {
-                        Button { onRemoveImage(id) } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white, .black.opacity(0.55))
-                                .contentShape(Rectangle())
-                        }
-                        .plainButton()
-                        .padding(2)
-                        .opacity(hoveredImage == id ? 1 : 0)
-                        .help("Remove picture")
-                    }
-                    .onHover { inside in
-                        if inside { hoveredImage = id } else if hoveredImage == id { hoveredImage = nil }
-                    }
-                    .contextMenu { Button("Remove picture") { onRemoveImage(id) } }
                 }
+                .frame(width: 56, height: 56)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+                .onTapGesture { onOpenImage(index) }
+                .cursor(.pointingHand)
+                .overlay(alignment: .topTrailing) {
+                    Button { onRemoveImage(id) } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.white, .black.opacity(0.55))
+                            .contentShape(Rectangle())
+                    }
+                    .plainButton()
+                    .padding(2)
+                    .opacity(hoveredImage == id ? 1 : 0)
+                    .help("Remove picture")
+                }
+                .onHover { inside in
+                    if inside { hoveredImage = id } else if hoveredImage == id { hoveredImage = nil }
+                }
+                .contextMenu { Button("Remove picture") { onRemoveImage(id) } }
             }
         }
-        .frame(height: 56)
     }
 
     private var actions: some View {

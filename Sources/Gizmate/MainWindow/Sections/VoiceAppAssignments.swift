@@ -121,8 +121,10 @@ enum AppIconProvider {
     }
 }
 
-/// Minimal flow layout that wraps its children onto new rows as needed.
-private struct FlowWrap: Layout {
+/// Minimal flow layout that wraps its children onto new rows as needed. Also
+/// what a note card lays its thumbnails out with: a horizontal `ScrollView`
+/// there swallowed the wheel from the list around it.
+struct FlowWrap: Layout {
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
