@@ -209,7 +209,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         - A model doing meaning or writing work over whatever they have selected, or over a screenshot, or what they dictate, or files they pick. Understanding, fixing, rewriting, explaining, checking, translating. The subject matter does not matter and neither does how varied the input is, because a model reads each one. Code is text like anything else.
         - One of a closed set of Mac actions: opening things, running a Shortcut, moving files.
         - A script, when the job is the same every time it runs.
-        - Something that works out its own steps, when what to do next depends on what the last step found.
+        - Something that works out its own steps, when what to do next depends on what the last step found. While it works it can read and search the web, no key or setup needed, and drive the Mac's own commands.
         The answer lands wherever it is useful: a panel, typed straight over their selection, the clipboard, a notification, Notes, read aloud, drawn on the screen, or written to files. Some gizmos never run at all and just sit on a screen edge showing what they have.
 
         You answer questions too, about their Mac, about anything, and that is genuinely useful. It is what you do when there is nothing to build yet, not the headline.

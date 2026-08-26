@@ -122,8 +122,9 @@ complete supported native action and does not require Python, a subprocess, or
 preview-verifier browser automation.
 
 A Python candidate may use any PyPI dependency, the network, the user's files,
-and subprocesses. There is no allowlist and no offline restriction. Gizmate
-validates a candidate by running it the same way the user's Mac will.
+and subprocesses. There is no allowlist and no offline restriction, and
+searching the web needs no credential — the "ddgs" package searches keylessly.
+Gizmate validates a candidate by running it the same way the user's Mac will.
 
 UNSUPPORTED is a last resort and never a keyword filter. Words such as Python,
 script, URL, browser, network, dependency, package, subprocess, and download
@@ -164,7 +165,10 @@ Choose the candidate kind before writing it:
   declaresNetwork, secretNames, and outputDirectory when output is "files".
 - agent: when the job genuinely cannot be written down in advance, because what
   to do next depends on what the previous step found. At run time this writes and
-  runs its own Python, step by step, until it has an answer. Include prompt (the
+  runs its own Python, step by step, until it has an answer — through it the
+  agent can search and read the web without any key, and drive the Mac's own
+  command line (open, shortcuts run), so "go find out, then open or report it"
+  requests are agent material, not UNSUPPORTED. Include prompt (the
   instruction, written to the agent, not to the user), maxSteps, timeoutSeconds,
   secretNames, and zero or one fixture.
 
@@ -665,6 +669,16 @@ name only, for example dependencies = ["httpx"]. Each call is a fresh script in 
 fresh empty directory — nothing carries over between calls except what you read
 back and what you write into a path you chose deliberately. Print what you want
 to see; you are reading the output, not the user.
+
+The network needs no key: fetch any page or API directly, and when you have to
+search rather than fetch, the "ddgs" PyPI package searches the web without
+credentials. The Mac itself is reachable through subprocess — "open" a URL,
+path or app ("open -a Safari"), reveal a file ("open -R"), or run one of the
+user's own Shortcuts ("shortcuts run <name>"); these run without any permission
+prompt, while osascript can stall the run behind a macOS Automation prompt, so
+prefer the open/shortcuts forms. Where your answer lands — panel, clipboard,
+notes, spoken — is the tool's configured output and the host delivers it: never
+script the delivery of your own answer.
 
 finish — end the run and hand your answer to the user. The "text" argument is the
 tool's entire result: it goes straight into a panel, the clipboard, or over the

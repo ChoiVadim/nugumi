@@ -124,6 +124,19 @@ enum ToolEvalSuite {
         // for a list of rows with several lines and a bar when the request is
         // about numbers, rather than a grid of squares. A recipe naming those
         // fields would grade the prompt instead of the builder.
+        // A run that cannot happen without reaching the web, asked for as an
+        // outcome rather than a mechanism. Grades whether the capability
+        // description makes the model treat "go find out and report" as agent
+        // material with nothing handed in — not which search route the agent
+        // takes at run time; read the report's trail for that, and fix the
+        // generic description if it never reaches the web, never a recipe.
+        ToolEvalCase(
+            name: "agent-web-daily-report",
+            request: "хочу кнопку, которая соберёт мне утреннюю сводку: погода "
+                + "в Сеуле и главные новости по технологиям, посмотри в интернете",
+            kind: .agent,
+            input: ToolInput.none
+        ),
         // A gizmo whose whole subject is what the user has already saved: no
         // input to hand it, the notes context is the material. Grades whether
         // the capability description makes the model reach for input "none"
