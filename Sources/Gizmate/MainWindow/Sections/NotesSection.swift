@@ -363,7 +363,7 @@ struct NotesGrid: View {
                 store.update(note.id, usedAsContext: !note.usedAsContext)
             },
             onDelete: { store.delete(note.id) },
-            onDragHandle: {
+            onDragStart: {
                 dragging = note.id
                 return NSItemProvider(object: note.id.uuidString as NSString)
             },
@@ -423,11 +423,14 @@ private struct NoteCard: View {
     let onTag: (UUID?) -> Void
     let onToggleContext: () -> Void
     let onDelete: () -> Void
-    /// Starts a reorder drag. Lives on a handle of its own rather than on the
-    /// card, because the card is a title field over a text view — a drag begun
-    /// anywhere on it is someone selecting words, and `NSTextView` wins that
-    /// argument against any SwiftUI gesture wrapped around it.
-    let onDragHandle: () -> NSItemProvider
+    /// Starts a reorder drag, from the card's title row.
+    ///
+    /// Not from the body: that is an `NSTextView`, and it wins any argument
+    /// with a SwiftUI gesture wrapped around it — a drag begun there is someone
+    /// selecting words, which is what it should be. The title row is the one
+    /// part of a card that is chrome rather than content, which is why it is
+    /// the part you pick a card up by, the way a window has a title bar.
+    let onDragStart: () -> NSItemProvider
     /// A fixed card height keeps every card in a grid *row* the same height.
     /// `nil` drops that and follows the text instead — right wherever the cards
     /// are stacked one per row, like the dock, where uniform height only buys
@@ -438,6 +441,9 @@ private struct NoteCard: View {
     @State private var text: String
     @State private var hovering = false
     @State private var bodyHeight: CGFloat = 0
+    /// The card's own size on screen, so the drag preview can be the same card
+    /// rather than a differently sized copy of it.
+    @State private var cardSize: CGSize = .zero
     @FocusState private var titleFocused: Bool
 
     /// Floor so an empty note is still a card you can aim at, ceiling so one
@@ -473,7 +479,7 @@ private struct NoteCard: View {
         onTag: @escaping (UUID?) -> Void,
         onToggleContext: @escaping () -> Void,
         onDelete: @escaping () -> Void,
-        onDragHandle: @escaping () -> NSItemProvider,
+        onDragStart: @escaping () -> NSItemProvider,
         fixedHeight: CGFloat?
     ) {
         self.note = note
@@ -484,10 +490,60 @@ private struct NoteCard: View {
         self.onTag = onTag
         self.onToggleContext = onToggleContext
         self.onDelete = onDelete
-        self.onDragHandle = onDragHandle
+        self.onDragStart = onDragStart
         self.fixedHeight = fixedHeight
         _title = State(initialValue: note.title)
         _text = State(initialValue: note.text)
+    }
+
+    /// A transparent sheet over the title, present only while the title is not
+    /// being edited.
+    ///
+    /// It has to be a layer of its own: an `NSTextField` takes the mouse-down
+    /// itself, so an `onDrag` on the row around it never fires — the drag would
+    /// silently be a text selection instead. Clicking hands focus to the field
+    /// and the sheet lifts, so editing a title is unchanged after the first
+    /// click; it comes back when focus leaves.
+    private var titleDragSurface: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture { titleFocused = true }
+            .onDrag(onDragStart, preview: { dragPreview })
+            .help("Drag the title to reorder")
+    }
+
+    /// What travels with the pointer: the card, not a glyph. Rebuilt rather than
+    /// snapshotted because the live card holds two editors, and a drag preview
+    /// made of live text fields is a second caret on screen.
+    ///
+    /// Sized from the real card so the thing under the pointer is the size of
+    /// the hole it left. The fallback only ever shows for a drag begun in the
+    /// same frame the card first appeared.
+    private var dragPreview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.isEmpty ? "Untitled" : title)
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(FlowTheme.ink)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .lineLimit(6)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(
+            width: max(cardSize.width, 235),
+            height: max(cardSize.height, 96),
+            alignment: .topLeading
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(FlowTheme.subtleFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(FlowTheme.hairline, lineWidth: 1)
+        )
     }
 
     private var tagName: String {
@@ -503,6 +559,7 @@ private struct NoteCard: View {
                     .foregroundStyle(FlowTheme.ink)
                     .focused($titleFocused)
                     .onChange(of: title) { _, new in onChange(new, text) }
+                    .overlay { if !titleFocused { titleDragSurface } }
                 tagMenu
             }
 
@@ -529,6 +586,13 @@ private struct NoteCard: View {
         // body: a row that is invisible most of the time would still reserve
         // its height, which is exactly the gap this replaces.
         .overlay(alignment: .bottomTrailing) { actions }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.onChange(of: proxy.size, initial: true) { _, size in
+                    cardSize = size
+                }
+            }
+        }
         .onHover { hovering = $0 }
         .onAppear {
             guard isFocused else { return }
@@ -558,13 +622,6 @@ private struct NoteCard: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(FlowTheme.inkTertiary)
-                .contentShape(Rectangle())
-                .onDrag(onDragHandle)
-                .help("Drag to reorder")
-
             Button(action: onToggleContext) {
                 Image(systemName: note.usedAsContext ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12.5, weight: .medium))
