@@ -12,6 +12,7 @@ struct SettingsSnapshot {
     var floatingDefaultMode: FloatingButtonDefaultMode
     var selectionDisplayMode: SelectionDisplayMode
     var invisibilityEnabled: Bool
+    var notesAccessEnabled: Bool = true
     var launchAtLogin: Bool = false
     var writingStyles: [AppCategory: WritingStyle]
     // Named for the defaults keys they carry rather than for their tiers:
@@ -79,6 +80,7 @@ enum SettingsIntent {
     case setThinkingLevel(ThinkingLevel, ModelUseScope)
     case chooseModel(String, ModelUseScope)
     case toggleInvisibility
+    case setNotesAccess(Bool)
     case setLaunchAtLogin(Bool)
     case recordShortcut(GlobalShortcutAction)
     case recordToolShortcut(UUID)

@@ -60,6 +60,7 @@ extension GizmateApp {
             "replacementMode",
             InvisibilityState.defaultsKey,
             InvisibilityState.firstRunShownKey,
+            NotesAccess.defaultsKey,
             usageStatsExpandedKey
         ].forEach { defaults.removeObject(forKey: $0) }
 
@@ -194,6 +195,7 @@ extension GizmateApp: SettingsHost {
             floatingDefaultMode: floatingDefaultMode,
             selectionDisplayMode: selectionDisplayMode,
             invisibilityEnabled: invisibilityModeEnabled,
+            notesAccessEnabled: NotesAccess.isEnabled,
             launchAtLogin: isRunningFromAppBundle && LaunchAtLogin.isEnabled,
             writingStyles: styles,
             textModelID: textModelID,
@@ -308,6 +310,10 @@ extension GizmateApp: SettingsHost {
         case .setLaunchAtLogin(let enabled):
             guard isRunningFromAppBundle else { break }
             LaunchAtLogin.set(enabled)
+        case .setNotesAccess(let enabled):
+            // No side effects on purpose: every reader checks the key at the
+            // moment a prompt is assembled or a script is launched.
+            UserDefaults.standard.set(enabled, forKey: NotesAccess.defaultsKey)
         case .setWritingStyle(let style, let category):
             setWritingStyle(style, for: category)
             updateMenuState()

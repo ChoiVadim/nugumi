@@ -118,6 +118,14 @@ private struct GeneralTab: View {
                         .toggleStyle(.switch)
                         .tint(FlowTheme.accent)
                     }
+                    Divider().background(FlowTheme.hairline)
+                    SettingRow("Let gizmos read my notes",
+                               subtitle: "Gizmos that ask for notes get the ones you ticked. Off means none of them do, and neither does Ask.") {
+                        Toggle("", isOn: bridge.binding(\.notesAccessEnabled) { .setNotesAccess($0) })
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .tint(FlowTheme.accent)
+                    }
                 }
             }
         }

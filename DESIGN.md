@@ -1203,3 +1203,35 @@ person aims at the conversation, not at a control.
   there is an answer to the builder's own question and a picture has nowhere to
   go. The builder never receives pictures at all: the one agent sees it and
   writes the `BUILD:` line, so what the picture _showed_ travels as words.
+
+## 18. Notes reach a model through three gates, and only through them
+
+A note is handed to anything that thinks — a gizmo, Ask — exactly when all
+three of these say yes, and there is no fourth switch anywhere:
+
+1. **The master switch** in Settings ("Let gizmos read my notes",
+   `NotesAccess`, default on). It is enforced inside `NotesContext.records()`,
+   the one function every consumer is built on, so no call site can forget it.
+2. **The per-gizmo `usesNotes` flag**, set in the gizmo's editor or by the
+   builder. Ask deliberately has no flag of its own: it is the front door, and
+   the master switch plus the ticks are its whole configuration.
+3. **The per-note tick** (`Note.usedAsContext`), which exists to exclude the
+   scratch notes, not to make every note opt in.
+
+What the consumer then sees is standardized, not bespoke per consumer:
+
+- **Prompt text** (`NotesContext.text`, for `.prompt` gizmos, `.agent` gizmos,
+  built-ins, and Ask): one line per note, newest first, `- [Folder] Title:
+body`. The bracket is the folder — a `NoteTag` name — so a model can tell
+  work notes from personal ones without being handed the store.
+- **A JSON file** (`NotesContext.fileData()`, for `.python` gizmos): the same
+  records as `[{title, text, folder, updatedAt}]`, handed over as a file whose
+  path arrives in `GIZMO_NOTES_FILE`. The variable is absent when there is
+  nothing to share — the master switch off, or nothing ticked — so a script
+  must treat it as optional, and candidate validation runs without it on
+  purpose: model-written code the user never approved does not get the user's
+  notes.
+
+Do not add a consumer that decodes the notes key itself. `records()` is where
+the gates live, and a consumer that goes around it is a consumer the master
+switch does not reach.

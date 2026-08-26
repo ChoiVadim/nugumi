@@ -73,13 +73,15 @@ Annotation rules:
 Do not click, automate, or claim you took an action.
 """
 
-    /// Base prompt, plus the user's "About you" background when present.
+    /// Base prompt, plus the user's "About you" background when present, plus
+    /// their ticked notes. Ask has no per-gizmo `usesNotes` flag on purpose:
+    /// the Settings master switch and the per-note tick are its only gates.
     ///
     /// Ask used to carry a Gen Z styling suffix here, layered on by the global
     /// toggle. Gen Z is a built-in you aim at a selection now
     /// (`RingActionID.genZ`), so there is nothing global left to overlay.
     static func systemPrompt(aboutUser: String? = nil) -> String {
-        UserAboutContext.appending(to: systemPromptBase, about: aboutUser)
+        NotesContext.appending(to: UserAboutContext.appending(to: systemPromptBase, about: aboutUser))
     }
 
     static func prompt(question: String, hasImage: Bool) -> String {

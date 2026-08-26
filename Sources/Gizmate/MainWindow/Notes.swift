@@ -142,10 +142,10 @@ final class NotesStore: ObservableObject {
     @Published private(set) var tags: [NoteTag] = []
     var onChange: (() -> Void)?
 
-    /// `nonisolated` because `NotesContext` reads the same key off the main
+    /// `nonisolated` because `NotesContext` reads the same keys off the main
     /// actor, while assembling a prompt.
     nonisolated static let defaultsKey = "notes"
-    private static let tagsKey = "noteTags"
+    nonisolated static let tagsKey = "noteTags"
 
     private let defaults: UserDefaults
 
@@ -292,6 +292,19 @@ final class NotesStore: ObservableObject {
     }
 }
 
+/// The master switch for handing notes to models and scripts. Per-gizmo
+/// `usesNotes` and the per-note tick decide *which* notes go where; this is the
+/// user's one lever to stop all of it at once, from Settings.
+enum NotesAccess {
+    static let defaultsKey = "gizmosReadNotesEnabled"
+    /// On by default: the per-note tick already defaults each note in, and
+    /// shipping the toggle off would silently break every gizmo built before
+    /// it existed.
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
+    }
+}
+
 /// The ticked notes as prompt text.
 ///
 /// Reads `UserDefaults` directly rather than taking a `NotesStore`, exactly as
@@ -307,29 +320,70 @@ enum NotesContext {
     /// stops rather than appending a two-word stub.
     private static let minimumEntryLength = 80
 
-    /// Ticked notes, most recently edited first, one per line. Empty when
-    /// nothing is ticked — which keeps "notes off" genuinely zero-cost.
-    static var text: String {
-        guard let data = UserDefaults.standard.data(forKey: NotesStore.defaultsKey),
-              let notes = try? JSONDecoder().decode([Note].self, from: data)
-        else { return "" }
+    /// One note as consumers see it: the folder resolved to a name, the text
+    /// untouched. Encodable because the python file is these records verbatim;
+    /// a `nil` folder encodes as no key at all.
+    struct Record: Encodable {
+        let title: String
+        let text: String
+        let folder: String?
+        let updatedAt: Date
+    }
 
-        var lines: [String] = []
-        var used = 0
-        let candidates = notes
+    /// Every note allowed into context, newest first. Empty when the master
+    /// switch is off — the one gate both the prompt text and the python file
+    /// pass through.
+    static func records() -> [Record] {
+        guard NotesAccess.isEnabled else { return [] }
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: NotesStore.defaultsKey),
+              let notes = try? JSONDecoder().decode([Note].self, from: data)
+        else { return [] }
+
+        // An absent tags key is a first run, not "no folders": the store
+        // resolves it to the default set, so folder names must too.
+        let tags: [NoteTag]
+        if let tagData = defaults.data(forKey: NotesStore.tagsKey),
+           let decoded = try? JSONDecoder().decode([NoteTag].self, from: tagData) {
+            tags = decoded
+        } else {
+            tags = NoteTag.defaults
+        }
+        let folderNames = Dictionary(
+            tags.map { ($0.id, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        return notes
             .filter { $0.usedAsContext && $0.isUsable }
             .sorted { $0.updatedAt > $1.updatedAt }
+            .map { note in
+                Record(
+                    title: note.displayTitle,
+                    text: note.text,
+                    folder: note.tagID.flatMap { folderNames[$0] },
+                    updatedAt: note.updatedAt
+                )
+            }
+    }
 
-        for note in candidates {
+    /// Ticked notes, most recently edited first, one per line, the folder named
+    /// in brackets. Empty when nothing is ticked — which keeps "notes off"
+    /// genuinely zero-cost.
+    static var text: String {
+        var lines: [String] = []
+        var used = 0
+        for record in records() {
             let remaining = maxLength - used
             guard remaining >= minimumEntryLength else { break }
-            let body = note.text
+            let body = record.text
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: .newlines)
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .joined(separator: " ")
-            let line = "- \(note.displayTitle): \(body)"
+            let folder = record.folder.map { "[\($0)] " } ?? ""
+            let line = "- \(folder)\(record.title): \(body)"
             // Clipped rather than skipped, so the newest note always makes it in
             // even when it is longer than the whole budget.
             let entry = line.count <= remaining ? line : String(line.prefix(remaining)) + "…"
@@ -337,6 +391,18 @@ enum NotesContext {
             used += entry.count
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// The same records as JSON, for a python gizmo's `GIZMO_NOTES_FILE`.
+    /// `nil` when there is nothing to hand over, so no file gets written at all
+    /// and a script learns to treat the variable as optional.
+    static func fileData() -> Data? {
+        let records = records()
+        guard !records.isEmpty else { return nil }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        return try? encoder.encode(records)
     }
 
     /// Appends the notes section to a prompt. Returns the prompt unchanged when
@@ -347,7 +413,7 @@ enum NotesContext {
         return prompt + """
 
 
-        Notes the user saved, most recent first:
+        Notes the user saved, most recent first. A leading [name] is the folder the note is filed in:
         \(notes)
 
         Treat these as background facts about the user and their work, and use them only where they are relevant to the request. Do not mention, list, or summarize these notes in the output unless the request explicitly asks about them.
