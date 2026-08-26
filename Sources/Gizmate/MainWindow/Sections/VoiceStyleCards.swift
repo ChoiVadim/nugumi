@@ -218,14 +218,23 @@ struct PlainTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
-            report(textView)
+            // In the same turn as the text, so a card that follows its content
+            // grows in the layout pass that lays out the new line. Reported a
+            // turn later, the text first scrolls itself up inside the old
+            // frame to show the caret, then snaps back when the frame catches
+            // up: one visible jump per Return.
+            report(textView, deferred: false)
         }
 
         /// TextKit 2 first, TextKit 1 as the fallback. Reaching for
         /// `layoutManager` on a TextKit 2 view silently downgrades it to
         /// compatibility mode, so it is only touched when there is no TextKit 2
         /// layout manager to ask.
-        func report(_ textView: NSTextView) {
+        ///
+        /// `deferred` is for callers inside a SwiftUI update pass, where writing
+        /// a binding is "Modifying state during view update"; a text view's own
+        /// change notification is outside one and writes straight through.
+        func report(_ textView: NSTextView, deferred: Bool = true) {
             let height: CGFloat
             if let tlm = textView.textLayoutManager {
                 tlm.ensureLayout(for: tlm.documentRange)
@@ -237,8 +246,7 @@ struct PlainTextEditor: NSViewRepresentable {
                 return
             }
             guard abs(height - parent.measuredHeight.wrappedValue) > 0.5 else { return }
-            // Out of the current layout pass: writing a binding from inside one
-            // is what "Modifying state during view update" complains about.
+            guard deferred else { return parent.measuredHeight.wrappedValue = height }
             DispatchQueue.main.async { [parent] in parent.measuredHeight.wrappedValue = height }
         }
     }
