@@ -50,11 +50,13 @@ struct EdgesDiagram: View {
     /// component, read as three different kinds of thing. Every other dimension
     /// here is derived from this one so they cannot drift again.
     static let tileWidth: CGFloat = 96
-    static let tileHeight: CGFloat = 62
+    /// Tall enough for the icon plus the two lines a name is allowed, so a
+    /// wrapping title makes a tile no taller than a one-word one.
+    static let tileHeight: CGFloat = 76
     static let tileSpacing: CGFloat = 6
     static let railPadding: CGFloat = 10
     static let sideRailWidth: CGFloat = tileWidth + railPadding * 2
-    static let topRailHeight: CGFloat = 82
+    static let topRailHeight: CGFloat = tileHeight + railPadding * 2
     /// Where a side rail's first tile starts: past the top rail, then past the
     /// rail's own vertical padding. Exact now that the rails carry no caption
     /// above their tiles, but it does not have to be: a few points of slop only
@@ -438,9 +440,13 @@ private struct EdgeToolTile: View {
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 6)
-        // Uniform height as well as width: a one-word name and a two-word one
-        // otherwise make neighbouring tiles different sizes down a rail.
-        .frame(maxWidth: .infinity, minHeight: EdgesDiagram.tileHeight)
+        // Uniform height as well as width, and fixed rather than a minimum:
+        // with a minimum, "Applications Launcher" wrapped to two lines and
+        // grew a tile a third taller than the one beside it, which reads as a
+        // different kind of thing rather than a longer name.
+        .frame(maxWidth: .infinity,
+               minHeight: EdgesDiagram.tileHeight,
+               maxHeight: EdgesDiagram.tileHeight)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(FlowTheme.subtleFill)
