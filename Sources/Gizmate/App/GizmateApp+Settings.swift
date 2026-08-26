@@ -117,6 +117,13 @@ extension GizmateApp {
             previousToolsChange?()
             guard let self else { return }
             self.dockStore.prune(keeping: DockCatalog.placeableIDs(host: self))
+            // Its shortcut goes dead with it too, and a newly installed tool
+            // with a stored binding starts answering its key without a
+            // relaunch. Registration is a full teardown/rebuild and idempotent;
+            // if churn during a build ever shows a cost, debounce here rather
+            // than making registration incremental.
+            ToolShortcutStore.prune(keeping: Set(self.toolsStore.tools.map(\.id)))
+            self.setupGlobalHotKeys()
         }
         DockHoverMonitor.shared.onMove = { [weak self] point in
             self?.dockControllers.forEach { $0.pointerMoved(to: point) }

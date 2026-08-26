@@ -51,30 +51,7 @@ extension GizmateApp {
         ]
 
         for (action, handler) in bindings {
-            let shortcut = shortcut(for: action)
-            switch shortcut.kind {
-            case .combo:
-                let hotKey = GlobalHotKey(
-                    definition: GlobalHotKeyDefinition(action: action, shortcut: shortcut),
-                    onPressed: handler
-                )
-                globalHotKeys.append(hotKey)
-                hotKey.register()
-            case .doubleTap:
-                let detector = DoubleModifierPressDetector(
-                    modifier: shortcut.modifiers,
-                    onDetected: handler
-                )
-                modifierDetectors.append(detector)
-                detector.start()
-            case .mouseButton:
-                let monitor = MouseButtonShortcutMonitor(
-                    buttonNumber: Int(shortcut.keyCode),
-                    onPressed: handler
-                )
-                mouseButtonMonitors.append(monitor)
-                monitor.start()
-            }
+            installShortcut(shortcut(for: action), hotKeyID: action.id, handler: handler)
         }
 
         // Always-on ⌃⌥A alias for Ask Gizmate, in addition to its configurable
@@ -86,6 +63,73 @@ extension GizmateApp {
         )
         globalHotKeys.append(askGizmateAlias)
         askGizmateAlias.register()
+
+        // Gizmos the user recorded a key for, through the same installer and
+        // into the same three lists — so the teardown above and the recorder's
+        // quiet-everything pass cover them with no code of their own. The
+        // handler captures the id and resolves at press time: a tool edited
+        // since registration runs as it now is, and a deleted one does nothing
+        // until the store change rebuilds us.
+        let bound = ToolShortcutStore.assignments(ids: toolsStore.tools.map(\.id))
+        let ordered = toolsStore.tools.sorted { $0.id.uuidString < $1.id.uuidString }
+        for (index, tool) in ordered.enumerated() {
+            guard let shortcut = bound[tool.id] else { continue }
+            let id = tool.id
+            installShortcut(
+                shortcut,
+                hotKeyID: GlobalHotKeyDefinition.toolHotKeyIDBase + UInt32(index),
+                handler: { [weak self] in self?.runToolFromShortcut(id) }
+            )
+        }
+    }
+
+    /// One registration per `GlobalShortcut.Kind`, shared by the built-in table
+    /// and the per-gizmo loop so the two cannot drift.
+    @MainActor
+    private func installShortcut(
+        _ shortcut: GlobalShortcut,
+        hotKeyID: UInt32,
+        handler: @escaping @MainActor () -> Void
+    ) {
+        switch shortcut.kind {
+        case .combo:
+            let hotKey = GlobalHotKey(
+                definition: GlobalHotKeyDefinition(id: hotKeyID, shortcut: shortcut),
+                onPressed: handler
+            )
+            globalHotKeys.append(hotKey)
+            hotKey.register()
+        case .doubleTap:
+            let detector = DoubleModifierPressDetector(
+                modifier: shortcut.modifiers,
+                onDetected: handler
+            )
+            modifierDetectors.append(detector)
+            detector.start()
+        case .mouseButton:
+            let monitor = MouseButtonShortcutMonitor(
+                buttonNumber: Int(shortcut.keyCode),
+                onPressed: handler
+            )
+            mouseButtonMonitors.append(monitor)
+            monitor.start()
+        }
+    }
+
+    /// What a gizmo's key does. A resident opens where it lives — DESIGN.md's
+    /// "a shortcut for a resident opens the resident" — and every other gizmo
+    /// gets a headless run: `runTool` with an empty selection reads whatever
+    /// the moment supplies, exactly as the quick menu's ring does.
+    @MainActor
+    func runToolFromShortcut(_ id: UUID) {
+        guard let tool = toolsStore.tools.first(where: { $0.id == id }) else { return }
+        if tool.output == .surface {
+            let storageID = ToolRef.generated(id).storageID
+            guard let edge = dockStore.edge(of: storageID) else { return }
+            _ = dockControllers.first { $0.edge == edge }?.reveal(itemID: storageID)
+            return
+        }
+        runTool(tool, selection: "")
     }
 
     /// The quick-menu shortcut (default Mouse 3): opens the same action ring
@@ -410,21 +454,43 @@ extension GizmateApp {
         controller.present()
     }
 
+    /// One scan over everything that can hold a key — the reserved Ask alias,
+    /// every built-in action, and every bound gizmo — so the two setters below
+    /// cannot disagree about what "taken" means.
+    @MainActor
+    private func isShortcutTaken(
+        _ shortcut: GlobalShortcut,
+        excludingAction: GlobalShortcutAction? = nil,
+        excludingTool: UUID? = nil
+    ) -> Bool {
+        if shortcut == GlobalShortcutAction.askGizmateAlias { return true }
+        for action in GlobalShortcutAction.allCases where action != excludingAction {
+            if self.shortcut(for: action) == shortcut { return true }
+        }
+        let bound = ToolShortcutStore.assignments(ids: toolsStore.tools.map(\.id))
+        for (id, taken) in bound where id != excludingTool {
+            if taken == shortcut { return true }
+        }
+        return false
+    }
+
     @MainActor
     private func setKeyboardShortcut(_ shortcut: GlobalShortcut, for action: GlobalShortcutAction) -> Bool {
-        // Reserve the always-on Ask Gizmate alias so no action can shadow it.
-        if shortcut == GlobalShortcutAction.askGizmateAlias {
-            return false
-        }
-        for otherAction in GlobalShortcutAction.allCases where otherAction != action {
-            if self.shortcut(for: otherAction) == shortcut {
-                return false
-            }
-        }
-
+        guard !isShortcutTaken(shortcut, excludingAction: action) else { return false }
         GlobalShortcutStore.set(shortcut, for: action)
         setupGlobalHotKeys()
         updateMenuState()
+        return true
+    }
+
+    /// The gizmo counterpart of `setKeyboardShortcut`. No menu to update — a
+    /// gizmo's key appears in its own editor and on its Home tile, not in the
+    /// status menu.
+    @MainActor
+    func setToolShortcut(_ shortcut: GlobalShortcut, for id: UUID) -> Bool {
+        guard !isShortcutTaken(shortcut, excludingTool: id) else { return false }
+        ToolShortcutStore.set(shortcut, for: id)
+        setupGlobalHotKeys()
         return true
     }
 

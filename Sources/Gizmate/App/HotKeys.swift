@@ -15,6 +15,12 @@ import Vision
 struct GlobalHotKeyDefinition {
     static let signature = OSType(0x54524E53) // TRNS
 
+    /// Where per-gizmo hotkey ids start. Ids are process-local — nothing
+    /// persists them, every launch registers afresh — so a tool's id is just
+    /// base + its index in the current registration pass. The built-in actions
+    /// own 2...13 and the Ask alias owns 100, all far below this.
+    static let toolHotKeyIDBase: UInt32 = 1000
+
     let id: UInt32
     let keyCode: UInt32
     let carbonModifiers: UInt32

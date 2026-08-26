@@ -37,6 +37,16 @@ final class BuiltInShortcutTests: XCTestCase {
         XCTAssertFalse(ids.contains(100), "id 100 is reserved for the Ask alias")
     }
 
+    /// Per-gizmo hotkeys take ids from `toolHotKeyIDBase` upward, so every
+    /// fixed id — the actions' and the alias's — must sit below the base or a
+    /// user's Nth bound gizmo silently steals a built-in's Carbon slot.
+    func testFixedHotKeyIDsSitBelowTheToolIDBase() {
+        for action in GlobalShortcutAction.allCases {
+            XCTAssertLessThan(action.id, GlobalHotKeyDefinition.toolHotKeyIDBase)
+        }
+        XCTAssertLessThan(100, GlobalHotKeyDefinition.toolHotKeyIDBase)
+    }
+
     /// Every shipped default has to be a shortcut the registrar can actually
     /// install — an invalid one falls back silently and the key never works.
     func testEveryDefaultShortcutIsValid() {
