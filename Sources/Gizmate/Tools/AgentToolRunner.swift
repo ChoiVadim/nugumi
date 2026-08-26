@@ -234,10 +234,31 @@ enum AgentToolRunner {
                 thinkingLevel: thinkingLevel,
                 onPartial: { _ in }
             )
-            // The same repair the builder does: models wrap their JSON in a
-            // markdown fence often enough that failing the whole run over it
-            // would be the most common way an agent tool dies.
-            return .text(ToolAgentModelActionValidator.normalized(text) ?? text)
+            // The same normalization the builder applies: a markdown fence or a
+            // rewrapped envelope is a presentation slip, not a protocol breach.
+            if let normalized = ToolAgentModelActionValidator.normalized(text) {
+                return .text(normalized)
+            }
+            // And the same one-shot repair turn. Run budgets carry
+            // `repairs: 0`, so without this a single malformed frame — two
+            // concatenated JSON objects is the shape that actually turns up —
+            // killed the whole run where a build would have corrected it. A
+            // second attempt that is still malformed falls through as the raw
+            // text, and the sidecar's strict parser ends the run honestly.
+            let repair = ToolAgentModelActionRepair.turn(
+                agentContext: request.user,
+                rejected: text,
+                logLabel: "Run"
+            )
+            guard let payload = repair.payload else { return .text(text) }
+            let repaired = try await backend.complete(
+                systemPrompt: request.system + ToolAgentModelActionRepair.systemSuffix,
+                userPrompt: payload,
+                images: [],
+                thinkingLevel: thinkingLevel,
+                onPartial: { _ in }
+            )
+            return .text(ToolAgentModelActionValidator.normalized(repaired) ?? text)
         } catch {
             return .error(error is CancellationError ? .cancelled : .workerFailure)
         }
