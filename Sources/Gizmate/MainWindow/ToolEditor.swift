@@ -300,6 +300,16 @@ struct ToolEditorPanel: View {
                 ) {
                     optionsEditor
                 }
+                rowDivider
+                detailRow(
+                    "Shortcut",
+                    value: toolShortcut?.displayString ?? "None",
+                    hint: draft.output == .surface
+                        ? "A global key that opens this gizmo on its edge."
+                        : "A global key that runs this gizmo from anywhere, no Ring needed."
+                ) {
+                    shortcutControls
+                }
             }
 
             switch draft.kind {
@@ -734,6 +744,34 @@ struct ToolEditorPanel: View {
     }
 
     // MARK: - Shared fields
+
+    /// Sparse on purpose: unlike a built-in there is no default to fall back
+    /// to, so nil honestly means "no key".
+    private var toolShortcut: GlobalShortcut? {
+        bridge.settings.toolShortcuts[draft.id]
+    }
+
+    /// Mirrors `BuiltInEditorPanel.shortcutRow`, plus the Remove a built-in
+    /// never needs — a built-in's key can only be changed, a gizmo's can also
+    /// not exist.
+    private var shortcutControls: some View {
+        HStack(spacing: 8) {
+            if let shortcut = toolShortcut {
+                KeyCap(text: shortcut.displayString)
+                SecondaryButton(title: "Change") {
+                    bridge.perform(.recordToolShortcut(draft.id))
+                }
+                .padding(.leading, 4)
+                SecondaryButton(title: "Remove") {
+                    bridge.perform(.clearToolShortcut(draft.id))
+                }
+            } else {
+                SecondaryButton(title: "Set shortcut") {
+                    bridge.perform(.recordToolShortcut(draft.id))
+                }
+            }
+        }
+    }
 
     private var nameField: some View {
         TextField(draft.kind == .prompt ? "To JSON" : "Download video", text: draftBinding.name)

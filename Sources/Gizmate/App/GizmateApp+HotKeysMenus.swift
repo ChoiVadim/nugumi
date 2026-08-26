@@ -436,7 +436,7 @@ extension GizmateApp {
         mouseButtonMonitors.forEach { $0.stop() }
         shortcutRecorderWindowController?.close()
         let controller = ShortcutRecorderWindowController(
-            action: action,
+            title: action.menuTitle,
             currentShortcut: shortcut(for: action),
             onShortcut: { [weak self] shortcut in
                 let didSet = self?.setKeyboardShortcut(shortcut, for: action) ?? false
@@ -446,6 +446,33 @@ extension GizmateApp {
             onClose: { [weak self] in
                 // Rebuild from the store rather than re-enabling in place: OK
                 // already saved the new key, Cancel changed nothing.
+                self?.setupGlobalHotKeys()
+                self?.shortcutRecorderWindowController = nil
+            }
+        )
+        shortcutRecorderWindowController = controller
+        controller.present()
+    }
+
+    /// The gizmo counterpart of `presentShortcutRecorder(for:)`, with the same
+    /// quiet-everything choreography — the comment above explains why every
+    /// listener stops while the panel is up.
+    @MainActor
+    func presentShortcutRecorder(forTool id: UUID) {
+        guard let tool = toolsStore.tools.first(where: { $0.id == id }) else { return }
+        globalHotKeys.forEach { $0.unregister() }
+        modifierDetectors.forEach { $0.isEnabled = false }
+        mouseButtonMonitors.forEach { $0.stop() }
+        shortcutRecorderWindowController?.close()
+        let controller = ShortcutRecorderWindowController(
+            title: tool.name,
+            currentShortcut: ToolShortcutStore.shortcut(for: id),
+            onShortcut: { [weak self] shortcut in
+                let didSet = self?.setToolShortcut(shortcut, for: id) ?? false
+                self?.mainWindowController?.bridge.refreshFromHost()
+                return didSet
+            },
+            onClose: { [weak self] in
                 self?.setupGlobalHotKeys()
                 self?.shortcutRecorderWindowController = nil
             }

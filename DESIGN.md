@@ -515,6 +515,9 @@ share of users regardless of what looks right.
   pressed from anywhere, so it has to expand the dock and place the caret
   itself. `startAskGizmatePrompt` asks `DockStore` where Ask sits and does one
   of two things; it never opens a second place to type the same question.
+  Generated gizmos follow the same rule: `runToolFromShortcut` reveals a
+  `.surface` gizmo's edge and runs everything else headlessly, so a key on a
+  resident is "show me what it has", never a phantom run.
 - **Whatever starts a screen capture is what dates it.** Ask's floating capsule
   captures the instant the shortcut fires, before the capsule appears, because
   activating Gizmate closes the very menu the user is asking about. A docked
@@ -891,8 +894,9 @@ share of users regardless of what looks right.
   this section, and nothing `DockCatalog` computes, ever checks the ring, so
   none of it can tell that state apart from a resident correctly sitting on
   an edge. `HomeSectionContent.location` is the one place that checks every
-  home a tool can have — a ring slot, `DockStore`, and, for a built-in, its
-  own global shortcut — and reads back `.nowhere` only when none of the three
+  home a tool can have — a ring slot, `DockStore`, and a global shortcut,
+  a built-in's always-resolved one or the binding a user recorded for a gizmo
+  in `ToolShortcutStore` — and reads back `.nowhere` only when none of them
   claims it, worded plainly on the tool's own row (`FlowTheme.inkTertiary`,
   not a banner) rather than left for someone to notice only by trying to run
   it. The ring and `DockStore` never write to each other, so a tool can
@@ -904,9 +908,9 @@ share of users regardless of what looks right.
   is never `.nowhere` even off the ring and off every edge: `GlobalShortcutStore`
   always resolves a binding, saved or default, so the key still runs it
   regardless of where else it sits. A `.clipboard` or `.notify` gizmo can
-  never earn an edge or a shortcut at all, so for one of those `.nowhere` is
-  still the only way to fail, and Home is the only screen that was ever going
-  to catch it. `DockPlacementParityTests` pins this against real `ToolsStore`
+  never earn an edge, but it can now earn a key — recorded from the Shortcut
+  row in its own editor — so `.nowhere` for one of those means "no slot and
+  no key", and Home is still the only screen that was ever going to catch it. `DockPlacementParityTests` pins this against real `ToolsStore`
   / `RingLayoutStore` / `DockStore` instances — the same shape as the
   built-in resident check earlier in this section, generalized from "does a
   control exist for this" to "does any home exist at all."

@@ -1,3 +1,4 @@
+import Foundation
 import GizmateToolAgentCore
 
 // MARK: - Settings snapshot (reads)
@@ -23,6 +24,9 @@ struct SettingsSnapshot {
     var askGizmateThinkingLevel: ThinkingLevel
     var deepThinkingLevel: ThinkingLevel
     var shortcuts: [GlobalShortcutAction: GlobalShortcut]
+    /// Gizmos the user recorded a key for. Sparse where `shortcuts` is total:
+    /// a gizmo with no entry has no key, there is no default to fall back to.
+    var toolShortcuts: [UUID: GlobalShortcut] = [:]
     var appsByCategory: [AppCategory: [AppRef]] = [:]
 
     func writingStyle(for category: AppCategory) -> WritingStyle {
@@ -77,6 +81,11 @@ enum SettingsIntent {
     case toggleInvisibility
     case setLaunchAtLogin(Bool)
     case recordShortcut(GlobalShortcutAction)
+    case recordToolShortcut(UUID)
+    case clearToolShortcut(UUID)
+    // Built-ins only, on purpose: the Shortcuts panel never shows a gizmo's
+    // binding, and a panel must not silently clear what it does not show. A
+    // gizmo's key is set and removed in its own editor.
     case resetShortcuts
     case signInCloud(CloudProvider)
     case signOutCloud(CloudProvider)

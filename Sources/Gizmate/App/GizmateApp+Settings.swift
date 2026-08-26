@@ -203,6 +203,7 @@ extension GizmateApp: SettingsHost {
             askGizmateThinkingLevel: askGizmateThinkingLevel,
             deepThinkingLevel: deepThinkingLevel,
             shortcuts: shortcuts,
+            toolShortcuts: ToolShortcutStore.assignments(ids: toolsStore.tools.map(\.id)),
             appsByCategory: appsByCategory()
         )
     }
@@ -333,6 +334,11 @@ extension GizmateApp: SettingsHost {
             toggleInvisibilityMode()
         case .recordShortcut(let action):
             presentShortcutRecorder(for: action)
+        case .recordToolShortcut(let id):
+            presentShortcutRecorder(forTool: id)
+        case .clearToolShortcut(let id):
+            ToolShortcutStore.clear(for: id)
+            setupGlobalHotKeys()
         case .resetShortcuts:
             resetKeyboardShortcuts()
         case .signInCloud(let provider):

@@ -15,8 +15,13 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
     private static let titleFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
     private static let messageFont = NSFont.systemFont(ofSize: 12, weight: .regular)
 
-    private let action: GlobalShortcutAction
-    private let currentShortcut: GlobalShortcut
+    /// What the key is for, as shown in the panel's message — an action's
+    /// `menuTitle` or a gizmo's name. A plain string so the recorder needs no
+    /// idea which of the two it is serving.
+    private let subject: String
+    /// nil when nothing is bound yet — a gizmo starts keyless, unlike an
+    /// action, which always falls back to its default.
+    private let currentShortcut: GlobalShortcut?
     private let onShortcut: (GlobalShortcut) -> Bool
     private let onClose: () -> Void
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
@@ -26,12 +31,12 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
     private var pendingShortcut: GlobalShortcut?
 
     init(
-        action: GlobalShortcutAction,
-        currentShortcut: GlobalShortcut,
+        title: String,
+        currentShortcut: GlobalShortcut?,
         onShortcut: @escaping (GlobalShortcut) -> Bool,
         onClose: @escaping () -> Void
     ) {
-        self.action = action
+        self.subject = title
         self.currentShortcut = currentShortcut
         self.onShortcut = onShortcut
         self.onClose = onClose
@@ -128,14 +133,14 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        messageLabel.stringValue = "Click the field, then press keys for \(action.menuTitle) - or double-tap ⌃ ⌥ ⇧ ⌘, or click a spare mouse button."
+        messageLabel.stringValue = "Click the field, then press keys for \(subject) - or double-tap ⌃ ⌥ ⇧ ⌘, or click a spare mouse button."
         messageLabel.font = Self.messageFont
         messageLabel.textColor = .secondaryLabelColor
         messageLabel.maximumNumberOfLines = 0
         messageLabel.preferredMaxLayoutWidth = textWidth
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        shortcutField.idleDisplayText = currentShortcut.displayString
+        shortcutField.idleDisplayText = currentShortcut?.displayString ?? ""
         shortcutField.onBeginRecording = { [weak self] in
             guard let self else { return }
             self.pendingShortcut = nil

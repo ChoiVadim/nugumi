@@ -462,11 +462,11 @@ final class DockPlacementParityTests: XCTestCase {
         )
     }
 
-    /// I2: a built-in has a third home a gizmo never can — its own global
-    /// shortcut. `GlobalShortcutStore` always resolves one, saved or default,
-    /// for any `RingActionID` with a `shortcutAction`, so taking Explain off
-    /// the ring to free a slot (an ordinary act) must not make `location`
-    /// claim it lives nowhere while ⌃⌥T still runs it.
+    /// I2: a built-in's third home is its own global shortcut.
+    /// `GlobalShortcutStore` always resolves one, saved or default, for any
+    /// `RingActionID` with a `shortcutAction`, so taking Explain off the ring
+    /// to free a slot (an ordinary act) must not make `location` claim it
+    /// lives nowhere while ⌃⌥T still runs it.
     func testABuiltInWithAGlobalShortcutIsNeverReportedAsLivingNowhere() {
         let toolsDirectory = FileManager.default.temporaryDirectory
             .appending(path: "gizmate-home-shortcut-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -534,6 +534,69 @@ final class DockPlacementParityTests: XCTestCase {
             "a built-in its shortcut still runs is reachable, so it must not take "
                 + "the treatment Home uses to mark a tool nothing points at"
         )
+    }
+
+    /// The gizmo half of I2, possible since `ToolShortcutStore`: a generated
+    /// tool's binding exists only when the user recorded one, so the fixture
+    /// carries both a bound and an unbound gizmo — the unbound one is what
+    /// keeps this from passing by every tool reading `.shortcut` regardless.
+    func testAGeneratedToolWithARecordedShortcutIsNotReportedAsLivingNowhere() {
+        let toolsDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "gizmate-tool-shortcut-home-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: toolsDirectory) }
+        let tools = ToolsStore(directoryURL: toolsDirectory, migrateLegacy: false)
+
+        let ringSuiteName = "ToolShortcutHomeTests.ring.\(UUID().uuidString)"
+        let ringDefaults = UserDefaults(suiteName: ringSuiteName)!
+        defer { ringDefaults.removePersistentDomain(forName: ringSuiteName) }
+        let ringLayout = RingLayoutStore(defaults: ringDefaults)
+
+        let dockSuiteName = "ToolShortcutHomeTests.dock.\(UUID().uuidString)"
+        let dockDefaults = UserDefaults(suiteName: dockSuiteName)!
+        defer { dockDefaults.removePersistentDomain(forName: dockSuiteName) }
+        let dock = DockStore(defaults: dockDefaults)
+
+        let overridesSuiteName = "ToolShortcutHomeTests.overrides.\(UUID().uuidString)"
+        let overridesDefaults = UserDefaults(suiteName: overridesSuiteName)!
+        defer { overridesDefaults.removePersistentDomain(forName: overridesSuiteName) }
+        let overrides = BuiltInOverridesStore(defaults: overridesDefaults)
+
+        let shortcutSuiteName = "ToolShortcutHomeTests.shortcuts.\(UUID().uuidString)"
+        let shortcutDefaults = UserDefaults(suiteName: shortcutSuiteName)!
+        defer { shortcutDefaults.removePersistentDomain(forName: shortcutSuiteName) }
+
+        let home = HomeSectionContent(
+            tools: tools, ringLayout: ringLayout, dock: dock, overrides: overrides,
+            shortcutDefaults: shortcutDefaults
+        )
+
+        let bound = tools.save(GizmateTool(name: "Bound", kind: .python, input: .selection, output: .clipboard))
+        let unbound = tools.save(GizmateTool(name: "Unbound", kind: .python, input: .selection, output: .clipboard))
+        let key = GlobalShortcut(
+            keyCode: 11, modifiers: [.control, .option], keyEquivalent: "b", keyDisplay: "B"
+        )
+        ToolShortcutStore.set(key, for: bound.id, defaults: shortcutDefaults)
+
+        func location(for tool: GizmateTool) -> HomeLocation {
+            home.location(for: .tool(tool.id), storageID: ToolRef.generated(tool.id).storageID)
+        }
+
+        guard case .shortcut(let read) = location(for: bound) else {
+            return XCTFail(
+                "a gizmo off the ring and off every edge whose key still runs it "
+                    + "must not read back as `.nowhere`"
+            )
+        }
+        XCTAssertEqual(read, key)
+        XCTAssertEqual(location(for: bound).label, key.displayString)
+
+        guard case .nowhere = location(for: unbound) else {
+            return XCTFail(
+                "a gizmo with no slot, no edge and no recorded key really does "
+                    + "live nowhere — without this, the assertion above would pass "
+                    + "for every tool regardless of binding"
+            )
+        }
     }
 
     /// I3: `RingLayoutStore.assign` and `DockStore.dock` never call each

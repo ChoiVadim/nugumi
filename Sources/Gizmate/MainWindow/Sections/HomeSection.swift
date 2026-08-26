@@ -332,6 +332,13 @@ struct HomeSectionContent: View {
         if case .builtIn(let action) = content, let shortcutAction = action.shortcutAction {
             return .shortcut(GlobalShortcutStore.shortcut(for: shortcutAction, defaults: shortcutDefaults))
         }
+        // A gizmo's binding, unlike a built-in's, exists only when the user
+        // recorded one — but when it does, the key runs the tool from anywhere
+        // and "Nowhere" would be a lie.
+        if case .tool(let id) = content,
+           let bound = ToolShortcutStore.shortcut(for: id, defaults: shortcutDefaults) {
+            return .shortcut(bound)
+        }
         return .nowhere
     }
 }
@@ -374,8 +381,9 @@ private struct HomeRow: Identifiable {
 enum HomeLocation {
     case ring(folder: String?)
     case edge(DockEdge)
-    /// A built-in with a `shortcutAction` and no ring slot or edge: it still
-    /// runs, from the key `GlobalShortcutStore` resolves for it.
+    /// A tool with no ring slot or edge that still runs from a key: a built-in
+    /// through the binding `GlobalShortcutStore` always resolves, or a gizmo
+    /// through the one the user recorded in `ToolShortcutStore`.
     case shortcut(GlobalShortcut)
     /// Saved but unreachable from anywhere a user would think to look — not a
     /// warning, just the plain truth about a tool nothing points at yet.
