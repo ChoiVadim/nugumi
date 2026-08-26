@@ -254,7 +254,10 @@ final class EdgeDockController {
     private func presentResult(_ view: NSView) {
         guard let screen else { return }
         view.autoresizingMask = [.width, .height]
-        let wasVisible = state != .hidden
+        // A window still fading out counts as visible: a new result replacing
+        // one that closed a moment ago rides in from wherever the old one got
+        // to, rather than jumping past the bezel to slide in over it.
+        let wasVisible = state != .hidden || panel.isVisible
         transientResult = view
         pointerLeftTimer?.invalidate()
         pointerLeftTimer = nil
@@ -615,7 +618,10 @@ final class EdgeDockController {
             panel.animator().setFrame(retract, display: true)
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
-            self?.panel.orderOut(nil)
+            // Only if nothing re-presented in the meantime: a result opened
+            // during this fade would otherwise be ordered out by it.
+            guard let self, self.state == .hidden else { return }
+            self.panel.orderOut(nil)
         }
     }
 

@@ -1089,11 +1089,14 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         // word itself, not mostly empty result-box space to its right.
         let shimmerFont = NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold)
         let shimmerTextWidth = ceil(((loadingBaseText ?? "") as NSString).size(withAttributes: [.font: shimmerFont]).width) + 4
+        // One line tall, at the top of the box: in a dock the box is the whole
+        // edge, and a word centred halfway down it reads as lost, not loading.
+        let shimmerHeight = min(ceil(shimmerFont.ascender - shimmerFont.descender) + 8, resultScrollFrame.height)
         loadingShimmer.frame = NSRect(
             x: resultScrollFrame.minX,
-            y: resultScrollFrame.minY,
+            y: resultScrollFrame.maxY - shimmerHeight,
             width: min(max(shimmerTextWidth, 1), resultScrollFrame.width),
-            height: resultScrollFrame.height
+            height: shimmerHeight
         )
         // Measure the rendered attributed content (tables/headers included), not
         // the plain string, so tall blocks get the right scroll height.
