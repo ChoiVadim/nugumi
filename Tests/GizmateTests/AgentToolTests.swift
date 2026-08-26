@@ -3,6 +3,39 @@ import XCTest
 
 @testable import Gizmate
 
+/// A run speaks `run_python`/`finish`, which the build-vocabulary
+/// `normalized` reads as invalid — that mismatch made `answerModel`'s
+/// normalization a silent no-op for months, and a fenced or malformed run
+/// reply killed the whole run. These pin the run-side reading.
+final class RunModelActionNormalizationTests: XCTestCase {
+    private let runAction =
+        #"{"version":1,"action":"toolCall","name":"run_python","arguments":{"source":"print(1)","purpose":"count"}}"#
+
+    func testAValidRunActionPassesThroughUntouched() {
+        XCTAssertEqual(ToolAgentModelActionValidator.normalizedForRun(runAction), runAction)
+        let finish = #"{"version":1,"action":"finalText","text":"done"}"#
+        XCTAssertEqual(ToolAgentModelActionValidator.normalizedForRun(finish), finish)
+    }
+
+    func testAFencedRunActionIsUnfenced() {
+        let fenced = "```json\n\(runAction)\n```"
+        XCTAssertEqual(ToolAgentModelActionValidator.normalizedForRun(fenced), runAction)
+    }
+
+    /// Two concatenated JSON objects — the shape that actually turns up — must
+    /// come back nil so the repair turn fires, rather than passing through to
+    /// the sidecar's strict parser and ending the run.
+    func testConcatenatedObjectsAreNotARunAction() {
+        let glued = runAction + #"{"version":1,"action":"finalText","text":"done"}"#
+        XCTAssertNil(ToolAgentModelActionValidator.normalizedForRun(glued))
+    }
+
+    func testABuildToolNameIsNotARunAction() {
+        let build = #"{"version":1,"action":"toolCall","name":"write_candidate","arguments":{}}"#
+        XCTAssertNil(ToolAgentModelActionValidator.normalizedForRun(build))
+    }
+}
+
 final class AgentToolCandidateTests: XCTestCase {
     private func agentCandidate(
         prompt: String = "Work out what the link is and answer accordingly.",

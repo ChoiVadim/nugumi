@@ -420,6 +420,42 @@ enum ToolAgentModelActionDiagnosis {
     }
 }
 
+extension ToolAgentModelActionValidator {
+    /// The run-session counterpart of `normalized`. A run speaks a different
+    /// vocabulary — `run_python` and `finish`, `AgentRunToolNameV1` — so
+    /// `isStrictlyValid`, which checks the five build tools, reads every valid
+    /// run action as invalid; before this existed, `answerModel`'s
+    /// "normalize" call was a no-op that always fell back to the raw text.
+    /// Shape only, on purpose: the sidecar's Zod schemas stay the one
+    /// authority on what `run_python` takes, and this must never grow a
+    /// second copy of them — it exists to tell "a run action, possibly
+    /// fenced" from "not JSON at all", which is what the repair turn is for.
+    static func normalizedForRun(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isPlausibleRunAction(trimmed) { return trimmed }
+        let body = unfenced(text)
+        if body != trimmed, isPlausibleRunAction(body) { return body }
+        return nil
+    }
+
+    private static func isPlausibleRunAction(_ text: String) -> Bool {
+        guard let parsed = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
+              let object = parsed as? [String: Any],
+              object["version"] as? Int == 1,
+              let action = object["action"] as? String else { return false }
+        switch action {
+        case "finalText":
+            return object["text"] is String
+        case "toolCall":
+            guard let name = object["name"] as? String,
+                  AgentRunToolNameV1(rawValue: name) != nil else { return false }
+            return object["arguments"] is [String: Any]
+        default:
+            return false
+        }
+    }
+}
+
 /// The one-shot format-repair turn's ingredients, shared by the build session
 /// (`ToolAgentLiveBuilder.answerPiModelRequest`) and an agent run
 /// (`AgentToolRunner.answerModel`) so the two cannot drift. The control flow —

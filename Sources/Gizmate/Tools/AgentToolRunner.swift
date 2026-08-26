@@ -234,9 +234,10 @@ enum AgentToolRunner {
                 thinkingLevel: thinkingLevel,
                 onPartial: { _ in }
             )
-            // The same normalization the builder applies: a markdown fence or a
-            // rewrapped envelope is a presentation slip, not a protocol breach.
-            if let normalized = ToolAgentModelActionValidator.normalized(text) {
+            // The run-vocabulary normalization — `normalized` itself checks
+            // the five build tools and reads every valid run action as
+            // invalid, which for months made this call a silent no-op.
+            if let normalized = ToolAgentModelActionValidator.normalizedForRun(text) {
                 return .text(normalized)
             }
             // And the same one-shot repair turn. Run budgets carry
@@ -258,7 +259,7 @@ enum AgentToolRunner {
                 thinkingLevel: thinkingLevel,
                 onPartial: { _ in }
             )
-            return .text(ToolAgentModelActionValidator.normalized(repaired) ?? text)
+            return .text(ToolAgentModelActionValidator.normalizedForRun(repaired) ?? text)
         } catch {
             return .error(error is CancellationError ? .cancelled : .workerFailure)
         }
