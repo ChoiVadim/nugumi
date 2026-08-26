@@ -7,8 +7,14 @@ enum SurfaceRefreshOutcome: Equatable {
     /// The script ran and printed exactly the rows already cached — nothing
     /// for the dock to redraw.
     case unchanged
-    /// The gizmo wasn't approved, its script didn't run, or its output
-    /// wasn't rows. The dock keeps showing its cached rows either way.
+    /// The script's current code carries no approval — a fresh gizmo, or one
+    /// whose code changed since the user last said yes. Its own case rather
+    /// than a `.failed` message, because the dock can do something about it:
+    /// draw an approve control, which is the consent UI the hover trigger
+    /// itself never had.
+    case needsApproval
+    /// The script didn't run or its output wasn't rows. The dock keeps
+    /// showing its cached rows either way.
     case failed(String)
 }
 
@@ -40,16 +46,7 @@ enum SurfaceRefresh {
         previous: [SurfaceRow] = [],
         run: (GizmateTool) async throws -> String
     ) async -> SurfaceRefreshOutcome {
-        guard isApproved else {
-            // Home (the tool list) doesn't run anything itself — it opens a
-            // row's editor, where Install & test is the actual run. Naming
-            // both real places running happens, not the screen you'd start
-            // from to reach one of them.
-            return .failed(
-                "Not approved yet — run “\(tool.name)” once from the ring, "
-                    + "or test it from its editor in Home."
-            )
-        }
+        guard isApproved else { return .needsApproval }
         do {
             let stdout = try await run(tool)
             let rows = try SurfaceRows.decode(stdout: stdout)
@@ -64,11 +61,13 @@ enum SurfaceRefresh {
     /// back to, so this can be tested without a view.
     ///
     /// `.refreshed`/`.unchanged` say nothing: either just drew the truth or
-    /// is already showing it. `.failed` is the only outcome that has
-    /// anything to explain, and what it says depends on `rowsAreEmpty`: with
-    /// no cached rows there is no "what was here last" to point to, so the
-    /// real reason — not approved yet, uv missing, a Python traceback — is
-    /// all there is to show. Only when there genuinely are cached rows
+    /// is already showing it. `.needsApproval` says nothing here either —
+    /// the dock draws an approve control for it instead of a caption, and
+    /// that control carries its own words. `.failed` is the only outcome
+    /// with something to explain, and what it says depends on
+    /// `rowsAreEmpty`: with no cached rows there is no "what was here last"
+    /// to point to, so the real reason — uv missing, a Python traceback —
+    /// is all there is to show. Only when there genuinely are cached rows
     /// behind it does the generic staleness caption become honest.
     static func caption(for outcome: SurfaceRefreshOutcome, rowsAreEmpty: Bool) -> String? {
         guard case .failed(let message) = outcome else { return nil }

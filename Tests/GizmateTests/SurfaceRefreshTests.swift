@@ -13,14 +13,9 @@ final class SurfaceRefreshTests: XCTestCase {
         let outcome = await SurfaceRefresh.outcome(
             for: tool, isApproved: false
         ) { _ in XCTFail("an unapproved surface must not run"); return "" }
-        guard case .failed(let message) = outcome else { return XCTFail("expected .failed") }
-        // Pinned so the message can't drift back to naming a screen that
-        // doesn't run anything — Home opens a tool's editor, it doesn't run
-        // it itself, and this string is read straight off the dock.
-        XCTAssertEqual(
-            message,
-            "Not approved yet — run “\(tool.name)” once from the ring, or test it from its editor in Home."
-        )
+        // Its own case, not a `.failed` message: the dock draws an approve
+        // control for it, and a string can't be pattern-matched into one.
+        XCTAssertEqual(outcome, .needsApproval)
     }
 
     func testRowsThatDidNotChangeReportUnchanged() async {
@@ -89,10 +84,16 @@ final class SurfaceRefreshCaptionTests: XCTestCase {
     /// the real reason has to be the whole caption, not discarded in favor
     /// of a generic one stacked over the layout's own empty-state copy.
     func testAFailureWithNoCachedRowsShowsTheRealMessage() {
-        let message = "Not approved yet — run “Downloads” once from the ring, "
-            + "or test it from its editor in Home."
+        let message = "uv is not installed."
         let caption = SurfaceRefresh.caption(for: .failed(message), rowsAreEmpty: true)
         XCTAssertEqual(caption, message)
+    }
+
+    /// Approval has a control of its own with its own words — a caption on
+    /// top of it would say the same thing twice, once uselessly.
+    func testNeedsApprovalHasNoCaption() {
+        XCTAssertNil(SurfaceRefresh.caption(for: .needsApproval, rowsAreEmpty: true))
+        XCTAssertNil(SurfaceRefresh.caption(for: .needsApproval, rowsAreEmpty: false))
     }
 
     /// Only when there is something cached behind it does "showing what was

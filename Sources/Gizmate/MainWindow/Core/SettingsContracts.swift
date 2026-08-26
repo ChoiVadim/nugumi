@@ -138,8 +138,13 @@ protocol SettingsHost: AnyObject {
     /// Runs a surface gizmo's script because the pointer crossed a screen
     /// edge — never because the user pressed anything, so this can't ask for
     /// approval the way `runTool` can. An unapproved surface reports
-    /// `.failed` instead of running; see `SurfaceRefresh`.
+    /// `.needsApproval` instead of running; see `SurfaceRefresh`.
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome
+    /// Records the user's approval of the surface's *current* script — the
+    /// dock's approve control calls this, and the press is the consent the
+    /// hover trigger itself never has — then refreshes, so one click takes
+    /// the panel from stale to live.
+    func approveSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome
     /// Already implemented on `GizmateApp`; exposed so a docked gizmo's run
     /// button reaches the same path the Ring uses.
     func runTool(_ tool: GizmateTool, selection: String)

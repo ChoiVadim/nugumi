@@ -683,6 +683,16 @@ share of users regardless of what looks right.
   in the editors. A surface has no working undocked state — it is simply in the
   middle of the figure — and its own hint says "Not on an edge, so it never
   runs" rather than borrowing a word that would claim otherwise.
+  When the approval itself is what's missing — a fresh surface, or a script
+  changed on disk since the user last said yes — the panel asks in place:
+  `SurfaceRefreshOutcome.needsApproval` is its own case, and the dock draws
+  one sentence plus an "Approve and refresh" button (`SurfaceApprovalPrompt`)
+  under the cached rows instead of the generic stale caption that used to
+  swallow the reason. The press is the deliberate act the hover trigger never
+  had a place for, it lands in the same `ToolApprovals` store every other
+  consent screen writes, and it approves the script's _current_ hash — the
+  same one the next run checks — then refreshes, so one click takes the panel
+  from stale to live.
 - **Say what's true of the resident, not the sentence a neighbouring one
   happens to use.** The folder hub used to carry a second consent sentence
   purely so it would not borrow the surface's wording about running and

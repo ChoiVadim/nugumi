@@ -33,6 +33,12 @@ struct SurfaceView: View {
     /// view only ever draws whatever string it's handed rather than
     /// deciding "stale" for itself and losing the real reason underneath.
     let stale: String?
+    /// Present exactly while the gizmo's current script carries no approval:
+    /// the action the approve control fires. The control *is* the consent UI
+    /// a hover-triggered run has nowhere else to put — a press on it, on the
+    /// one panel showing this one gizmo, is the deliberate act the approval
+    /// store records. nil hides the control.
+    var approve: (() -> Void)? = nil
     /// Which rows are lit. A value handed down the tree rather than read from
     /// the environment, so a click re-renders the two cards whose state changed
     /// instead of all eighty — see `SurfaceSelection`'s own comment for what
@@ -61,6 +67,9 @@ struct SurfaceView: View {
                         node: layout, rows: rows, availableWidth: geo.size.width,
                         selectedIDs: selectedIDs
                     )
+                    if let approve {
+                        SurfaceApprovalPrompt(approve: approve)
+                    }
                     if let stale {
                         Text(stale)
                             .font(.system(size: 12))
@@ -244,5 +253,42 @@ private struct SurfaceEmptyLabel: View {
             .foregroundStyle(FlowTheme.inkSecondary)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.top, 24)
+    }
+}
+
+/// The consent control a hover-triggered run has nowhere else to put: one
+/// sentence saying why the panel stopped, and the button whose press is the
+/// approval. Words first, button second — the user is saying yes to code
+/// running on its own, and a bare button under stale numbers would not say
+/// to what.
+private struct SurfaceApprovalPrompt: View {
+    let approve: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text("The script changed and needs your approval to keep running on its own.")
+                .font(.system(size: 12))
+                .foregroundStyle(FlowTheme.inkSecondary)
+                .multilineTextAlignment(.center)
+            Button(action: approve) {
+                Text("Approve and refresh")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(FlowTheme.ink)
+                    .padding(.vertical, 5)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(FlowTheme.subtleFill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(FlowTheme.hairline, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .cursor(.pointingHand)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 }

@@ -21,6 +21,7 @@ struct SurfaceHostView: View {
     /// the ~300 ms `uv` + Python cold start a fresh run costs.
     @State private var rows: [SurfaceRow]
     @State private var stale: String?
+    @State private var needsApproval = false
 
     init(tool: GizmateTool, host: any SettingsHost) {
         self.tool = tool
@@ -36,7 +37,10 @@ struct SurfaceHostView: View {
             // that this is a real gizmo. Drawing nothing makes the bug
             // visible instead of crashing the whole dock over it.
             if let layout = tool.layout {
-                SurfaceView(layout: layout, rows: rows, stale: stale)
+                SurfaceView(
+                    layout: layout, rows: rows, stale: stale,
+                    approve: needsApproval ? approve : nil
+                )
             }
         }
         .task {
@@ -57,7 +61,18 @@ struct SurfaceHostView: View {
     }
 
     private func refresh() async {
-        let outcome = await host.refreshSurface(tool)
+        apply(await host.refreshSurface(tool))
+    }
+
+    /// The one press a surface takes that isn't a card's own: the user
+    /// approving the script's current code. Runs through the host so the
+    /// approval lands in the same store every other consent screen writes,
+    /// and applies the outcome so the click itself swaps the stale rows out.
+    private func approve() {
+        Task { apply(await host.approveSurface(tool)) }
+    }
+
+    private func apply(_ outcome: SurfaceRefreshOutcome) {
         // Leave `rows` exactly as cached on `.failed` —
         // `SurfaceRefreshOutcome.failed` promises "the dock keeps showing
         // its cached rows either way" — so `rows.isEmpty` here is exactly
@@ -65,6 +80,7 @@ struct SurfaceHostView: View {
         if case .refreshed(let fresh) = outcome {
             rows = fresh
         }
+        needsApproval = outcome == .needsApproval
         stale = SurfaceRefresh.caption(for: outcome, rowsAreEmpty: rows.isEmpty)
     }
 }

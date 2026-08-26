@@ -71,6 +71,9 @@ private final class StubSettingsHost: SettingsHost {
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockCatalogSurfaceTests")
     }
+    func approveSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
+        fatalError("unused by DockCatalogSurfaceTests")
+    }
     func runTool(_ tool: GizmateTool, selection: String) { fatalError("unused by DockCatalogSurfaceTests") }
     func performBuiltIn(_ id: RingActionID) { fatalError("unused by DockCatalogSurfaceTests") }
     func presentMainWindow(section: MainWindowSection?) { fatalError("unused by DockCatalogSurfaceTests") }

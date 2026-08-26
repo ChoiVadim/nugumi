@@ -782,6 +782,9 @@ private final class StubBuiltInResidentsHost: SettingsHost {
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockPlacementParityTests")
     }
+    func approveSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
+        fatalError("unused by DockPlacementParityTests")
+    }
     func runTool(_ tool: GizmateTool, selection: String) { fatalError("unused by DockPlacementParityTests") }
     func performBuiltIn(_ id: RingActionID) { fatalError("unused by DockPlacementParityTests") }
     func presentMainWindow(section: MainWindowSection?) { fatalError("unused by DockPlacementParityTests") }
@@ -876,6 +879,9 @@ private final class StubEdgesUnplacedHost: SettingsHost {
     var gizmoBuilder: GizmoBuilder { fatalError("unused by DockPlacementParityTests") }
     var surfaceRows: SurfaceRowsCache { fatalError("unused by DockPlacementParityTests") }
     func refreshSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
+        fatalError("unused by DockPlacementParityTests")
+    }
+    func approveSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
         fatalError("unused by DockPlacementParityTests")
     }
     func runTool(_ tool: GizmateTool, selection: String) { fatalError("unused by DockPlacementParityTests") }

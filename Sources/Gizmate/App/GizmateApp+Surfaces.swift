@@ -57,6 +57,17 @@ extension GizmateApp {
         }
         return outcome
     }
+
+    /// The press on the dock's approve control. Approves whatever the script
+    /// hashes to *now* — the same `approvalHash` a refresh checks against, so
+    /// the yes covers exactly the code the next run executes — and refreshes
+    /// immediately, because a click that only cleared a caption would leave
+    /// the panel stale until the next reveal.
+    @MainActor
+    func approveSurface(_ tool: GizmateTool) async -> SurfaceRefreshOutcome {
+        ToolApprovals.approve(tool.id, hash: toolsStore.approvalHash(for: tool))
+        return await refreshSurface(tool)
+    }
 }
 
 /// A surface's script ran and exited non-zero. Its own type, not a reuse of
