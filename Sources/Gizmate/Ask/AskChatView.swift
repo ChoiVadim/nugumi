@@ -268,7 +268,7 @@ struct AskChatView: View {
                     )
                 )
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .disabled(idle && !conversation.isRunning)
         .help(conversation.isRunning ? "Stop" : "Send")
     }
@@ -289,7 +289,7 @@ struct AskChatView: View {
                         .fill(on ? FlowTheme.accentSoft : Color.clear)
                 )
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .help(help)
     }
 

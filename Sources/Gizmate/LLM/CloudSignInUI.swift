@@ -222,7 +222,7 @@ private struct ClaudeCodeLoginPanelView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(FlowTheme.accentBright)
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Spacer(minLength: 12)
 
@@ -241,7 +241,7 @@ private struct ClaudeCodeLoginPanelView: View {
                         .padding(.horizontal, 12)
                         .background(Capsule().fill(Color.white.opacity(0.12)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Button(action: { model.onSignIn() }) {
                     Text("Sign in")
@@ -251,7 +251,7 @@ private struct ClaudeCodeLoginPanelView: View {
                         .padding(.horizontal, 14)
                         .background(Capsule().fill(FlowTheme.accentBright.opacity(model.code.isEmpty || isWorking ? 0.4 : 1)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .disabled(model.code.isEmpty || isWorking)
             }
         }
@@ -398,7 +398,7 @@ private struct CloudAPIKeyPanelView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(FlowTheme.accentBright)
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Spacer(minLength: 12)
 
@@ -417,7 +417,7 @@ private struct CloudAPIKeyPanelView: View {
                         .padding(.horizontal, 12)
                         .background(Capsule().fill(Color.white.opacity(0.12)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Button(action: { model.onSave() }) {
                     Text("Save")
@@ -427,7 +427,7 @@ private struct CloudAPIKeyPanelView: View {
                         .padding(.horizontal, 14)
                         .background(Capsule().fill(FlowTheme.accentBright.opacity(model.key.isEmpty || isWorking ? 0.4 : 1)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .disabled(model.key.isEmpty || isWorking)
             }
         }

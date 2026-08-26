@@ -232,6 +232,18 @@ about what the first one meant.
 - Prefer native AppKit/SwiftUI interaction behavior.
 - Do not animate layout properties.
 - Progress should use `ProgressView` for long-running setup work.
+- **The pointer names what is under it.** `pointingHand` over anything that
+  acts on a click, `openHand` over anything that can be picked up, arrow over
+  everything else. This was absent from the whole app for its first two years —
+  three `NSCursor` calls in the entire source, all in the live panel — so every
+  button, tab and card looked exactly as inert as the background behind it.
+  Go through `.cursor(_:)` / `.plainButton()` in `Cursors.swift`, never a bare
+  `.onHover { NSCursor.push() }`: the tracking area it installs is
+  `.activeAlways`, and Gizmate's panels are non-activating in an app that is
+  usually not the active one, where an active-app-only area is silent. It also
+  answers `cursorUpdate` rather than pushing a cursor it has to remember to pop
+  — a card torn down mid-hover cannot leak the wrong pointer for the rest of
+  the session.
 - A list the user keeps is ordered by the user, not by a clock. Notes sorted
   themselves by `updatedAt`, so the card being typed into jumped to the top and
   the list rearranged itself while it was being read. Creation order, then

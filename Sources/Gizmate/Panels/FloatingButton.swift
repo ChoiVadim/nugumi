@@ -355,6 +355,11 @@ final class FirstMouseButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        CursorTrackingView.attach(.pointingHand, to: self)
+    }
 }
 
 @MainActor

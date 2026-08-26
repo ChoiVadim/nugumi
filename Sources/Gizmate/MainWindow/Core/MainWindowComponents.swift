@@ -24,6 +24,10 @@ extension View {
             single()
             if let double, (NSApp.currentEvent?.clickCount ?? 1) >= 2 { double() }
         }
+        // Carried by the gesture rather than left to each caller: this modifier
+        // exists precisely for the things that act on a click but are not
+        // `Button`s, which is the set that would otherwise be missed.
+        .cursor(.pointingHand)
     }
 }
 
@@ -225,7 +229,7 @@ struct PillPicker<Option: Hashable>: View {
                         )
                         .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .plainButton()
             }
         }
         .padding(3)

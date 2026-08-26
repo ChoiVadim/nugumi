@@ -227,6 +227,11 @@ enum TranslationPanelPalette {
 }
 
 final class LanguagePickerButton: NSButton {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        CursorTrackingView.attach(.pointingHand, to: self)
+    }
+
     static let titleLeadingInset: CGFloat = 8
 
     private static let horizontalPadding: CGFloat = 8

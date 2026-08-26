@@ -330,7 +330,7 @@ struct FolderHubView: View {
             .padding(.vertical, 3)
             .background(Self.chipShape.fill(fill(here: isCurrent, folder: folder)))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { inside in
             if inside {
                 hoveredChip = folder.path
@@ -382,7 +382,7 @@ struct FolderHubView: View {
                         .font(.system(size: 8, weight: .bold))
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .accessibilityLabel("Remove \(folder.lastPathComponent)")
             }
         }
@@ -398,6 +398,7 @@ struct FolderHubView: View {
             armedChip = nil
             show(folder, asRoot: true)
         }
+        .cursor(.pointingHand)
         // Leaving the chip disarms it: an armed chip left behind is a red
         // capsule sitting in the row with no way back except deleting it.
         .onHover { inside in

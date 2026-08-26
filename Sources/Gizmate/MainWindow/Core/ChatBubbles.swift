@@ -73,7 +73,7 @@ struct ChatImageThumb: View {
                         .frame(width: 16, height: 16)
                         .background(Circle().fill(Color.black.opacity(0.65)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .help("Remove")
                 .padding(3)
             }
@@ -180,7 +180,7 @@ struct ChatSendDisc: View {
                 .frame(width: 22, height: 22)
                 .background(Circle().fill(idle ? FlowTheme.ink.opacity(0.22) : FlowTheme.ink))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .disabled(idle)
         .help("Send")
     }

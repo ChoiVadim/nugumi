@@ -66,6 +66,7 @@ struct DockDragHandle: View {
             // which `minimumDistance: 1` is what decides. The two cannot both
             // fire for one press.
             .onTapGesture(perform: onTap)
+            .cursor(.openHand)
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { _ in

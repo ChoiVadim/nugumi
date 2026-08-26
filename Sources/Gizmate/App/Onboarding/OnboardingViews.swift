@@ -301,7 +301,7 @@ struct OnboardingRootView: View {
                 )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 
     private var skipButton: some View {
@@ -310,7 +310,7 @@ struct OnboardingRootView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.56))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .frame(maxWidth: .infinity)
         .padding(.top, 12)
     }
@@ -371,7 +371,7 @@ private struct FinaleChoiceButton: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { inside in
             withAnimation(.easeOut(duration: 0.14)) { hovered = inside }
         }
@@ -537,7 +537,7 @@ private struct IntroVideoPage: View {
                         .padding(.horizontal, 14)
                         .background(Capsule().fill(Color.black.opacity(0.35)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .padding(16)
             }
     }

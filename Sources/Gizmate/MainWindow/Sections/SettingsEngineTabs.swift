@@ -109,7 +109,7 @@ private struct AdvancedToggle: View {
                 .foregroundStyle(hovering ? FlowTheme.ink : FlowTheme.inkTertiary)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { hovering = $0 }
     }
 }
@@ -167,7 +167,7 @@ private struct ModelScopeCard: View {
                     Button(action: onOpenPicker) {
                         ModelTriggerLabel(text: currentModel.shortName)
                     }
-                    .buttonStyle(.plain)
+                    .plainButton()
                 }
                 if let ollamaCloudSignInNotice {
                     InlineInfoRow(text: ollamaCloudSignInNotice)

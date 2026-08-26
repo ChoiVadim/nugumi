@@ -121,7 +121,7 @@ struct RingSlotButton: View {
                         .frame(width: 28, height: 28)
                         .contentShape(Circle())
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .offset(x: 8, y: -8)
                 .zIndex(2)
                 .help("Remove from Ring")
@@ -158,6 +158,9 @@ struct RingSlotButton: View {
                     bubble.offset(x: bubbleOffset.x, y: bubbleOffset.y)
                 }
             }
+            // Clicked far more often than carried, so the pointer names the
+            // press. The carry announces itself once it starts.
+            .cursor(.pointingHand)
             .gesture(press)
             .help(isEmpty ? "Add an action" : (folder == nil ? label : "Rename “\(label)”"))
             .accessibilityAddTraits(.isButton)

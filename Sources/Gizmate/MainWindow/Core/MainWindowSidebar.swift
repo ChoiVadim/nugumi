@@ -61,7 +61,7 @@ struct SidebarView: View {
                         .font(.system(size: 18))
                         .foregroundStyle(FlowTheme.accent)
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .help("Update available - click to install")
             }
         }
@@ -97,6 +97,6 @@ struct NavItem: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 }

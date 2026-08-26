@@ -86,7 +86,7 @@ struct BuiltInEditorPanel: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(FlowTheme.subtleFill))
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help("Close")
             .accessibilityLabel("Close editor")
         }
@@ -252,7 +252,7 @@ struct BuiltInEditorPanel: View {
                             )
                     )
             }
-            .buttonStyle(.plain)
+            .plainButton()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

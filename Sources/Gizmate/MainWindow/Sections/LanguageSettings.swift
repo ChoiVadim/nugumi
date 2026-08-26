@@ -64,6 +64,7 @@ private struct LanguageMenu: View {
             MenuFieldLabel(text: current.displayName)
         }
         .menuStyle(.borderlessButton)
+        .cursor(.pointingHand)
         .fixedSize()
     }
 }

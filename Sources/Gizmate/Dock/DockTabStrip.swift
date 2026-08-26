@@ -99,7 +99,7 @@ private struct DockTab: View {
                 .background(plate)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { hovering = $0 }
         // Simultaneous rather than instead of the button: a press that never
         // moves has to stay a press. Firing both — a pull that ends back inside

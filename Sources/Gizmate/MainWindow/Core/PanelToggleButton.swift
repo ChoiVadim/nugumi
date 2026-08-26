@@ -26,7 +26,7 @@ struct ChromeIconButton: View {
                 )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(help)

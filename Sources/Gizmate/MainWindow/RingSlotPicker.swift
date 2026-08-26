@@ -130,7 +130,7 @@ private struct RingSlotPickerPanel: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(FlowTheme.subtleFill))
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help("Close")
             .accessibilityLabel("Close action picker")
         }
@@ -179,7 +179,7 @@ private struct RingSlotPickerPanel: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .disabled(pending == nil)
         .opacity(pending == nil ? 0.4 : 1)
         .help("Puts the selected action in this slot.")
@@ -200,7 +200,7 @@ private struct RingSlotPickerPanel: View {
             .padding(.horizontal, 10)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 
     private func sourceTab(_ value: Group, count: Int) -> some View {
@@ -221,7 +221,7 @@ private struct RingSlotPickerPanel: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

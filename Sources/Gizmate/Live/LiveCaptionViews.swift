@@ -202,6 +202,11 @@ final class KeyableLivePanel: NSPanel {
 /// - background mode (the round white play button): a persistent `restingBG`
 ///   that brightens to `hoverBG` on hover.
 final class HoverIconButton: NSButton {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        CursorTrackingView.attach(.pointingHand, to: self)
+    }
+
     var roundedFull = false
     var corner: CGFloat = 6
     var baseTint: NSColor = NSColor(calibratedWhite: 1.0, alpha: 0.6)
@@ -273,16 +278,8 @@ final class HoverIconButton: NSButton {
 /// Shows the open-hand "grab to move" cursor on hover, hinting the card is a drag
 /// handle (the window is movable by dragging its background).
 final class DragHandleView: NSView {
-    private var tracking: NSTrackingArea?
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let area = NSTrackingArea(rect: bounds,
-                                  options: [.activeAlways, .mouseEnteredAndExited, .cursorUpdate],
-                                  owner: self, userInfo: nil)
-        addTrackingArea(area)
-        tracking = area
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        CursorTrackingView.attach(.openHand, to: self)
     }
-    override func cursorUpdate(with event: NSEvent) { NSCursor.openHand.set() }
-    override func mouseEntered(with event: NSEvent) { NSCursor.openHand.set() }
 }

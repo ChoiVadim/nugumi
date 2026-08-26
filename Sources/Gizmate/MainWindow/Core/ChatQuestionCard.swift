@@ -75,7 +75,7 @@ struct ChatQuestionCard: View {
                     .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help(
                 questions.total > 1
                     ? "Skip these and let Gizmate decide"
@@ -144,7 +144,7 @@ private struct OptionRow: View {
             .contentShape(Rectangle())
             .background(hovering ? FlowTheme.selected : .clear)
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { hovering = $0 }
     }
 }

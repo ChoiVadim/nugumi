@@ -73,7 +73,7 @@ struct RingFolderEditorPanel: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(FlowTheme.subtleFill))
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help("Close")
             .accessibilityLabel("Close sub-ring editor")
         }
@@ -145,7 +145,7 @@ struct RingFolderEditorPanel: View {
                             )
                     )
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .disabled(!canSave)
             .opacity(canSave ? 1 : 0.45)
         }

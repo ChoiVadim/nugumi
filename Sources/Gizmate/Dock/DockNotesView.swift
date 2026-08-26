@@ -81,7 +81,7 @@ struct DockNotesView: View {
             .padding(.vertical, 3)
             .background(Capsule().fill(selected ? FlowTheme.raised : FlowTheme.subtleFill))
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 
     // MARK: - List

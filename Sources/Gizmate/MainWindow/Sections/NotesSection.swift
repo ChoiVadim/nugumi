@@ -93,7 +93,7 @@ struct NotesSection: View {
                     .padding(.bottom, 10)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help("New tag")
             Spacer(minLength: 0)
         }
@@ -223,7 +223,7 @@ private struct TagEditorRow: View {
                                 )
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .plainButton()
                         .onHover { hoveringDelete = $0 }
                     }
                 }
@@ -509,6 +509,7 @@ private struct NoteCard: View {
             .contentShape(Rectangle())
             .onTapGesture { titleFocused = true }
             .onDrag(onDragStart, preview: { dragPreview })
+            .cursor(.openHand)
             .help("Drag the title to reorder")
     }
 
@@ -616,6 +617,7 @@ private struct NoteCard: View {
                 .lineLimit(1)
         }
         .menuStyle(.borderlessButton)
+        .cursor(.pointingHand)
         .menuIndicator(.hidden)
         .fixedSize()
     }
@@ -628,7 +630,7 @@ private struct NoteCard: View {
                     .foregroundStyle(note.usedAsContext ? FlowTheme.accent : FlowTheme.inkTertiary)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help(note.usedAsContext
                   ? "Gizmos with \"Use my notes\" on can read this note"
                   : "Kept out of every prompt")
@@ -639,7 +641,7 @@ private struct NoteCard: View {
                     .foregroundStyle(FlowTheme.inkSecondary)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help("Delete note")
         }
         .padding(12)

@@ -219,7 +219,7 @@ private struct ModelPickerPanel: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(FlowTheme.subtleFill))
             }
-            .buttonStyle(.plain)
+            .plainButton()
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
@@ -291,7 +291,7 @@ private struct ModelPickerPanel: View {
             .contentShape(Rectangle())
             .background(isSelected ? FlowTheme.subtleFill : Color.clear)
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 
     private var modelColumn: some View {
@@ -352,7 +352,7 @@ private struct ModelPickerPanel: View {
             .contentShape(Rectangle())
             .background(isPending ? FlowTheme.subtleFill : Color.clear)
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 
     private var footer: some View {
@@ -383,7 +383,7 @@ private struct ModelPickerPanel: View {
                             )
                     )
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .disabled(!enabled)
         }
         .padding(.horizontal, 16)

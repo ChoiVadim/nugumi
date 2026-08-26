@@ -242,7 +242,7 @@ struct HomeSectionContent: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .help(row.detail ?? row.title)
     }
 

@@ -92,6 +92,13 @@ struct SurfaceCardMouse: NSViewRepresentable {
 }
 
 final class SurfaceCardMouseView: NSView, NSDraggingSource {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // A shelf's rows are picked up more often than they are opened — see
+        // the double-click note in `SurfaceCard`.
+        CursorTrackingView.attach(.openHand, to: self)
+    }
+
     var isSelected: () -> Bool = { false }
     var onClick: (Bool) -> Void = { _ in }
     var onActivate: () -> Void = {}

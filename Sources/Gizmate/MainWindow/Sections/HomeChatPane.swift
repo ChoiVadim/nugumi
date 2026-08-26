@@ -361,7 +361,7 @@ struct HomeChatPane: View {
                 )
                 .overlay(Capsule().stroke(FlowTheme.hairline, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 
     // MARK: - Composer
@@ -466,7 +466,7 @@ struct HomeChatPane: View {
                 .frame(width: 22, height: 22, alignment: .leading)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .help("Show Gizmate a picture. Drag one in, or paste it.")
     }
 
@@ -543,7 +543,7 @@ struct HomeChatPane: View {
                         .padding(.vertical, 6)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .plainButton()
                 }
             }
             .padding(.vertical, 4)

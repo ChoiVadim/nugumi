@@ -35,7 +35,7 @@ struct AppIconStrip: View {
                     }
                     .frame(width: diameter, height: diameter)
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .help("Add an app to \(category.displayName)")
             }
             .padding(.vertical, 4)
@@ -66,7 +66,7 @@ private struct AppIconBubble: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.white, Color.black.opacity(0.6))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .offset(x: 4, y: -4)
             }
         }

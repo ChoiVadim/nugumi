@@ -520,6 +520,7 @@ private struct UsageStatsMenuSummaryView: View {
             .onTapGesture {
                 onToggle()
             }
+            .cursor(.pointingHand)
             .help(isExpanded ? "Show less" : "Show more")
     }
 }

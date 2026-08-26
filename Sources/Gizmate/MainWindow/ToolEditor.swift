@@ -166,7 +166,7 @@ struct ToolEditorPanel: View {
                     .frame(width: 24, height: 24)
                     .background(Circle().fill(FlowTheme.subtleFill))
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help("Close")
             .accessibilityLabel("Close gizmo editor")
         }
@@ -202,7 +202,7 @@ struct ToolEditorPanel: View {
                             )
                     )
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .disabled(!canSave)
             .opacity(canSave ? 1 : 0.45)
         }
@@ -551,7 +551,7 @@ struct ToolEditorPanel: View {
                 .frame(height: 38)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .accessibilityLabel("\(title), \(value)")
             .accessibilityHint(isOpen ? "Collapse" : "Expand")
 
@@ -686,7 +686,7 @@ struct ToolEditorPanel: View {
                     } label: {
                         Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.plain)
+                    .plainButton()
                     .help("Remove \(row.value)")
                 }
             }
@@ -701,7 +701,7 @@ struct ToolEditorPanel: View {
                 } label: {
                     Label("Add an option", systemImage: "plus.circle")
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .foregroundStyle(FlowTheme.inkTertiary)
             }
         }
@@ -971,7 +971,7 @@ struct ToolEditorPanel: View {
                         )
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .plainButton()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1073,7 +1073,7 @@ struct ToolEditorPanel: View {
             Button(scriptIsEmpty ? "Insert template" : "Replace with template") {
                 script = Self.scriptTemplate
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .font(.system(size: 11.5, weight: .medium))
             .foregroundStyle(FlowTheme.accent)
             .fixedSize()
@@ -1417,7 +1417,7 @@ struct IconGrid: View {
                             .font(.system(size: 11))
                             .foregroundStyle(FlowTheme.inkTertiary)
                     }
-                    .buttonStyle(.plain)
+                    .plainButton()
                 }
             }
             .padding(.vertical, 7)
@@ -1440,7 +1440,7 @@ struct IconGrid: View {
                                 )
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .plainButton()
                         .help(name)
                         // ponytail: last-cell onAppear instead of a scroll-offset
                         // observer — .onScrollTargetVisibilityChange is macOS 15.

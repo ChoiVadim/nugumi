@@ -79,6 +79,11 @@ final class RadialMenuBackdropView: NSView {
 /// answered the cursor on its own would be a second, disagreeing opinion about
 /// what is selected.
 final class RadialMenuButtonView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        CursorTrackingView.attach(.pointingHand, to: self)
+    }
+
     private let circleView = NSVisualEffectView()
     /// Liquid Glass backing (NSGlassEffectView) when the OS has it; the class
     /// is resolved by name at runtime because the release SDK predates the

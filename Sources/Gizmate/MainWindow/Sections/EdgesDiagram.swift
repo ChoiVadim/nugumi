@@ -329,6 +329,7 @@ struct EdgesDiagram: View {
             }
         )
             .opacity(drag?.id == item.id ? 0.25 : 1)
+            .cursor(.openHand)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
                     .onChanged { drag = Carried(id: item.id, location: $0.location) }
@@ -478,7 +479,7 @@ extension EdgeToolTile {
                     .frame(width: 18, height: 16)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .plainButton()
             .help(pinned
                 ? "Stays open until you close it."
                 : "Closes when the pointer leaves.")

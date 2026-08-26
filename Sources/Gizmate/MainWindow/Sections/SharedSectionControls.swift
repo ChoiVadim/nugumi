@@ -68,7 +68,7 @@ struct SecondaryButton: View {
                         .fill(destructive ? Color.red.opacity(0.18) : Color.white.opacity(0.10))
                 )
         }
-        .buttonStyle(.plain)
+        .plainButton()
     }
 }
 
@@ -95,7 +95,7 @@ struct FlowTabBar: View {
                     .fixedSize()
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .plainButton()
             }
             Spacer(minLength: 0)
         }
@@ -134,7 +134,7 @@ struct ResetDiscButton: View {
                 .background(Circle().fill(hovering ? FlowTheme.raised : Color.clear))
                 .overlay(Circle().stroke(hovering ? FlowTheme.hairline : Color.clear, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { inside in
             withAnimation(.easeOut(duration: 0.15)) { hovering = inside }
         }
@@ -172,7 +172,7 @@ struct RowIconButton: View {
                 )
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .plainButton()
         .onHover { hovering = $0 }
     }
 }

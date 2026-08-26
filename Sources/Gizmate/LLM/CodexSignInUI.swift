@@ -214,7 +214,7 @@ private struct CodexEnableDeviceCodeView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(FlowTheme.accentBright)
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Spacer(minLength: 12)
 
@@ -226,7 +226,7 @@ private struct CodexEnableDeviceCodeView: View {
                         .padding(.horizontal, 16)
                         .background(Capsule().fill(Color.white.opacity(0.10)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Button(action: done) {
                     Text("Done")
@@ -236,7 +236,7 @@ private struct CodexEnableDeviceCodeView: View {
                         .padding(.horizontal, 20)
                         .background(Capsule().fill(FlowTheme.accentBright))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
             }
         }
         .padding(20)
@@ -280,7 +280,7 @@ private struct CodexLoginPanelView: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .help("Copy code")
                 Spacer(minLength: 0)
             }
@@ -303,7 +303,7 @@ private struct CodexLoginPanelView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(FlowTheme.accentBright)
                 }
-                .buttonStyle(.plain)
+                .plainButton()
 
                 Spacer(minLength: 12)
 
@@ -321,7 +321,7 @@ private struct CodexLoginPanelView: View {
                         .padding(.horizontal, 10)
                         .background(Capsule().fill(Color.white.opacity(0.12)))
                 }
-                .buttonStyle(.plain)
+                .plainButton()
                 .padding(.leading, 4)
             }
         }

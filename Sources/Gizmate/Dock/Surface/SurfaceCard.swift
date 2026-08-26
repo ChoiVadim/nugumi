@@ -390,9 +390,9 @@ private struct SurfaceCardTapModifier: ViewModifier {
             // Finder's own gesture for "open this", and the one a card can
             // afford: a card is a drag source, and a shelf's files are picked
             // up far more often than they are opened.
-            content.onTapGesture(count: 2) { activate(row) }
+            content.onTapGesture(count: 2) { activate(row) }.cursor(.openHand)
         } else if let tap {
-            content.onTapGesture { perform(tap) }
+            content.onTapGesture { perform(tap) }.cursor(.pointingHand)
         } else {
             content
         }
