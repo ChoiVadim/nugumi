@@ -63,13 +63,17 @@ struct SurfaceView: View {
         GeometryReader { geo in
             OverlayScrollHost {
                 VStack(alignment: .leading, spacing: 8) {
+                    // First, not last: the rows below it can be taller than
+                    // the panel, and a control that needs scrolling to exist
+                    // was found by nobody — the stale numbers were the whole
+                    // screen and the button sat under them, off screen.
+                    if let approve {
+                        SurfaceApprovalPrompt(approve: approve)
+                    }
                     SurfaceTreeView(
                         node: layout, rows: rows, availableWidth: geo.size.width,
                         selectedIDs: selectedIDs
                     )
-                    if let approve {
-                        SurfaceApprovalPrompt(approve: approve)
-                    }
                     if let stale {
                         Text(stale)
                             .font(.system(size: 12))
@@ -257,38 +261,31 @@ private struct SurfaceEmptyLabel: View {
 }
 
 /// The consent control a hover-triggered run has nowhere else to put: one
-/// sentence saying why the panel stopped, and the button whose press is the
-/// approval. Words first, button second — the user is saying yes to code
-/// running on its own, and a bare button under stale numbers would not say
-/// to what.
+/// full-width button whose sentence is its label. Just the button, no
+/// explanatory paragraph beside it — the words say what changed and what the
+/// press does, and anything more was prose in front of the one action the
+/// panel is asking for.
 private struct SurfaceApprovalPrompt: View {
     let approve: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            Text("The script changed and needs your approval to keep running on its own.")
-                .font(.system(size: 12))
-                .foregroundStyle(FlowTheme.inkSecondary)
+        Button(action: approve) {
+            Text("The script changed. Click to approve and refresh.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(FlowTheme.ink)
                 .multilineTextAlignment(.center)
-            Button(action: approve) {
-                Text("Approve and refresh")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(FlowTheme.ink)
-                    .padding(.vertical, 5)
-                    .padding(.horizontal, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(FlowTheme.subtleFill)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(FlowTheme.hairline, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .cursor(.pointingHand)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(FlowTheme.subtleFill)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(FlowTheme.hairline, lineWidth: 1)
+                )
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
+        .cursor(.pointingHand)
     }
 }
