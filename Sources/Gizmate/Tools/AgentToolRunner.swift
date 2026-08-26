@@ -107,6 +107,9 @@ enum AgentToolRunner {
         var step = 0
         while true {
             guard let line = try await process.receiveLine() else {
+                if deadline.timeIntervalSinceNow <= 0 {
+                    throw AgentToolRunError.failed(.timedOut, "ran past its time limit")
+                }
                 throw AgentToolRunError.endedWithoutAnswer
             }
             let message = try AgentRunJSONLCodecV1.decode(line)
@@ -121,6 +124,13 @@ enum AgentToolRunner {
                 return text
 
             case .failed(let failure):
+                // The sidecar reports its own deadline as an abort, which
+                // decodes here as `cancelled`. Nobody cancelled anything — the
+                // clock ran out, and `timedOut` is the code both the run UI
+                // and candidate validation know how to read.
+                if failure.code == .cancelled, deadline.timeIntervalSinceNow <= 0 {
+                    throw AgentToolRunError.failed(.timedOut, failure.message)
+                }
                 throw AgentToolRunError.failed(failure.code, failure.message)
 
             case .modelRequest(let request):
@@ -133,7 +143,8 @@ enum AgentToolRunner {
                 )
                 try await send(
                     .modelResponse(runID: runID, .init(requestID: request.requestID, result: result)),
-                    to: process
+                    to: process,
+                    deadline: deadline
                 )
 
             case .toolRequest(let envelope):
@@ -152,7 +163,8 @@ enum AgentToolRunner {
                             callID: envelope.callID,
                             result: .runPython(response)
                         )),
-                        to: process
+                        to: process,
+                        deadline: deadline
                     )
                 case .finish:
                     // Acknowledged here; the answer itself arrives as the
@@ -163,7 +175,8 @@ enum AgentToolRunner {
                             callID: envelope.callID,
                             result: .finish(AgentRunFinishResponseV1())
                         )),
-                        to: process
+                        to: process,
+                        deadline: deadline
                     )
                 }
 
@@ -296,5 +309,28 @@ enum AgentToolRunner {
 
     private static func send(_ message: AgentRunMessageV1, to process: JSONLProcess) async throws {
         try await process.sendLine(AgentRunJSONLCodecV1.encode(message))
+    }
+
+    /// A send into a sidecar that already exited fails as EPIPE, which
+    /// `FileHandle` wraps in a Cocoa error reading "The file couldn’t be
+    /// saved." Handed to the build model as a diagnostic, that sentence made it
+    /// "repair" candidates by promising not to write files. Name what actually
+    /// happened: past the deadline it is a timeout, otherwise the runtime died.
+    private static func send(
+        _ message: AgentRunMessageV1,
+        to process: JSONLProcess,
+        deadline: Date
+    ) async throws {
+        do {
+            try await send(message, to: process)
+        } catch {
+            if deadline.timeIntervalSinceNow <= 0 {
+                throw AgentToolRunError.failed(.timedOut, "ran past its time limit")
+            }
+            throw AgentToolRunError.failed(
+                .workerFailure,
+                "The agent runtime stopped mid-run: \(error.localizedDescription)"
+            )
+        }
     }
 }

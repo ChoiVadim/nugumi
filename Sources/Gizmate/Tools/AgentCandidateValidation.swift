@@ -74,11 +74,15 @@ enum AgentCandidateValidation {
                 durationMilliseconds: duration,
                 passingFingerprint: input.fingerprint
             )
-        } catch AgentToolRunError.failed(.budgetExhausted, _) {
-            // The trial's budget is deliberately smaller than the tool's own, so
-            // running out of it says nothing bad about the candidate. Failing
-            // here would make the model "repair" a tool that was fine by
-            // simplifying it until it fits three steps.
+        } catch AgentToolRunError.failed(.budgetExhausted, _),
+            AgentToolRunError.failed(.timedOut, _) {
+            // The trial's budgets — steps and clock alike — are deliberately
+            // smaller than the tool's own, so running out of either says
+            // nothing bad about the candidate. Failing here would make the
+            // model "repair" a tool that was fine by simplifying it until it
+            // fits three steps and ninety seconds: a run of four candidates
+            // did exactly that, each one promising harder not to save files,
+            // because the trial's timeout surfaced as a pipe write error.
             return try ToolAgentValidationReportV1(
                 candidateID: input.candidateID,
                 fingerprint: input.fingerprint,
