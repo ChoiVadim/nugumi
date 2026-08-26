@@ -61,7 +61,7 @@ struct SurfaceView: View {
         // the width there and handing it down as a plain value sidesteps the
         // chicken-and-egg entirely.
         GeometryReader { geo in
-            OverlayScrollHost {
+            OverlayScrollHost(centersShortContent: true) {
                 VStack(alignment: .leading, spacing: 8) {
                     // First, not last: the rows below it can be taller than
                     // the panel, and a control that needs scrolling to exist

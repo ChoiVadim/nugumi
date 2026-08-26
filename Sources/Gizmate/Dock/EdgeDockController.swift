@@ -268,12 +268,12 @@ final class EdgeDockController {
         install(view: margined(view), showsDragHandle: true)
         let size = NSSize(
             width: edge == .top ? 620 : 380,
-            // 640 is a request, not a promise: DockGeometry.expandedFrame
+            // 580 is a request, not a promise: DockGeometry.expandedFrame
             // clamps to the screen's visible height, so a small display gets
             // as much as it has. Raised from 520 for the side edges because a
             // five-section surface did not fit and scrolled its last reading
-            // off the bottom.
-            height: edge == .top ? 300 : 640
+            // off the bottom; 640 overshot into dead space below the rows.
+            height: edge == .top ? 300 : 580
         )
         present(
             frame: DockGeometry.expandedFrame(edge, contentSize: size, on: screen),
@@ -449,8 +449,8 @@ final class EdgeDockController {
             // of it, so a top dock still gets its full 300pt of content.
             let size = NSSize(
                 width: edge == .top ? 620 : 380,
-                // Same 640-with-screen-clamp as presentResult above.
-                height: (edge == .top ? 300 : 640) + topContentInset
+                // Same 580-with-screen-clamp as presentResult above.
+                height: (edge == .top ? 300 : 580) + topContentInset
             )
             // Only a panel already expanded morphs into the next one — that is
             // one object resizing, and it keeps the tab you clicked on screen

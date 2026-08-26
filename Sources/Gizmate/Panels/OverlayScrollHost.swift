@@ -20,6 +20,12 @@ private final class FlippedScrollDocument: NSView {
 /// `NSScrollView` subclass, so the nesting has to invert: AppKit owns the
 /// scrolling, SwiftUI rides inside it.
 struct OverlayScrollHost<Content: View>: NSViewRepresentable {
+    /// Vertically centres content shorter than the viewport instead of
+    /// pinning it to the top. Off by default — a list of notes reads from the
+    /// top like any list — and on for a stats surface, whose slack under the
+    /// last reading otherwise pools at the bottom and reads as a mistake.
+    /// Content taller than the viewport scrolls exactly as before either way.
+    var centersShortContent = false
     @ViewBuilder var content: () -> Content
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -38,18 +44,39 @@ struct OverlayScrollHost<Content: View>: NSViewRepresentable {
         document.addSubview(host)
         scroll.documentView = document
 
-        NSLayoutConstraint.activate([
-            // The document's height comes from the hosting view, which is what
-            // gives the scroll view something to scroll.
+        var constraints = [
             host.leadingAnchor.constraint(equalTo: document.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            host.topAnchor.constraint(equalTo: document.topAnchor),
-            host.bottomAnchor.constraint(equalTo: document.bottomAnchor),
             // Width tracks the viewport; height deliberately does not.
             document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
             document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
-        ])
+        ]
+        if centersShortContent {
+            // The document is at least the viewport and hugs the content past
+            // it: the low-priority equality gives way exactly when the
+            // viewport minimum wins, which is the only case where centring
+            // has room to mean anything.
+            let hug = document.heightAnchor.constraint(equalTo: host.heightAnchor)
+            hug.priority = .defaultLow
+            constraints += [
+                host.topAnchor.constraint(greaterThanOrEqualTo: document.topAnchor),
+                host.bottomAnchor.constraint(lessThanOrEqualTo: document.bottomAnchor),
+                host.centerYAnchor.constraint(equalTo: document.centerYAnchor),
+                document.heightAnchor.constraint(
+                    greaterThanOrEqualTo: scroll.contentView.heightAnchor
+                ),
+                hug,
+            ]
+        } else {
+            // The document's height comes from the hosting view, which is what
+            // gives the scroll view something to scroll.
+            constraints += [
+                host.topAnchor.constraint(equalTo: document.topAnchor),
+                host.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
         return scroll
     }
 
