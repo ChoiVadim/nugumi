@@ -430,6 +430,20 @@ share of users regardless of what looks right.
   the middle of the text. It is a gutter now — a column down the inner edge of a
   side dock, a bar across the bottom of the notch — and `install` insets the
   content past it, so the two cannot disagree about who owns those points.
+- **A result on an edge is its own component, not the floating panel laid
+  flat.** `TranslationPanelController` used to hand the dock its own
+  `TranslationContentView` with a `chromeless` flag: the card built for beside
+  the cursor, its 17pt result type, its language menu and replace button,
+  squeezed into a 380pt column on the bezel. It read as a floating window
+  stuck to the edge, because that is what it was. A floating answer is glanced
+  at and dismissed; a docked one is read beside your work, and it should read
+  at the size the Ask dock already does. So the controller is one seam with two
+  components behind it: floating stays `TranslationContentView`, docked is
+  `DockResultView`, the Ask dock's language (title row, `ChatAnswerText`,
+  `ChatThinkingText` naming the agent's step), held off the glass by the same
+  `contentMargin` as every resident. What the docked one drops is deliberate:
+  no language menu, no replace, no follow-up field. Those belong to the
+  selection flows, which open beside the selection.
   The notch got one when closing became a choice. It never had a handle before
   because it could not stay open, so `bezelwardOffset` measured `x` alone and
   returned zero for `.top` — correct then, and a pinned notch with no way out

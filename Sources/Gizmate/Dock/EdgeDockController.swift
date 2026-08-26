@@ -265,7 +265,7 @@ final class EdgeDockController {
         // to touch a dock while one is up), so it always carries a way out —
         // it is a panel that stays open by definition, whatever the tool that
         // produced it does the rest of the time.
-        install(view: view, showsDragHandle: true)
+        install(view: margined(view), showsDragHandle: true)
         let size = NSSize(
             width: edge == .top ? 620 : 380,
             height: edge == .top ? 300 : 520

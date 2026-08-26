@@ -95,10 +95,15 @@ final class TranslationPanelController {
     /// but it is never ordered in, and the content lives on an edge instead.
     private let dockHost: ResultSurfaceHost?
     private var isDocked: Bool { dockHost != nil }
+    /// The docked component's state, and the view drawing it. A result on an
+    /// edge is `DockResultView`, not this controller's `contentView` squeezed
+    /// into the dock: the two are different things (see that view's doc).
+    private let dockedResult: DockResultModel?
+    private var dockedView: NSView?
 
     var panelFrame: NSRect { panel.frame }
     var isVisible: Bool { panel.isVisible }
-    var displayedResultText: String { contentView.currentResultText }
+    var displayedResultText: String { dockedResult?.text ?? contentView.currentResultText }
     var currentSourceText: String { contentView.currentSourceText }
     var currentTargetLanguageValue: TranslationLanguage { contentView.currentTargetLanguageValue }
 
@@ -121,6 +126,7 @@ final class TranslationPanelController {
         onClose: (() -> Void)? = nil
     ) {
         self.dockHost = dockHost
+        self.dockedResult = dockHost == nil ? nil : DockResultModel(title: resultLabel ?? "Result")
         self.loadingPlaceholder = loadingPlaceholder
         self.anchor = anchor
         self.onClose = onClose
@@ -147,10 +153,6 @@ final class TranslationPanelController {
             anchorY: anchorY,
             showsSource: showsSource,
             showsFollowUp: showsFollowUp,
-            // On an edge the dock supplies the glass, the corners and the
-            // width, so the content must not bring its own — see DESIGN.md,
-            // "No glass inside glass".
-            chromeless: dockHost != nil,
             onTargetLanguageSelected: onTargetLanguageSelected,
             onReplace: onReplace
         )
@@ -203,12 +205,15 @@ final class TranslationPanelController {
             contentView.setTargetLanguage(targetLanguage)
         }
         contentView.startLoadingAnimation(baseText: placeholder ?? loadingPlaceholder)
-        if let dockHost {
+        if let dockHost, let dockedResult {
             // The dock sizes and dismisses its own panel, so neither the
             // fit-to-content pass nor the outside-click monitors apply: an edge
             // that vanished on the first click elsewhere would be unusable.
-            contentView.removeFromSuperview()
-            dockHost.present(contentView)
+            dockedResult.stage = .loading(placeholder ?? loadingPlaceholder)
+            let view = dockedView ?? makeDockedView(dockedResult)
+            dockedView = view
+            view.removeFromSuperview()
+            dockHost.present(view)
         } else {
             resizeToFitContent(animated: false)
             panel.orderFrontRegardless()
@@ -222,8 +227,26 @@ final class TranslationPanelController {
     /// Re-words the shimmer while still loading: an agent's current step,
     /// so a long run reads as progress rather than as a stuck "Thinking".
     func updateLoading(_ placeholder: String) {
+        if let dockedResult {
+            guard case .loading = dockedResult.stage else { return }
+            dockedResult.stage = .loading(placeholder)
+            return
+        }
         guard contentView.isShowingLoadingState else { return }
         contentView.startLoadingAnimation(baseText: placeholder)
+    }
+
+    private func makeDockedView(_ model: DockResultModel) -> NSView {
+        let view = NSHostingView(rootView: DockResultView(
+            model: model,
+            onCopy: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(model.text, forType: .string)
+            },
+            onClose: { [weak self] in self?.dismissByUser() }
+        ))
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
     }
 
     func showTranslation(_ text: String, requestID: UUID? = nil, isFinal: Bool = false) {
@@ -231,6 +254,10 @@ final class TranslationPanelController {
             return
         }
 
+        if let dockedResult {
+            dockedResult.stage = .answer(text)
+            return
+        }
         // Partials render inline (stable while streaming); the final chunk
         // (isFinal) re-renders as block markdown — tables/headers/lists.
         contentView.setResult(text, isFinal: isFinal)
@@ -241,6 +268,10 @@ final class TranslationPanelController {
             return
         }
 
+        if let dockedResult {
+            dockedResult.stage = .failure(message)
+            return
+        }
         contentView.setError(message)
     }
 
