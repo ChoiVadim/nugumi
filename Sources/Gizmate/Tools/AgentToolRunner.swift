@@ -49,9 +49,12 @@ enum AgentToolRunner {
     /// cannot eat the entire context and end the run.
     private static let maximumStreamCharacters = 8_000
 
-    struct Progress: Sendable {
-        let step: Int
-        let purpose: String
+    enum Progress: Sendable {
+        /// The agent is asking the model what to do next.
+        case thinking
+        /// The agent is running a script it wrote; `purpose` is its own
+        /// one-liner on what the step is for.
+        case runningPython(step: Int, purpose: String)
     }
 
     /// - Parameters:
@@ -62,7 +65,8 @@ enum AgentToolRunner {
     ///     model call, so an image attached once would be gone by the step that
     ///     needed it. Costs one image per turn — see `budgets(for:)` for how
     ///     many that can be.
-    ///   - onProgress: called as each `run_python` step starts, for the HUD.
+    ///   - onProgress: called on every model turn and as each `run_python`
+    ///     step starts, so a surface can show the run as a trace.
     /// - Returns: the text the agent finished with.
     @MainActor
     static func run(
@@ -120,6 +124,7 @@ enum AgentToolRunner {
                 throw AgentToolRunError.failed(failure.code, failure.message)
 
             case .modelRequest(let request):
+                onProgress(.thinking)
                 let result = await answerModel(
                     request,
                     images: images,
@@ -135,7 +140,7 @@ enum AgentToolRunner {
                 switch envelope.request {
                 case .runPython(let python):
                     step += 1
-                    onProgress(Progress(step: step, purpose: python.purpose))
+                    onProgress(.runningPython(step: step, purpose: python.purpose))
                     let response = await runPython(
                         python,
                         tool: tool,

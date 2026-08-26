@@ -209,7 +209,7 @@ final class TranslationPanelController {
             // The dock sizes and dismisses its own panel, so neither the
             // fit-to-content pass nor the outside-click monitors apply: an edge
             // that vanished on the first click elsewhere would be unusable.
-            dockedResult.stage = .loading(placeholder ?? loadingPlaceholder)
+            dockedResult.beginLoading(placeholder ?? loadingPlaceholder)
             let view = dockedView ?? makeDockedView(dockedResult)
             dockedView = view
             view.removeFromSuperview()
@@ -228,8 +228,8 @@ final class TranslationPanelController {
     /// so a long run reads as progress rather than as a stuck "Thinking".
     func updateLoading(_ placeholder: String) {
         if let dockedResult {
-            guard case .loading = dockedResult.stage else { return }
-            dockedResult.stage = .loading(placeholder)
+            guard dockedResult.working != nil else { return }
+            dockedResult.updateLoading(placeholder)
             return
         }
         guard contentView.isShowingLoadingState else { return }
@@ -243,7 +243,6 @@ final class TranslationPanelController {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(model.text, forType: .string)
             },
-            onClose: { [weak self] in self?.dismissByUser() }
         ))
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
@@ -255,7 +254,7 @@ final class TranslationPanelController {
         }
 
         if let dockedResult {
-            dockedResult.stage = .answer(text)
+            dockedResult.finish(answer: text)
             return
         }
         // Partials render inline (stable while streaming); the final chunk
@@ -269,7 +268,7 @@ final class TranslationPanelController {
         }
 
         if let dockedResult {
-            dockedResult.stage = .failure(message)
+            dockedResult.fail(message)
             return
         }
         contentView.setError(message)

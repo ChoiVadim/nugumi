@@ -1,88 +1,118 @@
 import AppKit
 import SwiftUI
 
-/// What a docked result is showing: the wait, the answer, or the failure.
-/// Driven from `TranslationPanelController`, on the main thread like it.
+/// What a docked result is showing: what the tool did so far, the line it is
+/// on now, and then its answer or its failure.
+///
+/// Driven from `TranslationPanelController`, on the main thread like it. The
+/// answer is rendered to an attributed string once, here, so the view's body
+/// never re-parses a long report: the same `NSAttributedString` instance is
+/// what lets `MarkdownLabel` reuse its measured height across scroll frames.
 final class DockResultModel: ObservableObject {
-    enum Stage: Equatable {
-        case loading(String)
-        case answer(String)
-        case failure(String)
-    }
-
     let title: String
-    @Published var stage: Stage
+    /// Settled lines of the agent's trace, in order: each step it ran.
+    @Published private(set) var trace: [String] = []
+    /// The line breathing right now, nil once the run is over.
+    @Published private(set) var working: String?
+    @Published private(set) var failure: String?
+    @Published private(set) var rendered: NSAttributedString?
+    private(set) var text = ""
 
-    init(title: String, stage: Stage = .loading("Thinking")) {
+    /// A generic wait is not part of the trace; a step's purpose is.
+    static let thinking = "Thinking"
+
+    init(title: String) {
         self.title = title
-        self.stage = stage
     }
 
-    var text: String {
-        if case .answer(let text) = stage { return text }
-        return ""
+    func beginLoading(_ line: String) {
+        trace = []
+        failure = nil
+        rendered = nil
+        text = ""
+        working = line
+    }
+
+    func updateLoading(_ line: String) {
+        settleWorking()
+        working = line
+    }
+
+    func finish(answer: String) {
+        settleWorking()
+        working = nil
+        text = answer
+        rendered = TranslationContentView.renderedMarkdownText(
+            answer,
+            font: .systemFont(ofSize: 12.5),
+            color: NSColor(calibratedWhite: 1, alpha: 0.9)
+        )
+    }
+
+    func fail(_ message: String) {
+        settleWorking()
+        working = nil
+        failure = message
+    }
+
+    private func settleWorking() {
+        guard let working, working != Self.thinking else { return }
+        trace.append(working)
     }
 }
 
-/// A result on an edge, as its own component.
+/// A result on an edge, as its own component: the Ask dock's transcript with
+/// one exchange in it. The bubble is the gizmo that was asked, the trace under
+/// it is what the agent did (each script it ran, by its own one-line purpose),
+/// the breathing line is where it is now, and the answer follows in the chat's
+/// markdown at the chat's size.
 ///
-/// It used to be the floating panel's content view laid into the dock
-/// "chromeless": the layout, fonts and buttons built for a card beside the
-/// cursor, squeezed into a 380pt column on the bezel. The two are different
-/// things. A floating answer is glanced at and dismissed; a docked one is read
-/// beside whatever you are doing, at the size the Ask dock already reads at.
-/// So this speaks the Ask dock's language: a title row, the chat's markdown
-/// text, and a line that breathes while the tool works, naming the agent's
-/// current step.
+/// No title row and no close button: the dock already has both ways out (the
+/// handle and Escape), and a row of chrome above the first line costs every
+/// reading of the answer. Copy rides in the top fade the way Ask's new-chat
+/// disc does, and only once there is something to copy.
 struct DockResultView: View {
     @ObservedObject var model: DockResultModel
     let onCopy: () -> Void
-    let onClose: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            Divider().background(FlowTheme.hairline)
-            ScrollView {
-                content
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-                    .padding(.bottom, 4)
-                    // DESIGN.md §8: thin overlay scroller, never a legacy track.
-                    .background(ScrollerConfigurator())
+        ScrollView {
+            VStack(alignment: .leading, spacing: 7) {
+                ChatQuestionBubble(text: model.title)
+                ForEach(Array(model.trace.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(size: 12))
+                        .foregroundStyle(FlowTheme.inkTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let working = model.working {
+                    ChatThinkingText(text: working)
+                }
+                if let failure = model.failure {
+                    ChatProblemText(message: failure)
+                }
+                if let rendered = model.rendered {
+                    MarkdownLabel(text: rendered)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                }
             }
-            .scrollIndicators(.automatic)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
+            // DESIGN.md §8: thin overlay scroller, never a legacy track.
+            .background(ScrollerConfigurator())
         }
-        // No padding of its own: the panel holds it off the glass by
-        // `DockGeometry.contentMargin`, the same as every resident.
-        .foregroundStyle(FlowTheme.ink)
-    }
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Text(model.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(FlowTheme.inkSecondary)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            if !model.text.isEmpty {
+        .scrollIndicators(.automatic)
+        .mask(AskChatView.topFade)
+        .overlay(alignment: .topTrailing) {
+            if model.rendered != nil {
                 ResetDiscButton(symbol: "doc.on.doc", label: "", accessibilityTitle: "Copy", action: onCopy)
                     .help("Copy")
+                    .padding(.trailing, 6)
             }
-            ResetDiscButton(symbol: "xmark", label: "", accessibilityTitle: "Close", action: onClose)
-                .help("Close")
         }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch model.stage {
-        case .loading(let text):
-            ChatThinkingText(text: text)
-        case .answer(let text):
-            ChatAnswerText(markdown: text)
-        case .failure(let message):
-            ChatProblemText(message: message)
-        }
+        .foregroundStyle(FlowTheme.ink)
     }
 }

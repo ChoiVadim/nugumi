@@ -459,7 +459,12 @@ extension GizmateApp {
                     uv: uv,
                     onProgress: { progress in
                         Task { @MainActor in
-                            panel?.updateLoading("Step \(progress.step): \(progress.purpose.prefix(90))")
+                            switch progress {
+                            case .thinking:
+                                panel?.updateLoading(DockResultModel.thinking)
+                            case .runningPython(let step, let purpose):
+                                panel?.updateLoading("Step \(step): \(purpose.prefix(120))")
+                            }
                         }
                     }
                 )

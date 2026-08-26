@@ -137,7 +137,7 @@ struct AskChatView: View {
     /// laid over the top, because the dock is translucent glass — an opaque
     /// band matching "the background" would be a stripe of the wrong colour
     /// over whatever is behind the panel.
-    private static var topFade: some View {
+    static var topFade: some View {
         VStack(spacing: 0) {
             LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
                 .frame(height: 20)

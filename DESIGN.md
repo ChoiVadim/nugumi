@@ -439,11 +439,19 @@ share of users regardless of what looks right.
   at and dismissed; a docked one is read beside your work, and it should read
   at the size the Ask dock already does. So the controller is one seam with two
   components behind it: floating stays `TranslationContentView`, docked is
-  `DockResultView`, the Ask dock's language (title row, `ChatAnswerText`,
-  `ChatThinkingText` naming the agent's step), held off the glass by the same
-  `contentMargin` as every resident. What the docked one drops is deliberate:
-  no language menu, no replace, no follow-up field. Those belong to the
-  selection flows, which open beside the selection.
+  `DockResultView`, which is the Ask dock's transcript with one exchange in
+  it: the gizmo's name as the question bubble, the agent's trace under it (a
+  "Thinking" line for every model turn, and each script it ran by its own
+  one-line purpose, kept once settled), then the answer in `MarkdownLabel` at
+  the chat's size, held off the glass by the same `contentMargin` as every
+  resident. No title row and no close button: the dock already has both ways
+  out, and Copy rides in the top fade where Ask's new-chat disc does. What the
+  docked one drops is deliberate: no language menu, no replace, no follow-up
+  field. Those belong to the selection flows, which open beside the selection.
+  The answer is rendered once, in `DockResultModel`, and `MarkdownLabel` keeps
+  the height it measured for that same string at that width: `boundingRect`
+  lays the whole report out from scratch, SwiftUI asks on every scroll frame,
+  and a long report made the dock stutter under the wheel.
   The notch got one when closing became a choice. It never had a handle before
   because it could not stay open, so `bezelwardOffset` measured `x` alone and
   returned zero for `.top` — correct then, and a pinned notch with no way out

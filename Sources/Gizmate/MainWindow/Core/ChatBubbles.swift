@@ -225,6 +225,11 @@ struct MarkdownLabel: NSViewRepresentable {
     /// answer on one line.
     final class Coordinator {
         var width: CGFloat = 0
+        /// The last measurement, keyed by the string's identity and the width
+        /// it was measured at. `boundingRect` lays the whole answer out from
+        /// scratch, and SwiftUI asks again on every scroll frame; for a long
+        /// report that is tens of milliseconds each, which is the stutter.
+        var measured: (text: NSAttributedString, width: CGFloat, height: CGFloat)?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -266,10 +271,14 @@ struct MarkdownLabel: NSViewRepresentable {
         let width = offered ?? context.coordinator.width
         guard width > 0 else { return nil }
         context.coordinator.width = width
-        let height = text.boundingRect(
+        if let measured = context.coordinator.measured, measured.text === text, measured.width == width {
+            return CGSize(width: width, height: measured.height)
+        }
+        let height = ceil(text.boundingRect(
             with: CGSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
-        ).height
-        return CGSize(width: width, height: ceil(height))
+        ).height)
+        context.coordinator.measured = (text, width, height)
+        return CGSize(width: width, height: height)
     }
 }
