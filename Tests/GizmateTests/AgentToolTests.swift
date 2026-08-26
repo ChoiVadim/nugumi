@@ -22,12 +22,28 @@ final class RunModelActionNormalizationTests: XCTestCase {
         XCTAssertEqual(ToolAgentModelActionValidator.normalizedForRun(fenced), runAction)
     }
 
-    /// Two concatenated JSON objects — the shape that actually turns up — must
-    /// come back nil so the repair turn fires, rather than passing through to
-    /// the sidecar's strict parser and ending the run.
-    func testConcatenatedObjectsAreNotARunAction() {
+    /// A valid action with a JSON hedge glued after it — the dominant
+    /// malformed shape, the model preemptively appending the finalText
+    /// confirmation — is read deterministically as the action, costing no
+    /// repair model call inside the run's own deadline.
+    func testAGluedFinalTextTrailerIsDroppedDeterministically() {
         let glued = runAction + #"{"version":1,"action":"finalText","text":"done"}"#
-        XCTAssertNil(ToolAgentModelActionValidator.normalizedForRun(glued))
+        XCTAssertEqual(ToolAgentModelActionValidator.normalizedForRun(glued), runAction)
+        // A quoted brace inside the Python source must not end the scan early.
+        let braced =
+            #"{"version":1,"action":"toolCall","name":"run_python","arguments":{"source":"print('}')","purpose":"p"}}"#
+        XCTAssertEqual(
+            ToolAgentModelActionValidator.normalizedForRun(
+                braced + #"{"version":1,"action":"finalText","text":"done"}"#
+            ),
+            braced
+        )
+    }
+
+    /// Prose after the object is not a hedge — that still goes to the repair
+    /// turn rather than being silently truncated.
+    func testAnActionFollowedByProseIsNotARunAction() {
+        XCTAssertNil(ToolAgentModelActionValidator.normalizedForRun(runAction + "\nDone!"))
     }
 
     func testABuildToolNameIsNotARunAction() {

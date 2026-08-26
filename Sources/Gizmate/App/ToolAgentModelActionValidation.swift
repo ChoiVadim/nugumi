@@ -435,6 +435,57 @@ extension ToolAgentModelActionValidator {
         if isPlausibleRunAction(trimmed) { return trimmed }
         let body = unfenced(text)
         if body != trimmed, isPlausibleRunAction(body) { return body }
+        return firstOfGluedActions(body)
+    }
+
+    /// The run-session model reads "to call a tool, reply X; after finish,
+    /// reply Y" and, often enough to be the dominant malformed shape, sends
+    /// both at once: `{toolCall …}{"action":"finalText","text":"done"}`. A
+    /// repair model turn can fix that, but it costs a call inside the run's
+    /// own deadline — a deterministic read is the backstop. Not a guess, by
+    /// the same standard `rewrappedEnvelope` sets: the split is taken only
+    /// when the first object is a complete valid run action and the trailer
+    /// is itself a JSON object — a hedge, never prose. Anything else still
+    /// returns nil and goes to the repair turn.
+    private static func firstOfGluedActions(_ body: String) -> String? {
+        guard let split = firstBalancedObject(of: body),
+              isPlausibleRunAction(split.first) else { return nil }
+        let trailer = split.rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trailer.isEmpty,
+              let parsed = try? JSONSerialization.jsonObject(with: Data(trailer.utf8)),
+              parsed is [String: Any] else { return nil }
+        return split.first
+    }
+
+    /// The first balanced top-level `{…}` of `text` and whatever follows it,
+    /// or nil when `text` is not one-or-more leading objects. String- and
+    /// escape-aware, so a `}` inside a Python source string does not end the
+    /// scan early.
+    private static func firstBalancedObject(of text: String) -> (first: String, rest: String)? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.first == "{" else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for index in trimmed.indices {
+            let character = trimmed[index]
+            if escaped {
+                escaped = false
+                continue
+            }
+            switch character {
+            case "\\" where inString: escaped = true
+            case "\"": inString.toggle()
+            case "{" where !inString: depth += 1
+            case "}" where !inString:
+                depth -= 1
+                if depth == 0 {
+                    let end = trimmed.index(after: index)
+                    return (String(trimmed[..<end]), String(trimmed[end...]))
+                }
+            default: break
+            }
+        }
         return nil
     }
 
