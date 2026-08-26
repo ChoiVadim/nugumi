@@ -232,6 +232,15 @@ about what the first one meant.
 - Prefer native AppKit/SwiftUI interaction behavior.
 - Do not animate layout properties.
 - Progress should use `ProgressView` for long-running setup work.
+- A list the user keeps is ordered by the user, not by a clock. Notes sorted
+  themselves by `updatedAt`, so the card being typed into jumped to the top and
+  the list rearranged itself while it was being read. Creation order, then
+  whatever order it was dragged into. Where a card is full of editable text,
+  the drag starts from a handle of its own: `NSTextView` wins any argument with
+  a SwiftUI gesture wrapped around it, so a drag begun on the card is someone
+  selecting words. Reorder on the way past (`dropEntered`), so the list is its
+  own preview, and carry the id as plain text — a `Transferable` of our own
+  needs an `Info.plist` a `swift run` build does not have.
 
 ## 7. Depth & Surface
 
