@@ -117,25 +117,20 @@ enum ToolEvalSuite {
             kind: .agent,
             input: .selection
         ),
-        // The readings half of a surface, as opposed to the files half the
-        // downloads case in `resultSweep` already covers. Written as a person
-        // would ask, naming neither "list" nor "details" nor "meter": the
-        // point is whether the capability description makes the model reach
-        // for a list of rows with several lines and a bar when the request is
-        // about numbers, rather than a grid of squares. A recipe naming those
-        // fields would grade the prompt instead of the builder.
-        // A run that cannot happen without reaching the web, asked for as an
-        // outcome rather than a mechanism. Grades whether the capability
-        // description makes the model treat "go find out and report" as agent
-        // material with nothing handed in — not which search route the agent
-        // takes at run time; read the report's trail for that, and fix the
-        // generic description if it never reaches the web, never a recipe.
+        // A build that cannot succeed without reaching the web, asked for as
+        // an outcome rather than a mechanism. Deliberately silent on `kind`:
+        // the first run built it as a script, and by this suite's own
+        // python-vs-agent line a fixed fetch-and-format procedure IS a
+        // script — pinning "agent" here would grade taste, not capability.
+        // What it asserts is what the user meant: nothing handed in, and a
+        // smoke-level trial, which for this request can only pass by really
+        // searching from inside the validation run.
         ToolEvalCase(
-            name: "agent-web-daily-report",
+            name: "web-daily-report",
             request: "хочу кнопку, которая соберёт мне утреннюю сводку: погода "
                 + "в Сеуле и главные новости по технологиям, посмотри в интернете",
-            kind: .agent,
-            input: ToolInput.none
+            input: ToolInput.none,
+            minimumAssurance: .smoke
         ),
         // A gizmo whose whole subject is what the user has already saved: no
         // input to hand it, the notes context is the material. Grades whether
@@ -163,6 +158,13 @@ enum ToolEvalSuite {
             input: ToolInput.none,
             usesNotes: true
         ),
+        // The readings half of a surface, as opposed to the files half the
+        // downloads case in `resultSweep` already covers. Written as a person
+        // would ask, naming neither "list" nor "details" nor "meter": the
+        // point is whether the capability description makes the model reach
+        // for a list of rows with several lines and a bar when the request is
+        // about numbers, rather than a grid of squares. A recipe naming those
+        // fields would grade the prompt instead of the builder.
         ToolEvalCase(
             name: "surface-machine-readings",
             request: "хочу видеть сбоку экрана как загружен мой мак: процессор, "
