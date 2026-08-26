@@ -253,7 +253,13 @@ about what the first one meant.
   a SwiftUI gesture wrapped around it, so a drag begun on the card is someone
   selecting words. Reorder on the way past (`dropEntered`), so the list is its
   own preview, and carry the id as plain text — a `Transferable` of our own
-  needs an `Info.plist` a `swift run` build does not have.
+  needs an `Info.plist` a `swift run` build does not have. A reorder-on-entry
+  is only a preview if it slides: the move runs inside `withAnimation`, the
+  lifted card dims to a hole the way an iOS icon does, and the gaps between
+  cards accept the drop too, or a card let go in one flies back to a slot
+  another card now sits in. SwiftUI never says a drag ended off-target, so the
+  hole is lifted by polling `NSEvent.pressedMouseButtons`, the one signal that
+  survives a drag session.
 
 ## 7. Depth & Surface
 
