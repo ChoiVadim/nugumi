@@ -98,6 +98,32 @@ final class NoteImagesTests: XCTestCase {
         XCTAssertNotEqual(NSTextView().registeredDraggedTypes, [.string], "the fixture must discriminate")
     }
 
+    /// A note's title edits through the window's field editor, and that is a
+    /// text view registered for file drops all the same. Both windows that host
+    /// notes hand out a words-only one; a secret still gets its secure editor.
+    @MainActor
+    func testTitleFieldEditorTakesOnlyWordsByDrag() throws {
+        let rect = NSRect(x: 0, y: 0, width: 200, height: 100)
+        let windows: [NSWindow] = [
+            MainWindow(contentRect: rect, styleMask: .titled, backing: .buffered, defer: false),
+            EdgeDockPanel(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false),
+        ]
+        for window in windows {
+            let title = NSTextField(frame: rect)
+            let secret = NSSecureTextField(frame: rect)
+            window.contentView?.addSubview(title)
+            window.contentView?.addSubview(secret)
+
+            window.makeFirstResponder(title)
+            let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "\(type(of: window))")
+            XCTAssertTrue(editor is PlainTextView, "\(type(of: window))")
+            XCTAssertEqual(editor.registeredDraggedTypes, [.string], "\(type(of: window))")
+
+            window.makeFirstResponder(secret)
+            XCTAssertFalse(window.firstResponder is PlainTextView, "a secret keeps its secure editor")
+        }
+    }
+
     /// Notes saved before pictures existed have no `images` key at all.
     func testNotesSavedBeforePicturesDecodeWithNone() throws {
         let legacy = """

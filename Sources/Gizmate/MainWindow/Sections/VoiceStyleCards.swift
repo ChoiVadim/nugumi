@@ -137,6 +137,18 @@ final class PlainTextView: NSTextView {
         unregisterDraggedTypes()
         registerForDraggedTypes([.string])
     }
+
+    /// A window's field editor — the one text view every `NSTextField` in it
+    /// edits through, a note's title included. It is an `NSTextView` registered
+    /// for file drops like any other, so a picture dropped on a title arrived
+    /// as a path in the title; as a `PlainTextView` it lets the drop through to
+    /// the card. `MainWindow` and `EdgeDockPanel` hand this out from
+    /// `fieldEditor(_:for:)`.
+    static func makeFieldEditor() -> PlainTextView {
+        let editor = PlainTextView()
+        editor.isFieldEditor = true
+        return editor
+    }
 }
 
 struct PlainTextEditor: NSViewRepresentable {

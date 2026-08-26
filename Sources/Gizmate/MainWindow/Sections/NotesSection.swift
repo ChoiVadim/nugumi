@@ -359,9 +359,6 @@ struct NotesGrid: View {
                 store.update(note.id, title: title, text: text)
             },
             onTag: { store.update(note.id, tagID: .some($0)) },
-            onToggleContext: {
-                store.update(note.id, usedAsContext: !note.usedAsContext)
-            },
             onDelete: { store.delete(note.id) },
             onAttach: { store.attach($0, to: note.id) },
             onRemoveImage: { store.removeImage($0, from: note.id) },
@@ -459,7 +456,6 @@ private struct NoteCard: View {
     let onFocusHandled: () -> Void
     let onChange: (String, String) -> Void
     let onTag: (UUID?) -> Void
-    let onToggleContext: () -> Void
     let onDelete: () -> Void
     /// Pictures arrive three ways — dropped on the card, pasted into its body,
     /// or picked through the clip — and all three land here.
@@ -485,6 +481,7 @@ private struct NoteCard: View {
     @State private var title: String
     @State private var text: String
     @State private var hovering = false
+    @State private var hoveredImage: UUID?
     @State private var bodyHeight: CGFloat = 0
     /// The card's own size on screen, so the drag preview can be the same card
     /// rather than a differently sized copy of it.
@@ -522,7 +519,6 @@ private struct NoteCard: View {
         onFocusHandled: @escaping () -> Void,
         onChange: @escaping (String, String) -> Void,
         onTag: @escaping (UUID?) -> Void,
-        onToggleContext: @escaping () -> Void,
         onDelete: @escaping () -> Void,
         onAttach: @escaping ([ChatImage]) -> Void,
         onRemoveImage: @escaping (UUID) -> Void,
@@ -537,7 +533,6 @@ private struct NoteCard: View {
         self.onFocusHandled = onFocusHandled
         self.onChange = onChange
         self.onTag = onTag
-        self.onToggleContext = onToggleContext
         self.onDelete = onDelete
         self.onAttach = onAttach
         self.onRemoveImage = onRemoveImage
@@ -704,7 +699,9 @@ private struct NoteCard: View {
         return !paste.keepsText
     }
 
-    /// A strip of thumbnails above the body; a click opens the full view.
+    /// A strip of thumbnails above the body; a click opens the full view, and
+    /// the cross that fades in on hover removes — the same treatment as the
+    /// card's own bin (DESIGN.md §9).
     private var pictures: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -722,6 +719,21 @@ private struct NoteCard: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onOpenImage(index) }
                     .cursor(.pointingHand)
+                    .overlay(alignment: .topTrailing) {
+                        Button { onRemoveImage(id) } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white, .black.opacity(0.55))
+                                .contentShape(Rectangle())
+                        }
+                        .plainButton()
+                        .padding(2)
+                        .opacity(hoveredImage == id ? 1 : 0)
+                        .help("Remove picture")
+                    }
+                    .onHover { inside in
+                        if inside { hoveredImage = id } else if hoveredImage == id { hoveredImage = nil }
+                    }
                     .contextMenu { Button("Remove picture") { onRemoveImage(id) } }
                 }
             }
@@ -739,17 +751,6 @@ private struct NoteCard: View {
             }
             .plainButton()
             .help("Attach a picture. Drop one on the card, or paste it.")
-
-            Button(action: onToggleContext) {
-                Image(systemName: note.usedAsContext ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(note.usedAsContext ? FlowTheme.accent : FlowTheme.inkTertiary)
-                    .contentShape(Rectangle())
-            }
-            .plainButton()
-            .help(note.usedAsContext
-                  ? "Gizmos with \"Use my notes\" on can read this note"
-                  : "Kept out of every prompt")
 
             Button(action: onDelete) {
                 Image(systemName: "trash")

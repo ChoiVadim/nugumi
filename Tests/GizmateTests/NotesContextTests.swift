@@ -50,29 +50,24 @@ final class NotesContextTests: XCTestCase {
         XCTAssertEqual(NotesContext.appending(to: "BASE"), "BASE")
     }
 
-    func testUntickedNotesNeverReachThePrompt() {
+    func testEveryUsableNoteReachesThePrompt() {
         store([
-            Note(title: "Shipping", text: "We ship on Tuesdays.", usedAsContext: true),
-            Note(title: "Groceries", text: "milk, eggs", usedAsContext: false),
+            Note(title: "Shipping", text: "We ship on Tuesdays."),
+            Note(title: "Groceries", text: "milk, eggs"),
         ])
 
         let prompt = NotesContext.appending(to: "BASE")
         XCTAssertTrue(prompt.contains("We ship on Tuesdays."))
-        XCTAssertFalse(prompt.contains("milk, eggs"))
-    }
-
-    func testEveryNoteUntickedIsTheSameAsNoNotes() {
-        store([Note(text: "kept out", usedAsContext: false)])
-        XCTAssertEqual(NotesContext.appending(to: "BASE"), "BASE")
+        XCTAssertTrue(prompt.contains("milk, eggs"))
     }
 
     func testEmptyNotesAreSkipped() {
-        store([Note(title: "Half-written", text: "   ", usedAsContext: true)])
+        store([Note(title: "Half-written", text: "   ")])
         XCTAssertEqual(NotesContext.appending(to: "BASE"), "BASE")
     }
 
     func testTitlelessNoteIsLabelledWithItsFirstLine() {
-        store([Note(text: "Deploy checklist\nrun migrations first", usedAsContext: true)])
+        store([Note(text: "Deploy checklist\nrun migrations first")])
         XCTAssertTrue(NotesContext.text.hasPrefix("- Deploy checklist: "))
     }
 
@@ -97,7 +92,6 @@ final class NotesContextTests: XCTestCase {
             Note(
                 title: "note\(index)",
                 text: String(repeating: "x", count: size),
-                usedAsContext: true,
                 createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
                 updatedAt: Date(timeIntervalSince1970: TimeInterval(index))
             )
@@ -114,8 +108,7 @@ final class NotesContextTests: XCTestCase {
     func testASingleOversizeNoteIsClippedRatherThanDropped() {
         store([Note(
             title: "War and peace",
-            text: String(repeating: "y", count: NotesContext.maxLength * 3),
-            usedAsContext: true
+            text: String(repeating: "y", count: NotesContext.maxLength * 3)
         )])
 
         let text = NotesContext.text

@@ -57,11 +57,6 @@ struct Note: Codable, Identifiable, Equatable {
     /// saved before tags existed live, and where a note lands when its tag is
     /// deleted. Untagged notes show under All and nowhere else.
     var tagID: UUID?
-    /// Whether this note is handed to gizmos that opted into notes context.
-    /// On by default: a note the user bothered to save is usually background
-    /// they want the model to have. The tick exists to exclude the scratch ones,
-    /// not to make every note opt in one by one.
-    var usedAsContext: Bool
     /// Attached pictures, in the order they were added. Each id names a pair of
     /// files under `NoteImages` — the bytes never enter the notes plist.
     var images: [UUID]
@@ -73,7 +68,6 @@ struct Note: Codable, Identifiable, Equatable {
         title: String = "",
         text: String = "",
         tagID: UUID? = nil,
-        usedAsContext: Bool = true,
         images: [UUID] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
@@ -82,7 +76,6 @@ struct Note: Codable, Identifiable, Equatable {
         self.title = title
         self.text = text
         self.tagID = tagID
-        self.usedAsContext = usedAsContext
         self.images = images
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -113,8 +106,10 @@ struct Note: Codable, Identifiable, Equatable {
 
     // Lenient decoding, same reasoning as `Snippet` and `GizmateTool`: a field
     // added in a later version must not throw away every note already saved.
+    // A field removed (`usedAsContext`, the per-note context tick) is simply
+    // not read; the master switch in Settings is the one gate now.
     private enum CodingKeys: String, CodingKey {
-        case id, title, text, tagID, usedAsContext, images, createdAt, updatedAt
+        case id, title, text, tagID, images, createdAt, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -125,7 +120,6 @@ struct Note: Codable, Identifiable, Equatable {
         // Absent in every note saved before tags existed — untagged is exactly
         // what those notes are.
         tagID = try c.decodeIfPresent(UUID.self, forKey: .tagID)
-        usedAsContext = try c.decodeIfPresent(Bool.self, forKey: .usedAsContext) ?? true
         images = try c.decodeIfPresent([UUID].self, forKey: .images) ?? []
         let created = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         createdAt = created
@@ -184,14 +178,12 @@ final class NotesStore: ObservableObject {
         _ id: UUID,
         title: String? = nil,
         text: String? = nil,
-        tagID: UUID?? = nil,
-        usedAsContext: Bool? = nil
+        tagID: UUID?? = nil
     ) {
         guard let idx = notes.firstIndex(where: { $0.id == id }) else { return }
         if let title { notes[idx].title = title }
         if let text { notes[idx].text = text }
         if let tagID { notes[idx].tagID = tagID }
-        if let usedAsContext { notes[idx].usedAsContext = usedAsContext }
         notes[idx].updatedAt = Date()
         save()
         onChange?()
@@ -332,28 +324,26 @@ final class NotesStore: ObservableObject {
 }
 
 /// The master switch for handing notes to models and scripts. Per-gizmo
-/// `usesNotes` and the per-note tick decide *which* notes go where; this is the
-/// user's one lever to stop all of it at once, from Settings.
+/// `usesNotes` decides *which* gizmos get them; this is the user's one lever to
+/// stop all of it at once, from Settings.
 enum NotesAccess {
     static let defaultsKey = "gizmosReadNotesEnabled"
-    /// On by default: the per-note tick already defaults each note in, and
-    /// shipping the toggle off would silently break every gizmo built before
-    /// it existed.
+    /// On by default: shipping the toggle off would silently break every gizmo
+    /// built before it existed.
     static var isEnabled: Bool {
         UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
     }
 }
 
-/// The ticked notes as prompt text.
+/// The user's notes as prompt text.
 ///
 /// Reads `UserDefaults` directly rather than taking a `NotesStore`, exactly as
 /// `UserAboutContext` does: prompts are assembled deep inside `TranslationMode`
 /// and `AgentToolRunner`, and threading a main-actor store down to both would
 /// cost more plumbing than the decode costs microseconds.
 enum NotesContext {
-    /// Total budget across all notes. The ticks already decide *which* notes go
-    /// in; this is the backstop against one pasted article eating the context on
-    /// its own.
+    /// Total budget across all notes: the backstop against one pasted article
+    /// eating the context on its own.
     static let maxLength = 4_000
     /// Below this there is no room left for a note worth reading, so the loop
     /// stops rather than appending a two-word stub.
@@ -394,7 +384,7 @@ enum NotesContext {
         )
 
         return notes
-            .filter { $0.usedAsContext && $0.isUsable }
+            .filter(\.isUsable)
             .sorted { $0.updatedAt > $1.updatedAt }
             .map { note in
                 Record(
@@ -406,9 +396,9 @@ enum NotesContext {
             }
     }
 
-    /// Ticked notes, most recently edited first, one per line, the folder named
-    /// in brackets. Empty when nothing is ticked — which keeps "notes off"
-    /// genuinely zero-cost.
+    /// Notes with text in them, most recently edited first, one per line, the
+    /// folder named in brackets. Empty when there are none — which keeps "notes
+    /// off" genuinely zero-cost.
     static var text: String {
         var lines: [String] = []
         var used = 0

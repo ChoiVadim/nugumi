@@ -338,7 +338,7 @@ share of users regardless of what looks right.
 - **That rule is about controls, and a card you write in is not one.** A note
   card lifted its fill on hover like a button does, which promises a press that
   does nothing — the card is already open, and the pointer is there to put a
-  caret in it or reach the tick and the bin that fade in at its corner. Those
+  caret in it or reach the clip and the bin that fade in at its corner. Those
   appearing is the whole hover treatment. Repainting the surface underneath
   them says a second, wrong thing about the same gesture. `NoteCard` keeps one
   fill; only the controls it holds react.
@@ -1261,19 +1261,23 @@ person aims at the conversation, not at a control.
   go. The builder never receives pictures at all: the one agent sees it and
   writes the `BUILD:` line, so what the picture _showed_ travels as words.
 
-## 18. Notes reach a model through three gates, and only through them
+## 18. Notes reach a model through two gates, and only through them
 
-A note is handed to anything that thinks — a gizmo, Ask — exactly when all
-three of these say yes, and there is no fourth switch anywhere:
+A note is handed to anything that thinks — a gizmo, Ask — exactly when both
+of these say yes, and there is no third switch anywhere:
 
 1. **The master switch** in Settings ("Let gizmos read my notes",
    `NotesAccess`, default on). It is enforced inside `NotesContext.records()`,
    the one function every consumer is built on, so no call site can forget it.
 2. **The per-gizmo `usesNotes` flag**, set in the gizmo's editor or by the
    builder. Ask deliberately has no flag of its own: it is the front door, and
-   the master switch plus the ticks are its whole configuration.
-3. **The per-note tick** (`Note.usedAsContext`), which exists to exclude the
-   scratch notes, not to make every note opt in.
+   the master switch is its whole configuration.
+
+There used to be a third, a tick on every card (`Note.usedAsContext`), meant to
+keep scratch notes out. Ticking notes one by one was a chore nobody did, and a
+second switch that says a narrower version of what the first one says is one
+more thing to explain. The field is no longer read; notes that carry it decode
+as before.
 
 What the consumer then sees is standardized, not bespoke per consumer:
 
@@ -1284,7 +1288,7 @@ body`. The bracket is the folder — a `NoteTag` name — so a model can tell
 - **A JSON file** (`NotesContext.fileData()`, for `.python` gizmos): the same
   records as `[{title, text, folder, updatedAt}]`, handed over as a file whose
   path arrives in `GIZMO_NOTES_FILE`. The variable is absent when there is
-  nothing to share — the master switch off, or nothing ticked — so a script
+  nothing to share — the master switch off, or no note with text — so a script
   must treat it as optional, and candidate validation runs without it on
   purpose: model-written code the user never approved does not get the user's
   notes.
@@ -1315,6 +1319,14 @@ switch does not reach.
   to be an override of `updateDragTypeRegistration()`, not a call after init:
   AppKit re-registers on every editability or window change, and a one-time
   `unregisterDraggedTypes` was undone before the first drop landed.
+- **The title is a drop target too, through the window.** An `NSTextField`
+  edits through its window's shared field editor, which is an `NSTextView`
+  registered for file drops like any other — so a picture dropped on a title
+  arrived as a path in the title. `MainWindow` and `EdgeDockPanel` hand out a
+  `PlainTextView` from `fieldEditor(_:for:)` instead, secure fields excepted.
+- **Removing is on the thumbnail, on hover.** A cross fades in at its corner
+  the way the card's bin does; the context menu carries the same action for
+  whoever reaches for it that way.
 - **⌘V is caught in `paste(_:)`, not by a monitor.** The chat needs an
   `NSEvent` monitor because its field editor is SwiftUI's; a note body is our
   own `NSTextView`, and overriding `paste(_:)` sees the paste before the view

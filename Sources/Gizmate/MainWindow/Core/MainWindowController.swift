@@ -5,6 +5,14 @@ import SwiftUI
 
 @MainActor
 final class MainWindow: NSWindow {
+    /// See `PlainTextView.makeFieldEditor()`. A secret keeps the secure editor
+    /// its own cell asks for, never a plain text view.
+    private let wordsOnlyFieldEditor = PlainTextView.makeFieldEditor()
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        if object is NSSecureTextField { return super.fieldEditor(createFlag, for: object) }
+        return wordsOnlyFieldEditor
+    }
+
     // Transparent-titlebar windows swallow Cmd+A/C/V/X before SwiftUI TextFields
     // see them. Re-dispatch to the first responder, mirroring SnippetsWindow.
     override func sendEvent(_ event: NSEvent) {

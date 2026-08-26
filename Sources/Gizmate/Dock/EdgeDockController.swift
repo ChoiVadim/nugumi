@@ -37,6 +37,14 @@ final class EdgeDockPanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    /// See `PlainTextView.makeFieldEditor()`: a note title in the dock takes a
+    /// dropped picture the same way it does in the main window.
+    private let wordsOnlyFieldEditor = PlainTextView.makeFieldEditor()
+    override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+        if object is NSSecureTextField { return super.fieldEditor(createFlag, for: object) }
+        return wordsOnlyFieldEditor
+    }
 }
 
 /// One dock, on one edge.
