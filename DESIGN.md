@@ -1329,12 +1329,16 @@ switch does not reach.
 - **A drop lands on the card under the pointer.** Each `NoteCard` is its own
   `dropDestination`, nested inside the grid's reorder `onDrop` — a file URL
   conforms to `UTType.data` too, and the deeper target is the one asked first.
-  `PlainTextView` registers for dragged strings only: a text view takes file
+  `PlainTextView` registers for no dragged type at all: a text view takes file
   drops by default and inserts the path, and being the deepest registered view
-  it would take the drop before any SwiftUI target around it saw it. That has
-  to be an override of `updateDragTypeRegistration()`, not a call after init:
-  AppKit re-registers on every editability or window change, and a one-time
-  `unregisterDraggedTypes` was undone before the first drop landed.
+  it takes the drop before any SwiftUI target around it is asked. Strings only
+  was not enough either — a screenshot dragged off the floating thumbnail
+  carries its path as plain text beside the file, so any type the editor takes
+  is a type it takes before the card. Text is typed or pasted into a note; the
+  drag is for pictures. That has to be an override of
+  `updateDragTypeRegistration()`, not a call after init: AppKit re-registers on
+  every editability or window change, and a one-time `unregisterDraggedTypes`
+  was undone before the first drop landed.
 - **The title is a drop target too, through the window.** An `NSTextField`
   edits through its window's shared field editor, which is an `NSTextView`
   registered for file drops like any other — so a picture dropped on a title

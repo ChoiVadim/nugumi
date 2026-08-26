@@ -126,16 +126,20 @@ final class PlainTextView: NSTextView {
         super.paste(sender)
     }
 
-    /// Words are the only thing this editor takes by drag. A text view also
-    /// registers for file drops and inserts the path, and being the deepest
-    /// registered view it takes the drop before any SwiftUI target wrapped
-    /// around it is asked. Overridden rather than set once after init: AppKit
-    /// calls this again whenever editability or the window changes, and the
-    /// first attempt — an `unregisterDraggedTypes` in `makeNSView` — was undone
-    /// by exactly that before the first drop landed.
+    /// This editor takes nothing by drag. A text view registers for file drops
+    /// and inserts the path, and being the deepest registered view it takes the
+    /// drop before any SwiftUI target wrapped around it is asked. Registering
+    /// for strings alone was not enough: a screenshot dragged off the floating
+    /// thumbnail carries its path as plain text beside the file, and any type
+    /// the editor takes is a type it takes before the card. Text is typed or
+    /// pasted here; a picture, dropped anywhere on the card, reaches the card.
+    ///
+    /// Overridden rather than set once after init: AppKit calls this again
+    /// whenever editability or the window changes, and the first attempt — an
+    /// `unregisterDraggedTypes` in `makeNSView` — was undone by exactly that
+    /// before the first drop landed.
     override func updateDragTypeRegistration() {
         unregisterDraggedTypes()
-        registerForDraggedTypes([.string])
     }
 
     /// The same rule for every field editor in the app — the shared text view
@@ -154,10 +158,9 @@ final class PlainTextView: NSTextView {
             forName: NSTextView.didChangeSelectionNotification, object: nil, queue: .main
         ) { note in
             guard let editor = note.object as? NSTextView, editor.isFieldEditor,
-                  editor.registeredDraggedTypes != [.string]
+                  !editor.registeredDraggedTypes.isEmpty
             else { return }
             editor.unregisterDraggedTypes()
-            editor.registerForDraggedTypes([.string])
         }
     }
 }

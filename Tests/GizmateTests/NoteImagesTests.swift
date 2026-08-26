@@ -86,23 +86,26 @@ final class NoteImagesTests: XCTestCase {
     /// whenever it goes into a window or turns editable, which is what undid
     /// the first fix; this walks it through both and checks the list after.
     @MainActor
-    func testNoteBodyTakesOnlyWordsByDrag() {
+    func testNoteBodyTakesNothingByDrag() {
         let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 100, height: 100),
                               styleMask: .borderless, backing: .buffered, defer: false)
         let textView = PlainTextView()
-        window.contentView?.addSubview(textView)
-        textView.isEditable = false
-        textView.isEditable = true
+        let plain = NSTextView()
+        for view in [textView, plain] {
+            window.contentView?.addSubview(view)
+            view.isEditable = false
+            view.isEditable = true
+        }
 
-        XCTAssertEqual(textView.registeredDraggedTypes, [.string])
-        XCTAssertNotEqual(NSTextView().registeredDraggedTypes, [.string], "the fixture must discriminate")
+        XCTAssertEqual(textView.registeredDraggedTypes, [])
+        XCTAssertFalse(plain.registeredDraggedTypes.isEmpty, "the fixture must discriminate")
     }
 
     /// A note's title edits through the window's field editor, and that is a
     /// text view registered for file drops all the same. The guard trims it as
     /// it goes live, for the second field in a window as much as the first.
     @MainActor
-    func testTitleFieldEditorTakesOnlyWordsByDrag() throws {
+    func testTitleFieldEditorTakesNothingByDrag() throws {
         PlainTextView.trimFieldEditorDrops()
         let rect = NSRect(x: 0, y: 0, width: 200, height: 100)
         let window = NSWindow(contentRect: rect, styleMask: .titled, backing: .buffered, defer: false)
@@ -115,7 +118,7 @@ final class NoteImagesTests: XCTestCase {
             window.makeFirstResponder(field)
             let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
             XCTAssertTrue(editor.isFieldEditor)
-            XCTAssertEqual(editor.registeredDraggedTypes, [.string])
+            XCTAssertEqual(editor.registeredDraggedTypes, [])
         }
     }
 
