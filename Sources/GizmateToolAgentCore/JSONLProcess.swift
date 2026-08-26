@@ -81,6 +81,13 @@ public actor JSONLProcess {
             )
             close(stdinPipe[0])
             close(stdoutPipe[1])
+            // A sidecar that hits its deadline (or dies on a terminal failure)
+            // exits with the host possibly mid-write. Without this the kernel
+            // answers that write with SIGPIPE and takes the whole app down —
+            // not just the run. F_SETNOSIGPIPE scopes the opt-out to this one
+            // descriptor; `sendLine`'s write then fails as a thrown EPIPE the
+            // callers already handle as a failed run.
+            _ = fcntl(stdinPipe[1], F_SETNOSIGPIPE, 1)
             return JSONLProcess(
                 processID: pid,
                 input: FileHandle(fileDescriptor: stdinPipe[1], closeOnDealloc: true),
