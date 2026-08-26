@@ -995,7 +995,11 @@ the three rules below with it.
 One card type, two arrangements, and the repeater picks which. A `grid` cell is
 a square with the icon above centred text; a `list` row is as wide as the panel
 with the icon beside left-aligned text and a hairline ruling it off from the
-next. Nothing in the wire format says which — `SurfaceCard(height:)` is already
+next. A list row's glyph is the section's emblem, not its first line's bullet:
+28pt, light stroke, centred against the whole text block in a fixed-width slot
+so every row's text starts at the same x — the stats-strip look (iStat Menus is
+the shape being copied). That centring reversed an earlier top-pin, decided
+when rows were one line tall, where the two alignments draw identically. Nothing in the wire format says which — `SurfaceCard(height:)` is already
 the parameter that differs, so the axis follows it rather than becoming a knob
 the model has to set correctly (§12).
 

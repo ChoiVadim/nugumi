@@ -144,8 +144,10 @@ enum RingActionID: String, Codable, CaseIterable {
 extension RingIconKind {
     /// Template image for this glyph at the ring's button size, or an SF Symbol
     /// at `pointSize` for the settings diagram. Mirrors the sizing that
-    /// `RingItem.phosphor` / `RingItem.symbol` bake in.
-    func image(pointSize: CGFloat = 20) -> NSImage {
+    /// `RingItem.phosphor` / `RingItem.symbol` bake in. `weight` only means
+    /// anything to the `.symbol` case — a Phosphor PNG has its weight baked
+    /// into the asset — and defaults to the semibold every existing call drew.
+    func image(pointSize: CGFloat = 20, weight: NSFont.Weight = .semibold) -> NSImage {
         switch self {
         case .phosphor(let name):
             let image = GizmateResources.bundle.url(forResource: "\(name)-bold", withExtension: "png")
@@ -156,7 +158,7 @@ extension RingIconKind {
         case .symbol(let name):
             return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
                 .withSymbolConfiguration(
-                    NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
+                    NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
                 ) ?? NSImage()
         case .brand:
             return BrandMark.templateImage(height: pointSize) ?? NSImage()

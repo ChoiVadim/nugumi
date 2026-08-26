@@ -149,19 +149,23 @@ struct SurfaceCard: View {
 
     /// A row across the panel: icon beside the text, everything left-aligned.
     ///
-    /// The icon is pinned to the top rather than centred against the text
-    /// block. A reading with four detail lines would otherwise float its icon
-    /// somewhere in the middle of the block, and a column of icons that starts
-    /// at a different height in every row is the thing the eye notices before
-    /// it reads a single word.
+    /// The icon is centred against the whole text block, the way every stats
+    /// strip on this platform draws its sections (iStat Menus is the shape
+    /// being copied): a reading is a block, and its glyph is the block's
+    /// emblem, not its first line's bullet. This reverses an earlier top-pin —
+    /// that call was made when rows were one line tall, where the two
+    /// alignments draw identically, so nothing that argued for it is lost.
+    /// The 30pt slot is fixed so the text column starts at the same x in
+    /// every row whatever each glyph's own aspect is.
     private var listBody: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             if let icon = card.icon, hasVisibleIcon(icon) {
                 iconView(icon)
+                    .frame(width: 30)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(resolvedTitle)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(FlowTheme.ink)
                     .lineLimit(2)
                     .truncationMode(.middle)
@@ -266,10 +270,18 @@ struct SurfaceCard: View {
     /// still name one that stopped resolving, and this is the difference
     /// between a fallback glyph and a blank one.
     private func symbolIcon(_ name: String) -> some View {
-        Image(nsImage: RingIconKind.symbol(ToolIcons.resolved(name)).image(pointSize: 20))
-            .resizable()
-            .foregroundStyle(FlowTheme.ink)
-            .frame(width: 20, height: 20)
+        // A list row's glyph is the section's emblem and draws at 28pt with a
+        // light stroke, the outline look the reference stats strips use; a
+        // grid cell keeps the 20pt it always had — its square spends the room
+        // on the preview, not the glyph.
+        let size: CGFloat = height == nil ? 28 : 20
+        return Image(
+            nsImage: RingIconKind.symbol(ToolIcons.resolved(name))
+                .image(pointSize: size, weight: height == nil ? .light : .regular)
+        )
+        .resizable()
+        .foregroundStyle(FlowTheme.ink)
+        .frame(width: size, height: size)
     }
 
     /// A row's value for `key`, or `nil` when the key is missing or empty —
