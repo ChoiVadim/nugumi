@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createInterface, type Interface } from "node:readline";
 import {
+  encodeEnvelope,
   parseInbound,
   parseToolResponse,
   ProtocolError,
@@ -73,6 +74,27 @@ export function buildDefinition(
   };
 }
 
+/// A start frame the schema rejects arrives before a runtime exists, so no
+/// object owns a runID to answer with, and the sidecar used to die without a
+/// frame — which the host can only report as "the agent stopped without
+/// producing an answer", for a tool a trial had just passed. Salvage the
+/// envelope's own runID and say what was wrong; only a line too mangled to
+/// carry one stays silent.
+function emitOrphanFailure(line: string, error: unknown): void {
+  try {
+    const runID = (JSON.parse(line) as { runID?: unknown }).runID;
+    if (typeof runID !== "string") return;
+    process.stdout.write(
+      encodeEnvelope(runID, "failed", {
+        code: "invalidProtocol",
+        message: error instanceof Error ? error.message : "invalid start",
+      }),
+    );
+  } catch {
+    // Not even JSON: there is no address to answer to.
+  }
+}
+
 export async function runSidecar<TStart>(
   definition: SidecarDefinition<TStart>,
 ): Promise<void> {
@@ -87,7 +109,13 @@ export async function runSidecar<TStart>(
     const iterator = input[Symbol.asyncIterator]();
     const first = await iterator.next();
     if (first.done) throw new ProtocolError("invalidProtocol", "missing start");
-    const parsed = definition.parseLine(first.value);
+    let parsed: ReturnType<typeof definition.parseLine>;
+    try {
+      parsed = definition.parseLine(first.value);
+    } catch (error) {
+      emitOrphanFailure(first.value, error);
+      throw error;
+    }
     if (parsed.message.type !== "start")
       throw new ProtocolError("invalidProtocol", "first message must be start");
     const start = parsed.message.payload as unknown as TStart & {

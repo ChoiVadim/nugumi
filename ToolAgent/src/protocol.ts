@@ -838,15 +838,31 @@ const inboundSchemas = {
     .strict(),
 } as const;
 
+/// A run's budgets are not a build's. The host derives them from the tool's
+/// own `maxSteps` (capped at 24 by the candidate schema above): modelTurns is
+/// steps + 3 and toolCalls is steps + 2, so the bounds here must fit that
+/// arithmetic. The build `budgets` schema caps modelTurns at 12 — a preview
+/// bound — and reusing it here rejected every agent tool with more than nine
+/// steps at its very first frame, after a trial (clamped to three steps) had
+/// just passed it.
+const runBudgets = z
+  .object({
+    modelTurns: z.number().int().min(1).max(27),
+    toolCalls: z.number().int().min(1).max(32),
+    repairs: z.number().int().min(0).max(3),
+    durationSeconds: z.number().int().min(1).max(900),
+  })
+  .strict();
+
 /// Starting an *agent tool* run. Its own schema rather than a variant of the
 /// build start: a build is described by a request sentence, while a run carries
 /// a frozen instruction plus whatever the ring handed the tool, and the two have
-/// nothing in common but their budgets.
+/// nothing in common but their budgets — and even those only in shape.
 export const runStartSchema = z
   .object({
     instruction: byteString(LIMITS.promptBytes),
     input: byteString(LIMITS.agentInputBytes, true),
-    budgets,
+    budgets: runBudgets,
     // Names only. The values are already in the environment of every process
     // the host runs for this agent; they never travel over this protocol.
     secretNames: z

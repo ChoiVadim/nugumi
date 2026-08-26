@@ -208,3 +208,53 @@ test("build-session tools are not callable from a run", async () => {
   assert.match(output, /"code":"invalidModelAction"/);
   assert.doesNotMatch(output, /read_build_context/);
 });
+
+/// The host derives a run's budgets from the tool's own maxSteps, which the
+/// candidate schema caps at 24: modelTurns = steps + 3 and toolCalls =
+/// steps + 2. The build budgets schema tops out at 12 modelTurns, and reusing
+/// it for runs made every agent tool with more than nine steps die before its
+/// first frame — silently, which the host could only report as "the agent
+/// stopped without producing an answer".
+test("the widest host budgets start a run, and a rejected start answers with a frame", async () => {
+  const wide = launch();
+  wide.stdin.write(
+    `${JSON.stringify({
+      ...start,
+      payload: {
+        ...start.payload,
+        budgets: {
+          modelTurns: 27,
+          toolCalls: 26,
+          repairs: 0,
+          durationSeconds: 900,
+        },
+      },
+    })}\n`,
+  );
+  const accepted = await drive(wide, (message) => {
+    if (message["type"] === "modelRequest") {
+      send(wide, "cancel", { reason: "userRequested" });
+    }
+  });
+  assert.match(accepted.output, /"type":"modelRequest"/);
+
+  const rejected = launch();
+  rejected.stdin.write(
+    `${JSON.stringify({
+      ...start,
+      payload: {
+        ...start.payload,
+        budgets: {
+          modelTurns: 99,
+          toolCalls: 8,
+          repairs: 0,
+          durationSeconds: 60,
+        },
+      },
+    })}\n`,
+  );
+  const result = await drive(rejected, () => {});
+  assert.match(result.output, /"type":"failed"/);
+  assert.match(result.output, /"code":"invalidProtocol"/);
+  assert.equal(result.exitCode, 1);
+});
