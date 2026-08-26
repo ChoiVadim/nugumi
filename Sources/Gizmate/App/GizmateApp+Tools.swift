@@ -275,7 +275,7 @@ extension GizmateApp {
                 images: images
             )
         case .replace:
-            lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            lastReplacementSourcePID = selectionSourcePID
             runInstantTranslation(
                 text,
                 language: draftTargetLanguage,

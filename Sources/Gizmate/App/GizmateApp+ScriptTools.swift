@@ -283,8 +283,7 @@ extension GizmateApp {
                     NSPasteboard.general.setString(result.text ?? "", forType: .string)
                     ToastHUD.shared.show(text: "\(tool.name) — copied")
                 case .replace where result.text != nil:
-                    self.lastReplacementSourcePID = NSWorkspace.shared
-                        .frontmostApplication?.processIdentifier
+                    self.lastReplacementSourcePID = self.selectionSourcePID
                     self.replaceCurrentSelection(with: result.text ?? "")
                 case .notes where result.text != nil:
                     self.keepNote(result.text ?? "", title: tool.name, tagID: self.gizmoNoteTagID)
@@ -647,7 +646,7 @@ extension GizmateApp {
                 ToastHUD.shared.show(text: "\(tool.name) — no output")
                 return
             }
-            lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            lastReplacementSourcePID = selectionSourcePID
             replaceCurrentSelection(with: text)
         case .panel:
             let text = result.text

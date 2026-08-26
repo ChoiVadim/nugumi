@@ -61,6 +61,68 @@ extension GizmateApp {
         }
     }
 
+    /// The selection pipeline for Gizmate's own edge docks.
+    ///
+    /// `startMouseMonitor` is a global monitor, so it is blind to this app's
+    /// own mouse — a drag across a note on an edge produced no mouse-up here at
+    /// all, which is why the ring never armed over one. The text view announces
+    /// its own selection instead, so there is no gesture to reconstruct: what
+    /// fires is what was selected, by drag or by ⇧-arrow or by ⌘A alike.
+    ///
+    /// The tail delay is not a debounce for looks. The notification fires per
+    /// character while a drag is in progress, so arming on the first one would
+    /// pop the button under the pointer that is still selecting.
+    func startDockSelectionMonitor() {
+        dockSelectionObserver = NotificationCenter.default.addObserver(
+            forName: NSTextView.didChangeSelectionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let view = note.object as? NSTextView, view.window is EdgeDockPanel else {
+                return
+            }
+            MainActor.assumeIsolated { self?.dockSelectionChanged() }
+        }
+    }
+
+    private func dockSelectionChanged() {
+        dockSelectionTimer?.invalidate()
+        dockSelectionTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.25,
+            repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.armDockSelection() }
+        }
+    }
+
+    private func armDockSelection() {
+        guard selectionDisplayMode != .off, !isCloudSignInActive else { return }
+        // Still dragging. Ask again rather than arming mid-gesture.
+        guard NSEvent.pressedMouseButtons == 0 else {
+            dockSelectionChanged()
+            return
+        }
+
+        guard let selection = DockSelection.current() else {
+            // The selection collapsed — typing over it, or a click elsewhere in
+            // the note. Whatever the button was offering is about text that no
+            // longer exists.
+            translateButtonController?.close()
+            translateButtonController = nil
+            return
+        }
+
+        let cleaned = TextNormalizer.cleanedSelection(selection.text)
+        guard !cleaned.isEmpty, TextNormalizer.looksMeaningful(cleaned) else { return }
+        let anchor = selectAllAnchorPoint(from: selection.selectionRect)
+        showTranslateButton(
+            for: cleaned,
+            near: anchor,
+            selectionRect: selection.selectionRect,
+            panelSide: .right
+        )
+    }
+
     func startKeyboardMonitor() {
         // Global, listen-only — Cmd+A still propagates to the focused app so
         // its native select-all fires. We just want to know when it happened

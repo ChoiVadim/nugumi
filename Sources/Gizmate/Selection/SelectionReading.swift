@@ -37,6 +37,15 @@ final class SelectionReader {
         pasteboardBaseline: Int? = nil,
         completion: @escaping (SelectedTextContext?) -> Void
     ) {
+        // A dock of our own has key focus: the selection is right there in the
+        // responder chain, and neither AX nor a synthesized ⌘C would find it.
+        // First, not last — a clipboard-preferring read would otherwise post a
+        // ⌘C the frontmost app answers with *its* selection.
+        if let dockSelection = DockSelection.current() {
+            completion(dockSelection)
+            return
+        }
+
         if preferClipboard {
             ClipboardSelectionReader.readSelectedText(pasteboardBaseline: pasteboardBaseline) { [weak self] clipboardText in
                 if let clipboardText, !clipboardText.isEmpty {
@@ -697,3 +706,49 @@ enum PasteboardTextInserter {
     }
 }
 
+
+/// The text selected inside one of Gizmate's own edge docks.
+///
+/// Every other read in this file goes out through AX or a synthesized ⌘C, and
+/// neither can reach a note on an edge. AX asked about our own process from the
+/// main thread waits on the run loop that would have to answer it, and the
+/// selection monitor is a *global* event monitor, which by definition never
+/// sees this app's own mouse. So a drag-select in a docked note read as "no
+/// selection anywhere", and the ring never armed over the one surface Gizmate
+/// draws itself.
+///
+/// The responder chain has the answer already, exactly, with no permission and
+/// no clipboard involved.
+///
+/// Scoped to the docks on purpose, twice over. `keyWindow` rather than any
+/// window, because an `NSTextView` keeps its selection after it stops being
+/// key — without that a note selected on an edge an hour ago would shadow the
+/// live selection in whatever app the user is actually in. And `EdgeDockPanel`
+/// rather than any window of ours, because a selection in the main window is a
+/// field being typed into or a transcript being read, and a ring popping over
+/// those is noise.
+enum DockSelection {
+    static func current() -> SelectedTextContext? {
+        guard let panel = NSApp.keyWindow as? EdgeDockPanel,
+              let view = panel.firstResponder as? NSTextView
+        else { return nil }
+        return selection(in: view)
+    }
+
+    /// Split out from `current()` so it can be tested against a text view alone:
+    /// the window half needs a key window, which a test process has no way to
+    /// hand out, while the range arithmetic is the half that can actually be
+    /// wrong. `selectedRange` is a UTF-16 range, so it is read with `NSString`
+    /// and bounds-checked — a `String` index would be a different unit and a
+    /// stale range from a text view mid-edit would trap rather than return nil.
+    static func selection(in view: NSTextView) -> SelectedTextContext? {
+        let text = view.string as NSString
+        let range = view.selectedRange()
+        guard range.length > 0, NSMaxRange(range) <= text.length else { return nil }
+        let rect = view.firstRect(forCharacterRange: range, actualRange: nil)
+        return SelectedTextContext(
+            text: text.substring(with: range),
+            selectionRect: rect.width > 0 || rect.height > 0 ? rect : nil
+        )
+    }
+}

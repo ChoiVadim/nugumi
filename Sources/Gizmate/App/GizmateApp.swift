@@ -18,6 +18,9 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var mouseMonitor: Any?
     var keyboardMonitor: Any?
+    /// Selections made inside our own docks — see `startDockSelectionMonitor`.
+    var dockSelectionObserver: Any?
+    var dockSelectionTimer: Timer?
     var lastLeftMouseDownLocation: NSPoint?
     /// Pasteboard changeCount at the start of the current selection gesture.
     /// If it advances before the clipboard fallback runs, the frontmost app
@@ -557,6 +560,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         }
         startMouseMonitor()
         startKeyboardMonitor()
+        startDockSelectionMonitor()
         applySelectionDisplayMode()
         setupGlobalHotKeys()
         syncAppClassifierOverrides()

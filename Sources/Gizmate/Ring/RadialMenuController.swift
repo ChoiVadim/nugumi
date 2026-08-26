@@ -119,7 +119,7 @@ final class RadialActionMenuController {
             backing: .buffered,
             defer: false
         )
-        panel.level = .floating
+        panel.level = .gizmateOverlay
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         InvisibilityState.apply(to: panel)
         panel.isOpaque = false

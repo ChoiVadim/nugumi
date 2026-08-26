@@ -12,6 +12,19 @@ import SwiftUI
 import UserNotifications
 import Vision
 
+extension NSWindow.Level {
+    /// Where Gizmate's own answer UI sits: the floating button, the ring it
+    /// opens, and the panel an action lands in.
+    ///
+    /// `.floating` is not high enough any more. An edge dock is `.statusBar`
+    /// so a top dock can grow out of the notch, which means a ring armed from
+    /// a note on an edge opened *behind* the note it was about. One point over
+    /// the docks puts it back in front, and clears the menu bar (`.mainMenu`,
+    /// which `.statusBar` already outranks) on the way — a ring raised near the
+    /// top of the screen used to lose its upper slots to it.
+    static let gizmateOverlay = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+}
+
 /// The translation panel's "Revise or ask a follow-up" field. A plain
 /// `NSTextField` is editable by default; we only add Esc-to-close.
 /// A non-bezeled `NSTextField` draws its text near the top of its frame, not

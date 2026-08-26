@@ -238,6 +238,20 @@ extension GizmateApp {
         }
     }
 
+    /// Which process a replacement has to paste back into.
+    ///
+    /// Not always the frontmost app any more. A dock is a `.nonactivatingPanel`,
+    /// so a note being edited on an edge holds key focus while the app the user
+    /// came from is still frontmost — reading `frontmostApplication` there sends
+    /// a rewrite of the note into whatever happens to be behind it, and
+    /// activates that app to do it.
+    var selectionSourcePID: pid_t? {
+        if DockSelection.current() != nil {
+            return ProcessInfo.processInfo.processIdentifier
+        }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier
+    }
+
     @MainActor
     func replaceCurrentSelection(with translation: String) {
         let cleanTranslation = TextNormalizer.cleanedTranslation(translation)

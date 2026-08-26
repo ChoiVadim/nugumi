@@ -127,7 +127,7 @@ extension GizmateApp {
         panelSide: TranslationPanelController.Side = .right,
         restoresReadyOnUserDismiss: Bool = false
     ) {
-        lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        lastReplacementSourcePID = selectionSourcePID
 
         let cleanedDraft = TextNormalizer.cleanedDraftMessage(text)
         guard !cleanedDraft.isEmpty else {
@@ -187,7 +187,7 @@ extension GizmateApp {
             insertsDirectly = selectionReader.focusEditableComposeField()
         }
         if insertsDirectly {
-            lastReplacementSourcePID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            lastReplacementSourcePID = selectionSourcePID
             runInstantTranslation(text, language: draftTargetLanguage, near: screenPoint, mode: .smartReply)
             return
         }
