@@ -434,7 +434,10 @@ extension GizmateApp {
             return
         }
         let screenPoint = NSEvent.mouseLocation
-        let loadingBar = showInstantTranslationLoading(near: screenPoint)
+        // A panel gizmo shows its progress in the panel it will answer in;
+        // every other output keeps the pill at the cursor.
+        let panel = tool.output == .panel ? presentGizmoResultPanel(for: tool, near: screenPoint) : nil
+        let loadingBar = panel == nil ? showInstantTranslationLoading(near: screenPoint) : nil
         let backend = askBackend
         // Standard, not Deep, and that is not an oversight. An agent gizmo is
         // handed the screenshot its input captured, so it belongs to the tier
@@ -453,16 +456,22 @@ extension GizmateApp {
                     images: images,
                     backend: backend,
                     thinkingLevel: thinkingLevel,
-                    uv: uv
+                    uv: uv,
+                    onProgress: { progress in
+                        Task { @MainActor in
+                            panel?.updateLoading("Step \(progress.step): \(progress.purpose.prefix(90))")
+                        }
+                    }
                 )
                 guard let self else { return }
                 self.deliver(
                     ToolRunResult(exitCode: 0, stdout: answer, stderr: "", producedFiles: []),
                     for: tool,
-                    near: screenPoint
+                    near: screenPoint,
+                    panel: panel
                 )
             } catch {
-                self?.presentToolFailure(tool, detail: error.localizedDescription)
+                self?.presentToolFailure(tool, detail: error.localizedDescription, panel: panel)
             }
         }
     }
@@ -589,7 +598,8 @@ extension GizmateApp {
         temporaryFiles: [URL] = []
     ) {
         let screenPoint = NSEvent.mouseLocation
-        let loadingBar = showInstantTranslationLoading(near: screenPoint)
+        let panel = tool.output == .panel ? presentGizmoResultPanel(for: tool, near: screenPoint) : nil
+        let loadingBar = panel == nil ? showInstantTranslationLoading(near: screenPoint) : nil
 
         Task { @MainActor [weak self] in
             defer {
@@ -607,19 +617,26 @@ extension GizmateApp {
                 guard result.isSuccess else {
                     self.presentToolFailure(tool, detail: result.stderr.isEmpty
                         ? "The script exited with code \(result.exitCode)."
-                        : result.stderr)
+                        : result.stderr, panel: panel)
                     return
                 }
-                self.deliver(result, for: tool, near: screenPoint)
+                self.deliver(result, for: tool, near: screenPoint, panel: panel)
             } catch {
-                self?.presentToolFailure(tool, detail: error.localizedDescription)
+                self?.presentToolFailure(tool, detail: error.localizedDescription, panel: panel)
             }
         }
     }
 
     /// Routes a finished run by the tool's declared output.
     @MainActor
-    private func deliver(_ result: ToolRunResult, for tool: GizmateTool, near screenPoint: NSPoint) {
+    /// - Parameter panel: the result panel already opened for a `.panel`
+    ///   gizmo, showing its progress; the answer lands in it.
+    private func deliver(
+        _ result: ToolRunResult,
+        for tool: GizmateTool,
+        near screenPoint: NSPoint,
+        panel: TranslationPanelController? = nil
+    ) {
         switch tool.output {
         case .files:
             guard let first = result.producedFiles.first else {
@@ -652,11 +669,12 @@ extension GizmateApp {
             replaceCurrentSelection(with: text)
         case .panel:
             let text = result.text
+            let panel = panel ?? presentGizmoResultPanel(for: tool, near: screenPoint)
             guard !text.isEmpty else {
-                ToastHUD.shared.show(text: "\(tool.name) — no output")
+                panel.showError("\(tool.name) produced no output.")
                 return
             }
-            presentSelectionTranslationError(text, title: tool.name)
+            panel.showTranslation(text, isFinal: true)
         case .notify:
             let text = result.text
             ToastHUD.shared.show(
@@ -710,7 +728,7 @@ extension GizmateApp {
     }
 
     @MainActor
-    private func presentToolFailure(_ tool: GizmateTool, detail: String) {
+    private func presentToolFailure(_ tool: GizmateTool, detail: String, panel: TranslationPanelController? = nil) {
         analyticsClient.track(.errorOccurred, properties: [
             "error_type": "script_tool",
             "error_context": "tool_run"
@@ -721,9 +739,13 @@ extension GizmateApp {
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .suffix(8)
             .joined(separator: "\n")
-        presentSelectionTranslationError(
-            tail.isEmpty ? "The tool failed with no output." : tail,
-            title: "\(tool.name) failed"
-        )
+        let message = tail.isEmpty ? "The tool failed with no output." : tail
+        // A panel already shimmering "Thinking" must not be left doing so
+        // behind an alert; the failure is its answer.
+        if let panel {
+            panel.showError(message)
+            return
+        }
+        presentSelectionTranslationError(message, title: "\(tool.name) failed")
     }
 }

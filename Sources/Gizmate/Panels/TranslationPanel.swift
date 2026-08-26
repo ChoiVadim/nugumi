@@ -219,6 +219,13 @@ final class TranslationPanelController {
         return activeRequestID
     }
 
+    /// Re-words the shimmer while still loading: an agent's current step,
+    /// so a long run reads as progress rather than as a stuck "Thinking".
+    func updateLoading(_ placeholder: String) {
+        guard contentView.isShowingLoadingState else { return }
+        contentView.startLoadingAnimation(baseText: placeholder)
+    }
+
     func showTranslation(_ text: String, requestID: UUID? = nil, isFinal: Bool = false) {
         guard requestIsCurrent(requestID) else {
             return
