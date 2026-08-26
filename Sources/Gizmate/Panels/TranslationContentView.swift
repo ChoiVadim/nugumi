@@ -31,7 +31,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     static let preferredWidth: CGFloat = bodyWidth
     private static let minHeight: CGFloat = 168
     private static let maxHeight: CGFloat = 540
-    private static let contentWidth: CGFloat = 364
+    static let contentWidth: CGFloat = 364
     static let sourceFontSize: CGFloat = 16
     private static let collapsedSourceBoxHeight: CGFloat = 34
     private static let minimumExpandedSourceBoxHeight: CGFloat = 48
@@ -68,6 +68,25 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     private static let resultParagraphGapFactor: CGFloat = 1.1
     private static let textInsetY: CGFloat = 3
     private static let scrollableTextBottomPadding: CGFloat = 18
+    /// Width kept clear at the right of a scrollable box so the overlay
+    /// scroller floats over the gutter rather than over the last word.
+    private static let scrollerInset: CGFloat = 8
+
+    /// The width text is actually laid out in inside a box `boxWidth` wide.
+    ///
+    /// Every height on this panel is a measurement, and a measurement taken at
+    /// a different width than the one the text container gets is simply wrong.
+    /// It was: heights were measured at the full `contentWidth` while
+    /// `layoutScrollableTextView` handed the container `contentWidth -
+    /// scrollerInset`. Eight points is one wrapped line often enough — the box
+    /// was then sized to text that fits, `fitsInScrollFrame` said so, and the
+    /// scroller was switched *off* over content that had just overflowed it.
+    /// The last line was cut in half with no way to reach it, on exactly the
+    /// texts where the difference cost a wrap and on no others, which is what
+    /// made it look intermittent.
+    static func textContainerWidth(inBox boxWidth: CGFloat) -> CGFloat {
+        max(1, boxWidth - scrollerInset)
+    }
 
     var onClose: (() -> Void)?
     var onNeedsResize: (() -> Void)?
@@ -201,7 +220,10 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
     static func preferredHeight(sourceText: String, resultText: String, sourceExpanded: Bool = false, showsSource: Bool = true, showsFollowUp: Bool = false) -> CGFloat {
         preferredHeight(
             sourceText: sourceText,
-            resultBoxHeight: renderedResultHeight(markdown: resultText, width: contentWidth),
+            resultBoxHeight: renderedResultHeight(
+                markdown: resultText,
+                width: textContainerWidth(inBox: contentWidth)
+            ),
             sourceExpanded: sourceExpanded,
             showsSource: showsSource,
             showsFollowUp: showsFollowUp
@@ -230,12 +252,18 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         // with the displayed text mid-stream and the result twitches.
         let resultBox: CGFloat
         if !isShowingLoadingState, let storage = resultTextView.textStorage, storage.length > 0 {
-            resultBox = Self.resultBoxHeight(rawTextHeight: Self.attributedTextHeight(storage, width: Self.contentWidth))
+            resultBox = Self.resultBoxHeight(rawTextHeight: Self.attributedTextHeight(
+                storage,
+                width: Self.textContainerWidth(inBox: Self.contentWidth)
+            ))
         } else {
             // While loading, size for the placeholder (e.g. "Revising"), not the
             // prior answer still held in resultText — otherwise revise blows the
             // panel up to the old result's height with the shimmer floating in it.
-            resultBox = Self.renderedResultHeight(markdown: loadingBaseText ?? resultText, width: Self.contentWidth)
+            resultBox = Self.renderedResultHeight(
+                markdown: loadingBaseText ?? resultText,
+                width: Self.textContainerWidth(inBox: Self.contentWidth)
+            )
         }
         return Self.preferredHeight(
             sourceText: sourceText,
@@ -307,7 +335,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         return boxHeight(
             for: text,
             font: NSFont.systemFont(ofSize: sourceFontSize, weight: .semibold),
-            width: contentWidth,
+            width: textContainerWidth(inBox: contentWidth),
             minimum: minimumExpandedSourceBoxHeight,
             maximum: maximumSourceBoxHeight
         )
@@ -355,7 +383,6 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
             )
         }
 
-        let scrollerInset: CGFloat = 8
         textView.textContainerInset = NSSize(width: 0, height: verticalInset)
         textView.frame = NSRect(
             origin: .zero,
@@ -363,7 +390,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         )
         textView.minSize = NSSize(width: 0, height: scrollFrame.height)
         textView.textContainer?.containerSize = NSSize(
-            width: max(0, scrollFrame.width - scrollerInset),
+            width: textContainerWidth(inBox: scrollFrame.width),
             height: CGFloat.greatestFiniteMagnitude
         )
         scrollView.hasVerticalScroller = showsOverflowScroller && !fitsInScrollFrame
@@ -1015,7 +1042,7 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
                 let sourceRawTextHeight = Self.textHeight(
                     for: sourceText,
                     font: NSFont.systemFont(ofSize: Self.sourceFontSize, weight: .semibold),
-                    width: sourceScrollFrame.width
+                    width: Self.textContainerWidth(inBox: sourceScrollFrame.width)
                 )
                 Self.layoutScrollableTextView(
                     sourceTextView,
@@ -1072,12 +1099,15 @@ final class TranslationContentView: NSView, NSTextFieldDelegate {
         // the plain string, so tall blocks get the right scroll height.
         let resultRawTextHeight: CGFloat
         if let storage = resultTextView.textStorage, storage.length > 0 {
-            resultRawTextHeight = Self.attributedTextHeight(storage, width: resultScrollFrame.width)
+            resultRawTextHeight = Self.attributedTextHeight(
+                storage,
+                width: Self.textContainerWidth(inBox: resultScrollFrame.width)
+            )
         } else {
             resultRawTextHeight = Self.textHeight(
                 for: resultDisplayText,
                 font: NSFont.systemFont(ofSize: Self.resultFontSize, weight: .semibold),
-                width: resultScrollFrame.width,
+                width: Self.textContainerWidth(inBox: resultScrollFrame.width),
                 paragraphSpacing: Self.resultFontSize * Self.resultParagraphSpacingFactor
             )
         }
