@@ -179,6 +179,16 @@ extension GizmateApp {
             return
         }
 
+        // A no-input gizmo works over whatever context its prompt carries (the
+        // user's notes, its own instruction) — falling through would read the
+        // selection and refuse with "Select text first" for a tool that never
+        // wanted one. Spelled `ToolInput.none`: a bare `.none` here is
+        // `Optional.none` and matches nothing.
+        if tool.input == ToolInput.none {
+            run(tool, on: "", near: NSEvent.mouseLocation, selectionRect: nil)
+            return
+        }
+
         let armed = TextNormalizer.cleanedSelection(selection)
         if !armed.isEmpty {
             run(tool, on: armed, near: NSEvent.mouseLocation, selectionRect: nil)

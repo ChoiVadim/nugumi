@@ -42,7 +42,7 @@ enum ToolRunError: LocalizedError {
             case .screenshot: return "No screen area was captured."
             case .screenshotText: return "No text was found in that screen area."
             case .drawnScreen: return "The screen wasn't captured."
-            case .none: return nil
+            case .none: return "Nothing to work on."
             }
         case .timedOut(let seconds):
             return "The tool ran longer than \(seconds)s and was stopped. Anything it had written was discarded."
