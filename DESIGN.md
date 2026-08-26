@@ -255,11 +255,13 @@ about what the first one meant.
   own preview, and carry the id as plain text — a `Transferable` of our own
   needs an `Info.plist` a `swift run` build does not have. A reorder-on-entry
   is only a preview if it slides: the move runs inside `withAnimation`, the
-  lifted card dims to a hole the way an iOS icon does, and the gaps between
-  cards accept the drop too, or a card let go in one flies back to a slot
-  another card now sits in. SwiftUI never says a drag ended off-target, so the
-  hole is lifted by polling `NSEvent.pressedMouseButtons`, the one signal that
-  survives a drag session.
+  lifted card dims to a hole the way an iOS icon does. SwiftUI never says a
+  drag ended off-target, so the hole is lifted by polling
+  `NSEvent.pressedMouseButtons`, the one signal that survives a drag session.
+  No `.onDrop` on the container around the cards, however tempting for the
+  gaps between them: on macOS an outer target for the same type takes every
+  `dropEntered`, and the cards under it never hear one. That shipped once and
+  reordered nothing at all.
 
 ## 7. Depth & Surface
 

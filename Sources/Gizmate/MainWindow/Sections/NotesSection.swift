@@ -352,13 +352,9 @@ struct NotesGrid: View {
                     }
                 }
             }
-            // The gaps between cards accept the drop too. Without this a card
-            // let go in a gap has no target, so AppKit flies the preview back
-            // to where the drag began — a slot another card now sits in.
-            .onDrop(
-                of: [NoteReorderPayload.type],
-                delegate: NoteReorderDrop(target: nil, dragging: $dragging, store: store)
-            )
+            // No `.onDrop` on the container itself, however tempting for the
+            // gaps: on macOS an outer target for the same type takes every
+            // `dropEntered` and the cards under it never hear one.
             .onChange(of: dragging) { _, id in
                 guard id != nil else { return }
                 // SwiftUI never says when a drag ends anywhere but on a target,
@@ -453,14 +449,12 @@ enum NoteReorderPayload {
 /// have at all — the same trap that left every drag in `EdgesDiagram` silently
 /// doing nothing. The id travels as a string, which the system already knows.
 private struct NoteReorderDrop: DropDelegate {
-    /// `nil` is the grid itself: it accepts the drop so the gesture ends
-    /// cleanly, and moves nothing.
-    let target: UUID?
+    let target: UUID
     @Binding var dragging: UUID?
     let store: NotesStore
 
     func dropEntered(info: DropInfo) {
-        guard let dragging, let target, dragging != target else { return }
+        guard let dragging, dragging != target else { return }
         // Animated, or the cards teleport and the eye cannot tell which one
         // moved where. The slide is the whole preview.
         MainActor.assumeIsolated {
