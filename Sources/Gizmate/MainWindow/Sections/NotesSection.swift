@@ -365,7 +365,7 @@ struct NotesGrid: View {
             onDelete: { store.delete(note.id) },
             onDragStart: {
                 dragging = note.id
-                return NSItemProvider(object: note.id.uuidString as NSString)
+                return NoteReorderPayload.provider(for: note.id)
             },
             fixedHeight: cardHeight
         )
@@ -373,9 +373,41 @@ struct NotesGrid: View {
         // mid-keystroke and drop the caret.
         .id(note.id)
         .onDrop(
-            of: [.text],
+            of: [NoteReorderPayload.type],
             delegate: NoteReorderDrop(target: note.id, dragging: $dragging, store: store)
         )
+    }
+}
+
+/// What a note being reordered puts on the drag pasteboard.
+///
+/// Deliberately not text. It was `NSItemProvider(object: NSString)`, and a note
+/// card is made of an `NSTextField` over an `NSTextView` — both of which are
+/// registered drop targets for plain text and both of which sit *in front of*
+/// the SwiftUI drop target. So dragging a card over any card, its own included,
+/// offered the id to the text view first and it took it: the note filled up
+/// with UUIDs, and the reorder never happened.
+///
+/// `public.data` fixes that at the source rather than by teaching each text
+/// view to refuse. No text view registers it, so none of them is a destination
+/// for this drag at all and AppKit walks up to the card behind them — which is
+/// the target that was wanted the whole time. A declared system type, so it
+/// needs no `Info.plist` entry, which a `swift run` build has no way to
+/// provide (the trap that left every drag in `EdgesDiagram` inert). Visible to
+/// this process only, so a card dragged into another app carries nothing.
+enum NoteReorderPayload {
+    static let type = UTType.data
+
+    static func provider(for id: UUID) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.registerDataRepresentation(
+            forTypeIdentifier: type.identifier,
+            visibility: .ownProcess
+        ) { completion in
+            completion(Data(id.uuidString.utf8), nil)
+            return nil
+        }
+        return provider
     }
 }
 
@@ -508,7 +540,14 @@ private struct NoteCard: View {
         Color.clear
             .contentShape(Rectangle())
             .onTapGesture { titleFocused = true }
-            .onDrag(onDragStart, preview: { dragPreview })
+            .onDrag({
+                // Step out of the card first. A caret still sitting in the body
+                // makes the thing being carried also the thing being typed in,
+                // and the editor under it goes on claiming the pointer.
+                titleFocused = false
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                return onDragStart()
+            }, preview: { dragPreview })
             .cursor(.openHand)
             .help("Drag the title to reorder")
     }

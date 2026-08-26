@@ -1,3 +1,4 @@
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import Gizmate
@@ -70,6 +71,21 @@ final class NoteReorderTests: XCTestCase {
         store.move(ids[1], toPositionOf: UUID())
         store.move(UUID(), toPositionOf: ids[1])
         XCTAssertEqual(titles(store), ["a", "b", "c", "d"])
+    }
+
+    /// The payload decides which view the drop lands on. Anything textual is
+    /// taken by the title field or the body text view sitting in front of the
+    /// card, which is how a reorder ended up typing UUIDs into a note.
+    func testTheDragCarriesNothingATextViewWouldTake() {
+        let provider = NoteReorderPayload.provider(for: UUID())
+
+        XCTAssertTrue(provider.hasItemConformingToTypeIdentifier(UTType.data.identifier))
+        for textual in [UTType.plainText, .utf8PlainText, .text, .rtf, .url, .fileURL] {
+            XCTAssertFalse(
+                provider.hasItemConformingToTypeIdentifier(textual.identifier),
+                "\(textual.identifier) is a type an editor accepts"
+            )
+        }
     }
 
     @MainActor
