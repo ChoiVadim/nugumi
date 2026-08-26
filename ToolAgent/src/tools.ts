@@ -177,6 +177,9 @@ export function createTools(runtime: SidecarRuntime) {
       secretNames: Type.Optional(
         Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8 }),
       ),
+      // Notes only, no usesVoice: a script reads a notes file and has no
+      // model to style. Mirrors protocol.ts and ToolAgentModels.swift.
+      usesNotes: Type.Optional(Type.Boolean()),
     }),
     Type.Object({
       ...commonCandidate,

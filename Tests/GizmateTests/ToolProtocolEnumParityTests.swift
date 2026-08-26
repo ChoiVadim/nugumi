@@ -86,6 +86,48 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         XCTAssertEqual(fresh.tool.usesVoice, false, "and nil on a new build means off")
     }
 
+    /// The same contract for a script, which got notes later than prompts and
+    /// agents did — and for a while carried the flag on `GizmateTool` while
+    /// `installedTool(from:)` nilled it out for `.python`, so a chat edit reset
+    /// it exactly the way the test above guards against.
+    func testAScriptsNotesFlagSurvivesAChatEditToo() throws {
+        var existing = GizmateTool(name: "Export", kind: .python, input: .none, output: .notify)
+        existing.usesNotes = true
+
+        let snapshot = try ToolAgentLiveBuilder.installedTool(from: existing, script: "print('ok')")
+        XCTAssertEqual(snapshot.usesNotes, true, "an edit session must see the current value")
+        XCTAssertNil(snapshot.usesVoice, "a script has no voice to carry")
+
+        func candidate(usesNotes: Bool?) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .python,
+                name: "Export",
+                brief: "Writes the notes to a file.",
+                symbolName: "doc.text",
+                input: .none,
+                output: .notify,
+                trigger: .always,
+                usesNotes: usesNotes,
+                source: "print('ok')",
+                timeoutSeconds: 30
+            )
+        }
+        let silent = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(usesNotes: nil),
+            preserving: existing
+        )
+        XCTAssertEqual(silent.tool.usesNotes, true, "nil is \"didn't say\", not \"turn it off\"")
+
+        let cleared = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(usesNotes: false),
+            preserving: existing
+        )
+        XCTAssertEqual(cleared.tool.usesNotes, false, "an explicit false must still win")
+
+        let fresh = ToolAgentLiveBuilder.generatedTool(from: try candidate(usesNotes: true))
+        XCTAssertEqual(fresh.tool.usesNotes, true, "a new build takes the candidate's word")
+    }
+
     /// The editor is what the user picks from, and the protocol is what the chat
     /// builder validates against. When the editor offers more than the protocol
     /// accepts, saving works and opening that gizmo in the builder throws

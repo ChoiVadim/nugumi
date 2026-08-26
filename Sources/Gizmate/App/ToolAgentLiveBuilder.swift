@@ -130,7 +130,8 @@ enum ToolAgentLiveBuilder {
             clarificationCancellation: clarificationCancellation,
             // Read at call time, not from the request: the user may have stored
             // the key seconds ago, in the row this very build put in front of them.
-            secretNames: { ToolSecrets.names() }
+            secretNames: { ToolSecrets.names() },
+            notesAvailable: { NotesAccess.isEnabled }
         )
     }
 
@@ -171,7 +172,7 @@ enum ToolAgentLiveBuilder {
             appliesTargetLanguage: kind == .prompt && tool.appliesTargetLanguage,
             // Carried so an edit session shows the model the current values —
             // without them, a revision that never mentioned notes stripped them.
-            usesNotes: kind == .prompt || kind == .agent ? tool.usesNotes : nil,
+            usesNotes: kind == .native ? nil : tool.usesNotes,
             usesVoice: kind == .prompt || kind == .agent ? tool.usesVoice : nil,
             nativeAction: kind == .native
                 ? ToolAgentNativeActionV1(rawValue: tool.nativeAction.rawValue)

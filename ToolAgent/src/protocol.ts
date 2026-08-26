@@ -320,6 +320,12 @@ const pythonCandidate = z
       .array(byteString(LIMITS.secretNameBytes))
       .max(LIMITS.secretNameCount)
       .default([]),
+    // Whether the script is handed the user's notes as a JSON file (the path
+    // arrives in GIZMO_NOTES_FILE). Optional, never defaulted: the host
+    // re-encodes a candidate and compares byte for byte, so a key the model
+    // did not write must not appear. No usesVoice here — a script has no
+    // model to style — and ToolAgentModels.swift keeps the same asymmetry.
+    usesNotes: z.boolean().optional(),
   })
   .strict();
 
@@ -554,6 +560,9 @@ const installedPythonTool = z
       .array(byteString(LIMITS.secretNameBytes))
       .max(LIMITS.secretNameCount)
       .default([]),
+    // Carried into an edit like secretNames is, so a revision that never
+    // mentioned notes does not strip them.
+    usesNotes: z.boolean().optional(),
   })
   .strict();
 
@@ -662,6 +671,9 @@ export const toolResponsePayloadSchemas = {
         .array(byteString(LIMITS.secretNameBytes))
         .max(LIMITS.secretNameCount)
         .default([]),
+      // Whether the user currently lets gizmos read their notes. Absent from
+      // a host that predates the field.
+      notesAvailable: z.boolean().optional(),
     })
     .strict(),
   write_candidate: z.object({ candidateID: uuid, fingerprint }).strict(),

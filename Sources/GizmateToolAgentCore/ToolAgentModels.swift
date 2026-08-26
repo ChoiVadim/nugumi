@@ -33,14 +33,15 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     public let options: [String]?
     public let prompt: String
     public let appliesTargetLanguage: Bool
-    /// `.prompt` and `.agent` only: appends the user's saved Notes to the
-    /// prompt as context (see `NotesContext`). Optional for the same reason
+    /// Hands the gizmo the user's saved Notes (see `NotesContext`): appended
+    /// to the prompt for `.prompt` and `.agent`, handed to `.python` as the
+    /// JSON file named in `GIZMO_NOTES_FILE`. Optional for the same reason
     /// `options` is — the validator's byte-for-byte re-encode means an absent
     /// key must stay absent, and nil is "didn't say", which an edit resolves
     /// as "keep what the tool already had".
     public let usesNotes: Bool?
     /// Same contract as `usesNotes`, for the user's Voice settings — writing
-    /// register, dictionary and snippets.
+    /// register, dictionary and snippets. `.prompt` and `.agent` only.
     public let usesVoice: Bool?
     public let nativeAction: ToolAgentNativeActionV1?
     public let target: String
@@ -317,6 +318,11 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // Present only on a surface — `validate` rejects a layout on any
             // other output, so a non-surface Python tool never had one to omit.
             try container.encodeIfPresent(layout, forKey: .layout)
+            // Notes but not Voice: a script reads a notes file, and has no
+            // model to style. The same asymmetry is in the zod and TypeBox
+            // schemas, and the three must agree or a candidate the model wrote
+            // correctly fails the byte-for-byte check above.
+            try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
         case .agent:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(fixtures, forKey: .fixtures)
@@ -728,6 +734,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             // Python tool never had one to write, and this type enforces
             // nothing about the pairing itself — that stays on the candidate.
             try container.encodeIfPresent(layout, forKey: .layout)
+            try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
         case .agent:
             try container.encode(prompt, forKey: .prompt)
             try container.encode(maxSteps, forKey: .maxSteps)

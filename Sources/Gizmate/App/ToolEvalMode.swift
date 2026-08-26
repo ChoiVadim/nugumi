@@ -151,6 +151,18 @@ enum ToolEvalSuite {
             input: ToolInput.none,
             usesNotes: true
         ),
+        // The same material through a script: a mechanical job over the notes,
+        // where a model would be the wrong tool. Grades whether the description
+        // of GIZMO_NOTES_FILE reaches the model as a python capability at all,
+        // rather than notes being something only a prompt can have.
+        ToolEvalCase(
+            name: "python-notes-export",
+            request: "сохрани все мои заметки в один текстовый файл, "
+                + "по папкам, с заголовками",
+            kind: .python,
+            input: ToolInput.none,
+            usesNotes: true
+        ),
         ToolEvalCase(
             name: "surface-machine-readings",
             request: "хочу видеть сбоку экрана как загружен мой мак: процессор, "

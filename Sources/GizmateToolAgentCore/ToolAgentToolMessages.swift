@@ -71,21 +71,33 @@ public struct ToolAgentReadBuildContextResponseV1: Codable, Equatable, Sendable 
     /// `secretNames`. Values are never sent — the model writes
     /// `os.environ["OPENAI_API_KEY"]` without ever seeing the key.
     public let secretNames: [String]
+    /// Whether the user currently lets gizmos read their notes (the Settings
+    /// master switch). Informational: a candidate may set `usesNotes` either
+    /// way, and it takes effect whenever the switch is on. `nil` from a host
+    /// that predates the field.
+    public let notesAvailable: Bool?
 
-    public init(remaining: ToolAgentUsageCountersV1, secretNames: [String] = []) {
+    public init(
+        remaining: ToolAgentUsageCountersV1,
+        secretNames: [String] = [],
+        notesAvailable: Bool? = nil
+    ) {
         self.remaining = remaining
         self.secretNames = secretNames
+        self.notesAvailable = notesAvailable
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.remaining = try container.decode(ToolAgentUsageCountersV1.self, forKey: .remaining)
         self.secretNames = try container.decodeIfPresent([String].self, forKey: .secretNames) ?? []
+        self.notesAvailable = try container.decodeIfPresent(Bool.self, forKey: .notesAvailable)
     }
 
     private enum CodingKeys: String, CodingKey {
         case remaining
         case secretNames
+        case notesAvailable
     }
 }
 

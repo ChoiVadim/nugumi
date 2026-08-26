@@ -38,6 +38,10 @@ public typealias ToolBuildSleepV1 = @Sendable (UInt64) async throws -> Void
 /// build that just told them it needs one. Answering from the snapshot makes
 /// "add it and tell me when it's there" a loop that can never terminate.
 public typealias ToolBuildSecretNamesV1 = @Sendable () async -> [String]
+/// Whether the user currently lets gizmos read their notes. Read at call time
+/// for the same reason `ToolBuildSecretNamesV1` is; `nil` leaves the field out
+/// of `read_build_context`, which is what a test that never mentions notes wants.
+public typealias ToolBuildNotesAvailableV1 = @Sendable () async -> Bool
 
 public actor ToolBuildSupervisor {
     let store: ToolBuildStore
@@ -51,6 +55,7 @@ public actor ToolBuildSupervisor {
     /// `nil` falls back to the request's snapshot, which is what a test that
     /// does not care about secrets wants.
     let secretNames: ToolBuildSecretNamesV1?
+    let notesAvailable: ToolBuildNotesAvailableV1?
     let makeCandidateID: @Sendable () -> UUID
     let sleep: ToolBuildSleepV1
 
@@ -76,6 +81,7 @@ public actor ToolBuildSupervisor {
         clarification: @escaping ToolBuildClarificationHandlerV1 = { _ in throw ToolAgentFailureCodeV1.invalidProtocol },
         clarificationCancellation: @escaping @Sendable () async -> Void = {},
         secretNames: ToolBuildSecretNamesV1? = nil,
+        notesAvailable: ToolBuildNotesAvailableV1? = nil,
         makeCandidateID: @escaping @Sendable () -> UUID = { UUID() },
         sleep: @escaping ToolBuildSleepV1 = { try await Task.sleep(nanoseconds: $0) }
     ) {
@@ -88,6 +94,7 @@ public actor ToolBuildSupervisor {
         self.clarification = clarification
         self.clarificationCancellation = clarificationCancellation
         self.secretNames = secretNames
+        self.notesAvailable = notesAvailable
         self.makeCandidateID = makeCandidateID
         self.sleep = sleep
     }

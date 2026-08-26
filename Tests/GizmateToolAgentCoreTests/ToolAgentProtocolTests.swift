@@ -661,6 +661,56 @@ final class ToolAgentProtocolTests: XCTestCase {
         XCTAssertEqual(carried.usesVoice, true)
     }
 
+    /// A script carries `usesNotes` and drops `usesVoice`. The drop is the
+    /// deliberate half: a script has no model to style, and the zod and TypeBox
+    /// schemas say the same, so the encoder here must not start writing a key
+    /// the sidecar would refuse.
+    func testPythonCarriesNotesAndDropsVoice() throws {
+        func candidate(usesNotes: Bool?) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .python,
+                name: "Export",
+                brief: "Writes the notes to a file.",
+                symbolName: "doc.text",
+                input: .none,
+                output: .notify,
+                trigger: .always,
+                usesNotes: usesNotes,
+                usesVoice: true,
+                source: "print('ok')",
+                timeoutSeconds: 30
+            )
+        }
+        let plainJSON = String(data: try JSONEncoder().encode(try candidate(usesNotes: nil)), encoding: .utf8) ?? ""
+        XCTAssertFalse(plainJSON.contains("usesNotes"), "absent must stay absent")
+        XCTAssertFalse(plainJSON.contains("usesVoice"), "a script never writes usesVoice")
+
+        for flag in [true, false] {
+            let data = try JSONEncoder().encode(try candidate(usesNotes: flag))
+            let decoded = try JSONDecoder().decode(ToolAgentCandidateV1.self, from: data)
+            XCTAssertEqual(decoded.usesNotes, flag)
+            XCTAssertNil(decoded.usesVoice)
+        }
+
+        let installed = try ToolAgentInstalledToolV1(
+            kind: .python,
+            name: "Export",
+            brief: "Writes the notes to a file.",
+            symbolName: "doc.text",
+            input: .none,
+            output: .notify,
+            trigger: .always,
+            usesNotes: true,
+            source: "print('ok')",
+            timeoutSeconds: 30
+        )
+        let carried = try JSONDecoder().decode(
+            ToolAgentInstalledToolV1.self,
+            from: try JSONEncoder().encode(installed)
+        )
+        XCTAssertEqual(carried.usesNotes, true)
+    }
+
     /// One option is not a choice, six do not fan cleanly, and a blank circle is
     /// a button with no name. All three are the model's mistake to fix, not
     /// something to quietly repair on the way in.

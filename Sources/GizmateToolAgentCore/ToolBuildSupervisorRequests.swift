@@ -54,7 +54,8 @@ extension ToolBuildSupervisor {
                     toolCalls: request.budgets.toolCalls - charged.counters.toolCalls,
                     repairs: request.budgets.repairs - charged.counters.repairs
                 ),
-                secretNames: await secretNames?() ?? request.availableSecretNames
+                secretNames: await secretNames?() ?? request.availableSecretNames,
+                notesAvailable: await notesAvailable?()
             ))
         case .writeCandidate(let write):
             response = .writeCandidate(try await acceptWrite(write, request: request))
