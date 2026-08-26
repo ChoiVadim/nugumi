@@ -1173,11 +1173,11 @@ struct ToolEditorPanel: View {
                 ) {
                     Stepper(
                         value: Binding(
-                            // "Off" reads as 1 so one step up lands on the 2s
+                            // "Off" reads as 0 so one step up lands on the 1s
                             // floor and one step down from the floor lands on
                             // Off, with no value the clamp would silently move.
-                            get: { draft.refreshSeconds ?? 1 },
-                            set: { draft.refreshSeconds = $0 < 2 ? nil : min(3600, $0) }
+                            get: { draft.refreshSeconds ?? 0 },
+                            set: { draft.refreshSeconds = $0 < 1 ? nil : min(3600, $0) }
                         ),
                         in: 0...3600,
                         step: 1

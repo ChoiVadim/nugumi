@@ -529,7 +529,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // in the zod and TypeBox schemas: a tick spawns a whole Python
             // process, and above an hour the field means what nil already
             // means (once per reveal).
-            guard refreshSeconds.map({ (2...3_600).contains($0) }) ?? true else {
+            guard refreshSeconds.map({ (1...3_600).contains($0) }) ?? true else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
         } else if layout != nil || refreshSeconds != nil {

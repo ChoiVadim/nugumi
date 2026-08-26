@@ -856,7 +856,8 @@ final class ToolAgentProtocolTests: XCTestCase {
         }
         XCTAssertNoThrow(try surface(nil))
         XCTAssertEqual(try surface(5).refreshSeconds, 5)
-        XCTAssertThrowsError(try surface(1))
+        XCTAssertEqual(try surface(1).refreshSeconds, 1)
+        XCTAssertThrowsError(try surface(0))
         XCTAssertThrowsError(try surface(3_601))
         XCTAssertThrowsError(try ToolAgentCandidateV1(
             kind: .python, name: "Slug", brief: "Slugifies.", symbolName: "link",

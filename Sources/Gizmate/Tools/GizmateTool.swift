@@ -518,10 +518,11 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     }
 
     /// The host's bounds on a surface cadence. Every tick spawns a `uv` +
-    /// Python process, so nothing faster than 2s no matter what the builder
-    /// wrote; above an hour the field is indistinguishable from "once per
-    /// reveal", which nil already means.
+    /// Python process, so nothing faster than every second no matter what the
+    /// builder wrote — and since the loop awaits the run before sleeping, the
+    /// real floor is the script's own duration anyway. Above an hour the field
+    /// is indistinguishable from "once per reveal", which nil already means.
     static func clampedRefreshSeconds(_ value: Int) -> Int {
-        max(2, min(3600, value))
+        max(1, min(3600, value))
     }
 }

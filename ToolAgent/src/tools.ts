@@ -164,7 +164,7 @@ export function createTools(runtime: SidecarRuntime) {
       // Surface-only, like layout: seconds between re-runs while the panel is
       // on screen. Mirrors protocol.ts's refreshSeconds bounds.
       refreshSeconds: Type.Optional(
-        Type.Integer({ minimum: 2, maximum: 3600 }),
+        Type.Integer({ minimum: 1, maximum: 3600 }),
       ),
       fixtures: Type.Array(
         Type.Object({

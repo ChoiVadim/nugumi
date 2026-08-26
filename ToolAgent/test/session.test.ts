@@ -459,7 +459,7 @@ test("a surface candidate's layout is validated by the sidecar schema, matching 
     parseModelAction(action({ ...surface, refreshSeconds: 5 })),
   );
   assert.throws(
-    () => parseModelAction(action({ ...surface, refreshSeconds: 1 })),
+    () => parseModelAction(action({ ...surface, refreshSeconds: 0 })),
     /invalid tool arguments/,
   );
   assert.throws(

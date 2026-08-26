@@ -437,7 +437,7 @@ finishes.
   drag actually carries out; tap takes "open:$name" or "reveal:$name", for
   what a click does with that row.
   A surface runs its script once each time its panel opens. Set refreshSeconds
-  (2 to 3600) only when the data goes stale on its own while the user watches —
+  (1 to 3600) only when the data goes stale on its own while the user watches —
   a system monitor, a download queue, anything with readings — and the panel
   will re-run the script on that cadence for as long as it stays open. Pick the
   slowest honest number; every tick is a whole script run. Leave it out for

@@ -142,7 +142,7 @@ final class ToolsStoreTests: XCTestCase {
         let json = #"{"id":"\#(UUID().uuidString)","name":"Readings","kind":"python","#
             + #""output":"surface","refreshSeconds":0,"createdAt":0}"#
         let clamped = try JSONDecoder().decode(GizmateTool.self, from: Data(json.utf8))
-        XCTAssertEqual(clamped.refreshSeconds, 2)
+        XCTAssertEqual(clamped.refreshSeconds, 1)
         XCTAssertEqual(GizmateTool(refreshSeconds: 100_000).refreshSeconds, 3_600)
     }
 }

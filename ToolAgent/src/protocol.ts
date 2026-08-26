@@ -32,7 +32,7 @@ export const LIMITS = {
   layoutEmptyBytes: 120,
   layoutMaxDepth: 3,
   // Mirrors ToolAgentCandidateV1.validate's refreshSeconds bounds.
-  refreshSecondsMin: 2,
+  refreshSecondsMin: 1,
   refreshSecondsMax: 3_600,
   // An agent tool's own input, and the answer it finishes with. The answer is
   // roomier than a build session's finalText because it *is* the tool's output:
