@@ -401,10 +401,21 @@ struct NotesGrid: View {
         // The lifted card leaves a hole, the way an iOS icon does: the copy
         // under the pointer is the card now, and the grid shows where it goes.
         .opacity(dragging == note.id ? 0.25 : 1)
-        .onDrop(
-            of: [NoteReorderPayload.type],
-            delegate: NoteReorderDrop(target: note.id, dragging: $dragging, store: store)
-        )
+        // The drop target is a sheet over the card, present only while a note
+        // is being carried, not the card itself. A card's body is an
+        // `NSTextView`, and AppKit hands a drag to that first: it does not
+        // take `public.data`, but the drag never climbs back out to a SwiftUI
+        // target behind it either, so `dropEntered` fired only from the 14pt of
+        // padding around the text. A SwiftUI overlay sits above AppKit views
+        // in hit-testing, the same way `titleDragSurface` beats its text field.
+        .overlay {
+            if dragging != nil {
+                Color.clear.onDrop(
+                    of: [NoteReorderPayload.type],
+                    delegate: NoteReorderDrop(target: note.id, dragging: $dragging, store: store)
+                )
+            }
+        }
     }
 }
 

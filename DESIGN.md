@@ -261,7 +261,12 @@ about what the first one meant.
   No `.onDrop` on the container around the cards, however tempting for the
   gaps between them: on macOS an outer target for the same type takes every
   `dropEntered`, and the cards under it never hear one. That shipped once and
-  reordered nothing at all.
+  reordered nothing at all. Nor is the card its own target: AppKit hands a drag
+  to the `NSTextView` in its body first and never climbs back out to the
+  SwiftUI target behind it, so a card-level `.onDrop` fired only from the
+  padding around the text. The target is a transparent overlay over the card,
+  present only while a note is being carried, which sits above AppKit views in
+  hit-testing the way `titleDragSurface` does.
 
 ## 7. Depth & Surface
 
