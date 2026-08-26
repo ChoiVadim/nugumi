@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -61,6 +62,9 @@ struct Note: Codable, Identifiable, Equatable {
     /// they want the model to have. The tick exists to exclude the scratch ones,
     /// not to make every note opt in one by one.
     var usedAsContext: Bool
+    /// Attached pictures, in the order they were added. Each id names a pair of
+    /// files under `NoteImages` — the bytes never enter the notes plist.
+    var images: [UUID]
     var createdAt: Date
     var updatedAt: Date
 
@@ -70,6 +74,7 @@ struct Note: Codable, Identifiable, Equatable {
         text: String = "",
         tagID: UUID? = nil,
         usedAsContext: Bool = true,
+        images: [UUID] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -78,6 +83,7 @@ struct Note: Codable, Identifiable, Equatable {
         self.text = text
         self.tagID = tagID
         self.usedAsContext = usedAsContext
+        self.images = images
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -108,7 +114,7 @@ struct Note: Codable, Identifiable, Equatable {
     // Lenient decoding, same reasoning as `Snippet` and `GizmateTool`: a field
     // added in a later version must not throw away every note already saved.
     private enum CodingKeys: String, CodingKey {
-        case id, title, text, tagID, usedAsContext, createdAt, updatedAt
+        case id, title, text, tagID, usedAsContext, images, createdAt, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -120,6 +126,7 @@ struct Note: Codable, Identifiable, Equatable {
         // what those notes are.
         tagID = try c.decodeIfPresent(UUID.self, forKey: .tagID)
         usedAsContext = try c.decodeIfPresent(Bool.self, forKey: .usedAsContext) ?? true
+        images = try c.decodeIfPresent([UUID].self, forKey: .images) ?? []
         let created = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         createdAt = created
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? created
@@ -148,11 +155,15 @@ final class NotesStore: ObservableObject {
     nonisolated static let tagsKey = "noteTags"
 
     private let defaults: UserDefaults
+    /// Where attached pictures are written. Injectable with `defaults` for the
+    /// same reason: a test attaching and deleting must not touch real files.
+    private let imagesDirectory: URL
 
     /// Injectable so tests can exercise tag deletion — which orphans notes —
     /// against a scratch suite rather than the user's real notes.
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, imagesDirectory: URL = GizmatePaths.noteImages) {
         self.defaults = defaults
+        self.imagesDirectory = imagesDirectory
         load()
     }
 
@@ -210,10 +221,38 @@ final class NotesStore: ObservableObject {
     }
 
     func delete(_ id: UUID) {
-        notes.removeAll { $0.id == id }
+        guard let idx = notes.firstIndex(where: { $0.id == id }) else { return }
+        for image in notes[idx].images { NoteImages.remove(image, in: imagesDirectory) }
+        notes.remove(at: idx)
         save()
         onChange?()
     }
+
+    /// Writes each picture to disk and hangs its id on the note. A picture that
+    /// fails to write is skipped rather than recorded, so the note never points
+    /// at a file that is not there.
+    func attach(_ pictures: [ChatImage], to id: UUID) {
+        guard let idx = notes.firstIndex(where: { $0.id == id }) else { return }
+        let written = pictures.compactMap { NoteImages.write($0, in: imagesDirectory) }
+        guard !written.isEmpty else { return }
+        notes[idx].images += written
+        notes[idx].updatedAt = Date()
+        save()
+        onChange?()
+    }
+
+    func removeImage(_ imageID: UUID, from id: UUID) {
+        guard let idx = notes.firstIndex(where: { $0.id == id }),
+              notes[idx].images.contains(imageID)
+        else { return }
+        notes[idx].images.removeAll { $0 == imageID }
+        NoteImages.remove(imageID, in: imagesDirectory)
+        save()
+        onChange?()
+    }
+
+    func imageURL(_ imageID: UUID) -> URL { NoteImages.url(imageID, in: imagesDirectory) }
+    func thumbnail(_ imageID: UUID) -> NSImage? { NoteImages.thumbnail(imageID, in: imagesDirectory) }
 
     func notes(taggedWith tagID: UUID?) -> [Note] {
         guard let tagID else { return notes }

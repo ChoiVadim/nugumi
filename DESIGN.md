@@ -1263,3 +1263,28 @@ body`. The bracket is the folder — a `NoteTag` name — so a model can tell
 Do not add a consumer that decodes the notes key itself. `records()` is where
 the gates live, and a consumer that goes around it is a consumer the master
 switch does not reach.
+
+## 19. A note keeps its pictures as files, and shows them through Quick Look
+
+- **The plist holds ids, the disk holds pixels.** Notes persist to
+  `UserDefaults`, and that plist is rewritten whole on every keystroke; a
+  picture inside it would be re-serialised per character typed. `Note.images`
+  is `[UUID]`, each naming two JPEGs under `GizmatePaths.noteImages` that
+  `NoteImages` writes at attach — the same two encodings `ChatImage` already
+  makes for the chat (§17), the small one because a card is re-evaluated on
+  every keystroke and cannot decode a 2048px file each time.
+- **The full view is the system's.** A click on a thumbnail opens
+  `QLPreviewPanel`, the panel Finder opens on the space bar: it zooms, pages
+  through the note's pictures on the arrow keys and closes on Esc. A picture
+  window of Gizmate's own would be a second, worse copy of that.
+- **A drop lands on the card under the pointer.** Each `NoteCard` is its own
+  `dropDestination`, nested inside the grid's reorder `onDrop` — a file URL
+  conforms to `UTType.data` too, and the deeper target is the one asked first.
+  `PlainTextEditor` registers for dragged strings only: a text view takes file
+  drops by default and inserts the path, and being the deepest registered view
+  it would take the drop before any SwiftUI target around it saw it.
+- **⌘V is caught in `paste(_:)`, not by a monitor.** The chat needs an
+  `NSEvent` monitor because its field editor is SwiftUI's; a note body is our
+  own `NSTextView`, and overriding `paste(_:)` sees the paste before the view
+  decides it means text. Same pixels-versus-words rule as §17, through
+  `ChatImage.pasted`.

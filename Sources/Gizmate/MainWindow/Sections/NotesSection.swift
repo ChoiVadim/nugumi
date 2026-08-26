@@ -363,6 +363,12 @@ struct NotesGrid: View {
                 store.update(note.id, usedAsContext: !note.usedAsContext)
             },
             onDelete: { store.delete(note.id) },
+            onAttach: { store.attach($0, to: note.id) },
+            onRemoveImage: { store.removeImage($0, from: note.id) },
+            onOpenImage: { index in
+                NoteImagePreview.show(note.images.map(store.imageURL), at: index)
+            },
+            thumbnail: store.thumbnail,
             onDragStart: {
                 dragging = note.id
                 return NoteReorderPayload.provider(for: note.id)
@@ -455,6 +461,13 @@ private struct NoteCard: View {
     let onTag: (UUID?) -> Void
     let onToggleContext: () -> Void
     let onDelete: () -> Void
+    /// Pictures arrive three ways — dropped on the card, pasted into its body,
+    /// or picked through the clip — and all three land here.
+    let onAttach: ([ChatImage]) -> Void
+    let onRemoveImage: (UUID) -> Void
+    /// Opens the full view, starting at this position in `note.images`.
+    let onOpenImage: (Int) -> Void
+    let thumbnail: (UUID) -> NSImage?
     /// Starts a reorder drag, from the card's title row.
     ///
     /// Not from the body: that is an `NSTextView`, and it wins any argument
@@ -485,7 +498,7 @@ private struct NoteCard: View {
 
     @ViewBuilder
     private var editor: some View {
-        let field = PlainTextEditor(text: $text, measuredHeight: $bodyHeight)
+        let field = PlainTextEditor(text: $text, measuredHeight: $bodyHeight, pasteHook: takePastedPictures)
             .onChange(of: text) { _, new in onChange(title, new) }
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
@@ -511,6 +524,10 @@ private struct NoteCard: View {
         onTag: @escaping (UUID?) -> Void,
         onToggleContext: @escaping () -> Void,
         onDelete: @escaping () -> Void,
+        onAttach: @escaping ([ChatImage]) -> Void,
+        onRemoveImage: @escaping (UUID) -> Void,
+        onOpenImage: @escaping (Int) -> Void,
+        thumbnail: @escaping (UUID) -> NSImage?,
         onDragStart: @escaping () -> NSItemProvider,
         fixedHeight: CGFloat?
     ) {
@@ -522,6 +539,10 @@ private struct NoteCard: View {
         self.onTag = onTag
         self.onToggleContext = onToggleContext
         self.onDelete = onDelete
+        self.onAttach = onAttach
+        self.onRemoveImage = onRemoveImage
+        self.onOpenImage = onOpenImage
+        self.thumbnail = thumbnail
         self.onDragStart = onDragStart
         self.fixedHeight = fixedHeight
         _title = State(initialValue: note.title)
@@ -603,6 +624,8 @@ private struct NoteCard: View {
                 tagMenu
             }
 
+            if !note.images.isEmpty { pictures }
+
             // Already an NSScrollView, so a long note scrolls inside its card
             // and every card in a row stays the same height. Flexible rather
             // than fixed: a fixed body inside a fixed card leaves dead space
@@ -611,6 +634,16 @@ private struct NoteCard: View {
         }
         .padding(14)
         .frame(height: fixedHeight)
+        // The card under the pointer is the note the picture is for, so each
+        // card is its own target. Inside the reorder `onDrop` in `NotesGrid`:
+        // a file URL conforms to `UTType.data` too, and the deeper target is
+        // the one that gets asked first.
+        .dropDestination(for: URL.self) { urls, _ in
+            let pictures = urls.compactMap(ChatImage.init(contentsOf:))
+            guard !pictures.isEmpty else { return false }
+            onAttach(pictures)
+            return true
+        }
         // One fill, hovered or not. Hover already reveals the tick and the bin
         // below; repainting the whole card on top of that answers "is this
         // clickable" for something that is a page you write on, not a button.
@@ -661,8 +694,52 @@ private struct NoteCard: View {
         .fixedSize()
     }
 
+    /// Same rule as the chat's ⌘V (DESIGN.md §17): a picture file is taken
+    /// whole, its name being noise; pixels beside real words are taken *and*
+    /// the words go on to the editor.
+    private func takePastedPictures(_ pasteboard: NSPasteboard) -> Bool {
+        let paste = ChatImage.pasted(pasteboard)
+        guard !paste.pictures.isEmpty else { return false }
+        onAttach(paste.pictures)
+        return !paste.keepsText
+    }
+
+    /// A strip of thumbnails above the body; a click opens the full view.
+    private var pictures: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(note.images.enumerated()), id: \.element) { index, id in
+                    Group {
+                        if let image = thumbnail(id) {
+                            Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            Image(systemName: "photo")
+                                .foregroundStyle(FlowTheme.inkTertiary)
+                        }
+                    }
+                    .frame(width: 56, height: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpenImage(index) }
+                    .cursor(.pointingHand)
+                    .contextMenu { Button("Remove picture") { onRemoveImage(id) } }
+                }
+            }
+        }
+        .frame(height: 56)
+    }
+
     private var actions: some View {
         HStack(spacing: 8) {
+            Button { onAttach(ChatImage.pick()) } label: {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(FlowTheme.inkSecondary)
+                    .contentShape(Rectangle())
+            }
+            .plainButton()
+            .help("Attach a picture. Drop one on the card, or paste it.")
+
             Button(action: onToggleContext) {
                 Image(systemName: note.usedAsContext ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12.5, weight: .medium))

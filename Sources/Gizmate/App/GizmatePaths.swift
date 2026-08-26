@@ -55,6 +55,12 @@ enum GizmatePaths {
     static var bin: URL { ensure(root.appending(path: "bin", directoryHint: .isDirectory)) }
     static var pythonInstall: URL { ensure(root.appending(path: "python", directoryHint: .isDirectory)) }
     static var cache: URL { ensure(root.appending(path: "cache", directoryHint: .isDirectory)) }
+    /// Pictures attached to notes, one JPEG (plus its thumbnail) per attachment.
+    /// Files rather than bytes in the notes plist: that plist is rewritten whole
+    /// on every keystroke.
+    static var noteImages: URL {
+        ensure(root.appending(path: "note-images", directoryHint: .isDirectory))
+    }
 
     /// A fresh scratch directory for one tool run. The caller owns cleanup.
     static func makeRunDirectory() throws -> URL {

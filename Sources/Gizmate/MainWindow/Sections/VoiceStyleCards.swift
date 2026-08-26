@@ -113,15 +113,38 @@ final class PassthroughScrollView: NSScrollView {
     }
 }
 
+/// `paste(_:)` is what ⌘V reaches through the Edit menu, so overriding it is
+/// the one place a paste can be seen before the field editor decides it means
+/// text — a monitor is only needed where the text view is not yours.
+final class PlainTextView: NSTextView {
+    /// Returns true to have taken the paste, in which case the text view never
+    /// sees it.
+    var pasteHook: ((NSPasteboard) -> Bool)?
+
+    override func paste(_ sender: Any?) {
+        if pasteHook?(.general) == true { return }
+        super.paste(sender)
+    }
+}
+
 struct PlainTextEditor: NSViewRepresentable {
     @Binding var text: String
     /// How tall the laid-out text actually is, for a caller that wants to size
     /// itself to its content. Defaults to a sink so every existing caller — all
     /// of which live in fixed-height cards — is unchanged.
     var measuredHeight: Binding<CGFloat> = .constant(0)
+    /// First look at a paste, see `PlainTextView.pasteHook`.
+    var pasteHook: ((NSPasteboard) -> Bool)? = nil
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
+        let textView = PlainTextView()
+        textView.pasteHook = pasteHook
+        // A plain-text view still registers for file drops and inserts the
+        // path, and being the deepest registered view it takes the drop before
+        // any SwiftUI target wrapped around it ever sees it. Words are the only
+        // thing this editor can take by drag.
+        textView.unregisterDraggedTypes()
+        textView.registerForDraggedTypes([.string])
         textView.delegate = context.coordinator
         textView.string = text
         textView.font = .systemFont(ofSize: 13)
@@ -147,8 +170,9 @@ struct PlainTextEditor: NSViewRepresentable {
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        guard let textView = scroll.documentView as? NSTextView else { return }
+        guard let textView = scroll.documentView as? PlainTextView else { return }
         if textView.string != text { textView.string = text }
+        textView.pasteHook = pasteHook
         textView.textColor = .white
         context.coordinator.report(textView)
     }
