@@ -533,6 +533,9 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         // kAXBoundsForRangeParameterizedAttribute) can stall the main thread
         // when an unsupported app responds slowly. Cap it.
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.5)
+        // Before the ring hook and the docks read the store, so a first
+        // launch already has the shipped gizmos in both.
+        DefaultTools.seed(into: toolsStore, dock: dockStore)
         // The ring reads its contents through this hook every time it opens, so
         // a slot edited in the Ring tab lands on the very next ring.
         RingConfigurationProvider.current = { [weak self] selection in

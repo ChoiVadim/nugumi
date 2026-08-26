@@ -136,6 +136,14 @@ Rules that fall out of this, all of them paid for:
   a tool's home on its tile, including "Nowhere", and counts them once at the
   group heading ("9 of 11 live nowhere") rather than nine times down a column.
   See DESIGN.md §16 for why that screen is a grid of tiles rather than a list.
+- **A shipped gizmo is a seeded gizmo, not a feature.** `DefaultTools.seed`
+  installs the bundled tools (Mac Usage, from `Resources/MacUsage.py`) into
+  the ordinary `ToolsStore` once per install — stable UUID, pre-approved
+  (code that ships inside the app carries the app's own consent), docked so
+  it is not born Nowhere — and nothing special-cases them afterwards: the
+  user edits, moves, or deletes them like any built gizmo, and a deleted one
+  is never re-seeded. Editing the bundled script only changes _fresh_
+  installs, on purpose: an existing install's copy belongs to the user.
 - **Every "what can be placed" set needs a parity test.** Five now exist in
   `Tests/GizmateTests/ToolProtocolEnumParityTests.swift`. This defect class —
   a thing reaching every layer and missing the one UI control that made it
