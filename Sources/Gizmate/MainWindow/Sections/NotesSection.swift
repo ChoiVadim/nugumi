@@ -625,7 +625,11 @@ private struct NoteCard: View {
             // and every card in a row stays the same height. Flexible rather
             // than fixed: a fixed body inside a fixed card leaves dead space
             // under the last line.
-            editor
+            //
+            // The bottom inset is the actions row's height: it floats over
+            // this corner, and without the inset the last line of a note sits
+            // under the clip and the bin the moment the pointer arrives.
+            editor.padding(.bottom, 14)
         }
         .padding(14)
         .frame(height: fixedHeight)
@@ -651,8 +655,8 @@ private struct NoteCard: View {
                 .stroke(FlowTheme.hairline, lineWidth: 1)
         )
         // Floated over the card's bottom-right rather than laid out under the
-        // body: a row that is invisible most of the time would still reserve
-        // its height, which is exactly the gap this replaces.
+        // body, so the row can fade without the layout moving; the body keeps
+        // the inset above so the two never share a line.
         .overlay(alignment: .bottomTrailing) { actions }
         .background {
             GeometryReader { proxy in
