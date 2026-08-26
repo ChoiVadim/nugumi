@@ -81,6 +81,23 @@ final class NoteImagesTests: XCTestCase {
         XCTAssertFalse(exists(NoteImages.thumbnailURL(id, in: dir)))
     }
 
+    /// A dropped picture file must reach the card, and the text view in front
+    /// of it is the deepest registered drop target. It re-registers on its own
+    /// whenever it goes into a window or turns editable, which is what undid
+    /// the first fix; this walks it through both and checks the list after.
+    @MainActor
+    func testNoteBodyTakesOnlyWordsByDrag() {
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 100, height: 100),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        let textView = PlainTextView()
+        window.contentView?.addSubview(textView)
+        textView.isEditable = false
+        textView.isEditable = true
+
+        XCTAssertEqual(textView.registeredDraggedTypes, [.string])
+        XCTAssertNotEqual(NSTextView().registeredDraggedTypes, [.string], "the fixture must discriminate")
+    }
+
     /// Notes saved before pictures existed have no `images` key at all.
     func testNotesSavedBeforePicturesDecodeWithNone() throws {
         let legacy = """

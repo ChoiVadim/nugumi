@@ -125,6 +125,18 @@ final class PlainTextView: NSTextView {
         if pasteHook?(.general) == true { return }
         super.paste(sender)
     }
+
+    /// Words are the only thing this editor takes by drag. A text view also
+    /// registers for file drops and inserts the path, and being the deepest
+    /// registered view it takes the drop before any SwiftUI target wrapped
+    /// around it is asked. Overridden rather than set once after init: AppKit
+    /// calls this again whenever editability or the window changes, and the
+    /// first attempt — an `unregisterDraggedTypes` in `makeNSView` — was undone
+    /// by exactly that before the first drop landed.
+    override func updateDragTypeRegistration() {
+        unregisterDraggedTypes()
+        registerForDraggedTypes([.string])
+    }
 }
 
 struct PlainTextEditor: NSViewRepresentable {
@@ -139,12 +151,7 @@ struct PlainTextEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let textView = PlainTextView()
         textView.pasteHook = pasteHook
-        // A plain-text view still registers for file drops and inserts the
-        // path, and being the deepest registered view it takes the drop before
-        // any SwiftUI target wrapped around it ever sees it. Words are the only
-        // thing this editor can take by drag.
-        textView.unregisterDraggedTypes()
-        textView.registerForDraggedTypes([.string])
+        textView.updateDragTypeRegistration()
         textView.delegate = context.coordinator
         textView.string = text
         textView.font = .systemFont(ofSize: 13)

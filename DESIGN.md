@@ -1295,9 +1295,12 @@ switch does not reach.
 - **A drop lands on the card under the pointer.** Each `NoteCard` is its own
   `dropDestination`, nested inside the grid's reorder `onDrop` — a file URL
   conforms to `UTType.data` too, and the deeper target is the one asked first.
-  `PlainTextEditor` registers for dragged strings only: a text view takes file
+  `PlainTextView` registers for dragged strings only: a text view takes file
   drops by default and inserts the path, and being the deepest registered view
-  it would take the drop before any SwiftUI target around it saw it.
+  it would take the drop before any SwiftUI target around it saw it. That has
+  to be an override of `updateDragTypeRegistration()`, not a call after init:
+  AppKit re-registers on every editability or window change, and a one-time
+  `unregisterDraggedTypes` was undone before the first drop landed.
 - **⌘V is caught in `paste(_:)`, not by a monitor.** The chat needs an
   `NSEvent` monitor because its field editor is SwiftUI's; a note body is our
   own `NSTextView`, and overriding `paste(_:)` sees the paste before the view
