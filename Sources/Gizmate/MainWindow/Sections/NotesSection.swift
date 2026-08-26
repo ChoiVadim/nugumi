@@ -11,7 +11,13 @@ struct NotesSection: View {
     @State private var focusedNoteID: UUID?
     /// `nil` is the All tab. Holding the tag's id rather than a tab index keeps
     /// the selection pointing at the same tag when tags are added or removed.
-    @State private var selectedTagID: UUID?
+    /// Kept in defaults, shared with the dock, so the tab survives a relaunch;
+    /// a tag deleted since reads as All.
+    @AppStorage(NotesStore.selectedTagKey) private var selectedTagRaw = ""
+    private var selectedTagID: UUID? {
+        get { UUID(uuidString: selectedTagRaw).flatMap { bridge.notes.tag($0)?.id } }
+        nonmutating set { selectedTagRaw = newValue?.uuidString ?? "" }
+    }
     @State private var tagEditor: TagEditorMode?
 
     enum TagEditorMode: Hashable {

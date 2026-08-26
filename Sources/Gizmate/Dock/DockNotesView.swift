@@ -18,8 +18,13 @@ struct DockNotesView: View {
 
     /// `nil` is All. Holding the tag's id rather than an index keeps the
     /// selection pointing at the same tag when tags are added or removed —
-    /// the same reasoning `NotesSection` uses.
-    @State private var selectedTagID: UUID?
+    /// the same reasoning `NotesSection` uses, and the same defaults key, so
+    /// the folder open here is the folder open there, and after a relaunch.
+    @AppStorage(NotesStore.selectedTagKey) private var selectedTagRaw = ""
+    private var selectedTagID: UUID? {
+        get { UUID(uuidString: selectedTagRaw).flatMap { notes.tag($0)?.id } }
+        nonmutating set { selectedTagRaw = newValue?.uuidString ?? "" }
+    }
     /// Handed to `NotesGrid` so a just-added note opens with the caret in it.
     @State private var focusedNoteID: UUID?
 

@@ -147,6 +147,10 @@ final class NotesStore: ObservableObject {
     /// actor, while assembling a prompt.
     nonisolated static let defaultsKey = "notes"
     nonisolated static let tagsKey = "noteTags"
+    /// The tag tab the notes list is on, as a UUID string ("" for All). One key
+    /// for the page and the dock, read through `@AppStorage` by both, so the
+    /// folder you were in is the folder you come back to.
+    nonisolated static let selectedTagKey = "notesSelectedTag"
 
     private let defaults: UserDefaults
     /// Where attached pictures are written. Injectable with `defaults` for the
