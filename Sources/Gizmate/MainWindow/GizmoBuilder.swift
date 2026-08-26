@@ -308,6 +308,8 @@ final class GizmoBuilder: ObservableObject {
         chat.reset()
         discard(live.subject)
         self.live = nil
+        // What stays is the one question a finished build leaves open.
+        chat.offerPlacement(saved)
         return saved
     }
 

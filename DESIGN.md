@@ -1167,6 +1167,22 @@ for ("what can Gizmate do").
   where things live that cannot move them is a control that lies. Home names each
   tool's home in words and links to the editor; deciding the home stays where the
   one writer for it already is.
+- **A gizmo is asked where it lives the moment it is saved, in the chat.** This
+  narrows the bullet above rather than reversing it. Save used to wipe the
+  transcript and say nothing, and the gizmo landed in the rail marked "Nowhere";
+  the person who had just watched it get built was left to discover the Ring and
+  Edges sections on their own, and the rail's count said how many never did.
+  `ChatPlacementCard` follows the ready card: a resident is offered the edges,
+  everything else the ring and a key, and "Not now" is always the last row
+  (`ToolHome.offered(for:)`, pinned to `DockCatalog.dockableGizmoOutputs` by
+  `ToolPlacementTests`). The ring is offered as the ring: the same `RingDiagram`
+  the Ring section draws, so the level and the slot are one tap on the picture
+  and a full slot is replaced in plain sight. Every write goes through the same
+  store calls the figures make (`assign`, `dock`, `placeOnTop`), so nothing here
+  is a second rule about placement, only a second door to the one rule. The
+  card ends as one sentence on how to use the gizmo from where it now is, written
+  from `ToolInput`, with an "Open Ring" / "Open Edges" button beside it; the
+  next message clears it. Home's rail stays a directory: it still moves nothing.
 
 ## 17. A chat takes a picture the three ways macOS offers
 

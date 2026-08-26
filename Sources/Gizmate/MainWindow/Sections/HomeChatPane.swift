@@ -30,6 +30,9 @@ struct HomeChatPane: View {
     /// the gizmo editor, which is what "being thrown into a window" was: one
     /// chat that sometimes stopped being a chat.
     @ObservedObject var builder: GizmoBuilder
+    /// For placing what was just saved: the stores are `let`s on the bridge,
+    /// and the card re-declares the one it draws from as `@ObservedObject`.
+    @EnvironmentObject private var bridge: GizmateSettingsBridge
 
     @State private var draft = ""
     /// Pictures waiting to go with the next message.
@@ -193,6 +196,7 @@ struct HomeChatPane: View {
         conversation.turns.isEmpty
             && conversation.pending == nil
             && builder.chat.messages.isEmpty
+            && builder.chat.placement == nil
     }
 
     /// The build, rendered as the same kind of exchange as everything else.
@@ -229,6 +233,46 @@ struct HomeChatPane: View {
         if let ready = builder.chat.readyMessage, !builder.isBuilding {
             readyCard(ready)
         }
+        if let stage = builder.chat.placement {
+            ChatPlacementCard(
+                stage: stage,
+                ringLayout: bridge.ringLayout,
+                tools: tools.tools,
+                onChoose: { place(stage, at: $0) },
+                onPickSlot: { place(stage, at: .ring, slot: $0) },
+                onOpen: { bridge.host?.presentMainWindow(section: $0) }
+            )
+        }
+    }
+
+    /// Writes the placement the same way the Ring and Edges figures do, then
+    /// leaves one sentence on how to use the gizmo from where it now is.
+    private func place(_ stage: ToolPlacementStage, at home: ToolHome, slot: RingSlotAddress? = nil) {
+        guard case .choosing(let tool) = stage else { return }
+        let id = ToolRef.generated(tool.id).storageID
+        var folder: String?
+        switch home {
+        case .ring:
+            guard let slot else { return }
+            bridge.ringLayout.assign(.tool(tool.id), to: slot.index, in: slot.path)
+            folder = slot.path.last.flatMap { bridge.ringLayout.folder($0)?.name }
+        case .edge(.top):
+            // The top rail holds one resident; same eviction the figure applies.
+            let residents = bridge.host.map { DockCatalog.knownIDs(host: $0) } ?? []
+            EdgesSection.placeOnTop(id, dock: bridge.dock, residentIDs: residents)
+        case .edge(let edge):
+            bridge.dock.dock(id, to: edge)
+        case .shortcut:
+            bridge.perform(.recordToolShortcut(tool.id))
+        case .nowhere:
+            break
+        }
+        let ring = GlobalShortcutStore.shortcut(for: .quickMenu).displayString
+        builder.chat.settlePlacement(
+            tool,
+            note: home.howToUse(tool, ringShortcut: ring, folder: folder),
+            section: home.section
+        )
     }
 
     /// The build is blocked on a key. Answering it here is what keeps the
@@ -584,6 +628,12 @@ struct HomeChatPane: View {
         let usable = tools.usableTools()
         draft = ""
         attachments = []
+
+        // The placement card answered a finished build; a new message is the
+        // next piece of work, so the card goes the way the transcript did.
+        if builder.chat.placement != nil {
+            builder.chat.reset()
+        }
 
         // A build already open owns the composer. Sending a message that is an
         // answer to the agent's own question anywhere else would strand the

@@ -38,7 +38,7 @@ struct ChatQuestionCard: View {
                     .padding(.bottom, 14)
                 ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
                     Divider().background(FlowTheme.hairline)
-                    OptionRow(number: index + 1, label: option) { answer(option) }
+                    ChatOptionRow(number: index + 1, label: option) { answer(option) }
                 }
                 Divider().background(FlowTheme.hairline)
                 freeText
@@ -117,7 +117,7 @@ struct ChatQuestionCard: View {
 /// The whole row is the target, not the label: a 24pt-tall strip of card that
 /// looks like a list item and only responds on the words is the kind of miss
 /// people blame on themselves.
-private struct OptionRow: View {
+struct ChatOptionRow: View {
     let number: Int
     let label: String
     let action: () -> Void

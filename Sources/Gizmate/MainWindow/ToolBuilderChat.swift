@@ -95,6 +95,9 @@ final class ToolBuilderChatSession: ObservableObject {
     /// The secret a candidate declared that the user has not stored. Non-nil
     /// means the build is parked in front of a key field.
     @Published private(set) var pendingSecret: String?
+    /// The gizmo just saved and the question of where it lives, then the
+    /// answer. Non-nil means the card is up; the next message clears it.
+    @Published private(set) var placement: ToolPlacementStage?
 
     private let answers: ToolBuilderAnswerBroker
     private let activityLimit: Int
@@ -308,6 +311,17 @@ final class ToolBuilderChatSession: ObservableObject {
         activity = []
         pendingSecret = nil
         pendingQuestions = nil
+        placement = nil
+    }
+
+    /// Saved. Ask where it lives instead of going quiet.
+    func offerPlacement(_ tool: GizmateTool) {
+        placement = .choosing(tool)
+    }
+
+    /// Placed (or declined). The note stays as the card until the next message.
+    func settlePlacement(_ tool: GizmateTool, note: String, section: MainWindowSection?) {
+        placement = .settled(tool: tool, note: note, section: section)
     }
 
     func markCandidateStale() {
