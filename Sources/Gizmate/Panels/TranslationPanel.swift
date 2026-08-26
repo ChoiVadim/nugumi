@@ -94,7 +94,7 @@ final class TranslationPanelController {
     /// it owns the content view, the interceptors and the request bookkeeping —
     /// but it is never ordered in, and the content lives on an edge instead.
     private let dockHost: ResultSurfaceHost?
-    private var isDocked: Bool { dockHost != nil }
+    var isDocked: Bool { dockHost != nil }
     /// The docked component's state, and the view drawing it. A result on an
     /// edge is `DockResultView`, not this controller's `contentView` squeezed
     /// into the dock: the two are different things (see that view's doc).
@@ -104,8 +104,11 @@ final class TranslationPanelController {
     /// off `contentView.onFollowUp`.
     private let onFollowUp: ((String) -> Void)?
 
-    var panelFrame: NSRect { panel.frame }
-    var isVisible: Bool { panel.isVisible }
+    /// Where the result is on screen: the dock's window when docked, since
+    /// the floating panel is never ordered in then. The selection gesture
+    /// asks these to leave a click inside the result alone.
+    var panelFrame: NSRect { dockedView?.window?.frame ?? panel.frame }
+    var isVisible: Bool { dockedView?.window?.isVisible ?? panel.isVisible }
     var displayedResultText: String { dockedResult?.text ?? contentView.currentResultText }
     var currentSourceText: String { contentView.currentSourceText }
     var currentTargetLanguageValue: TranslationLanguage { contentView.currentTargetLanguageValue }

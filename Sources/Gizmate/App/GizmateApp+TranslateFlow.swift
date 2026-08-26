@@ -20,7 +20,12 @@ extension GizmateApp {
         selectionRect: NSRect? = nil,
         panelSide: TranslationPanelController.Side = .right
     ) {
-        translationPanelController?.close()
+        // A floating answer belongs to the selection it was made from, so a
+        // new selection retires it. A docked one owns its edge until the user
+        // closes it (DESIGN.md §11), whatever they go on to select.
+        if translationPanelController?.isDocked != true {
+            translationPanelController?.close()
+        }
         translateButtonController?.close()
 
         guard selectionDisplayMode != .off else {
