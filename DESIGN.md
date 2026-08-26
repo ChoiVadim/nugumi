@@ -314,6 +314,13 @@ share of users regardless of what looks right.
   hovered is a permanent grey circle. `ResetDiscButton` and the folder hub's
   chips and crumbs all follow this; `FolderHubView.fill(here:folder:)` is the
   whole rule in four lines.
+- **That rule is about controls, and a card you write in is not one.** A note
+  card lifted its fill on hover like a button does, which promises a press that
+  does nothing — the card is already open, and the pointer is there to put a
+  caret in it or reach the tick and the bin that fade in at its corner. Those
+  appearing is the whole hover treatment. Repainting the surface underneath
+  them says a second, wrong thing about the same gesture. `NoteCard` keeps one
+  fill; only the controls it holds react.
 
 ## 10. Panels that touch the bezel
 

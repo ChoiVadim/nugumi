@@ -460,9 +460,12 @@ private struct NoteCard: View {
         }
         .padding(14)
         .frame(height: fixedHeight)
+        // One fill, hovered or not. Hover already reveals the tick and the bin
+        // below; repainting the whole card on top of that answers "is this
+        // clickable" for something that is a page you write on, not a button.
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(hovering ? FlowTheme.raised : FlowTheme.subtleFill)
+                .fill(FlowTheme.subtleFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
