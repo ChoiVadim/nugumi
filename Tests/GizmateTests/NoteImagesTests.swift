@@ -99,28 +99,23 @@ final class NoteImagesTests: XCTestCase {
     }
 
     /// A note's title edits through the window's field editor, and that is a
-    /// text view registered for file drops all the same. Both windows that host
-    /// notes hand out a words-only one; a secret still gets its secure editor.
+    /// text view registered for file drops all the same. The guard trims it as
+    /// it goes live, for the second field in a window as much as the first.
     @MainActor
     func testTitleFieldEditorTakesOnlyWordsByDrag() throws {
+        PlainTextView.trimFieldEditorDrops()
         let rect = NSRect(x: 0, y: 0, width: 200, height: 100)
-        let windows: [NSWindow] = [
-            MainWindow(contentRect: rect, styleMask: .titled, backing: .buffered, defer: false),
-            EdgeDockPanel(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false),
-        ]
-        for window in windows {
-            let title = NSTextField(frame: rect)
-            let secret = NSSecureTextField(frame: rect)
-            window.contentView?.addSubview(title)
-            window.contentView?.addSubview(secret)
+        let window = NSWindow(contentRect: rect, styleMask: .titled, backing: .buffered, defer: false)
+        let first = NSTextField(frame: rect)
+        let second = NSTextField(frame: rect)
+        window.contentView?.addSubview(first)
+        window.contentView?.addSubview(second)
 
-            window.makeFirstResponder(title)
-            let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "\(type(of: window))")
-            XCTAssertTrue(editor is PlainTextView, "\(type(of: window))")
-            XCTAssertEqual(editor.registeredDraggedTypes, [.string], "\(type(of: window))")
-
-            window.makeFirstResponder(secret)
-            XCTAssertFalse(window.firstResponder is PlainTextView, "a secret keeps its secure editor")
+        for field in [first, second] {
+            window.makeFirstResponder(field)
+            let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+            XCTAssertTrue(editor.isFieldEditor)
+            XCTAssertEqual(editor.registeredDraggedTypes, [.string])
         }
     }
 

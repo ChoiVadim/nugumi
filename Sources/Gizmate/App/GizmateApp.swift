@@ -480,6 +480,10 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
         // the single source of truth; the per-window .darkAqua pins are redundant.
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
+        // A picture dropped on a note's title lands on the card, not as a path
+        // in the title. See `PlainTextView.trimFieldEditorDrops`.
+        PlainTextView.trimFieldEditorDrops()
+
         // Every dialog AppKit draws for us — NSAlert, the About panel, user
         // notifications — falls back to the application icon. Under `swift run`
         // there is no bundle, so that fallback is the generic placeholder, which

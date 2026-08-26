@@ -138,16 +138,27 @@ final class PlainTextView: NSTextView {
         registerForDraggedTypes([.string])
     }
 
-    /// A window's field editor — the one text view every `NSTextField` in it
-    /// edits through, a note's title included. It is an `NSTextView` registered
-    /// for file drops like any other, so a picture dropped on a title arrived
-    /// as a path in the title; as a `PlainTextView` it lets the drop through to
-    /// the card. `MainWindow` and `EdgeDockPanel` hand this out from
-    /// `fieldEditor(_:for:)`.
-    static func makeFieldEditor() -> PlainTextView {
-        let editor = PlainTextView()
-        editor.isFieldEditor = true
-        return editor
+    /// The same rule for every field editor in the app — the shared text view
+    /// an `NSTextField` edits through, a note's title included. It registers
+    /// for file drops like any text view, so a picture dropped on a title
+    /// arrived as a path in the title.
+    ///
+    /// Not a field editor of our own: SwiftUI's `TextField` force-casts the
+    /// window's editor to a private subclass of its own and aborts on anything
+    /// else. Instead, the editor is trimmed the moment it goes live. Setup runs
+    /// `updateDragTypeRegistration` and then places the caret, so the selection
+    /// notification is the first one after the registration is final; the
+    /// check on `registeredDraggedTypes` keeps every later caret move free.
+    static func trimFieldEditorDrops() {
+        NotificationCenter.default.addObserver(
+            forName: NSTextView.didChangeSelectionNotification, object: nil, queue: .main
+        ) { note in
+            guard let editor = note.object as? NSTextView, editor.isFieldEditor,
+                  editor.registeredDraggedTypes != [.string]
+            else { return }
+            editor.unregisterDraggedTypes()
+            editor.registerForDraggedTypes([.string])
+        }
     }
 }
 

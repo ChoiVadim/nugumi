@@ -684,7 +684,7 @@ share of users regardless of what looks right.
   WidgetKit/xbar-shaped answer is `refreshSeconds` on the gizmo itself: the
   builder sets it because only the author of the data knows whether it decays,
   and the host owns everything that could make it a hazard — clamped to
-  2–3600s (`GizmateTool.clampedRefreshSeconds`), running only while the panel
+  1–3600s (`GizmateTool.clampedRefreshSeconds`), running only while the panel
   is on screen (the `.task` in `SurfaceHostView` dies with the view, so there
   is no background polling to stop), and never stacking a run on a slow one
   (the loop awaits each refresh in line). nil is the default and means what
@@ -1322,8 +1322,11 @@ switch does not reach.
 - **The title is a drop target too, through the window.** An `NSTextField`
   edits through its window's shared field editor, which is an `NSTextView`
   registered for file drops like any other — so a picture dropped on a title
-  arrived as a path in the title. `MainWindow` and `EdgeDockPanel` hand out a
-  `PlainTextView` from `fieldEditor(_:for:)` instead, secure fields excepted.
+  arrived as a path in the title. Not fixed with a field editor of our own:
+  SwiftUI's `TextField` force-casts the window's editor to a private class and
+  aborts on anything else (it did, on launch). `PlainTextView.trimFieldEditorDrops`
+  trims whichever editor goes live instead, app-wide from launch — a path
+  pasted into a single-line field by a drop is never what anyone meant.
 - **Removing is on the thumbnail, on hover.** A cross fades in at its corner
   the way the card's bin does; the context menu carries the same action for
   whoever reaches for it that way.
