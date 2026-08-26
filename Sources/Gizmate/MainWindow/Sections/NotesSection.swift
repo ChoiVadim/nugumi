@@ -336,18 +336,39 @@ struct NotesGrid: View {
             // inside an `NSScrollView`'s document view the height is unbounded
             // — it renders nothing at all. A few dozen cards cost nothing to
             // build eagerly; the multi-column page keeps the lazy grid.
-            if cardHeight == nil {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(items) { note in
-                        card(for: note)
+            Group {
+                if cardHeight == nil {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(items) { note in
+                            card(for: note)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                        ForEach(items) { note in
+                            card(for: note)
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
-                    ForEach(items) { note in
-                        card(for: note)
+            }
+            // The gaps between cards accept the drop too. Without this a card
+            // let go in a gap has no target, so AppKit flies the preview back
+            // to where the drag began — a slot another card now sits in.
+            .onDrop(
+                of: [NoteReorderPayload.type],
+                delegate: NoteReorderDrop(target: nil, dragging: $dragging, store: store)
+            )
+            .onChange(of: dragging) { _, id in
+                guard id != nil else { return }
+                // SwiftUI never says when a drag ends anywhere but on a target,
+                // and the lifted card is dimmed for as long as `dragging` is set.
+                // The button state is the one signal that survives a drag session.
+                Task { @MainActor in
+                    while dragging != nil, NSEvent.pressedMouseButtons & 1 != 0 {
+                        try? await Task.sleep(for: .milliseconds(50))
                     }
+                    dragging = nil
                 }
             }
         }
@@ -381,6 +402,9 @@ struct NotesGrid: View {
         // Keyed by id alone: re-keying on content would rebuild the card
         // mid-keystroke and drop the caret.
         .id(note.id)
+        // The lifted card leaves a hole, the way an iOS icon does: the copy
+        // under the pointer is the card now, and the grid shows where it goes.
+        .opacity(dragging == note.id ? 0.25 : 1)
         .onDrop(
             of: [NoteReorderPayload.type],
             delegate: NoteReorderDrop(target: note.id, dragging: $dragging, store: store)
@@ -429,13 +453,21 @@ enum NoteReorderPayload {
 /// have at all — the same trap that left every drag in `EdgesDiagram` silently
 /// doing nothing. The id travels as a string, which the system already knows.
 private struct NoteReorderDrop: DropDelegate {
-    let target: UUID
+    /// `nil` is the grid itself: it accepts the drop so the gesture ends
+    /// cleanly, and moves nothing.
+    let target: UUID?
     @Binding var dragging: UUID?
     let store: NotesStore
 
     func dropEntered(info: DropInfo) {
-        guard let dragging, dragging != target else { return }
-        MainActor.assumeIsolated { store.move(dragging, toPositionOf: target) }
+        guard let dragging, let target, dragging != target else { return }
+        // Animated, or the cards teleport and the eye cannot tell which one
+        // moved where. The slide is the whole preview.
+        MainActor.assumeIsolated {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                store.move(dragging, toPositionOf: target)
+            }
+        }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
