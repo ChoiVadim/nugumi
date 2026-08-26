@@ -100,6 +100,9 @@ final class TranslationPanelController {
     /// into the dock: the two are different things (see that view's doc).
     private let dockedResult: DockResultModel?
     private var dockedView: NSView?
+    /// Kept for the docked component's composer; the floating one reads it
+    /// off `contentView.onFollowUp`.
+    private let onFollowUp: ((String) -> Void)?
 
     var panelFrame: NSRect { panel.frame }
     var isVisible: Bool { panel.isVisible }
@@ -127,6 +130,7 @@ final class TranslationPanelController {
     ) {
         self.dockHost = dockHost
         self.dockedResult = dockHost == nil ? nil : DockResultModel(title: resultLabel ?? "Result")
+        self.onFollowUp = onFollowUp
         self.loadingPlaceholder = loadingPlaceholder
         self.anchor = anchor
         self.onClose = onClose
@@ -212,8 +216,11 @@ final class TranslationPanelController {
             dockedResult.beginLoading(placeholder ?? loadingPlaceholder)
             let view = dockedView ?? makeDockedView(dockedResult)
             dockedView = view
-            view.removeFromSuperview()
-            dockHost.present(view)
+            // Once. A follow-up loads into the same transcript; re-presenting
+            // would rebuild the glass under it.
+            if view.superview == nil {
+                dockHost.present(view)
+            }
         } else {
             resizeToFitContent(animated: false)
             panel.orderFrontRegardless()
@@ -243,6 +250,12 @@ final class TranslationPanelController {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(model.text, forType: .string)
             },
+            onFollowUp: onFollowUp.map { followUp in
+                { question in
+                    model.ask(question)
+                    followUp(question)
+                }
+            }
         ))
         view.translatesAutoresizingMaskIntoConstraints = false
         return view

@@ -19,6 +19,12 @@ extension GizmateApp {
             targetLanguage: targetLanguage,
             resultLabel: tool.name,
             showsSource: false,
+            showsFollowUp: true,
+            // The same follow-up every built-in answer takes: `.revise`
+            // answers a question about the result as readily as it edits it.
+            onFollowUp: { [weak self] instruction in
+                self?.reviseCurrentPanel(instruction: instruction)
+            },
             dockHost: resultHost(for: .generated(tool.id)),
             onClose: { [weak self] in self?.translationPanelController = nil }
         )

@@ -445,9 +445,13 @@ share of users regardless of what looks right.
   one-line purpose, kept once settled), then the answer in `MarkdownLabel` at
   the chat's size, held off the glass by the same `contentMargin` as every
   resident. No title row and no close button: the dock already has both ways
-  out, and Copy rides in the top fade where Ask's new-chat disc does. What the
-  docked one drops is deliberate: no language menu, no replace, no follow-up
-  field. Those belong to the selection flows, which open beside the selection.
+  out, and Copy rides in the top fade where Ask's new-chat disc does. Ask's
+  composer sits under it, minus the camera and the pencil: a follow-up typed
+  there is one more exchange in the same transcript, answered by the same
+  `reviseCurrentPanel` the floating panel's footer field uses, whose prompt
+  already answers a question as readily as it edits. What the docked one
+  drops is deliberate: no language menu and no replace. Those belong to the
+  selection flows, which open beside the selection.
   The answer is rendered once, in `DockResultModel`, and `MarkdownLabel` keeps
   the height it measured for that same string at that width: `boundingRect`
   lays the whole report out from scratch, SwiftUI asks on every scroll frame,

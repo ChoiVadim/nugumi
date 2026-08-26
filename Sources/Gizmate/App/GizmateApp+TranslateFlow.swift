@@ -341,7 +341,7 @@ extension GizmateApp {
     /// streaming come for free. "Previous response" is the latest shown text, so
     /// chained revises ("now shorter") build on each other.
     @MainActor
-    private func reviseCurrentPanel(
+    func reviseCurrentPanel(
         instruction: String,
         reviseMode: TranslationMode = .revise,
         usageKind: UsageStatsEventKind = .selection
