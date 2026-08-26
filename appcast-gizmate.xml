@@ -48,5 +48,16 @@
                 type="application/octet-stream"
                 sparkle:edSignature="QaXuIyU68YXR/voGtUIV9/xib2gVgFtA1DlC89O+p2V6ZVpAPCTZ7LQuqGPQd5U3gqZW0bEF1Wq7ZLsBWZ5yCg==" length="179591459" />
         </item>
+        <item>
+            <title>Version 0.3.0</title>
+            <pubDate>Wed, 26 Aug 2026 06:57:57 +0000</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/ChoiVadim/nugumi/releases/download/gizmate-v0.3.0/Gizmate-0.3.0.dmg"
+                type="application/octet-stream"
+                sparkle:edSignature="UAJpn+ph+VWWkXD3I11cGzuUjn+V6kj0Z6r9jBUKSS5HIRepPMX7gbDrOR8w0qbG3tGbhHqHyr9af3TkFFsUCg==" length="179660885" />
+        </item>
     </channel>
 </rss>
