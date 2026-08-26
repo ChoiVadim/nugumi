@@ -275,11 +275,15 @@ struct SurfaceCard: View {
         // grid cell keeps the 20pt it always had — its square spends the room
         // on the preview, not the glyph.
         let size: CGFloat = height == nil ? 28 : 20
+        // `scaledToFit`, not a bare `resizable` into a square frame: SF glyphs
+        // are not square — a battery is wide, a drive is squat — and forcing
+        // the aspect squashed exactly the glyphs this size was bought for.
         return Image(
             nsImage: RingIconKind.symbol(ToolIcons.resolved(name))
                 .image(pointSize: size, weight: height == nil ? .light : .regular)
         )
         .resizable()
+        .scaledToFit()
         .foregroundStyle(FlowTheme.ink)
         .frame(width: size, height: size)
     }
