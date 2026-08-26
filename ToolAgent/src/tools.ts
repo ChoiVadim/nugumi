@@ -161,6 +161,11 @@ export function createTools(runtime: SidecarRuntime) {
       // Present exactly when output is "surface" — mirrors
       // ToolAgentCandidateV1.layout and protocol.ts's pythonCandidate.layout.
       layout: Type.Optional(layoutNode),
+      // Surface-only, like layout: seconds between re-runs while the panel is
+      // on screen. Mirrors protocol.ts's refreshSeconds bounds.
+      refreshSeconds: Type.Optional(
+        Type.Integer({ minimum: 2, maximum: 3600 }),
+      ),
       fixtures: Type.Array(
         Type.Object({
           input: Type.String({ maxLength: 8192 }),

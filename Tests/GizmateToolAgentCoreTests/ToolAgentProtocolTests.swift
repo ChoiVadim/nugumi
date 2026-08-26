@@ -842,6 +842,43 @@ final class ToolAgentProtocolTests: XCTestCase {
         XCTAssertThrowsError(try makeCandidate(fixtures: [.init(input: "", expectedOutput: "HELLO")]))
     }
 
+    /// The cadence rides the same coupling as the layout: legal on a surface,
+    /// bounded, and meaningless anywhere else.
+    func testRefreshSecondsIsSurfaceOnlyAndBounded() throws {
+        func surface(_ refreshSeconds: Int?) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .python, name: "Readings", brief: "Shows machine readings.",
+                symbolName: "brain", input: .none, output: .surface, trigger: .always,
+                source: "print('{\"rows\":[]}')",
+                layout: .list(row: .text(.key("name")), empty: "No readings yet"),
+                refreshSeconds: refreshSeconds
+            )
+        }
+        XCTAssertNoThrow(try surface(nil))
+        XCTAssertEqual(try surface(5).refreshSeconds, 5)
+        XCTAssertThrowsError(try surface(1))
+        XCTAssertThrowsError(try surface(3_601))
+        XCTAssertThrowsError(try ToolAgentCandidateV1(
+            kind: .python, name: "Slug", brief: "Slugifies.", symbolName: "link",
+            input: .selection, output: .clipboard, trigger: .selection,
+            source: "print('x')", refreshSeconds: 5
+        ))
+    }
+
+    /// Same byte-for-byte reason as the layout key below: nil must not appear
+    /// as a key on the way back out.
+    func testACandidateWithoutACadenceEncodesNoRefreshSecondsKey() throws {
+        let candidate = try ToolAgentCandidateV1(
+            kind: .python, name: "Slug", brief: "Slugifies.", symbolName: "link",
+            input: .selection, output: .clipboard, trigger: .selection,
+            source: "print('x')"
+        )
+        let json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(candidate)
+        ) as? [String: Any]
+        XCTAssertNil(json?["refreshSeconds"])
+    }
+
     /// nil must not survive as an empty key, or the byte-for-byte re-encode in
     /// `ToolAgentModelActionValidator` rejects every candidate that has no layout.
     func testACandidateWithoutALayoutEncodesNoLayoutKey() throws {

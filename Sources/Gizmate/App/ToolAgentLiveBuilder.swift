@@ -184,7 +184,8 @@ enum ToolAgentLiveBuilder {
             declaresNetwork: kind == .python && tool.declaresNetwork,
             secretNames: kind == .python || kind == .agent ? tool.secretNames : [],
             maxSteps: tool.maxSteps,
-            layout: output == .surface ? tool.layout : nil
+            layout: output == .surface ? tool.layout : nil,
+            refreshSeconds: output == .surface ? tool.refreshSeconds : nil
         )
     }
 
@@ -556,6 +557,7 @@ enum ToolAgentLiveBuilder {
                 ? (candidate.secretNames ?? []).filter(stored.contains)
                 : [],
             layout: output == .surface ? candidate.layout : nil,
+            refreshSeconds: output == .surface ? candidate.refreshSeconds : nil,
             maxSteps: candidate.maxSteps,
             brief: candidate.brief,
             usesVoice: candidate.usesVoice ?? false,
@@ -580,6 +582,11 @@ enum ToolAgentLiveBuilder {
         // field the round trip silently drops.
         generated.tool.usesNotes = candidate.usesNotes ?? existing.usesNotes
         generated.tool.usesVoice = candidate.usesVoice ?? existing.usesVoice
+        // Same contract for a surface's cadence: an edit that reworded the
+        // brief must not turn a live monitor into a once-per-reveal one.
+        if generated.tool.output == .surface {
+            generated.tool.refreshSeconds = candidate.refreshSeconds ?? existing.refreshSeconds
+        }
         return generated
     }
 

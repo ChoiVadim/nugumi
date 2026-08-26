@@ -664,6 +664,21 @@ share of users regardless of what looks right.
   and the rule is what let it go: the sentence now lives on one gizmo's editor,
   where there is no neighbour to be confused with. The hub has no editor and
   needs none — nothing anywhere claims it runs.
+- **A surface's cadence is the tool's to declare, the host's to schedule.**
+  One refresh per reveal was right for every surface until the first monitor
+  (Mac Usage) existed, whose data goes stale while the user watches. The
+  WidgetKit/xbar-shaped answer is `refreshSeconds` on the gizmo itself: the
+  builder sets it because only the author of the data knows whether it decays,
+  and the host owns everything that could make it a hazard — clamped to
+  2–3600s (`GizmateTool.clampedRefreshSeconds`), running only while the panel
+  is on screen (the `.task` in `SurfaceHostView` dies with the view, so there
+  is no background polling to stop), and never stacking a run on a slow one
+  (the loop awaits each refresh in line). nil is the default and means what
+  surfaces always meant: once per reveal. Do not add a host-side global
+  interval instead — a bookmarks list and a CPU monitor cannot share one
+  number, and guessing on the host is worse than letting the tool say. The
+  consent sentence on the Edge hint grows the cadence clause only when one is
+  set, for the same one-tool-at-a-time reason the hint exists at all.
 - **One variable moves, and moving it is what loads.** The folder hub has four
   ways to change folder — a chip, a crumb, walking into a card, and falling back
   when the chip you were on is deleted — and for a while the loading lived in

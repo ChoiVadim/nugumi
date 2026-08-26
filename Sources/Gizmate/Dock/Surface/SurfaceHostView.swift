@@ -7,8 +7,10 @@ import SwiftUI
 ///
 /// `EdgeDockController.expandedView` calls `DockItem.makeView()` fresh every
 /// time the panel reveals, so a new `SurfaceHostView` — and a fresh `.task`
-/// — is exactly "one refresh per reveal". Nothing here needs to key or cancel
-/// anything itself.
+/// — is exactly "one refresh per reveal"; a gizmo with `refreshSeconds` set
+/// then keeps re-running on that cadence until the panel closes. Nothing here
+/// needs to key or cancel anything itself: the view's teardown cancels the
+/// `.task`, cadence loop included.
 struct SurfaceHostView: View {
     let tool: GizmateTool
     let host: any SettingsHost
@@ -37,7 +39,21 @@ struct SurfaceHostView: View {
                 SurfaceView(layout: layout, rows: rows, stale: stale)
             }
         }
-        .task { await refresh() }
+        .task {
+            await refresh()
+            // A gizmo that declared a cadence keeps re-running while its
+            // panel is on screen. The panel closing tears this view down and
+            // SwiftUI cancels the `.task` with it, so the loop's lifetime is
+            // exactly "revealed" — there is no background polling to stop.
+            // `refresh()` is awaited in line, so a run slower than the
+            // cadence stretches the tick instead of stacking a second run.
+            guard let seconds = tool.refreshSeconds else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(GizmateTool.clampedRefreshSeconds(seconds)))
+                guard !Task.isCancelled else { return }
+                await refresh()
+            }
+        }
     }
 
     private func refresh() async {

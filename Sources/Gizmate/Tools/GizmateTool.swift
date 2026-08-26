@@ -306,6 +306,14 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     var secretNames: [String]
     /// What a `.surface` gizmo draws. nil for every other result.
     var layout: ToolAgentLayoutV1?
+    /// How often a `.surface` gizmo re-runs while its panel is on screen, in
+    /// seconds. nil is the default and means what surfaces have always done:
+    /// one refresh per reveal. Set by the builder only for gizmos whose data
+    /// goes stale on its own (a system monitor, a download queue) — a folder
+    /// listing has no business re-running on a clock. The host clamps it and
+    /// never refreshes an unrevealed panel, so this is a cadence, not a
+    /// background poller.
+    var refreshSeconds: Int?
 
     // MARK: .agent
     /// How many scripts a `.agent` tool may run before it has to answer. The
@@ -352,6 +360,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         declaresNetwork: Bool = false,
         secretNames: [String] = [],
         layout: ToolAgentLayoutV1? = nil,
+        refreshSeconds: Int? = nil,
         maxSteps: Int = 8,
         brief: String = "",
         usesVoice: Bool = false,
@@ -376,6 +385,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         self.declaresNetwork = declaresNetwork
         self.secretNames = secretNames
         self.layout = layout
+        self.refreshSeconds = refreshSeconds.map(Self.clampedRefreshSeconds)
         self.maxSteps = maxSteps
 
         self.brief = brief
@@ -424,6 +434,7 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         case nativeAction, target
         case outputDirectory, timeoutSeconds, declaresNetwork, secretNames, brief
         case layout
+        case refreshSeconds
         case maxSteps
         case usesVoice, usesNotes
         case createdAt
@@ -465,6 +476,8 @@ struct GizmateTool: Codable, Equatable, Identifiable {
         // layout written by a newer build must cost the user this gizmo's
         // surface, not the gizmo.
         layout = try? c.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
+        refreshSeconds = (try? c.decodeIfPresent(Int.self, forKey: .refreshSeconds))
+            .flatMap { $0 }.map(Self.clampedRefreshSeconds)
         maxSteps = max(1, min(24, try c.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8))
         brief = try c.decodeIfPresent(String.self, forKey: .brief) ?? ""
         // Absent in every gizmo saved before this existed, and false is what
@@ -502,5 +515,13 @@ struct GizmateTool: Codable, Equatable, Identifiable {
             .filter { !$0.isEmpty && $0.utf8.count <= 64 && seen.insert($0).inserted }
             .prefix(5)
         return cleaned.count < 2 ? [] : Array(cleaned)
+    }
+
+    /// The host's bounds on a surface cadence. Every tick spawns a `uv` +
+    /// Python process, so nothing faster than 2s no matter what the builder
+    /// wrote; above an hour the field is indistinguishable from "once per
+    /// reveal", which nil already means.
+    static func clampedRefreshSeconds(_ value: Int) -> Int {
+        max(2, min(3600, value))
     }
 }

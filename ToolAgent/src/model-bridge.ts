@@ -163,8 +163,9 @@ Choose the candidate kind before writing it:
 - native: one closed macOS action from the catalogue below. Include target. Its result is "replace", "clipboard", "notify", "notes" or "speak" — there is no model in a native tool to write an answer or draw one, so "panel", "files" and "annotate" are not available to it. Do not include prompt/Python fields. Prefer native over Python whenever the catalogue can express the job.
 - python: when prompt/native cannot express the request, and the job is the same
   every time it runs. Include source, zero to three fixtures, timeoutSeconds,
-  declaresNetwork, secretNames, outputDirectory when output is "files", and
-  usesNotes when the script works over the user's notes.
+  declaresNetwork, secretNames, outputDirectory when output is "files",
+  usesNotes when the script works over the user's notes, and refreshSeconds
+  only when output is "surface" and the data goes stale on its own.
 - agent: when the job genuinely cannot be written down in advance, because what
   to do next depends on what the previous step found. At run time this writes and
   runs its own Python, step by step, until it has an answer — through it the
@@ -435,6 +436,13 @@ finishes.
   drag takes "file:$name" or "text:$name", for what the user's
   drag actually carries out; tap takes "open:$name" or "reveal:$name", for
   what a click does with that row.
+  A surface runs its script once each time its panel opens. Set refreshSeconds
+  (2 to 3600) only when the data goes stale on its own while the user watches —
+  a system monitor, a download queue, anything with readings — and the panel
+  will re-run the script on that cadence for as long as it stays open. Pick the
+  slowest honest number; every tick is a whole script run. Leave it out for
+  data that only changes when the user acts — folders, bookmarks, notes — where
+  once per reveal is already correct.
 
 Input and result are chosen independently: any input may be paired with any
 result, and the only hard constraints are the ones stated above — the trigger a

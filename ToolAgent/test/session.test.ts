@@ -453,6 +453,27 @@ test("a surface candidate's layout is validated by the sidecar schema, matching 
     () => parseModelAction(action({ ...surface, output: "clipboard" })),
     /invalid tool arguments/,
   );
+  // refreshSeconds rides the same coupling as layout: fine on a surface,
+  // rejected out of range, rejected on any other output.
+  assert.doesNotThrow(() =>
+    parseModelAction(action({ ...surface, refreshSeconds: 5 })),
+  );
+  assert.throws(
+    () => parseModelAction(action({ ...surface, refreshSeconds: 1 })),
+    /invalid tool arguments/,
+  );
+  assert.throws(
+    () => parseModelAction(action({ ...surface, refreshSeconds: 4000 })),
+    /invalid tool arguments/,
+  );
+  const { layout: _stripped, ...nonSurface } = surface;
+  assert.throws(
+    () =>
+      parseModelAction(
+        action({ ...nonSurface, output: "clipboard", refreshSeconds: 5 }),
+      ),
+    /invalid tool arguments/,
+  );
   assert.throws(
     () =>
       parseModelAction(

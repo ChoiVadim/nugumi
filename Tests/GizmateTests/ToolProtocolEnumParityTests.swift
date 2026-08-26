@@ -128,6 +128,56 @@ final class ToolProtocolEnumParityTests: XCTestCase {
         XCTAssertEqual(fresh.tool.usesNotes, true, "a new build takes the candidate's word")
     }
 
+    /// The same round trip for a surface's cadence: the installed snapshot
+    /// carries it into an edit session, and an edit that never mentioned it
+    /// keeps it rather than silently turning a live monitor into a
+    /// once-per-reveal one.
+    func testASurfacesCadenceSurvivesAChatEditThatNeverMentionedIt() throws {
+        let layout = ToolAgentLayoutV1.list(
+            row: .text(.key("name")), empty: "No readings yet"
+        )
+        var existing = GizmateTool(
+            name: "Readings", kind: .python, input: .none, output: .surface,
+            layout: layout
+        )
+        existing.refreshSeconds = 5
+
+        let snapshot = try ToolAgentLiveBuilder.installedTool(
+            from: existing, script: "print('{\"rows\":[]}')"
+        )
+        XCTAssertEqual(snapshot.refreshSeconds, 5, "an edit session must see the current value")
+
+        func candidate(refreshSeconds: Int?) throws -> ToolAgentCandidateV1 {
+            try ToolAgentCandidateV1(
+                kind: .python,
+                name: "Readings",
+                brief: "Shows machine readings.",
+                symbolName: "brain",
+                input: .none,
+                output: .surface,
+                trigger: .always,
+                source: "print('{\"rows\":[]}')",
+                timeoutSeconds: 30,
+                layout: layout,
+                refreshSeconds: refreshSeconds
+            )
+        }
+        let silent = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(refreshSeconds: nil),
+            preserving: existing
+        )
+        XCTAssertEqual(silent.tool.refreshSeconds, 5, "nil is \"didn't say\", not \"stop refreshing\"")
+
+        let retuned = ToolAgentLiveBuilder.generatedTool(
+            from: try candidate(refreshSeconds: 30),
+            preserving: existing
+        )
+        XCTAssertEqual(retuned.tool.refreshSeconds, 30, "an explicit value must still win")
+
+        let fresh = ToolAgentLiveBuilder.generatedTool(from: try candidate(refreshSeconds: 8))
+        XCTAssertEqual(fresh.tool.refreshSeconds, 8, "a new build takes the candidate's word")
+    }
+
     /// The editor is what the user picks from, and the protocol is what the chat
     /// builder validates against. When the editor offers more than the protocol
     /// accepts, saving works and opening that gizmo in the builder throws

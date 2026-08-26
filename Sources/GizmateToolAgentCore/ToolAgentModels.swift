@@ -70,6 +70,12 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
     /// validator re-encodes a candidate and compares byte for byte, and an
     /// absent key must stay absent on the way back.
     public let layout: ToolAgentLayoutV1?
+    /// How often a surface re-runs while its panel is on screen, in seconds.
+    /// Surface-only, like `layout`, and optional under the same byte-for-byte
+    /// contract. nil is "once per reveal" — the right answer for a surface
+    /// whose data only changes when the user acts (a folder, a list of
+    /// bookmarks); a monitor whose data goes stale on its own sets it.
+    public let refreshSeconds: Int?
 
     public init(
         kind: ToolAgentCandidateKindV1,
@@ -95,7 +101,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         declaresNetwork: Bool = false,
         secretNames: [String]? = nil,
         maxSteps: Int = 8,
-        layout: ToolAgentLayoutV1? = nil
+        layout: ToolAgentLayoutV1? = nil,
+        refreshSeconds: Int? = nil
     ) throws {
         try Self.validate(
             kind: kind,
@@ -117,7 +124,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             timeoutSeconds: timeoutSeconds,
             secretNames: secretNames,
             maxSteps: maxSteps,
-            layout: layout
+            layout: layout,
+            refreshSeconds: refreshSeconds
         )
         self.schemaVersion = 1
         self.kind = kind
@@ -144,6 +152,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.secretNames = secretNames
         self.maxSteps = maxSteps
         self.layout = layout
+        self.refreshSeconds = refreshSeconds
     }
 
     /// Keeps persisted phase-zero Python runs and existing protocol fixtures
@@ -229,6 +238,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         )
         let maxSteps = try container.decodeIfPresent(Int.self, forKey: .maxSteps) ?? 8
         let layout = try container.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
+        let refreshSeconds = try container.decodeIfPresent(Int.self, forKey: .refreshSeconds)
         guard schemaVersion == 1 else {
             throw ToolAgentFailureCodeV1.invalidCandidate
         }
@@ -252,7 +262,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             timeoutSeconds: timeoutSeconds,
             secretNames: secretNames,
             maxSteps: maxSteps,
-            layout: layout
+            layout: layout,
+            refreshSeconds: refreshSeconds
         )
         self.schemaVersion = schemaVersion
         self.kind = kind
@@ -279,6 +290,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         self.secretNames = secretNames
         self.maxSteps = maxSteps
         self.layout = layout
+        self.refreshSeconds = refreshSeconds
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -318,6 +330,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             // Present only on a surface — `validate` rejects a layout on any
             // other output, so a non-surface Python tool never had one to omit.
             try container.encodeIfPresent(layout, forKey: .layout)
+            try container.encodeIfPresent(refreshSeconds, forKey: .refreshSeconds)
             // Notes but not Voice: a script reads a notes file, and has no
             // model to style. The same asymmetry is in the zod and TypeBox
             // schemas, and the three must agree or a candidate the model wrote
@@ -354,7 +367,8 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         timeoutSeconds: Int,
         secretNames: [String]?,
         maxSteps: Int,
-        layout: ToolAgentLayoutV1?
+        layout: ToolAgentLayoutV1?,
+        refreshSeconds: Int?
     ) throws {
         // nil and [] both mean "no secrets". Only the wire format tells them
         // apart, and that distinction is the encoder's business, not this one's.
@@ -511,7 +525,14 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
             guard let layout, layout.isRepeater, !layout.containsNestedRepeater else {
                 throw ToolAgentFailureCodeV1.invalidCandidate
             }
-        } else if layout != nil {
+            // Same bounds as `GizmateTool.clampedRefreshSeconds`, and mirrored
+            // in the zod and TypeBox schemas: a tick spawns a whole Python
+            // process, and above an hour the field means what nil already
+            // means (once per reveal).
+            guard refreshSeconds.map({ (2...3_600).contains($0) }) ?? true else {
+                throw ToolAgentFailureCodeV1.invalidCandidate
+            }
+        } else if layout != nil || refreshSeconds != nil {
             throw ToolAgentFailureCodeV1.invalidCandidate
         }
     }
@@ -542,6 +563,7 @@ public struct ToolAgentCandidateV1: Codable, Equatable, Sendable {
         case secretNames
         case maxSteps
         case layout
+        case refreshSeconds
     }
 }
 
@@ -589,6 +611,10 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
     /// the model no way to see its current layout, and it would have to
     /// invent a new one from scratch on every edit.
     public let layout: ToolAgentLayoutV1?
+    /// The surface's refresh cadence, carried into an edit session for the
+    /// same reason `layout` is: an edit that never mentions it must not
+    /// silently strip it.
+    public let refreshSeconds: Int?
 
     public init(
         kind: ToolAgentCandidateKindV1,
@@ -613,7 +639,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         declaresNetwork: Bool = false,
         secretNames: [String] = [],
         maxSteps: Int = 8,
-        layout: ToolAgentLayoutV1? = nil
+        layout: ToolAgentLayoutV1? = nil,
+        refreshSeconds: Int? = nil
     ) throws {
         try Self.validate(
             kind: kind,
@@ -660,6 +687,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         self.secretNames = secretNames
         self.maxSteps = maxSteps
         self.layout = layout
+        self.refreshSeconds = refreshSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -695,7 +723,8 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             // user's disk, where a newer build may have written a shape this
             // one predates. One side can trust its own recent output; the
             // other has to survive its own past.
-            layout: try container.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout)
+            layout: try container.decodeIfPresent(ToolAgentLayoutV1.self, forKey: .layout),
+            refreshSeconds: try container.decodeIfPresent(Int.self, forKey: .refreshSeconds)
         )
     }
 
@@ -734,6 +763,7 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
             // Python tool never had one to write, and this type enforces
             // nothing about the pairing itself — that stays on the candidate.
             try container.encodeIfPresent(layout, forKey: .layout)
+            try container.encodeIfPresent(refreshSeconds, forKey: .refreshSeconds)
             try container.encodeIfPresent(usesNotes, forKey: .usesNotes)
         case .agent:
             try container.encode(prompt, forKey: .prompt)
@@ -898,5 +928,6 @@ public struct ToolAgentInstalledToolV1: Codable, Equatable, Sendable {
         case secretNames
         case maxSteps
         case layout
+        case refreshSeconds
     }
 }

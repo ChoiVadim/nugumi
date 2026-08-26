@@ -609,7 +609,9 @@ struct ToolEditorPanel: View {
     }
 
     private var runtimeValue: String {
-        "\(draft.timeoutSeconds)s" + (draft.declaresNetwork ? " · network" : "")
+        "\(draft.timeoutSeconds)s"
+            + (draft.declaresNetwork ? " · network" : "")
+            + (draft.refreshSeconds.map { " · every \($0)s" } ?? "")
     }
 
     private var limitsValue: String {
@@ -877,7 +879,9 @@ struct ToolEditorPanel: View {
             "Edge",
             hint: dockedEdge.map {
                 "On the \($0.displayName) edge, so it runs on its own every time that edge "
-                    + "opens. Change it in Edges."
+                    + "opens"
+                    + (draft.refreshSeconds.map { ", and again every \($0)s while it stays open" } ?? "")
+                    + ". Change it in Edges."
             } ?? "Not on an edge, so it never runs. Change it in Edges."
         )
     }
@@ -1159,6 +1163,31 @@ struct ToolEditorPanel: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .tint(FlowTheme.accent)
+            }
+            // Only a surface has a panel to keep fresh; every other output runs
+            // once and is done, so the row would be a knob wired to nothing.
+            if draft.output == .surface {
+                SettingRow(
+                    "Refresh",
+                    subtitle: "How often it re-runs while its panel is open. Off is once per open."
+                ) {
+                    Stepper(
+                        value: Binding(
+                            // "Off" reads as 1 so one step up lands on the 2s
+                            // floor and one step down from the floor lands on
+                            // Off, with no value the clamp would silently move.
+                            get: { draft.refreshSeconds ?? 1 },
+                            set: { draft.refreshSeconds = $0 < 2 ? nil : min(3600, $0) }
+                        ),
+                        in: 0...3600,
+                        step: 1
+                    ) {
+                        Text(draft.refreshSeconds.map { "\($0)s" } ?? "Off")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(FlowTheme.ink)
+                    }
+                    .fixedSize()
+                }
             }
         }
     }

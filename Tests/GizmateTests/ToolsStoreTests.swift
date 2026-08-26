@@ -123,4 +123,26 @@ final class ToolsStoreTests: XCTestCase {
         tool.layout = nil
         XCTAssertFalse(tool.isUsable)
     }
+
+    /// The cadence survives tool.json, and the clamp is applied on the way in
+    /// on both paths — a hand-edited file cannot smuggle a 0-second poller.
+    func testRefreshSecondsRoundTripsAndClampsOnDecode() throws {
+        var tool = GizmateTool()
+        tool.name = "Readings"
+        tool.kind = .python
+        tool.output = .surface
+        tool.refreshSeconds = 5
+
+        let reloaded = try JSONDecoder().decode(
+            GizmateTool.self, from: JSONEncoder().encode(tool)
+        )
+        XCTAssertEqual(reloaded.refreshSeconds, 5)
+        XCTAssertNil(GizmateTool().refreshSeconds)
+
+        let json = #"{"id":"\#(UUID().uuidString)","name":"Readings","kind":"python","#
+            + #""output":"surface","refreshSeconds":0,"createdAt":0}"#
+        let clamped = try JSONDecoder().decode(GizmateTool.self, from: Data(json.utf8))
+        XCTAssertEqual(clamped.refreshSeconds, 2)
+        XCTAssertEqual(GizmateTool(refreshSeconds: 100_000).refreshSeconds, 3_600)
+    }
 }

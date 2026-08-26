@@ -31,6 +31,9 @@ export const LIMITS = {
   // Mirrors ToolAgentLayoutV1.maximumEmptyBytes and .maximumDepth.
   layoutEmptyBytes: 120,
   layoutMaxDepth: 3,
+  // Mirrors ToolAgentCandidateV1.validate's refreshSeconds bounds.
+  refreshSecondsMin: 2,
+  refreshSecondsMax: 3_600,
   // An agent tool's own input, and the answer it finishes with. The answer is
   // roomier than a build session's finalText because it *is* the tool's output:
   // it lands in the result panel or on the clipboard.
@@ -290,6 +293,15 @@ const pythonCandidate = z
     // own superRefine below, the same way outputDirectory is enforced for
     // "files". What a surface draws, mirroring ToolAgentCandidateV1.layout.
     layout: layoutNode.optional(),
+    // Surface-only, like layout: how often the panel re-runs the script while
+    // it is on screen. Optional, never defaulted — byte-for-byte contract.
+    // Mirrors ToolAgentCandidateV1.refreshSeconds.
+    refreshSeconds: z
+      .number()
+      .int()
+      .min(LIMITS.refreshSecondsMin)
+      .max(LIMITS.refreshSecondsMax)
+      .optional(),
     // Zero fixtures means "running this would do something to the user's data".
     // A fixture without expectedOutput means "run it, but its output is not a
     // fixed string". Both are how a tool that does real work gets validated at
@@ -461,6 +473,16 @@ export const candidateSchema = z
         message: "layout is only for a surface",
       });
     }
+    if (
+      candidate.output !== "surface" &&
+      candidate.kind === "python" &&
+      candidate.refreshSeconds !== undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "refreshSeconds is only for a surface",
+      });
+    }
   });
 
 export type Candidate = z.infer<typeof candidateSchema>;
@@ -551,6 +573,13 @@ const installedPythonTool = z
     // what an existing surface gizmo already draws, carried into an edit so
     // Pi can see it rather than invent a new one from scratch.
     layout: layoutNode.optional(),
+    // The surface's refresh cadence, carried into an edit like layout is.
+    refreshSeconds: z
+      .number()
+      .int()
+      .min(LIMITS.refreshSecondsMin)
+      .max(LIMITS.refreshSecondsMax)
+      .optional(),
     outputDirectory: byteString(LIMITS.targetBytes).optional(),
     timeoutSeconds: z.number().int().min(5).max(1800),
     declaresNetwork: z.boolean(),
