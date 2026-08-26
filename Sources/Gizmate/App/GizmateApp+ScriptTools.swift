@@ -529,6 +529,8 @@ extension GizmateApp {
             tool.secretNames.isEmpty
                 ? nil
                 : "Reads your secrets: \(tool.secretNames.sorted().joined(separator: ", "))",
+            // Same reasoning: turning notes on re-asks, and the ask names why.
+            tool.usesNotes ? "Reads the notes you ticked in Notes." : nil,
             "Network: \(tool.declaresNetwork ? "yes" : "not declared")  ·  "
                 + "Saves to: \(tool.resolvedOutputDirectory?.lastPathComponent ?? "a temporary folder")  ·  "
                 + "Stops after \(tool.timeoutSeconds)s",

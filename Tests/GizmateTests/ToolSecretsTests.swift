@@ -192,6 +192,47 @@ final class ToolSecretApprovalTests: XCTestCase {
         XCTAssertEqual(store.scriptHash(for: tool.id), plain)
     }
 
+    /// Notes are a grant like a key is: turning them on for an approved script
+    /// widens what it can read, so it must re-ask. Turning them off again
+    /// lands back on the plain hash, so the approval history stays coherent.
+    func testHashChangesWhenNotesAreGrantedAndScriptDoesNot() throws {
+        let store = try makeStore()
+        var tool = GizmateTool(name: "Digest", kind: .python, brief: "Digests.")
+        store.save(tool, script: "print('hi')")
+        let plain = store.scriptHash(for: tool.id)
+
+        tool.usesNotes = true
+        store.save(tool, script: "print('hi')")
+        let withNotes = store.scriptHash(for: tool.id)
+        XCTAssertNotNil(withNotes)
+        XCTAssertNotEqual(plain, withNotes)
+
+        tool.usesNotes = false
+        store.save(tool, script: "print('hi')")
+        XCTAssertEqual(store.scriptHash(for: tool.id), plain)
+    }
+
+    /// Both grants fold in together, and the result depends on the set of
+    /// grants rather than on which one was added last.
+    func testHashFoldsSecretsAndNotesTogether() throws {
+        let store = try makeStore()
+        var tool = GizmateTool(name: "Digest", kind: .python, brief: "Digests.")
+        tool.secretNames = ["A_KEY"]
+        store.save(tool, script: "print('hi')")
+        let secretsOnly = store.scriptHash(for: tool.id)
+
+        tool.usesNotes = true
+        store.save(tool, script: "print('hi')")
+        let both = store.scriptHash(for: tool.id)
+        XCTAssertNotEqual(secretsOnly, both)
+
+        tool.secretNames = []
+        store.save(tool, script: "print('hi')")
+        let notesOnly = store.scriptHash(for: tool.id)
+        XCTAssertNotEqual(notesOnly, both)
+        XCTAssertNotEqual(notesOnly, secretsOnly)
+    }
+
     /// The build asks for a key exactly once, only for the names that are not
     /// already on disk. Asking again for a stored key would put a pointless
     /// field in front of the user in the middle of every rebuild.

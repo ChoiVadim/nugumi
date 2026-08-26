@@ -317,17 +317,20 @@ struct GizmateTool: Codable, Equatable, Identifiable {
     /// user wrote by hand.
     var brief: String
 
-    // MARK: .prompt / .agent context
+    // MARK: Context
     //
-    // Both default to off, and both are ignored by `.python` and `.native`,
-    // which have no model in the loop to hand context to.
+    // Both default to off. `.native` ignores both: a macOS action has nothing
+    // to hand context to.
 
     /// Hands the gizmo the user's Voice settings — writing register,
     /// level, dictionary and snippets. Off by default because a gizmo's own
     /// prompt is authoritative: layering a register directive over "turn this
-    /// into JSON" corrupts the output rather than styling it.
+    /// into JSON" corrupts the output rather than styling it. `.prompt` and
+    /// `.agent` only; a script has no model to style.
     var usesVoice: Bool
-    /// Hands the gizmo the notes ticked in the Notes tab (see `NotesContext`).
+    /// Hands the gizmo the notes ticked in the Notes tab (see `NotesContext`):
+    /// as prompt text for `.prompt` and `.agent`, as the JSON file named in
+    /// `GIZMO_NOTES_FILE` for `.python`.
     var usesNotes: Bool
 
     var createdAt: Date

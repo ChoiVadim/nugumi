@@ -71,12 +71,19 @@ enum ToolRunner {
     ///   the folder it declared. False during candidate validation, which runs
     ///   the same script for the same reasons but must not drop anything into
     ///   the user's Downloads on the way to deciding whether it works.
+    /// - Parameter includeNotes: whether a `usesNotes` script is handed the
+    ///   user's notes in `GIZMO_NOTES_FILE`. False during candidate validation:
+    ///   that is model-written code the user has not approved yet, and unlike a
+    ///   key the user stored for exactly this, their notes were never offered
+    ///   to it. Absence is a legal state at run time too (master switch off,
+    ///   nothing ticked), so validation doubles as proof the script survives it.
     static func run(
         tool: GizmateTool,
         script: String,
         arguments: [String],
         uv: URL,
         deliverOutputs: Bool = true,
+        includeNotes: Bool = true,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> ToolRunResult {
         guard !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -86,6 +93,15 @@ enum ToolRunner {
         let workDir = try GizmatePaths.makeRunDirectory()
         let scriptURL = workDir.appending(path: ToolsStore.scriptName, directoryHint: .notDirectory)
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        // Written before the snapshot below, so it can never read as an output.
+        // Only a `.python` tool: an agent's steps run through here with the
+        // agent tool, and its notes already travel in the instruction.
+        var notesURL: URL?
+        if includeNotes, tool.kind == .python, tool.usesNotes, let notes = NotesContext.fileData() {
+            let url = workDir.appending(path: "gizmo-notes.json", directoryHint: .notDirectory)
+            try notes.write(to: url)
+            notesURL = url
+        }
         let before = contents(of: workDir)
 
         let result: RawResult
@@ -102,6 +118,7 @@ enum ToolRunner {
                 // tool will have.
                 secrets: ToolSecrets.environment(for: tool.secretNames),
                 option: tool.activeOption,
+                notesURL: notesURL,
                 onOutput: onOutput
             )
         } catch {
@@ -111,6 +128,9 @@ enum ToolRunner {
             try? FileManager.default.removeItem(at: workDir)
             throw error
         }
+        // The directory may outlive the run when outputs stay in it; the
+        // user's notes must not.
+        if let notesURL { try? FileManager.default.removeItem(at: notesURL) }
 
         // Anything new in the working directory is the script's output. Compared
         // by path so a script that rewrites its own input is not treated as a
@@ -154,6 +174,7 @@ enum ToolRunner {
         timeout: Int,
         secrets: [String: String],
         option: String?,
+        notesURL: URL?,
         onOutput: (@Sendable (String) -> Void)?
     ) async throws -> RawResult {
         let process = Process()
@@ -174,6 +195,9 @@ enum ToolRunner {
         // `GIZMO_OPTION` is not a secret — it is the user's own visible choice.
         var environment = UVBootstrap.environment().merging(secrets) { runtime, _ in runtime }
         if let option { environment["GIZMO_OPTION"] = option }
+        // A path, not the notes themselves: the environment has a size ceiling
+        // and shows up in a process listing, and a file does neither.
+        if let notesURL { environment["GIZMO_NOTES_FILE"] = notesURL.path }
         process.environment = environment
 
         let outPipe = Pipe()

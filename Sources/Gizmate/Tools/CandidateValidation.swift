@@ -91,7 +91,8 @@ enum CandidateValidation {
                 script: candidate.source,
                 arguments: [fixture.input],
                 uv: uv,
-                deliverOutputs: false
+                deliverOutputs: false,
+                includeNotes: false
             )
         } catch {
             // A tool that legitimately declared a longer runtime than the build
@@ -218,7 +219,8 @@ enum CandidateValidation {
                 // candidate ceiling and ARG_MAX here is a megabyte.
                 arguments: [candidate.source],
                 uv: uv,
-                deliverOutputs: false
+                deliverOutputs: false,
+                includeNotes: false
             )
         } catch {
             return try report(

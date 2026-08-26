@@ -406,6 +406,14 @@ struct ToolEditorPanel: View {
                     }
                     rowDivider
                     detailRow(
+                        "Your context",
+                        value: contextValue,
+                        hint: "What this script is handed about you when it runs."
+                    ) {
+                        notesToggle(subtitle: "Hands the script the notes you ticked, as a JSON file it can read.")
+                    }
+                    rowDivider
+                    detailRow(
                         "Test",
                         value: testValue,
                         valueTint: test.isFailure ? Self.warning : nil,
@@ -1011,8 +1019,9 @@ struct ToolEditorPanel: View {
         }
     }
 
-    /// The two context toggles, offered to `.prompt` and `.agent` gizmos only —
-    /// a script or a macOS action has no model in the loop to hand context to.
+    /// The two context toggles, offered to `.prompt` and `.agent` gizmos. A
+    /// script gets only the notes one (`notesToggle`): it has no model to
+    /// style, and a macOS action has nothing to hand context to at all.
     private var contextToggles: some View {
         VStack(alignment: .leading, spacing: 18) {
             SettingRow(
@@ -1024,15 +1033,16 @@ struct ToolEditorPanel: View {
                     .toggleStyle(.switch)
                     .tint(FlowTheme.accent)
             }
-            SettingRow(
-                "Use my notes",
-                subtitle: "Hands it the notes you ticked in the Notes tab as background."
-            ) {
-                Toggle("", isOn: draftBinding.usesNotes)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .tint(FlowTheme.accent)
-            }
+            notesToggle(subtitle: "Hands it the notes you ticked in the Notes tab as background.")
+        }
+    }
+
+    private func notesToggle(subtitle: String) -> some View {
+        SettingRow("Use my notes", subtitle: subtitle) {
+            Toggle("", isOn: draftBinding.usesNotes)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(FlowTheme.accent)
         }
     }
 

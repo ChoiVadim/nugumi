@@ -74,18 +74,25 @@ final class ToolsStore: ObservableObject {
     /// widens what it can reach, and is not something to wave through on an
     /// approval the user gave for a script that had no keys at all.
     ///
-    /// nil for a prompt tool or a missing script. The secret names are folded in
-    /// only when there are some, so every tool approved before secrets existed
-    /// keeps its approval instead of re-prompting on upgrade.
+    /// nil for a prompt tool or a missing script. The secret names and the notes
+    /// grant are folded in only when present, so every tool approved before
+    /// either existed keeps its approval instead of re-prompting on upgrade.
     func scriptHash(for id: UUID) -> String? {
         guard let data = try? Data(contentsOf: scriptURL(for: id)) else { return nil }
-        let names = tool(id: id)?.secretNames.sorted() ?? []
-        guard !names.isEmpty else {
+        let tool = tool(id: id)
+        let names = tool?.secretNames.sorted() ?? []
+        let readsNotes = tool?.usesNotes ?? false
+        guard !names.isEmpty || readsNotes else {
             return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         }
         var hasher = SHA256()
         hasher.update(data: data)
-        hasher.update(data: Data("\nsecrets:\(names.joined(separator: ","))".utf8))
+        if !names.isEmpty {
+            hasher.update(data: Data("\nsecrets:\(names.joined(separator: ","))".utf8))
+        }
+        if readsNotes {
+            hasher.update(data: Data("\nnotes:on".utf8))
+        }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
