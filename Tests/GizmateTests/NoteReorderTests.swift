@@ -18,9 +18,12 @@ final class NoteReorderTests: XCTestCase {
         })
     }
 
+    /// Ids in list order, top to bottom. A new note lands on top, so the seed
+    /// is added last-to-first for the list to read a, b, c, d.
     @MainActor
     private func seeded(_ store: NotesStore) -> [UUID] {
-        ["a", "b", "c", "d"].map { store.add(title: $0).id }
+        for title in ["d", "c", "b", "a"] { store.add(title: title) }
+        return store.notes.map(\.id)
     }
 
     @MainActor
@@ -29,13 +32,23 @@ final class NoteReorderTests: XCTestCase {
     }
 
     @MainActor
-    func testNotesKeepTheOrderTheyWereMadeIn() {
+    func testANewNoteGoesOnTop() {
         let (store, cleanup) = store()
         defer { cleanup() }
         _ = seeded(store)
 
-        // Editing the oldest note must not float it anywhere.
-        store.update(store.notes[0].id, text: "edited")
+        store.add(title: "new")
+        XCTAssertEqual(titles(store), ["new", "a", "b", "c", "d"])
+    }
+
+    @MainActor
+    func testEditingANoteDoesNotMoveIt() {
+        let (store, cleanup) = store()
+        defer { cleanup() }
+        _ = seeded(store)
+
+        // Editing the bottom note must not float it anywhere.
+        store.update(store.notes[3].id, text: "edited")
         XCTAssertEqual(titles(store), ["a", "b", "c", "d"])
     }
 

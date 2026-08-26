@@ -166,7 +166,9 @@ final class NotesStore: ObservableObject {
     @discardableResult
     func add(title: String = "", text: String = "", tagID: UUID? = nil) -> Note {
         let note = Note(title: title, text: text, tagID: tagID)
-        notes.append(note)
+        // At the top: a new note is the one about to be written in, and the
+        // top is where the `+` that made it sits.
+        notes.insert(note, at: 0)
         save()
         onChange?()
         return note

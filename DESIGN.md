@@ -246,8 +246,9 @@ about what the first one meant.
   the session.
 - A list the user keeps is ordered by the user, not by a clock. Notes sorted
   themselves by `updatedAt`, so the card being typed into jumped to the top and
-  the list rearranged itself while it was being read. Creation order, then
-  whatever order it was dragged into. Where a card is full of editable text,
+  the list rearranged itself while it was being read. Newest on top — a new
+  note appears under the `+` that made it — then whatever order it was dragged
+  into; editing moves nothing. Where a card is full of editable text,
   the drag starts from a handle of its own: `NSTextView` wins any argument with
   a SwiftUI gesture wrapped around it, so a drag begun on the card is someone
   selecting words. Reorder on the way past (`dropEntered`), so the list is its
