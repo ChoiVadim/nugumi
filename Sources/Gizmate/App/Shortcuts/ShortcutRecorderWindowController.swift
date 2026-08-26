@@ -145,7 +145,7 @@ final class ShortcutRecorderWindowController: NSWindowController, NSWindowDelega
             guard let self else { return }
             self.pendingShortcut = nil
             self.okButton.isEnabled = false
-            self.messageLabel.stringValue = "Press the new shortcut now, or double-tap ⌃ ⌥ ⇧ ⌘."
+            self.messageLabel.stringValue = "Press the new shortcut now, double-tap ⌃ ⌥ ⇧ ⌘, or tap the trackpad with three fingers."
         }
         shortcutField.onCaptured = { [weak self] shortcut in
             self?.capture(shortcut)
@@ -310,6 +310,7 @@ private final class ShortcutCaptureFieldView: NSView {
     private var lastTapDate: Date?
     private var heldModifiers: NSEvent.ModifierFlags = []
     private var eventMonitor: Any?
+    private var trackpadMonitor: TrackpadTapShortcutMonitor?
 
     private let label = NSTextField(labelWithString: "")
 
@@ -342,6 +343,7 @@ private final class ShortcutCaptureFieldView: NSView {
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
         }
+        trackpadMonitor?.stop()
     }
 
     // MARK: - Responder & hit testing
@@ -425,7 +427,7 @@ private final class ShortcutCaptureFieldView: NSView {
 
         case .recording:
             label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-            label.stringValue = "Type a shortcut - or double-tap ⌃ ⌥ ⇧ ⌘"
+            label.stringValue = "Type a shortcut, double-tap ⌃ ⌥ ⇧ ⌘, or 3-finger tap"
             label.textColor = .secondaryLabelColor
             setBorderColor(NSColor.controlAccentColor.withAlphaComponent(0.85))
 
@@ -457,12 +459,37 @@ private final class ShortcutCaptureFieldView: NSView {
             guard let self else { return event }
             return self.handleLocal(event)
         }
+        // Touches never reach a window's event queue the way keys and clicks
+        // do, so the recorder listens the same way the shortcut itself will.
+        let monitor = TrackpadTapShortcutMonitor { [weak self] count in
+            self?.handleTrackpadTap(fingers: count)
+        }
+        monitor.start()
+        trackpadMonitor = monitor
     }
 
     private func stopEventMonitor() {
         if let eventMonitor {
             NSEvent.removeMonitor(eventMonitor)
             self.eventMonitor = nil
+        }
+        trackpadMonitor?.stop()
+        trackpadMonitor = nil
+    }
+
+    private func handleTrackpadTap(fingers: Int) {
+        guard window?.firstResponder === self, state == .recording || state == .conflict else { return }
+        // One finger is the click that armed the field; two is secondary
+        // click, which the system fires underneath any tap we bind.
+        guard fingers >= 2 else { return }
+        lastTapModifier = nil
+        lastTapDate = nil
+        let shortcut = GlobalShortcut(trackpadTap: UInt32(fingers))
+        if shortcut.isValid {
+            onCaptured?(shortcut)
+        } else {
+            NSSound.beep()
+            onInvalidShortcut?("Tap with three, four or five fingers. Two fingers is a secondary click.")
         }
     }
 

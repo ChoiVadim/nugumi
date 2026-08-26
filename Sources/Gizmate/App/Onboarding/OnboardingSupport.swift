@@ -109,6 +109,8 @@ struct FeatureTourStep {
             trigger = "Press \(shortcut.displayString)."
         case .mouseButton:
             trigger = "Click \(shortcut.displayString) on your mouse."
+        case .trackpadTap:
+            trigger = "Tap the trackpad with \(shortcut.keyCode) fingers."
         }
         return [trigger, "Type your question.", "Press Return."]
     }

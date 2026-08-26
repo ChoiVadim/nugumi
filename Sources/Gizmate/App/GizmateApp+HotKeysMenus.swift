@@ -25,6 +25,8 @@ extension GizmateApp {
         modifierDetectors.removeAll()
         mouseButtonMonitors.forEach { $0.stop() }
         mouseButtonMonitors.removeAll()
+        trackpadTapMonitors.forEach { $0.stop() }
+        trackpadTapMonitors.removeAll()
 
         let bindings: [(GlobalShortcutAction, @MainActor () -> Void)] = [
             (.screenshotArea, { [weak self] in self?.startScreenshotTranslation() }),
@@ -112,6 +114,13 @@ extension GizmateApp {
                 onPressed: handler
             )
             mouseButtonMonitors.append(monitor)
+            monitor.start()
+        case .trackpadTap:
+            let fingers = Int(shortcut.keyCode)
+            let monitor = TrackpadTapShortcutMonitor { count in
+                if count == fingers { handler() }
+            }
+            trackpadTapMonitors.append(monitor)
             monitor.start()
         }
     }
@@ -434,6 +443,7 @@ extension GizmateApp {
         globalHotKeys.forEach { $0.unregister() }
         modifierDetectors.forEach { $0.isEnabled = false }
         mouseButtonMonitors.forEach { $0.stop() }
+        trackpadTapMonitors.forEach { $0.stop() }
         shortcutRecorderWindowController?.close()
         let controller = ShortcutRecorderWindowController(
             title: action.menuTitle,
@@ -463,6 +473,7 @@ extension GizmateApp {
         globalHotKeys.forEach { $0.unregister() }
         modifierDetectors.forEach { $0.isEnabled = false }
         mouseButtonMonitors.forEach { $0.stop() }
+        trackpadTapMonitors.forEach { $0.stop() }
         shortcutRecorderWindowController?.close()
         let controller = ShortcutRecorderWindowController(
             title: tool.name,

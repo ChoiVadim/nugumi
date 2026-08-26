@@ -282,6 +282,7 @@ final class GizmateApp: NSObject, NSApplicationDelegate {
     }()
     var modifierDetectors: [DoubleModifierPressDetector] = []
     var mouseButtonMonitors: [MouseButtonShortcutMonitor] = []
+    var trackpadTapMonitors: [TrackpadTapShortcutMonitor] = []
     /// The quick menu's transient hub: a floating button spawned at the
     /// cursor whose ring is opened immediately (see `toggleQuickMenuRing`).
     var quickMenuButton: FloatingTranslateButtonController?

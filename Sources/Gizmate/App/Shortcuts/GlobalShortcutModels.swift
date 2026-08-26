@@ -171,6 +171,7 @@ struct GlobalShortcut: Codable, Equatable {
         case combo
         case doubleTap
         case mouseButton
+        case trackpadTap
     }
 
     let kind: Kind
@@ -206,6 +207,20 @@ struct GlobalShortcut: Codable, Equatable {
     init(mouseButton buttonNumber: UInt32) {
         self.kind = .mouseButton
         self.keyCode = buttonNumber
+        self.modifiersRawValue = 0
+        self.keyEquivalent = ""
+        self.keyDisplay = ""
+    }
+
+    /// A multi-finger tap on the trackpad. `fingers` is stored in `keyCode`.
+    /// Three is the floor: one finger is a click and two is secondary click,
+    /// and the system fires both underneath us because a tap cannot be
+    /// swallowed the way a spare mouse button can.
+    static let trackpadFingers: ClosedRange<UInt32> = 3...5
+
+    init(trackpadTap fingers: UInt32) {
+        self.kind = .trackpadTap
+        self.keyCode = fingers
         self.modifiersRawValue = 0
         self.keyEquivalent = ""
         self.keyDisplay = ""
@@ -295,6 +310,8 @@ struct GlobalShortcut: Codable, Equatable {
         case .mouseButton:
             // Humans number mouse buttons from 1; NSEvent from 0.
             return "Mouse \(keyCode + 1)"
+        case .trackpadTap:
+            return "\(keyCode)-finger tap"
         }
     }
 
@@ -306,6 +323,8 @@ struct GlobalShortcut: Codable, Equatable {
             return Self.singleModifierOptions.contains { modifiers == $0 }
         case .mouseButton:
             return keyCode >= 2
+        case .trackpadTap:
+            return Self.trackpadFingers.contains(keyCode)
         }
     }
 
@@ -331,7 +350,7 @@ struct GlobalShortcut: Codable, Equatable {
             return false
         }
         switch lhs.kind {
-        case .combo, .mouseButton:
+        case .combo, .mouseButton, .trackpadTap:
             return lhs.keyCode == rhs.keyCode
         case .doubleTap:
             return true

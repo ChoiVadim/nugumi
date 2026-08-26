@@ -137,6 +137,52 @@ final class GlobalShortcutsTests: XCTestCase {
         XCTAssertEqual(decoded, shortcut)
     }
 
+    // A trackpad tap needs three to five fingers: one is a click, two is a
+    // secondary click, and neither can be taken away from the system.
+    func testTrackpadTapValidityAndRoundTrip() {
+        XCTAssertFalse(GlobalShortcut(trackpadTap: 1).isValid)
+        XCTAssertFalse(GlobalShortcut(trackpadTap: 2).isValid)
+        XCTAssertTrue(GlobalShortcut(trackpadTap: 3).isValid)
+        XCTAssertTrue(GlobalShortcut(trackpadTap: 5).isValid)
+        XCTAssertFalse(GlobalShortcut(trackpadTap: 6).isValid)
+
+        let shortcut = GlobalShortcut(trackpadTap: 3)
+        XCTAssertEqual(shortcut.displayString, "3-finger tap")
+        let data = try! JSONEncoder().encode(shortcut)
+        let decoded = try! JSONDecoder().decode(GlobalShortcut.self, from: data)
+        XCTAssertEqual(decoded, shortcut)
+        XCTAssertNotEqual(decoded, GlobalShortcut(trackpadTap: 4))
+        XCTAssertNotEqual(decoded, GlobalShortcut(mouseButton: 3), "same keyCode, different kind")
+    }
+
+    // Three fingers land, none travels, all leave quickly: one 3-finger tap,
+    // even when they lift one at a time. A drag or a slow hold is not a tap.
+    func testTrackpadTapStateRecognisesCleanTapOnly() {
+        func touch(_ id: Int, _ x: CGFloat, down: Bool = true) -> TrackpadTapState.Touch {
+            TrackpadTapState.Touch(id: AnyHashable(id), position: CGPoint(x: x, y: 0.5), down: down)
+        }
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        var state = TrackpadTapState()
+
+        XCTAssertNil(state.step(touches: [touch(1, 0.3)], now: t0))
+        XCTAssertNil(state.step(touches: [touch(1, 0.3), touch(2, 0.5), touch(3, 0.7)], now: t0.addingTimeInterval(0.02)))
+        XCTAssertNil(state.step(touches: [touch(1, 0.3, down: false), touch(2, 0.5), touch(3, 0.7)], now: t0.addingTimeInterval(0.10)))
+        XCTAssertEqual(state.step(touches: [touch(2, 0.5, down: false), touch(3, 0.7, down: false)], now: t0.addingTimeInterval(0.15)), 3)
+
+        // Reset after firing: a lone finger afterwards reads as 1, not 3.
+        XCTAssertNil(state.step(touches: [touch(4, 0.3)], now: t0.addingTimeInterval(1)))
+        XCTAssertEqual(state.step(touches: [touch(4, 0.3, down: false)], now: t0.addingTimeInterval(1.05)), 1)
+
+        // Travel spoils it.
+        XCTAssertNil(state.step(touches: [touch(1, 0.3), touch(2, 0.5), touch(3, 0.7)], now: t0.addingTimeInterval(2)))
+        XCTAssertNil(state.step(touches: [touch(1, 0.4), touch(2, 0.6), touch(3, 0.8)], now: t0.addingTimeInterval(2.05)))
+        XCTAssertNil(state.step(touches: [touch(1, 0.4, down: false), touch(2, 0.6, down: false), touch(3, 0.8, down: false)], now: t0.addingTimeInterval(2.10)))
+
+        // Holding too long spoils it.
+        XCTAssertNil(state.step(touches: [touch(1, 0.3), touch(2, 0.5), touch(3, 0.7)], now: t0.addingTimeInterval(3)))
+        XCTAssertNil(state.step(touches: [touch(1, 0.3, down: false), touch(2, 0.5, down: false), touch(3, 0.7, down: false)], now: t0.addingTimeInterval(3.5)))
+    }
+
     // Left/right clicks must never validate as global shortcuts.
     func testPrimaryMouseButtonsAreInvalidShortcuts() {
         XCTAssertFalse(GlobalShortcut(mouseButton: 0).isValid)
